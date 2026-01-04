@@ -773,100 +773,97 @@ class BreathingCube(VisualizationPattern):
 
 class Mushroom(VisualizationPattern):
     """
-    Psychedelic mushroom - dome cap with stem.
-    Classic festival visual that pulses and glows.
+    Psychedelic Amanita mushroom - classic toadstool with spots.
+    Features breathing animation, gills, spiraling stem, and floating spores.
     """
 
     name = "Mushroom"
-    description = "Psychedelic mushroom - pulses and glows"
+    description = "Psychedelic toadstool with spots, gills, and spores"
 
     def __init__(self, config: PatternConfig = None):
         super().__init__(config)
         self._rotation = 0.0
         self._pulse = 0.0
         self._glow = 0.0
+        self._breathe = 0.0
+        self._breathe_dir = 1
+        self._wobble = 0.0
+        self._spore_time = 0.0
+        self._grow = 1.0
+        # Pre-generate spot positions (consistent each frame)
+        self._spot_angles = [i * 2.39996 for i in range(7)]  # Golden angle spacing
+        self._spot_phis = [0.3 + (i % 3) * 0.2 for i in range(7)]
 
     def calculate_entities(self, audio: AudioState) -> List[Dict]:
         entities = []
         n = self.config.entity_count
         center = 0.5
 
-        # Rotation and pulse
-        self._rotation += (0.3 + audio.amplitude * 0.5) * 0.016
+        # Rotation - faster with amplitude
+        self._rotation += (0.2 + audio.amplitude * 0.4) * 0.016
 
-        # Pulse on beat
+        # Breathing animation (slow oscillation)
+        self._breathe += 0.02 * self._breathe_dir
+        if self._breathe > 1.0:
+            self._breathe_dir = -1
+        elif self._breathe < 0.0:
+            self._breathe_dir = 1
+
+        # Wobble on beat
         if audio.is_beat:
             self._pulse = 1.0
             self._glow = 1.0
+            self._wobble = 0.15 * audio.amplitude
+            self._grow = 1.15
         self._pulse *= 0.92
-        self._glow *= 0.95
+        self._glow *= 0.93
+        self._wobble *= 0.9
+        self._grow = 1.0 + (self._grow - 1.0) * 0.95
 
-        # Allocate entities: 30% stem, 70% cap
-        stem_count = max(4, n // 3)
-        cap_count = n - stem_count
+        self._spore_time += 0.016
 
-        # === STEM (cylinder) ===
-        stem_radius = 0.06 + self._pulse * 0.02
-        stem_height = 0.35
-        rings = max(2, stem_count // 6)
+        # Calculate wobble offset
+        wobble_x = math.sin(self._spore_time * 2) * self._wobble
+        wobble_z = math.cos(self._spore_time * 2.5) * self._wobble * 0.7
+
+        # Allocate entities: 20% stem, 45% cap, 15% gills, 10% spots, 10% spores
+        stem_count = max(6, n // 5)
+        cap_count = max(10, int(n * 0.45))
+        gill_count = max(6, int(n * 0.15))
+        spot_count = max(5, n // 10)
+        spore_count = n - stem_count - cap_count - gill_count - spot_count
+
+        entity_idx = 0
+        breathe_scale = 1.0 + self._breathe * 0.05
+
+        # === STEM (twisted cylinder) ===
+        stem_radius = 0.055 * breathe_scale + self._pulse * 0.015
+        stem_height = 0.32 * self._grow
+        rings = max(3, stem_count // 5)
         per_ring = stem_count // rings
 
         for ring in range(rings):
-            ring_y = 0.1 + (ring / rings) * stem_height
-            ring_radius = stem_radius * (1.0 - ring * 0.1)  # Taper slightly
+            ring_t = ring / max(1, rings - 1)
+            ring_y = 0.08 + ring_t * stem_height
+            # Taper and slight bulge at base
+            taper = 1.0 - ring_t * 0.25 + math.sin(ring_t * math.pi) * 0.15
+            ring_radius = stem_radius * taper
+
+            # Spiral twist increases with height
+            twist = ring_t * math.pi * 0.5
 
             for j in range(per_ring):
                 idx = ring * per_ring + j
                 if idx >= stem_count:
                     break
 
-                angle = self._rotation + (j / per_ring) * math.pi * 2
-                x = center + math.cos(angle) * ring_radius
-                z = center + math.sin(angle) * ring_radius
+                angle = self._rotation + twist + (j / per_ring) * math.pi * 2
+                x = center + math.cos(angle) * ring_radius + wobble_x * ring_t
+                z = center + math.sin(angle) * ring_radius + wobble_z * ring_t
                 y = ring_y
 
-                band_idx = idx % 6
-                scale = self.config.base_scale * 0.8 + audio.bands[band_idx] * 0.2
-
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
-
-        # === CAP (dome/hemisphere) ===
-        cap_base_y = 0.1 + stem_height
-        cap_radius = 0.2 + self._pulse * 0.08 + audio.bands[0] * 0.05
-        layers = max(3, int(math.sqrt(cap_count)))
-
-        cap_idx = 0
-        for layer in range(layers):
-            # Phi angle from 0 (top) to pi/2 (equator)
-            phi = (layer / (layers - 1)) * (math.pi / 2) if layers > 1 else 0
-            layer_radius = cap_radius * math.sin(phi)
-            layer_y = cap_base_y + cap_radius * math.cos(phi) * 0.6  # Flatten dome
-
-            # More points on outer layers
-            points_this_layer = max(3, int((layer + 1) * cap_count / (layers * (layers + 1) / 2)))
-
-            for j in range(points_this_layer):
-                if cap_idx >= cap_count:
-                    break
-
-                angle = self._rotation * 0.5 + (j / points_this_layer) * math.pi * 2
-                x = center + math.cos(angle) * layer_radius
-                z = center + math.sin(angle) * layer_radius
-                y = layer_y
-
-                entity_idx = stem_count + cap_idx
-                band_idx = cap_idx % 6
-
-                # Cap blocks are larger and more reactive
-                scale = self.config.base_scale + audio.bands[band_idx] * 0.5 + self._glow * 0.3
+                band_idx = 2  # Stem uses mid frequencies
+                scale = self.config.base_scale * 0.7 + audio.bands[band_idx] * 0.15
 
                 entities.append({
                     "id": f"block_{entity_idx}",
@@ -877,7 +874,141 @@ class Mushroom(VisualizationPattern):
                     "band": band_idx,
                     "visible": True
                 })
-                cap_idx += 1
+                entity_idx += 1
+
+        # === CAP (dome with classic toadstool shape) ===
+        cap_base_y = 0.08 + stem_height
+        cap_radius = (0.22 + self._pulse * 0.06 + audio.bands[0] * 0.04) * breathe_scale * self._grow
+        layers = max(4, int(math.sqrt(cap_count)))
+        points_placed = 0
+
+        for layer in range(layers):
+            if points_placed >= cap_count:
+                break
+
+            layer_t = layer / max(1, layers - 1)
+            # Classic toadstool: flatter on top, curves down at edges
+            phi = layer_t * (math.pi * 0.55)  # Just past hemisphere
+            layer_radius = cap_radius * math.sin(phi)
+            # Flatten top, curve down at edge
+            height_factor = math.cos(phi) * 0.5 + (1 - layer_t) * 0.15
+            layer_y = cap_base_y + cap_radius * height_factor
+
+            points_this_layer = max(4, int(6 + layer * 4))
+
+            for j in range(points_this_layer):
+                if points_placed >= cap_count:
+                    break
+
+                angle = self._rotation * 0.4 + (j / points_this_layer) * math.pi * 2
+                x = center + math.cos(angle) * layer_radius + wobble_x
+                z = center + math.sin(angle) * layer_radius + wobble_z
+                y = layer_y
+
+                band_idx = 0  # Cap uses bass
+                scale = self.config.base_scale * 1.1 + audio.bands[band_idx] * 0.4 + self._glow * 0.25
+
+                entities.append({
+                    "id": f"block_{entity_idx}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True
+                })
+                entity_idx += 1
+                points_placed += 1
+
+        # === GILLS (radial lines under cap) ===
+        gill_y = cap_base_y - 0.02
+        num_gill_lines = max(4, gill_count // 3)
+        points_per_gill = gill_count // num_gill_lines
+
+        for g in range(num_gill_lines):
+            gill_angle = self._rotation * 0.4 + (g / num_gill_lines) * math.pi * 2
+
+            for p in range(points_per_gill):
+                if entity_idx >= stem_count + cap_count + gill_count:
+                    break
+
+                # Gills extend from stem to cap edge
+                t = (p + 1) / (points_per_gill + 1)
+                r = stem_radius + t * (cap_radius * 0.85 - stem_radius)
+
+                x = center + math.cos(gill_angle) * r + wobble_x
+                z = center + math.sin(gill_angle) * r + wobble_z
+                y = gill_y - t * 0.03  # Slight droop
+
+                band_idx = 3  # Gills use mid-high
+                scale = self.config.base_scale * 0.5 + audio.bands[band_idx] * 0.2
+
+                entities.append({
+                    "id": f"block_{entity_idx}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True
+                })
+                entity_idx += 1
+
+        # === SPOTS (white dots on cap - classic Amanita) ===
+        for s in range(min(spot_count, len(self._spot_angles))):
+            spot_phi = self._spot_phis[s] * (math.pi * 0.4)
+            spot_r = cap_radius * 0.85 * math.sin(spot_phi)
+            spot_y = cap_base_y + cap_radius * math.cos(spot_phi) * 0.5 + 0.02
+
+            spot_angle = self._rotation * 0.4 + self._spot_angles[s]
+            x = center + math.cos(spot_angle) * spot_r + wobble_x
+            z = center + math.sin(spot_angle) * spot_r + wobble_z
+            y = spot_y
+
+            band_idx = 5  # Spots use high freq
+            scale = self.config.base_scale * 0.9 + self._glow * 0.4 + audio.bands[5] * 0.3
+
+            entities.append({
+                "id": f"block_{entity_idx}",
+                "x": max(0, min(1, x)),
+                "y": max(0, min(1, y)),
+                "z": max(0, min(1, z)),
+                "scale": min(self.config.max_scale, scale),
+                "band": band_idx,
+                "visible": True
+            })
+            entity_idx += 1
+
+        # === SPORES (floating particles rising up) ===
+        for sp in range(spore_count):
+            # Each spore has unique phase
+            phase = sp * 1.618 + self._spore_time
+            spore_life = (phase % 3.0) / 3.0  # 0-1 lifecycle
+
+            # Spiral upward from cap
+            spore_angle = phase * 2.0 + sp
+            spore_r = 0.05 + spore_life * 0.15 + math.sin(phase * 3) * 0.03
+            spore_y = cap_base_y + 0.1 + spore_life * 0.4
+
+            x = center + math.cos(spore_angle) * spore_r + wobble_x * 0.5
+            z = center + math.sin(spore_angle) * spore_r + wobble_z * 0.5
+            y = spore_y
+
+            band_idx = 4  # Spores use high-mid
+            # Fade in then out
+            fade = math.sin(spore_life * math.pi)
+            scale = self.config.base_scale * 0.3 * fade + audio.bands[band_idx] * 0.15 * fade
+
+            entities.append({
+                "id": f"block_{entity_idx}",
+                "x": max(0, min(1, x)),
+                "y": max(0, min(1, y)),
+                "z": max(0, min(1, z)),
+                "scale": min(self.config.max_scale, max(0.01, scale)),
+                "band": band_idx,
+                "visible": fade > 0.1
+            })
+            entity_idx += 1
 
         self.update()
         return entities
@@ -885,65 +1016,164 @@ class Mushroom(VisualizationPattern):
 
 class Skull(VisualizationPattern):
     """
-    3D skull formation - cranium, jaw, eye sockets.
-    Epic for drops and dark sections of tracks.
+    Epic 3D skull with anatomical detail.
+    Features: animated jaw, flame eyes, breathing, orbital particles,
+    cheekbones, brow ridge, nose cavity, and head bob on beats.
     """
 
     name = "Skull"
-    description = "3D skull - jaw moves with bass"
+    description = "Epic skull - flame eyes, animated jaw, orbital particles"
 
     def __init__(self, config: PatternConfig = None):
         super().__init__(config)
         self._rotation = 0.0
         self._jaw_open = 0.0
         self._eye_glow = 0.0
+        self._breathe = 0.0
+        self._breathe_dir = 1
+        self._head_bob = 0.0
+        self._head_tilt = 0.0
+        self._time = 0.0
         self._skull_points = None
+        self._beat_intensity = 0.0
 
     def _generate_skull_points(self, n: int) -> List[tuple]:
-        """Generate skull formation points."""
+        """Generate detailed skull formation points."""
         points = []
 
-        # Cranium (sphere, upper portion) - 50% of points
-        cranium_count = n // 2
-        phi = math.pi * (3.0 - math.sqrt(5.0))  # Golden angle
+        # Allocate points: cranium 35%, face 20%, jaw 12%, eyes 10%,
+        # nose 5%, teeth 8%, orbitals 10%
+        cranium_count = int(n * 0.35)
+        face_count = int(n * 0.20)
+        jaw_count = int(n * 0.12)
+        eye_count = int(n * 0.10)
+        nose_count = int(n * 0.05)
+        teeth_count = int(n * 0.08)
+        orbital_count = n - cranium_count - face_count - jaw_count - eye_count - nose_count - teeth_count
 
+        # === CRANIUM (improved sphere distribution) ===
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
         for i in range(cranium_count):
-            y = 0.3 + (1 - (i / float(cranium_count - 1)) * 2) * 0.25  # Upper hemisphere
-            y = max(0.3, y)  # Keep in upper region
-            radius = math.sqrt(max(0, 1 - ((y - 0.55) / 0.25) ** 2)) * 0.2
-            theta = phi * i
+            t = i / max(1, cranium_count - 1)
+            # Concentrate points in upper hemisphere
+            y_local = 0.1 + t * 0.35
+            radius_at_y = 0.18 * math.sin(math.acos(max(-1, min(1, (y_local - 0.25) / 0.2))))
+            theta = golden_angle * i
 
-            x = math.cos(theta) * radius
-            z = math.sin(theta) * radius
-            points.append(('cranium', x, y, z))
+            x = math.cos(theta) * radius_at_y
+            z = math.sin(theta) * radius_at_y * 0.9  # Slightly elongated front-back
+            points.append(('cranium', x, y_local, z))
 
-        # Jaw (lower arc) - 20% of points
-        jaw_count = n // 5
-        for i in range(jaw_count):
-            angle = -math.pi * 0.4 + (i / jaw_count) * math.pi * 0.8
-            x = math.sin(angle) * 0.15
-            z = -math.cos(angle) * 0.08 - 0.05
-            y = 0.15
+        # === FACE (cheekbones, brow ridge, temple) ===
+        # Brow ridge
+        brow_count = face_count // 3
+        for i in range(brow_count):
+            t = i / max(1, brow_count - 1)
+            x = -0.12 + t * 0.24
+            y = 0.38
+            z = -0.12 - abs(x) * 0.3  # Curved forward
+            points.append(('brow', x, y, z))
+
+        # Cheekbones
+        cheek_count = face_count // 3
+        for side in [-1, 1]:
+            for i in range(cheek_count // 2):
+                t = i / max(1, cheek_count // 2 - 1)
+                angle = -0.3 + t * 0.6
+                x = side * (0.14 + math.sin(angle) * 0.04)
+                y = 0.28 + t * 0.08
+                z = -0.08 - t * 0.04
+                points.append(('cheek', x, y, z))
+
+        # Temple area
+        temple_count = face_count - brow_count - cheek_count
+        for side in [-1, 1]:
+            for i in range(temple_count // 2):
+                t = i / max(1, temple_count // 2 - 1)
+                x = side * 0.16
+                y = 0.32 + t * 0.1
+                z = -0.02 - t * 0.05
+                points.append(('temple', x, y, z))
+
+        # === JAW (horseshoe shape with chin) ===
+        # Main jaw arc
+        jaw_arc = jaw_count * 2 // 3
+        for i in range(jaw_arc):
+            t = i / max(1, jaw_arc - 1)
+            angle = -math.pi * 0.45 + t * math.pi * 0.9
+            x = math.sin(angle) * 0.13
+            z = -math.cos(angle) * 0.07 - 0.06
+            y = 0.12
             points.append(('jaw', x, y, z))
 
-        # Eye sockets (2 small clusters) - 15% each
-        eye_count = n // 7
-        for eye_side in [-1, 1]:
-            for i in range(eye_count):
-                angle = (i / eye_count) * math.pi * 2
-                radius = 0.03
-                x = eye_side * 0.08 + math.cos(angle) * radius
-                y = 0.45 + math.sin(angle) * radius * 0.5
-                z = -0.12
-                points.append(('eye', x, y, z))
+        # Chin point
+        chin_count = jaw_count - jaw_arc
+        for i in range(chin_count):
+            t = i / max(1, chin_count)
+            x = -0.03 + t * 0.06
+            y = 0.08
+            z = -0.13
+            points.append(('jaw', x, y, z))
 
-        # Teeth (bottom row)
-        teeth_count = min(8, n // 10)
-        for i in range(teeth_count):
-            x = -0.1 + (i / teeth_count) * 0.2
-            y = 0.18
-            z = -0.1
-            points.append(('teeth', x, y, z))
+        # === EYES (hollow sockets with flame particles) ===
+        eye_socket_count = eye_count // 2
+        flame_count = eye_count - eye_socket_count
+        for side in [-1, 1]:
+            # Socket rim
+            for i in range(eye_socket_count // 2):
+                angle = (i / max(1, eye_socket_count // 2)) * math.pi * 2
+                x = side * 0.07 + math.cos(angle) * 0.035
+                y = 0.34 + math.sin(angle) * 0.025
+                z = -0.11
+                points.append(('eye_socket', x, y, z))
+
+            # Inner flame particles (will animate)
+            for i in range(flame_count // 2):
+                t = i / max(1, flame_count // 2)
+                x = side * 0.07
+                y = 0.32 + t * 0.06
+                z = -0.09
+                points.append(('eye_flame', x, y, z, i))  # Store index for animation
+
+        # === NOSE CAVITY (triangle hole) ===
+        for i in range(nose_count):
+            t = i / max(1, nose_count - 1)
+            # Triangle shape
+            if t < 0.5:
+                x = -0.02 + t * 0.04
+                y = 0.25 - t * 0.06
+            else:
+                x = 0.02 - (t - 0.5) * 0.04
+                y = 0.22 + (t - 0.5) * 0.06
+            z = -0.12
+            points.append(('nose', x, y, z))
+
+        # === TEETH (upper and lower rows) ===
+        upper_teeth = teeth_count // 2
+        lower_teeth = teeth_count - upper_teeth
+
+        # Upper teeth (fixed to skull)
+        for i in range(upper_teeth):
+            t = i / max(1, upper_teeth - 1)
+            x = -0.08 + t * 0.16
+            y = 0.17
+            z = -0.10
+            points.append(('teeth_upper', x, y, z))
+
+        # Lower teeth (move with jaw)
+        for i in range(lower_teeth):
+            t = i / max(1, lower_teeth - 1)
+            x = -0.07 + t * 0.14
+            y = 0.14
+            z = -0.09
+            points.append(('teeth_lower', x, y, z))
+
+        # === ORBITAL PARTICLES (floating around skull) ===
+        for i in range(orbital_count):
+            phase = i * 2.39996  # Golden angle
+            radius = 0.28 + (i % 3) * 0.05
+            y_offset = math.sin(phase * 0.5) * 0.15
+            points.append(('orbital', phase, radius, y_offset, i))
 
         return points[:n]
 
@@ -956,55 +1186,134 @@ class Skull(VisualizationPattern):
         if self._skull_points is None or len(self._skull_points) != n:
             self._skull_points = self._generate_skull_points(n)
 
-        # Slow menacing rotation
-        self._rotation += 0.2 * 0.016
+        self._time += 0.016
+
+        # Slow menacing rotation with slight oscillation
+        base_rotation = self._time * 0.15
+        self._rotation = base_rotation + math.sin(self._time * 0.5) * 0.1
+
+        # Breathing (subtle scale pulse)
+        self._breathe += 0.015 * self._breathe_dir
+        if self._breathe > 1.0:
+            self._breathe_dir = -1
+        elif self._breathe < 0.0:
+            self._breathe_dir = 1
+
+        # Head bob and tilt on beat
+        if audio.is_beat:
+            self._head_bob = 0.03 * audio.amplitude
+            self._head_tilt = 0.05 * (1 if self._time % 2 < 1 else -1)
+            self._beat_intensity = 1.0
+            self._eye_glow = 1.0
+        self._head_bob *= 0.92
+        self._head_tilt *= 0.95
+        self._beat_intensity *= 0.93
+        self._eye_glow *= 0.88
 
         # Jaw opens with bass
-        target_jaw = audio.bands[0] * 0.15 + audio.bands[1] * 0.1
+        target_jaw = audio.bands[0] * 0.12 + audio.bands[1] * 0.06
         if audio.is_beat:
-            target_jaw += 0.1
-        self._jaw_open += (target_jaw - self._jaw_open) * 0.15
+            target_jaw += 0.08
+        self._jaw_open += (target_jaw - self._jaw_open) * 0.2
 
-        # Eye glow on beat
-        if audio.is_beat:
-            self._eye_glow = 1.0
-        self._eye_glow *= 0.9
+        breathe_scale = 1.0 + self._breathe * 0.03
 
         cos_r = math.cos(self._rotation)
         sin_r = math.sin(self._rotation)
+        cos_tilt = math.cos(self._head_tilt)
+        sin_tilt = math.sin(self._head_tilt)
 
-        for i, point in enumerate(self._skull_points):
-            part_type, px, py, pz = point
+        entity_idx = 0
+        for point in self._skull_points:
+            part_type = point[0]
+
+            if part_type == 'orbital':
+                # Orbital particles - special handling
+                _, phase, radius, y_offset, idx = point
+                orbit_angle = phase + self._time * (0.5 + idx * 0.1)
+                orbit_y = 0.35 + y_offset + math.sin(self._time * 2 + idx) * 0.03
+
+                px = math.cos(orbit_angle) * radius
+                pz = math.sin(orbit_angle) * radius
+                py = orbit_y
+
+                # No rotation applied - they orbit independently
+                x = center + px
+                y = py + self._head_bob
+                z = center + pz
+
+                band_idx = idx % 6
+                scale = self.config.base_scale * 0.4 + audio.bands[band_idx] * 0.25 + self._beat_intensity * 0.2
+
+                entities.append({
+                    "id": f"block_{entity_idx}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True
+                })
+                entity_idx += 1
+                continue
+
+            elif part_type == 'eye_flame':
+                # Animated flame particles
+                _, base_x, base_y, base_z, flame_idx = point
+                # Flames flicker and rise
+                flicker = math.sin(self._time * 15 + flame_idx * 2) * 0.01
+                rise = (self._time * 3 + flame_idx) % 1.0
+                px = base_x + flicker
+                py = base_y + rise * 0.04
+                pz = base_z + math.cos(self._time * 12 + flame_idx) * 0.005
+
+            else:
+                px, py, pz = point[1], point[2], point[3]
 
             # Apply jaw movement
-            if part_type == 'jaw':
+            if part_type in ('jaw', 'teeth_lower'):
                 py -= self._jaw_open
-            elif part_type == 'teeth':
-                py -= self._jaw_open * 0.5
 
-            # Rotate around Y axis
+            # Apply breathing scale
+            px *= breathe_scale
+            pz *= breathe_scale
+
+            # Apply head tilt (rotation around X)
+            py_tilted = py * cos_tilt - pz * sin_tilt
+            pz_tilted = py * sin_tilt + pz * cos_tilt
+            py, pz = py_tilted, pz_tilted
+
+            # Apply Y rotation
             rx = px * cos_r - pz * sin_r
             rz = px * sin_r + pz * cos_r
 
             x = center + rx
-            y = center + py - 0.1  # Lower the skull a bit
+            y = 0.35 + py + self._head_bob
             z = center + rz
 
-            band_idx = i % 6
+            # Determine scale based on part type
+            band_idx = entity_idx % 6
             scale = self.config.base_scale
 
-            if part_type == 'eye':
-                scale += self._eye_glow * 0.5 + audio.bands[4] * 0.3
+            if part_type == 'eye_socket':
+                scale += self._eye_glow * 0.4 + audio.bands[4] * 0.2
+            elif part_type == 'eye_flame':
+                scale = self.config.base_scale * 0.6 + self._eye_glow * 0.6 + audio.bands[5] * 0.4
             elif part_type == 'cranium':
-                scale += audio.bands[band_idx] * 0.3
-            elif part_type == 'jaw':
-                scale += audio.bands[0] * 0.4
+                scale += audio.bands[band_idx % 3] * 0.25
+            elif part_type in ('jaw', 'teeth_lower'):
+                scale += audio.bands[0] * 0.35
+            elif part_type in ('brow', 'cheek'):
+                scale += audio.bands[2] * 0.2
+            elif part_type in ('teeth_upper', 'teeth_lower'):
+                scale += self._beat_intensity * 0.3
 
+            # Global beat pulse
             if audio.is_beat:
-                scale *= 1.2
+                scale *= 1.15
 
             entities.append({
-                "id": f"block_{i}",
+                "id": f"block_{entity_idx}",
                 "x": max(0, min(1, x)),
                 "y": max(0, min(1, y)),
                 "z": max(0, min(1, z)),
@@ -1012,6 +1321,7 @@ class Skull(VisualizationPattern):
                 "band": band_idx,
                 "visible": True
             })
+            entity_idx += 1
 
         self.update()
         return entities
