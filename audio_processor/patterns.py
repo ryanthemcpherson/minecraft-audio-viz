@@ -836,45 +836,55 @@ class Mushroom(VisualizationPattern):
         entity_idx = 0
         breathe_scale = 1.0 + self._breathe * 0.05
 
-        # === STEM (twisted cylinder) ===
-        stem_radius = 0.055 * breathe_scale + self._pulse * 0.015
-        stem_height = 0.32 * self._grow
-        rings = max(3, stem_count // 5)
-        per_ring = stem_count // rings
+        # === STEM (organic with varied heights) ===
+        stem_radius = 0.06 * breathe_scale + self._pulse * 0.015
+        stem_height = 0.34 * self._grow
 
-        for ring in range(rings):
-            ring_t = ring / max(1, rings - 1)
-            ring_y = 0.08 + ring_t * stem_height
-            # Taper and slight bulge at base
-            taper = 1.0 - ring_t * 0.25 + math.sin(ring_t * math.pi) * 0.15
-            ring_radius = stem_radius * taper
+        # Place stem blocks with varied heights for organic look
+        for i in range(stem_count):
+            # Use golden angle for even distribution around cylinder
+            golden_angle = 2.39996323  # Golden angle in radians
+            angle_base = i * golden_angle
+
+            # Vertical position with variation - not flat rings
+            # Base position spreads blocks along full stem height
+            base_t = (i / stem_count)
+            # Add sinusoidal variation based on angle for organic staggering
+            height_variation = math.sin(angle_base * 3) * 0.04 + math.cos(angle_base * 5) * 0.02
+            y_t = base_t + height_variation
+            y_t = max(0, min(1, y_t))  # Clamp
+
+            ring_y = 0.06 + y_t * stem_height
+
+            # Radius varies with height: bulge at base, taper at top
+            taper = 1.0 - y_t * 0.3 + math.sin(y_t * math.pi) * 0.2
+            # Also vary radius slightly per block for texture
+            radius_variation = 1.0 + math.sin(i * 1.7) * 0.1
+            current_radius = stem_radius * taper * radius_variation
 
             # Spiral twist increases with height
-            twist = ring_t * math.pi * 0.5
+            twist = y_t * math.pi * 0.6
+            angle = self._rotation + twist + angle_base
 
-            for j in range(per_ring):
-                idx = ring * per_ring + j
-                if idx >= stem_count:
-                    break
+            x = center + math.cos(angle) * current_radius + wobble_x * y_t
+            z = center + math.sin(angle) * current_radius + wobble_z * y_t
+            y = ring_y
 
-                angle = self._rotation + twist + (j / per_ring) * math.pi * 2
-                x = center + math.cos(angle) * ring_radius + wobble_x * ring_t
-                z = center + math.sin(angle) * ring_radius + wobble_z * ring_t
-                y = ring_y
+            # Vary band assignment for color variation in stem
+            band_idx = 1 + (i % 2)  # Alternate between bands 1 and 2
+            base_scale = self.config.base_scale * (0.6 + y_t * 0.3)  # Smaller at base, larger at top
+            scale = base_scale + audio.bands[band_idx] * 0.2
 
-                band_idx = 2  # Stem uses mid frequencies
-                scale = self.config.base_scale * 0.7 + audio.bands[band_idx] * 0.15
-
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
-                entity_idx += 1
+            entities.append({
+                "id": f"block_{entity_idx}",
+                "x": max(0, min(1, x)),
+                "y": max(0, min(1, y)),
+                "z": max(0, min(1, z)),
+                "scale": min(self.config.max_scale, scale),
+                "band": band_idx,
+                "visible": True
+            })
+            entity_idx += 1
 
         # === CAP (dome with classic toadstool shape) ===
         cap_base_y = 0.08 + stem_height
@@ -1016,13 +1026,13 @@ class Mushroom(VisualizationPattern):
 
 class Skull(VisualizationPattern):
     """
-    Epic 3D skull with anatomical detail.
-    Features: animated jaw, flame eyes, breathing, orbital particles,
-    cheekbones, brow ridge, nose cavity, and head bob on beats.
+    Clean 3D skull using slice-based construction.
+    Uses horizontal cross-sections at different Y levels for accurate anatomy.
+    Features animated jaw, glowing eyes, and beat reactivity.
     """
 
     name = "Skull"
-    description = "Epic skull - flame eyes, animated jaw, orbital particles"
+    description = "Clean anatomical skull with animated jaw and glowing eyes"
 
     def __init__(self, config: PatternConfig = None):
         super().__init__(config)
@@ -1032,150 +1042,188 @@ class Skull(VisualizationPattern):
         self._breathe = 0.0
         self._breathe_dir = 1
         self._head_bob = 0.0
-        self._head_tilt = 0.0
         self._time = 0.0
         self._skull_points = None
         self._beat_intensity = 0.0
 
-    def _generate_skull_points(self, n: int) -> List[tuple]:
-        """Generate detailed skull formation points."""
+    def _skull_slice(self, y_norm: float, front_only: bool = False) -> List[tuple]:
+        """
+        Get skull cross-section outline at normalized Y position (0=bottom, 1=top).
+        Returns list of (x, z, part_type) tuples defining the outline.
+        """
         points = []
 
-        # Allocate points: cranium 35%, face 20%, jaw 12%, eyes 10%,
-        # nose 5%, teeth 8%, orbitals 10%
-        cranium_count = int(n * 0.35)
-        face_count = int(n * 0.20)
-        jaw_count = int(n * 0.12)
-        eye_count = int(n * 0.10)
-        nose_count = int(n * 0.05)
-        teeth_count = int(n * 0.08)
-        orbital_count = n - cranium_count - face_count - jaw_count - eye_count - nose_count - teeth_count
+        # Skull proportions (normalized coordinates, will be scaled)
+        # Front is -Z direction
 
-        # === CRANIUM (improved sphere distribution) ===
-        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
-        for i in range(cranium_count):
-            t = i / max(1, cranium_count - 1)
-            # Concentrate points in upper hemisphere
-            y_local = 0.1 + t * 0.35
-            radius_at_y = 0.18 * math.sin(math.acos(max(-1, min(1, (y_local - 0.25) / 0.2))))
-            theta = golden_angle * i
+        if y_norm < 0.15:
+            # Bottom of jaw / chin area
+            t = y_norm / 0.15
+            width = 0.08 + t * 0.04
+            depth = 0.06 + t * 0.02
+            # Horseshoe shape
+            for angle in range(-140, 141, 20):
+                rad = math.radians(angle)
+                x = math.sin(rad) * width
+                z = -math.cos(rad) * depth - 0.04
+                points.append((x, z, 'jaw'))
 
-            x = math.cos(theta) * radius_at_y
-            z = math.sin(theta) * radius_at_y * 0.9  # Slightly elongated front-back
-            points.append(('cranium', x, y_local, z))
+        elif y_norm < 0.25:
+            # Lower jaw with teeth
+            t = (y_norm - 0.15) / 0.10
+            width = 0.12 + t * 0.02
+            depth = 0.08 + t * 0.01
+            for angle in range(-130, 131, 15):
+                rad = math.radians(angle)
+                x = math.sin(rad) * width
+                z = -math.cos(rad) * depth - 0.02
+                points.append((x, z, 'jaw'))
 
-        # === FACE (cheekbones, brow ridge, temple) ===
-        # Brow ridge
-        brow_count = face_count // 3
-        for i in range(brow_count):
-            t = i / max(1, brow_count - 1)
-            x = -0.12 + t * 0.24
-            y = 0.38
-            z = -0.12 - abs(x) * 0.3  # Curved forward
-            points.append(('brow', x, y, z))
+        elif y_norm < 0.35:
+            # Upper jaw / maxilla with teeth
+            t = (y_norm - 0.25) / 0.10
+            width = 0.14 + t * 0.01
+            depth = 0.10
+            # Front arc (teeth area)
+            for angle in range(-100, 101, 12):
+                rad = math.radians(angle)
+                x = math.sin(rad) * width
+                z = -math.cos(rad) * depth
+                points.append((x, z, 'face'))
+            # Sides connecting to back
+            if not front_only:
+                for side in [-1, 1]:
+                    for d in range(3):
+                        x = side * width
+                        z = -depth + 0.02 + d * 0.04
+                        points.append((x, z, 'face'))
 
-        # Cheekbones
-        cheek_count = face_count // 3
-        for side in [-1, 1]:
-            for i in range(cheek_count // 2):
-                t = i / max(1, cheek_count // 2 - 1)
-                angle = -0.3 + t * 0.6
-                x = side * (0.14 + math.sin(angle) * 0.04)
-                y = 0.28 + t * 0.08
-                z = -0.08 - t * 0.04
-                points.append(('cheek', x, y, z))
+        elif y_norm < 0.45:
+            # Nose cavity and cheekbones
+            t = (y_norm - 0.35) / 0.10
+            width = 0.15
+            # Nose hole (center front)
+            nose_width = 0.03 * (1 - t * 0.5)
+            for nx in [-nose_width, 0, nose_width]:
+                points.append((nx, -0.11, 'nose'))
+            # Cheekbones (sides)
+            for side in [-1, 1]:
+                points.append((side * 0.14, -0.08, 'cheek'))
+                points.append((side * 0.16, -0.04, 'cheek'))
+                points.append((side * 0.15, 0.0, 'face'))
 
-        # Temple area
-        temple_count = face_count - brow_count - cheek_count
-        for side in [-1, 1]:
-            for i in range(temple_count // 2):
-                t = i / max(1, temple_count // 2 - 1)
-                x = side * 0.16
-                y = 0.32 + t * 0.1
-                z = -0.02 - t * 0.05
-                points.append(('temple', x, y, z))
+        elif y_norm < 0.55:
+            # Eye sockets
+            t = (y_norm - 0.45) / 0.10
+            # Eye socket outlines
+            for side in [-1, 1]:
+                eye_cx = side * 0.065
+                eye_cz = -0.08
+                # Oval socket
+                for angle in range(0, 360, 30):
+                    rad = math.radians(angle)
+                    ex = eye_cx + math.cos(rad) * 0.04
+                    ez = eye_cz + math.sin(rad) * 0.025
+                    points.append((ex, ez, 'eye'))
+            # Bridge of nose between eyes
+            points.append((0, -0.10, 'nose'))
+            # Outer face contour
+            for side in [-1, 1]:
+                points.append((side * 0.15, -0.05, 'face'))
+                points.append((side * 0.16, 0.0, 'face'))
 
-        # === JAW (horseshoe shape with chin) ===
-        # Main jaw arc
-        jaw_arc = jaw_count * 2 // 3
-        for i in range(jaw_arc):
-            t = i / max(1, jaw_arc - 1)
-            angle = -math.pi * 0.45 + t * math.pi * 0.9
-            x = math.sin(angle) * 0.13
-            z = -math.cos(angle) * 0.07 - 0.06
-            y = 0.12
-            points.append(('jaw', x, y, z))
+        elif y_norm < 0.65:
+            # Brow ridge and upper eye sockets
+            t = (y_norm - 0.55) / 0.10
+            # Prominent brow ridge
+            for bx in range(-12, 13, 3):
+                x = bx * 0.01
+                z = -0.10 - abs(x) * 0.3  # Curved forward
+                points.append((x, z, 'brow'))
+            # Temple sides
+            for side in [-1, 1]:
+                points.append((side * 0.15, -0.03, 'temple'))
+                points.append((side * 0.14, 0.02, 'cranium'))
 
-        # Chin point
-        chin_count = jaw_count - jaw_arc
-        for i in range(chin_count):
-            t = i / max(1, chin_count)
-            x = -0.03 + t * 0.06
-            y = 0.08
-            z = -0.13
-            points.append(('jaw', x, y, z))
+        elif y_norm < 0.80:
+            # Forehead and temporal region
+            t = (y_norm - 0.65) / 0.15
+            width = 0.14 - t * 0.02
+            # Rounded forehead
+            for angle in range(-160, 161, 15):
+                rad = math.radians(angle)
+                x = math.sin(rad) * width
+                z = -math.cos(rad) * 0.12 * (1 - t * 0.3)
+                points.append((x, z, 'cranium'))
 
-        # === EYES (hollow sockets with flame particles) ===
-        eye_socket_count = eye_count // 2
-        flame_count = eye_count - eye_socket_count
-        for side in [-1, 1]:
-            # Socket rim
-            for i in range(eye_socket_count // 2):
-                angle = (i / max(1, eye_socket_count // 2)) * math.pi * 2
-                x = side * 0.07 + math.cos(angle) * 0.035
-                y = 0.34 + math.sin(angle) * 0.025
-                z = -0.11
-                points.append(('eye_socket', x, y, z))
-
-            # Inner flame particles (will animate)
-            for i in range(flame_count // 2):
-                t = i / max(1, flame_count // 2)
-                x = side * 0.07
-                y = 0.32 + t * 0.06
-                z = -0.09
-                points.append(('eye_flame', x, y, z, i))  # Store index for animation
-
-        # === NOSE CAVITY (triangle hole) ===
-        for i in range(nose_count):
-            t = i / max(1, nose_count - 1)
-            # Triangle shape
-            if t < 0.5:
-                x = -0.02 + t * 0.04
-                y = 0.25 - t * 0.06
+        else:
+            # Top of skull (dome)
+            t = (y_norm - 0.80) / 0.20
+            radius = 0.12 * (1 - t * 0.7)
+            if radius > 0.01:
+                for angle in range(0, 360, 25):
+                    rad = math.radians(angle)
+                    x = math.cos(rad) * radius
+                    z = math.sin(rad) * radius * 0.9
+                    points.append((x, z, 'cranium'))
             else:
-                x = 0.02 - (t - 0.5) * 0.04
-                y = 0.22 + (t - 0.5) * 0.06
-            z = -0.12
-            points.append(('nose', x, y, z))
+                points.append((0, 0, 'cranium'))
 
-        # === TEETH (upper and lower rows) ===
-        upper_teeth = teeth_count // 2
-        lower_teeth = teeth_count - upper_teeth
+        return points
 
-        # Upper teeth (fixed to skull)
-        for i in range(upper_teeth):
-            t = i / max(1, upper_teeth - 1)
-            x = -0.08 + t * 0.16
-            y = 0.17
-            z = -0.10
-            points.append(('teeth_upper', x, y, z))
+    def _generate_skull_points(self, n: int) -> List[tuple]:
+        """Generate skull points using slice-based construction."""
+        all_points = []
 
-        # Lower teeth (move with jaw)
-        for i in range(lower_teeth):
-            t = i / max(1, lower_teeth - 1)
+        # Use more slices for cleaner shape - at least 20 slices
+        num_slices = max(20, n // 8)
+
+        # Generate skull shell points
+        for i in range(num_slices):
+            y_norm = i / (num_slices - 1)
+            slice_points = self._skull_slice(y_norm)
+
+            for x, z, part_type in slice_points:
+                all_points.append((part_type, x, y_norm, z))
+
+        # Add extra density to key features
+        # Extra eye detail
+        for side in [-1, 1]:
+            eye_cx, eye_cy = side * 0.065, 0.50
+            for i in range(8):
+                angle = i * math.pi * 2 / 8
+                x = eye_cx + math.cos(angle) * 0.025
+                z = -0.08 + math.sin(angle) * 0.015
+                all_points.append(('eye_inner', x, eye_cy, z))
+
+        # Extra teeth detail
+        for i in range(10):
+            t = i / 9
             x = -0.07 + t * 0.14
-            y = 0.14
-            z = -0.09
-            points.append(('teeth_lower', x, y, z))
+            all_points.append(('teeth_upper', x, 0.30, -0.095))
+            all_points.append(('teeth_lower', x, 0.22, -0.09))
 
-        # === ORBITAL PARTICLES (floating around skull) ===
-        for i in range(orbital_count):
-            phase = i * 2.39996  # Golden angle
-            radius = 0.28 + (i % 3) * 0.05
-            y_offset = math.sin(phase * 0.5) * 0.15
-            points.append(('orbital', phase, radius, y_offset, i))
-
-        return points[:n]
+        # Scale to fit n points - take evenly distributed subset if too many
+        if len(all_points) > n:
+            step = len(all_points) / n
+            selected = []
+            for i in range(n):
+                idx = int(i * step)
+                if idx < len(all_points):
+                    selected.append(all_points[idx])
+            return selected
+        else:
+            # Duplicate points if we need more
+            result = all_points[:]
+            idx = 0
+            while len(result) < n:
+                # Add slight variation to duplicates
+                orig = all_points[idx % len(all_points)]
+                varied = (orig[0], orig[1] + (idx * 0.001) % 0.01,
+                         orig[2], orig[3] + (idx * 0.001) % 0.01)
+                result.append(varied)
+                idx += 1
+            return result[:n]
 
     def calculate_entities(self, audio: AudioState) -> List[Dict]:
         entities = []
@@ -1188,140 +1236,95 @@ class Skull(VisualizationPattern):
 
         self._time += 0.016
 
-        # Slow menacing rotation with slight oscillation
-        base_rotation = self._time * 0.15
-        self._rotation = base_rotation + math.sin(self._time * 0.5) * 0.1
+        # Slow menacing rotation
+        self._rotation = self._time * 0.12
 
         # Breathing (subtle scale pulse)
-        self._breathe += 0.015 * self._breathe_dir
+        self._breathe += 0.012 * self._breathe_dir
         if self._breathe > 1.0:
             self._breathe_dir = -1
         elif self._breathe < 0.0:
             self._breathe_dir = 1
 
-        # Head bob and tilt on beat
+        # Beat response
         if audio.is_beat:
-            self._head_bob = 0.03 * audio.amplitude
-            self._head_tilt = 0.05 * (1 if self._time % 2 < 1 else -1)
+            self._head_bob = 0.025 * audio.amplitude
             self._beat_intensity = 1.0
             self._eye_glow = 1.0
-        self._head_bob *= 0.92
-        self._head_tilt *= 0.95
-        self._beat_intensity *= 0.93
-        self._eye_glow *= 0.88
+        self._head_bob *= 0.9
+        self._beat_intensity *= 0.92
+        self._eye_glow *= 0.85
 
         # Jaw opens with bass
-        target_jaw = audio.bands[0] * 0.12 + audio.bands[1] * 0.06
+        target_jaw = audio.bands[0] * 0.08 + audio.bands[1] * 0.04
         if audio.is_beat:
-            target_jaw += 0.08
-        self._jaw_open += (target_jaw - self._jaw_open) * 0.2
+            target_jaw += 0.06
+        self._jaw_open += (target_jaw - self._jaw_open) * 0.25
 
-        breathe_scale = 1.0 + self._breathe * 0.03
+        breathe_scale = 1.0 + self._breathe * 0.02
+        skull_scale = 0.55  # Overall skull size
 
         cos_r = math.cos(self._rotation)
         sin_r = math.sin(self._rotation)
-        cos_tilt = math.cos(self._head_tilt)
-        sin_tilt = math.sin(self._head_tilt)
 
-        entity_idx = 0
-        for point in self._skull_points:
-            part_type = point[0]
+        for i, point in enumerate(self._skull_points):
+            part_type, px, py_norm, pz = point[0], point[1], point[2], point[3]
 
-            if part_type == 'orbital':
-                # Orbital particles - special handling
-                _, phase, radius, y_offset, idx = point
-                orbit_angle = phase + self._time * (0.5 + idx * 0.1)
-                orbit_y = 0.35 + y_offset + math.sin(self._time * 2 + idx) * 0.03
+            # Scale and position
+            px = px * skull_scale * breathe_scale
+            pz = pz * skull_scale * breathe_scale
+            py = py_norm * 0.45 * skull_scale  # Vertical scale
 
-                px = math.cos(orbit_angle) * radius
-                pz = math.sin(orbit_angle) * radius
-                py = orbit_y
+            # Apply jaw movement (only to jaw and lower teeth)
+            if part_type == 'jaw' and py_norm < 0.25:
+                py -= self._jaw_open * (0.25 - py_norm) / 0.25
+            elif part_type == 'teeth_lower':
+                py -= self._jaw_open * 0.8
 
-                # No rotation applied - they orbit independently
-                x = center + px
-                y = py + self._head_bob
-                z = center + pz
-
-                band_idx = idx % 6
-                scale = self.config.base_scale * 0.4 + audio.bands[band_idx] * 0.25 + self._beat_intensity * 0.2
-
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
-                entity_idx += 1
-                continue
-
-            elif part_type == 'eye_flame':
-                # Animated flame particles
-                _, base_x, base_y, base_z, flame_idx = point
-                # Flames flicker and rise
-                flicker = math.sin(self._time * 15 + flame_idx * 2) * 0.01
-                rise = (self._time * 3 + flame_idx) % 1.0
-                px = base_x + flicker
-                py = base_y + rise * 0.04
-                pz = base_z + math.cos(self._time * 12 + flame_idx) * 0.005
-
-            else:
-                px, py, pz = point[1], point[2], point[3]
-
-            # Apply jaw movement
-            if part_type in ('jaw', 'teeth_lower'):
-                py -= self._jaw_open
-
-            # Apply breathing scale
-            px *= breathe_scale
-            pz *= breathe_scale
-
-            # Apply head tilt (rotation around X)
-            py_tilted = py * cos_tilt - pz * sin_tilt
-            pz_tilted = py * sin_tilt + pz * cos_tilt
-            py, pz = py_tilted, pz_tilted
-
-            # Apply Y rotation
+            # Rotate around Y axis
             rx = px * cos_r - pz * sin_r
             rz = px * sin_r + pz * cos_r
 
             x = center + rx
-            y = 0.35 + py + self._head_bob
+            y = 0.25 + py + self._head_bob
             z = center + rz
 
-            # Determine scale based on part type
-            band_idx = entity_idx % 6
-            scale = self.config.base_scale
+            # Scale based on part type
+            band_idx = i % 6
+            base_scale = self.config.base_scale * 0.9
 
-            if part_type == 'eye_socket':
-                scale += self._eye_glow * 0.4 + audio.bands[4] * 0.2
-            elif part_type == 'eye_flame':
-                scale = self.config.base_scale * 0.6 + self._eye_glow * 0.6 + audio.bands[5] * 0.4
-            elif part_type == 'cranium':
-                scale += audio.bands[band_idx % 3] * 0.25
-            elif part_type in ('jaw', 'teeth_lower'):
-                scale += audio.bands[0] * 0.35
-            elif part_type in ('brow', 'cheek'):
-                scale += audio.bands[2] * 0.2
+            if part_type in ('eye', 'eye_inner'):
+                base_scale *= 1.1
+                base_scale += self._eye_glow * 0.5 + audio.bands[4] * 0.3
+                band_idx = 4  # Eyes use high frequency color
+            elif part_type == 'jaw':
+                base_scale += audio.bands[0] * 0.3
+                band_idx = 0
             elif part_type in ('teeth_upper', 'teeth_lower'):
-                scale += self._beat_intensity * 0.3
+                base_scale *= 0.7
+                base_scale += self._beat_intensity * 0.25
+                band_idx = 5
+            elif part_type == 'brow':
+                base_scale *= 1.05
+                base_scale += audio.bands[2] * 0.2
+            elif part_type == 'cranium':
+                base_scale += audio.bands[band_idx % 3] * 0.2
+            elif part_type == 'nose':
+                base_scale *= 0.85
 
             # Global beat pulse
             if audio.is_beat:
-                scale *= 1.15
+                base_scale *= 1.1
 
             entities.append({
-                "id": f"block_{entity_idx}",
+                "id": f"block_{i}",
                 "x": max(0, min(1, x)),
                 "y": max(0, min(1, y)),
                 "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
+                "scale": min(self.config.max_scale, base_scale),
                 "band": band_idx,
                 "visible": True
             })
-            entity_idx += 1
 
         self.update()
         return entities
