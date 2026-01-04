@@ -57,7 +57,8 @@ class FFTAnalyzer:
                  fft_size: int = 2048,
                  hop_size: int = 512,
                  device: Optional[str] = None,
-                 low_latency: bool = False):
+                 low_latency: bool = False,
+                 ultra_low_latency: bool = False):
         """
         Initialize FFT analyzer.
 
@@ -67,9 +68,15 @@ class FFTAnalyzer:
             hop_size: Samples between FFT frames (smaller = more responsive)
             device: Audio device name (None = auto-detect loopback)
             low_latency: If True, use smaller buffers for lower latency (~20ms vs ~45ms)
+            ultra_low_latency: If True, use minimal buffers (~10ms, trades bass for speed)
         """
+        # Ultra-low latency mode: absolute minimum latency, sacrifices bass accuracy
+        if ultra_low_latency:
+            fft_size = 512    # ~10ms at 48kHz (minimum practical)
+            hop_size = 128    # ~2.6ms updates (very responsive)
+            low_latency = True  # Also set low_latency flag
         # Low latency mode uses smaller FFT (trades bass resolution for speed)
-        if low_latency:
+        elif low_latency:
             fft_size = 1024   # ~21ms at 48kHz (vs ~43ms)
             hop_size = 256    # ~5ms updates (vs ~11ms)
 
@@ -78,6 +85,7 @@ class FFTAnalyzer:
         self.hop_size = hop_size
         self.device = device
         self.low_latency = low_latency
+        self.ultra_low_latency = ultra_low_latency
 
         # Latency tracking
         self._latency_samples: deque = deque(maxlen=60)  # Last 60 measurements
@@ -99,8 +107,16 @@ class FFTAnalyzer:
         self._onsets = [False] * 6
 
         # Smoothing parameters (attack/release like synthetic system)
-        self._band_attack = 0.4    # How fast bands rise (0-1, higher = faster)
-        self._band_release = 0.08  # How fast bands fall (0-1, higher = faster)
+        # Ultra-low latency uses faster smoothing for more immediate response
+        if ultra_low_latency:
+            self._band_attack = 0.7    # Very fast attack for instant response
+            self._band_release = 0.15  # Faster release
+        elif low_latency:
+            self._band_attack = 0.5    # Fast attack
+            self._band_release = 0.10  # Moderate release
+        else:
+            self._band_attack = 0.4    # Normal attack
+            self._band_release = 0.08  # Smooth release
         self._noise_floor = 0.02   # Ignore signals below this threshold
 
         # Per-band history for normalization (AGC per band) - using deque for O(1) ops
@@ -112,13 +128,24 @@ class FFTAnalyzer:
         self._onset_threshold = 1.5  # Flux must be 1.5x average to trigger
         self._flux_history_size = 30  # ~0.5 second history
         self._flux_histories: List[deque] = [deque(maxlen=self._flux_history_size) for _ in range(6)]
-        self._min_onset_interval = 0.08  # 80ms minimum between onsets (same band)
+        # Faster onset detection in low-latency modes
+        if ultra_low_latency:
+            self._min_onset_interval = 0.05  # 50ms minimum (faster response)
+        elif low_latency:
+            self._min_onset_interval = 0.06  # 60ms minimum
+        else:
+            self._min_onset_interval = 0.08  # 80ms minimum between onsets (same band)
         self._last_onset_time = np.zeros(6)
 
         # Audio capture state
         self._stream = None
-        # Smaller queue in low-latency mode to avoid buffering delay
-        queue_size = 5 if low_latency else 15
+        # Smaller queue in low-latency modes to avoid buffering delay
+        if ultra_low_latency:
+            queue_size = 2  # Absolute minimum - nearly direct processing
+        elif low_latency:
+            queue_size = 5
+        else:
+            queue_size = 15
         self._audio_queue: queue.Queue = queue.Queue(maxsize=queue_size)
         self._running = False
         self._capture_thread: Optional[threading.Thread] = None
@@ -562,10 +589,12 @@ class HybridAnalyzer:
     falls back to synthetic analysis otherwise.
     """
 
-    def __init__(self, sample_rate: int = 44100, low_latency: bool = False):
+    def __init__(self, sample_rate: int = 44100, low_latency: bool = False,
+                 ultra_low_latency: bool = False):
         self.fft_analyzer: Optional[FFTAnalyzer] = None
         self.sample_rate = sample_rate
         self.low_latency = low_latency
+        self.ultra_low_latency = ultra_low_latency
         self._use_fft = False
         self._last_result: Optional[FFTResult] = None
         self._backend = None
@@ -578,14 +607,20 @@ class HybridAnalyzer:
         try:
             self.fft_analyzer = FFTAnalyzer(
                 sample_rate=self.sample_rate,
-                low_latency=self.low_latency
+                low_latency=self.low_latency,
+                ultra_low_latency=self.ultra_low_latency
             )
             if self.fft_analyzer.is_available:
                 if self.fft_analyzer.start_capture():
                     self._use_fft = True
                     self._backend = self.fft_analyzer.backend
                     latency_info = f"~{self.fft_analyzer.latency_stats.get('fft_latency_ms', 0):.0f}ms" if self.fft_analyzer.latency_stats else ""
-                    mode = "LOW-LATENCY" if self.low_latency else "NORMAL"
+                    if self.ultra_low_latency:
+                        mode = "ULTRA-LOW-LATENCY"
+                    elif self.low_latency:
+                        mode = "LOW-LATENCY"
+                    else:
+                        mode = "NORMAL"
                     logger.info(f"Hybrid analyzer: Using {self._backend} [{mode}] {latency_info}")
                 else:
                     logger.warning("Hybrid analyzer: Capture failed, using synthetic")

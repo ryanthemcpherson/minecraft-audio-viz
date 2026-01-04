@@ -441,7 +441,8 @@ class AppCaptureAgent:
                  http_port: int = 8080,
                  vscode_mode: bool = False,
                  use_fft: bool = True,
-                 low_latency: bool = False):
+                 low_latency: bool = False,
+                 ultra_low_latency: bool = False):
 
         self.app_name = app_name
         self.minecraft_host = minecraft_host
@@ -455,6 +456,15 @@ class AppCaptureAgent:
         self.vscode_mode = vscode_mode
         self.use_fft = use_fft
         self.low_latency = low_latency
+        self.ultra_low_latency = ultra_low_latency
+
+        # Frame timing based on latency mode
+        if ultra_low_latency:
+            self._frame_interval = 0.008  # 125 FPS for ultra-low latency
+        elif low_latency:
+            self._frame_interval = 0.012  # ~83 FPS for low latency
+        else:
+            self._frame_interval = 0.016  # ~60 FPS normal
 
         # Components
         self.capture = AppAudioCapture(app_name)
@@ -477,14 +487,22 @@ class AppCaptureAgent:
         self._using_fft = False
         if use_fft and HAS_FFT and HybridAnalyzer is not None:
             try:
-                self.fft_analyzer = HybridAnalyzer(low_latency=low_latency)
+                self.fft_analyzer = HybridAnalyzer(
+                    low_latency=low_latency,
+                    ultra_low_latency=ultra_low_latency
+                )
                 self._using_fft = self.fft_analyzer.using_fft
                 if self._using_fft:
                     stats = self.fft_analyzer.latency_stats
                     fft_ms = stats.get('fft_latency_ms', 0)
                     hop_ms = stats.get('hop_interval_ms', 0)
-                    mode = "LOW-LATENCY" if low_latency else "NORMAL"
-                    logger.info(f"FFT analyzer active [{mode}] - FFT: {fft_ms:.0f}ms, Update: {hop_ms:.0f}ms")
+                    if ultra_low_latency:
+                        mode = "ULTRA-LOW-LATENCY"
+                    elif low_latency:
+                        mode = "LOW-LATENCY"
+                    else:
+                        mode = "NORMAL"
+                    logger.info(f"FFT analyzer active [{mode}] - FFT: {fft_ms:.0f}ms, Update: {hop_ms:.0f}ms, Loop: {self._frame_interval*1000:.0f}ms")
                 else:
                     logger.info("FFT analyzer initialized - will use when audio available")
             except Exception as e:
@@ -1457,7 +1475,7 @@ class AppCaptureAgent:
                 # Send same entities to browser previews
                 await self._broadcast_state(entities, bands, frame)
 
-                await asyncio.sleep(0.016)  # ~60 FPS
+                await asyncio.sleep(self._frame_interval)  # FPS based on latency mode
 
         except Exception as e:
             logger.error(f"Capture error: {e}")
@@ -1547,6 +1565,8 @@ async def main():
                         help='Disable FFT analysis (use synthetic bands only)')
     parser.add_argument('--low-latency', action='store_true',
                         help='Use low-latency FFT mode (~20ms vs ~45ms, trades bass resolution)')
+    parser.add_argument('--ultra-low-latency', action='store_true',
+                        help='Use ultra-low-latency mode (~10ms FFT, 125 FPS, minimal bass)')
     parser.add_argument('--list-audio', action='store_true',
                         help='List available audio devices and exit')
 
@@ -1596,7 +1616,8 @@ async def main():
         http_port=0 if args.no_http else args.http_port,
         vscode_mode=args.vscode,
         use_fft=not args.no_fft,
-        low_latency=args.low_latency
+        low_latency=args.low_latency,
+        ultra_low_latency=args.ultra_low_latency
     )
 
     # Signal handler
