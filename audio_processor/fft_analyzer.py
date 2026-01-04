@@ -463,7 +463,11 @@ class FFTAnalyzer:
         else:
             # Extract band magnitudes (vectorized)
             for i, (low_bin, high_bin) in enumerate(self.band_bins):
-                self._raw_bands[i] = np.mean(self._spectrum[low_bin:high_bin])
+                if high_bin > low_bin:
+                    val = np.mean(self._spectrum[low_bin:high_bin])
+                    self._raw_bands[i] = val if np.isfinite(val) else 0.0
+                else:
+                    self._raw_bands[i] = 0.0
 
             # Update band histories and compute max (using deque)
             # Only update when we have actual signal
@@ -532,10 +536,15 @@ class FFTAnalyzer:
         snare_onset = self._onsets[2] and self._onsets[4]  # Low-mid + high-mid = snare
         hihat_onset = self._onsets[5] and not self._onsets[0]  # High only (no sub-bass) = hi-hat
 
+        # Sanitize output - replace any NaN/Inf with 0
+        bands_out = [float(b) if np.isfinite(b) else 0.0 for b in self._smoothed_bands]
+        raw_bands_out = [float(b) if np.isfinite(b) else 0.0 for b in self._raw_bands]
+        peak_out = float(peak) if np.isfinite(peak) else 0.0
+
         return FFTResult(
-            bands=self._smoothed_bands.tolist(),  # Use smoothed bands for display
-            raw_bands=self._raw_bands.tolist(),
-            peak=peak,
+            bands=bands_out,
+            raw_bands=raw_bands_out,
+            peak=peak_out,
             spectral_flux=spectral_flux,
             band_flux=self._band_flux.tolist(),
             onsets=list(self._onsets),

@@ -1418,6 +1418,8 @@ class AppCaptureAgent:
                 # Use FFT bands if available, otherwise synthetic
                 if fft_result is not None and self._using_fft:
                     bands = fft_result.bands
+                    # Sanitize bands - protect against NaN/Inf
+                    bands = [max(0.0, min(1.0, b)) if isinstance(b, (int, float)) and -1e10 < b < 1e10 else 0.0 for b in bands]
 
                     # Enhance beat detection with FFT onset info
                     if fft_result.kick_onset and not frame.is_beat:

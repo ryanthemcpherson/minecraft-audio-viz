@@ -199,12 +199,20 @@ class TerminalSpectrograph:
 
         # === FREQUENCY BANDS ===
         for i, (band_val, name, color) in enumerate(zip(bands, BAND_NAMES, BAND_COLORS)):
+            # Protect against NaN values
+            if not isinstance(band_val, (int, float)) or not (-1e10 < band_val < 1e10):
+                band_val = 0.0
+            band_val = max(0.0, min(1.0, float(band_val)))
             bar = self._make_bar(band_val, self._bar_width, color)
             pct = int(band_val * 100)
             lines.append(f"{color}{name}{Colors.RESET} {bar} {pct:3d}%")
 
         # === BEAT & VOLUME ROW ===
         beat_ind = self._beat_indicator(is_beat, beat_intensity)
+        # Protect against NaN
+        if not isinstance(amplitude, (int, float)) or not (-1e10 < amplitude < 1e10):
+            amplitude = 0.0
+        amplitude = max(0.0, min(1.0, float(amplitude)))
         vol_bar = self._make_bar(amplitude, 15, Colors.WHITE)
         lines.append(f"{Colors.DIM}{'─' * min(50, self._width - 2)}{Colors.RESET}")
         lines.append(f"Vol  {vol_bar} {int(amplitude*100):3d}%  {beat_ind}")
