@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioViz Preview</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="container">
+        <canvas id="visualizer"></canvas>
+        <div id="overlay">
+            <div id="header">
+                <h1>AudioViz Preview</h1>
+                <div id="status">Connecting...</div>
+            </div>
+            <div id="stats">
+                <div class="stat">
+                    <span class="label">Frame:</span>
+                    <span id="frame-count">0</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Volume:</span>
+                    <span id="volume">0%</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Beat:</span>
+                    <span id="beat-indicator">-</span>
+                </div>
+            </div>
+            <div id="bands">
+                <div class="band">
+                    <span class="band-label">Sub</span>
+                    <div class="band-bar"><div class="band-fill" id="band-0"></div></div>
+                    <input type="range" class="band-sens" id="sens-0" min="0" max="200" value="100" title="Sub-bass sensitivity">
+                </div>
+                <div class="band">
+                    <span class="band-label">Bass</span>
+                    <div class="band-bar"><div class="band-fill" id="band-1"></div></div>
+                    <input type="range" class="band-sens" id="sens-1" min="0" max="200" value="100" title="Bass sensitivity">
+                </div>
+                <div class="band">
+                    <span class="band-label">Low</span>
+                    <div class="band-bar"><div class="band-fill" id="band-2"></div></div>
+                    <input type="range" class="band-sens" id="sens-2" min="0" max="200" value="100" title="Low-mid sensitivity">
+                </div>
+                <div class="band">
+                    <span class="band-label">Mid</span>
+                    <div class="band-bar"><div class="band-fill" id="band-3"></div></div>
+                    <input type="range" class="band-sens" id="sens-3" min="0" max="200" value="100" title="Mid sensitivity">
+                </div>
+                <div class="band">
+                    <span class="band-label">High</span>
+                    <div class="band-bar"><div class="band-fill" id="band-4"></div></div>
+                    <input type="range" class="band-sens" id="sens-4" min="0" max="200" value="100" title="High-mid sensitivity">
+                </div>
+                <div class="band">
+                    <span class="band-label">Air</span>
+                    <div class="band-bar"><div class="band-fill" id="band-5"></div></div>
+                    <input type="range" class="band-sens" id="sens-5" min="0" max="200" value="100" title="Air/high sensitivity">
+                </div>
+            </div>
+            <!-- Preset Buttons -->
+            <div id="preset-buttons">
+                <button class="preset active" data-preset="auto">Auto</button>
+                <button class="preset" data-preset="edm">EDM</button>
+                <button class="preset" data-preset="chill">Chill</button>
+                <button class="preset" data-preset="rock">Rock</button>
+            </div>
+
+            <div id="pattern-selector">
+                <span class="label">Pattern:</span>
+                <select id="pattern-select">
+                    <option value="spectrum">Spectrum Bars</option>
+                </select>
+            </div>
+            <div id="block-count-control">
+                <span class="label">Blocks:</span>
+                <input type="range" id="block-count" min="8" max="64" value="16" step="1">
+                <span id="block-count-display">16</span>
+            </div>
+
+            <!-- Collapsible Advanced Settings -->
+            <details id="advanced-panel">
+                <summary>Advanced Settings</summary>
+                <div id="audio-settings">
+                    <div class="slider-control">
+                        <span class="slider-label">Attack:</span>
+                        <input type="range" id="attack-slider" min="10" max="90" value="35" step="5">
+                        <span class="slider-value" id="attack-display">35%</span>
+                    </div>
+                    <div class="slider-control">
+                        <span class="slider-label">Release:</span>
+                        <input type="range" id="release-slider" min="2" max="30" value="8" step="1">
+                        <span class="slider-value" id="release-display">8%</span>
+                    </div>
+                    <div class="slider-control">
+                        <span class="slider-label">AGC Gain:</span>
+                        <input type="range" id="agc-slider" min="1" max="12" value="8" step="0.5">
+                        <span class="slider-value" id="agc-display">8x</span>
+                    </div>
+                    <div class="slider-control">
+                        <span class="slider-label">Beat Sens:</span>
+                        <input type="range" id="beat-slider" min="50" max="200" value="100" step="10">
+                        <span class="slider-value" id="beat-display">100%</span>
+                    </div>
+                    <div class="slider-control">
+                        <span class="slider-label">Beat Thresh:</span>
+                        <input type="range" id="beat-thresh-slider" min="80" max="200" value="130" step="5">
+                        <span class="slider-value" id="beat-thresh-display">1.3x</span>
+                    </div>
+                </div>
+                <div id="band-sensitivity-section">
+                    <div class="settings-subheader">Per-Band Sensitivity</div>
+                    <div class="band-sens-grid">
+                        <div class="band-sens-item"><span>Sub</span><input type="range" class="band-sens-adv" id="sens-adv-0" min="0" max="200" value="100"></div>
+                        <div class="band-sens-item"><span>Bass</span><input type="range" class="band-sens-adv" id="sens-adv-1" min="0" max="200" value="100"></div>
+                        <div class="band-sens-item"><span>Low</span><input type="range" class="band-sens-adv" id="sens-adv-2" min="0" max="200" value="100"></div>
+                        <div class="band-sens-item"><span>Mid</span><input type="range" class="band-sens-adv" id="sens-adv-3" min="0" max="200" value="100"></div>
+                        <div class="band-sens-item"><span>High</span><input type="range" class="band-sens-adv" id="sens-adv-4" min="0" max="200" value="100"></div>
+                        <div class="band-sens-item"><span>Air</span><input type="range" class="band-sens-adv" id="sens-adv-5" min="0" max="200" value="100"></div>
+                    </div>
+                </div>
+            </details>
+
+            <div id="controls">
+                <button id="btn-reset">Reset Camera</button>
+                <label><input type="checkbox" id="chk-rotate" checked> Auto Rotate</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

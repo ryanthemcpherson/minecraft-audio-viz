@@ -1,0 +1,502 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Courier New', monospace;
+    background: #1a1a2e;
+    color: #eee;
+    overflow: hidden;
+}
+
+#container {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+}
+
+#visualizer {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+#overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    padding: 20px;
+    pointer-events: none;
+}
+
+#overlay button, #overlay input, #overlay label, #overlay select, #overlay span {
+    pointer-events: auto;
+}
+
+#block-count-control {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+#block-count-control .label {
+    color: #888;
+}
+
+#block-count {
+    width: 120px;
+    cursor: pointer;
+}
+
+#block-count-display {
+    color: #4ecdc4;
+    min-width: 30px;
+}
+
+#header h1 {
+    font-size: 24px;
+    color: #4ecdc4;
+    text-shadow: 0 0 10px rgba(78, 205, 196, 0.5);
+    margin-bottom: 5px;
+}
+
+#status {
+    font-size: 14px;
+    color: #888;
+}
+
+#status.connected {
+    color: #4ecdc4;
+}
+
+#status.error {
+    color: #ff6b6b;
+}
+
+#stats {
+    margin-top: 20px;
+    display: flex;
+    gap: 20px;
+}
+
+.stat {
+    background: rgba(0, 0, 0, 0.5);
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid #333;
+}
+
+.stat .label {
+    color: #888;
+    margin-right: 5px;
+}
+
+#beat-indicator {
+    display: inline-block;
+    width: 20px;
+    text-align: center;
+}
+
+#beat-indicator.active {
+    color: #ff6b6b;
+    text-shadow: 0 0 10px #ff6b6b;
+}
+
+#bands {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 200px;
+}
+
+.band {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.band-label {
+    width: 35px;
+    font-size: 11px;
+    color: #888;
+}
+
+/* Per-band sensitivity slider */
+.band-sens {
+    width: 40px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #333;
+    border-radius: 2px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.band-sens::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    background: #888;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.band-sens::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    background: #888;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+.band-sens:hover::-webkit-slider-thumb {
+    background: #4ecdc4;
+    box-shadow: 0 0 6px rgba(78, 205, 196, 0.5);
+}
+
+/* Color-coded sensitivity thumbs per band */
+.band:nth-child(1) .band-sens::-webkit-slider-thumb { background: #e74c3c; }
+.band:nth-child(2) .band-sens::-webkit-slider-thumb { background: #e67e22; }
+.band:nth-child(3) .band-sens::-webkit-slider-thumb { background: #f1c40f; }
+.band:nth-child(4) .band-sens::-webkit-slider-thumb { background: #2ecc71; }
+.band:nth-child(5) .band-sens::-webkit-slider-thumb { background: #3498db; }
+.band:nth-child(6) .band-sens::-webkit-slider-thumb { background: #9b59b6; }
+
+.band:nth-child(1) .band-sens::-moz-range-thumb { background: #e74c3c; }
+.band:nth-child(2) .band-sens::-moz-range-thumb { background: #e67e22; }
+.band:nth-child(3) .band-sens::-moz-range-thumb { background: #f1c40f; }
+.band:nth-child(4) .band-sens::-moz-range-thumb { background: #2ecc71; }
+.band:nth-child(5) .band-sens::-moz-range-thumb { background: #3498db; }
+.band:nth-child(6) .band-sens::-moz-range-thumb { background: #9b59b6; }
+
+.band-bar {
+    flex: 1;
+    height: 16px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 2px;
+    overflow: hidden;
+    border: 1px solid #333;
+}
+
+.band-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4ecdc4, #44bd32);
+    width: 0%;
+    transition: width 0.05s ease-out;
+}
+
+.band:nth-child(1) .band-fill { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+.band:nth-child(2) .band-fill { background: linear-gradient(90deg, #e67e22, #d35400); }
+.band:nth-child(3) .band-fill { background: linear-gradient(90deg, #f1c40f, #f39c12); }
+.band:nth-child(4) .band-fill { background: linear-gradient(90deg, #2ecc71, #27ae60); }
+.band:nth-child(5) .band-fill { background: linear-gradient(90deg, #3498db, #2980b9); }
+.band:nth-child(6) .band-fill { background: linear-gradient(90deg, #9b59b6, #8e44ad); }
+
+/* Preset Buttons */
+#preset-buttons {
+    margin-top: 15px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.preset {
+    background: rgba(0, 0, 0, 0.5);
+    color: #888;
+    border: 1px solid #444;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.2s ease;
+}
+
+.preset:hover {
+    background: rgba(78, 205, 196, 0.2);
+    border-color: #4ecdc4;
+    color: #4ecdc4;
+}
+
+.preset.active {
+    background: #4ecdc4;
+    color: #1a1a2e;
+    border-color: #4ecdc4;
+    box-shadow: 0 0 12px rgba(78, 205, 196, 0.4);
+}
+
+/* Preset-specific colors */
+.preset[data-preset="auto"].active { background: #4ecdc4; border-color: #4ecdc4; }
+.preset[data-preset="edm"].active { background: #e74c3c; border-color: #e74c3c; }
+.preset[data-preset="chill"].active { background: #9b59b6; border-color: #9b59b6; }
+.preset[data-preset="rock"].active { background: #e67e22; border-color: #e67e22; }
+
+#pattern-selector {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+#pattern-selector .label {
+    color: #888;
+}
+
+#pattern-select {
+    background: #2a2a4a;
+    color: #4ecdc4;
+    border: 1px solid #4ecdc4;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    min-width: 150px;
+}
+
+#pattern-select:hover {
+    background: #3a3a5a;
+}
+
+#pattern-select:focus {
+    outline: none;
+    box-shadow: 0 0 10px rgba(78, 205, 196, 0.3);
+}
+
+#pattern-select option {
+    background: #2a2a4a;
+    color: #eee;
+}
+
+#controls {
+    margin-top: 15px;
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+#controls button {
+    background: #4ecdc4;
+    color: #1a1a2e;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+}
+
+#controls button:hover {
+    background: #44bd32;
+}
+
+#controls label {
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+}
+
+#controls input[type="checkbox"] {
+    margin-right: 5px;
+}
+
+/* Audio Settings Panel */
+#audio-settings {
+    margin-top: 15px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #333;
+    width: 220px;
+}
+
+.settings-header {
+    color: #4ecdc4;
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.slider-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.slider-control:last-child {
+    margin-bottom: 0;
+}
+
+.slider-label {
+    color: #888;
+    font-size: 11px;
+    width: 65px;
+    flex-shrink: 0;
+}
+
+.slider-control input[type="range"] {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #333;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.slider-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #4ecdc4;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.slider-control input[type="range"]::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #4ecdc4;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+.slider-control input[type="range"]:hover::-webkit-slider-thumb {
+    background: #6fe8df;
+    box-shadow: 0 0 8px rgba(78, 205, 196, 0.5);
+}
+
+.slider-value {
+    color: #4ecdc4;
+    font-size: 11px;
+    width: 35px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* Beat flash effect */
+.beat-flash {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle, rgba(255,107,107,0.2) 0%, transparent 70%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+.beat-flash.active {
+    opacity: 1;
+}
+
+/* Collapsible Advanced Panel */
+#advanced-panel {
+    margin-top: 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #333;
+    border-radius: 4px;
+    width: 240px;
+}
+
+#advanced-panel summary {
+    padding: 10px 12px;
+    cursor: pointer;
+    color: #888;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    user-select: none;
+    transition: color 0.2s;
+}
+
+#advanced-panel summary:hover {
+    color: #4ecdc4;
+}
+
+#advanced-panel[open] summary {
+    color: #4ecdc4;
+    border-bottom: 1px solid #333;
+}
+
+#advanced-panel[open] #audio-settings {
+    border-top: none;
+    margin-top: 0;
+}
+
+/* Band Sensitivity Section in Advanced Panel */
+#band-sensitivity-section {
+    padding: 12px;
+    border-top: 1px solid #333;
+}
+
+.settings-subheader {
+    color: #4ecdc4;
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.band-sens-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.band-sens-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.band-sens-item span {
+    color: #888;
+    font-size: 10px;
+    width: 30px;
+    flex-shrink: 0;
+}
+
+.band-sens-adv {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #333;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.band-sens-adv::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    background: #666;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.band-sens-adv:hover::-webkit-slider-thumb {
+    background: #4ecdc4;
+}

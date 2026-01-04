@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioViz Control Panel</title>
+    <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header id="header">
+            <div class="header-left">
+                <h1>AudioViz Control</h1>
+                <span id="connection-status" class="status disconnected">Disconnected</span>
+            </div>
+            <div class="header-center">
+                <span class="zone-label">Zone:</span>
+                <select id="zone-select">
+                    <option value="main">main</option>
+                </select>
+            </div>
+            <div class="header-right">
+                <a href="/" target="_blank" class="btn btn-secondary">
+                    Open 3D Preview
+                </a>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div id="main-content">
+            <!-- Left Sidebar: Zone Overview -->
+            <aside id="zone-overview">
+                <div class="panel">
+                    <h2 class="panel-title">Zone Status</h2>
+
+                    <div class="status-item">
+                        <span class="status-label">Pattern:</span>
+                        <span id="current-pattern" class="status-value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Preset:</span>
+                        <span id="current-preset" class="status-value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">BPM:</span>
+                        <span id="bpm-estimate" class="status-value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Frame:</span>
+                        <span id="frame-count" class="status-value">0</span>
+                    </div>
+
+                    <!-- Beat Indicator -->
+                    <div id="beat-display">
+                        <div id="beat-indicator"></div>
+                        <span id="beat-text">BEAT</span>
+                    </div>
+
+                    <!-- Audio Meters -->
+                    <div id="audio-meters">
+                        <h3 class="section-title">Frequency Bands</h3>
+                        <div class="meter">
+                            <span class="meter-label">Sub</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-0"></div></div>
+                            <span class="meter-value" id="meter-val-0">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Bass</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-1"></div></div>
+                            <span class="meter-value" id="meter-val-1">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Low</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-2"></div></div>
+                            <span class="meter-value" id="meter-val-2">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Mid</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-3"></div></div>
+                            <span class="meter-value" id="meter-val-3">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">High</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-4"></div></div>
+                            <span class="meter-value" id="meter-val-4">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Air</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-5"></div></div>
+                            <span class="meter-value" id="meter-val-5">0%</span>
+                        </div>
+                        <!-- Master Volume -->
+                        <div class="meter master">
+                            <span class="meter-label">Master</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-master"></div></div>
+                            <span class="meter-value" id="meter-val-master">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="panel">
+                    <h2 class="panel-title">Quick Actions</h2>
+                    <div class="quick-actions">
+                        <button id="btn-blackout" class="btn btn-danger">Blackout</button>
+                        <button id="btn-freeze" class="btn btn-warning">Freeze</button>
+                    </div>
+                    <div class="tap-tempo">
+                        <button id="btn-tap-tempo" class="btn btn-full">Tap Tempo</button>
+                        <span id="tap-bpm">-- BPM</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Work Area -->
+            <main id="work-area">
+                <!-- Tab Bar -->
+                <nav id="tab-bar">
+                    <button class="tab active" data-tab="mixer">Live Mixer</button>
+                    <button class="tab" data-tab="timeline">Timeline</button>
+                </nav>
+
+                <!-- Tab Content -->
+                <div id="tab-content">
+                    <!-- Live Mixer Panel -->
+                    <div id="mixer-panel" class="tab-panel active">
+                        <!-- Pattern Quick-Switch -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Patterns</h3>
+                            <div id="pattern-grid" class="pattern-grid">
+                                <!-- Populated by JS -->
+                            </div>
+                        </section>
+
+                        <!-- Preset Buttons -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Presets</h3>
+                            <div id="preset-buttons" class="preset-buttons">
+                                <button class="preset-btn active" data-preset="auto">Auto</button>
+                                <button class="preset-btn" data-preset="edm">EDM</button>
+                                <button class="preset-btn" data-preset="chill">Chill</button>
+                                <button class="preset-btn" data-preset="rock">Rock</button>
+                            </div>
+                        </section>
+
+                        <!-- Band Faders -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Band Sensitivity</h3>
+                            <div id="band-faders" class="fader-bank">
+                                <div class="fader" data-band="0">
+                                    <span class="fader-label">Sub</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="1">
+                                    <span class="fader-label">Bass</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="2">
+                                    <span class="fader-label">Low</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="3">
+                                    <span class="fader-label">Mid</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="4">
+                                    <span class="fader-label">High</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="5">
+                                    <span class="fader-label">Air</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader fader-master" data-band="master">
+                                    <span class="fader-label">Master</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Effect Controls -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Audio Settings</h3>
+                            <div id="effect-controls" class="controls-grid">
+                                <div class="control-row">
+                                    <label>Attack</label>
+                                    <input type="range" id="ctrl-attack" min="5" max="90" value="35">
+                                    <span class="control-value" id="val-attack">35%</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Release</label>
+                                    <input type="range" id="ctrl-release" min="2" max="30" value="8">
+                                    <span class="control-value" id="val-release">8%</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>AGC Gain</label>
+                                    <input type="range" id="ctrl-agc" min="1" max="12" value="8" step="0.5">
+                                    <span class="control-value" id="val-agc">8x</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Beat Sens</label>
+                                    <input type="range" id="ctrl-beat-sens" min="50" max="200" value="100">
+                                    <span class="control-value" id="val-beat-sens">100%</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Beat Thresh</label>
+                                    <input type="range" id="ctrl-beat-thresh" min="80" max="200" value="130">
+                                    <span class="control-value" id="val-beat-thresh">1.3x</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Block Count</label>
+                                    <input type="range" id="ctrl-blocks" min="8" max="64" value="16">
+                                    <span class="control-value" id="val-blocks">16</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Effect Triggers -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Effects</h3>
+                            <div id="effect-triggers" class="effect-grid">
+                                <button class="effect-btn" data-effect="bass_drop">Bass Drop</button>
+                                <button class="effect-btn" data-effect="strobe">Strobe</button>
+                                <button class="effect-btn" data-effect="flash">Flash</button>
+                                <button class="effect-btn" data-effect="spin_up">Spin Up</button>
+                                <button class="effect-btn" data-effect="spin_down">Spin Down</button>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- Timeline Panel -->
+                    <div id="timeline-panel" class="tab-panel">
+                        <!-- Timeline Toolbar -->
+                        <div id="timeline-toolbar">
+                            <div class="toolbar-left">
+                                <button id="btn-new-show" class="btn btn-small" title="New Show">New</button>
+                                <button id="btn-load-demo" class="btn btn-small" title="Load Demo">Demo</button>
+                                <button id="btn-save-show" class="btn btn-small" title="Save Show">Save</button>
+                            </div>
+                            <div class="toolbar-center">
+                                <span id="show-name">No Show Loaded</span>
+                                <span class="show-info">
+                                    <span id="show-bpm">-- BPM</span>
+                                    <span id="show-duration-display">--:--</span>
+                                </span>
+                            </div>
+                            <div class="toolbar-right">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-loop">
+                                    Loop
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-snap">
+                                    Snap to Beat
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Time Ruler -->
+                        <div id="time-ruler">
+                            <div class="ruler-ticks"></div>
+                        </div>
+
+                        <!-- Timeline Canvas (tracks and cues) -->
+                        <div id="timeline-canvas">
+                            <!-- Tracks rendered by JS -->
+                            <div class="timeline-empty">
+                                <p>No show loaded</p>
+                                <button id="btn-load-demo-inline" class="btn btn-primary">Load Demo Show</button>
+                            </div>
+                        </div>
+
+                        <!-- Cue Inspector (right panel) -->
+                        <div id="cue-inspector" class="inspector-panel">
+                            <h3>Cue Properties</h3>
+                            <div class="inspector-content">
+                                <div class="inspector-empty">
+                                    <p>Select a cue to edit</p>
+                                </div>
+                                <div class="inspector-fields" style="display: none;">
+                                    <div class="field-row">
+                                        <label>Name</label>
+                                        <input type="text" id="cue-name" class="field-input">
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Type</label>
+                                        <select id="cue-type" class="field-input">
+                                            <option value="pattern_change">Pattern Change</option>
+                                            <option value="preset_change">Preset Change</option>
+                                            <option value="effect_trigger">Effect Trigger</option>
+                                            <option value="parameter_set">Parameter Set</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Start (ms)</label>
+                                        <input type="number" id="cue-start" class="field-input" min="0" step="100">
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Duration (ms)</label>
+                                        <input type="number" id="cue-duration" class="field-input" min="0" step="100">
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Trigger</label>
+                                        <select id="cue-trigger" class="field-input">
+                                            <option value="time">Time</option>
+                                            <option value="beat">Beat</option>
+                                            <option value="manual">Manual</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row action-row">
+                                        <label>Action</label>
+                                        <select id="cue-action-value" class="field-input">
+                                            <!-- Populated dynamically -->
+                                        </select>
+                                    </div>
+                                    <div class="inspector-actions">
+                                        <button id="btn-fire-cue" class="btn btn-primary btn-small">Fire Now</button>
+                                        <button id="btn-delete-cue" class="btn btn-danger btn-small">Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transport Controls -->
+                <footer id="transport">
+                    <div class="transport-left">
+                        <button id="btn-stop" class="transport-btn" title="Stop">
+                            <span class="icon">&#9632;</span>
+                        </button>
+                        <button id="btn-play" class="transport-btn" title="Play/Pause">
+                            <span class="icon">&#9654;</span>
+                        </button>
+                    </div>
+                    <div class="transport-center">
+                        <span id="timeline-position">00:00:00</span>
+                        <span class="transport-separator">/</span>
+                        <span id="timeline-duration">00:00:00</span>
+                    </div>
+                    <div class="transport-right">
+                        <span id="latency-display" class="latency">Latency: --ms</span>
+                    </div>
+                </footer>
+            </main>
+        </div>
+    </div>
+
+    <script type="module" src="js/admin-app.js"></script>
+</body>
+</html>
