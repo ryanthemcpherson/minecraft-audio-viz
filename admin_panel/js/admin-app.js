@@ -44,7 +44,14 @@ class AdminApp {
                 loop: false
             },
             show: null,
-            selectedCue: null
+            selectedCue: null,
+            // DJ management state
+            dj: {
+                isVJMode: false,
+                roster: [],
+                activeDjId: null,
+                crossfadeTarget: null
+            }
         };
 
         // Tap tempo tracking
@@ -116,6 +123,18 @@ class AdminApp {
         // Tabs
         this.elements.tabs = document.querySelectorAll('.tab');
         this.elements.tabPanels = document.querySelectorAll('.tab-panel');
+
+        // DJ Management
+        this.elements.djModeBadge = document.getElementById('dj-mode-badge');
+        this.elements.djCount = document.getElementById('dj-count');
+        this.elements.djRoster = document.getElementById('dj-roster');
+        this.elements.djQueue = document.getElementById('dj-queue');
+        this.elements.crossfadeFrom = document.getElementById('crossfade-from');
+        this.elements.crossfadeTo = document.getElementById('crossfade-to');
+        this.elements.crossfadeSlider = document.getElementById('crossfade-slider');
+        this.elements.crossfadeDuration = document.getElementById('crossfade-duration');
+        this.elements.crossfadeBeatSync = document.getElementById('crossfade-beat-sync');
+        this.elements.btnStartCrossfade = document.getElementById('btn-start-crossfade');
 
         // Transport
         this.elements.btnPlay = document.getElementById('btn-play');
@@ -296,6 +315,15 @@ class AdminApp {
             case 'cue_deleted':
                 this._handleCueChange(data);
                 break;
+
+            // DJ Management messages
+            case 'vj_state':
+                this._handleVJState(data);
+                break;
+
+            case 'dj_roster':
+                this._handleDJRoster(data);
+                break;
         }
     }
 
@@ -330,6 +358,333 @@ class AdminApp {
         if (this.state.show) {
             this._renderTimeline();
         }
+    }
+
+    _handleVJState(data) {
+        // VJ server sent full state including DJ roster
+        this.state.dj.isVJMode = true;
+        this.state.dj.roster = data.dj_roster || [];
+        this.state.dj.activeDjId = data.active_dj || null;
+
+        // Update patterns if provided
+        if (data.patterns) {
+            this.state.patterns = data.patterns;
+            this._renderPatternGrid();
+        }
+        if (data.current_pattern) {
+            this.state.currentPattern = data.current_pattern;
+            this._updateCurrentPattern(data.current_pattern);
+            this._highlightActivePattern(data.current_pattern);
+        }
+
+        this._updateDJModeIndicator();
+        this._renderDJRoster();
+        this._renderDJQueue();
+        this._updateCrossfadeControls();
+    }
+
+    _handleDJRoster(data) {
+        // DJ roster update from VJ server
+        this.state.dj.isVJMode = true;
+        this.state.dj.roster = data.roster || [];
+        this.state.dj.activeDjId = data.active_dj || null;
+
+        this._updateDJModeIndicator();
+        this._renderDJRoster();
+        this._renderDJQueue();
+        this._updateCrossfadeControls();
+    }
+
+    _updateDJModeIndicator() {
+        const badge = this.elements.djModeBadge;
+        if (!badge) return;
+
+        if (this.state.dj.isVJMode) {
+            badge.textContent = 'VJ Server Connected';
+            badge.className = 'dj-mode-badge vj-connected';
+        } else {
+            badge.textContent = 'Standalone Mode';
+            badge.className = 'dj-mode-badge standalone';
+        }
+    }
+
+    _renderDJRoster() {
+        const roster = this.elements.djRoster;
+        if (!roster) return;
+
+        const djs = this.state.dj.roster;
+
+        // Clear existing content
+        while (roster.firstChild) {
+            roster.removeChild(roster.firstChild);
+        }
+
+        if (!djs || djs.length === 0) {
+            const emptyDiv = document.createElement('div');
+            emptyDiv.className = 'dj-roster-empty';
+
+            const p1 = document.createElement('p');
+            p1.textContent = 'No DJs connected';
+            emptyDiv.appendChild(p1);
+
+            const p2 = document.createElement('p');
+            p2.className = 'hint';
+            p2.textContent = 'DJs connect using: ';
+            const code = document.createElement('code');
+            code.textContent = '--dj-relay';
+            p2.appendChild(code);
+            p2.appendChild(document.createTextNode(' mode'));
+            emptyDiv.appendChild(p2);
+
+            roster.appendChild(emptyDiv);
+
+            if (this.elements.djCount) {
+                this.elements.djCount.textContent = '0 DJs';
+            }
+            return;
+        }
+
+        if (this.elements.djCount) {
+            this.elements.djCount.textContent = `${djs.length} DJ${djs.length !== 1 ? 's' : ''}`;
+        }
+
+        djs.forEach(dj => {
+            const card = this._createDJCard(dj);
+            roster.appendChild(card);
+        });
+    }
+
+    _createDJCard(dj) {
+        const card = document.createElement('div');
+        card.className = `dj-card${dj.is_active ? ' active' : ''}`;
+        card.dataset.djId = dj.dj_id;
+
+        // Status dot
+        const statusDot = document.createElement('div');
+        statusDot.className = 'dj-status-dot';
+        card.appendChild(statusDot);
+
+        // DJ info container
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'dj-info';
+
+        // DJ name row
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'dj-name';
+        nameDiv.textContent = dj.dj_name;
+
+        if (dj.is_active) {
+            const liveBadge = document.createElement('span');
+            liveBadge.className = 'dj-live-badge';
+            liveBadge.textContent = 'LIVE';
+            nameDiv.appendChild(liveBadge);
+        }
+        infoDiv.appendChild(nameDiv);
+
+        // Stats row
+        const statsDiv = document.createElement('div');
+        statsDiv.className = 'dj-stats';
+
+        // BPM stat
+        const bpmStat = document.createElement('span');
+        bpmStat.className = 'dj-stat';
+        const bpmLabel = document.createElement('span');
+        bpmLabel.className = 'dj-stat-label';
+        bpmLabel.textContent = 'BPM:';
+        const bpmValue = document.createElement('span');
+        bpmValue.className = 'dj-stat-value';
+        bpmValue.textContent = Math.round(dj.bpm);
+        bpmStat.appendChild(bpmLabel);
+        bpmStat.appendChild(bpmValue);
+        statsDiv.appendChild(bpmStat);
+
+        // FPS stat
+        let fpsClass = 'good';
+        if (dj.fps < 50) fpsClass = 'warning';
+        if (dj.fps < 30) fpsClass = 'bad';
+
+        const fpsStat = document.createElement('span');
+        fpsStat.className = 'dj-stat';
+        const fpsLabel = document.createElement('span');
+        fpsLabel.className = 'dj-stat-label';
+        fpsLabel.textContent = 'FPS:';
+        const fpsValue = document.createElement('span');
+        fpsValue.className = `dj-stat-value ${fpsClass}`;
+        fpsValue.textContent = dj.fps.toFixed(0);
+        fpsStat.appendChild(fpsLabel);
+        fpsStat.appendChild(fpsValue);
+        statsDiv.appendChild(fpsStat);
+
+        // Latency stat
+        let latencyClass = 'good';
+        if (dj.latency_ms > 150) latencyClass = 'warning';
+        if (dj.latency_ms > 300) latencyClass = 'bad';
+
+        const latStat = document.createElement('span');
+        latStat.className = 'dj-stat';
+        const latLabel = document.createElement('span');
+        latLabel.className = 'dj-stat-label';
+        latLabel.textContent = 'Latency:';
+        const latValue = document.createElement('span');
+        latValue.className = `dj-stat-value ${latencyClass}`;
+        latValue.textContent = `${dj.latency_ms.toFixed(0)}ms`;
+        latStat.appendChild(latLabel);
+        latStat.appendChild(latValue);
+        statsDiv.appendChild(latStat);
+
+        infoDiv.appendChild(statsDiv);
+        card.appendChild(infoDiv);
+
+        // Actions
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'dj-actions';
+
+        if (!dj.is_active) {
+            const activateBtn = document.createElement('button');
+            activateBtn.className = 'dj-action-btn btn-activate';
+            activateBtn.title = 'Set as Active DJ';
+            activateBtn.textContent = '\u25B6'; // Play symbol
+            activateBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._setActiveDJ(dj.dj_id);
+            });
+            actionsDiv.appendChild(activateBtn);
+        }
+
+        const kickBtn = document.createElement('button');
+        kickBtn.className = 'dj-action-btn btn-kick';
+        kickBtn.title = 'Kick DJ';
+        kickBtn.textContent = '\u2715'; // X symbol
+        kickBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._kickDJ(dj.dj_id);
+        });
+        actionsDiv.appendChild(kickBtn);
+
+        card.appendChild(actionsDiv);
+
+        return card;
+    }
+
+    _renderDJQueue() {
+        const queue = this.elements.djQueue;
+        if (!queue) return;
+
+        const djs = this.state.dj.roster;
+
+        // Clear existing content
+        while (queue.firstChild) {
+            queue.removeChild(queue.firstChild);
+        }
+
+        if (!djs || djs.length === 0) {
+            const emptyDiv = document.createElement('div');
+            emptyDiv.className = 'dj-queue-empty';
+            const p = document.createElement('p');
+            p.textContent = 'Queue empty';
+            emptyDiv.appendChild(p);
+            queue.appendChild(emptyDiv);
+            return;
+        }
+
+        // Sort by priority
+        const sortedDjs = [...djs].sort((a, b) => a.priority - b.priority);
+
+        sortedDjs.forEach((dj, index) => {
+            const item = document.createElement('div');
+            item.className = 'dj-queue-item';
+            item.dataset.djId = dj.dj_id;
+
+            const position = document.createElement('span');
+            position.className = 'dj-queue-position';
+            position.textContent = index + 1;
+            item.appendChild(position);
+
+            const name = document.createElement('span');
+            name.className = 'dj-queue-name';
+            name.textContent = dj.dj_name;
+            item.appendChild(name);
+
+            queue.appendChild(item);
+        });
+    }
+
+    _updateCrossfadeControls() {
+        const djs = this.state.dj.roster;
+        const hasMultipleDJs = djs && djs.length >= 2;
+
+        // Enable/disable crossfade controls
+        if (this.elements.crossfadeSlider) {
+            this.elements.crossfadeSlider.disabled = !hasMultipleDJs;
+        }
+        if (this.elements.crossfadeDuration) {
+            this.elements.crossfadeDuration.disabled = !hasMultipleDJs;
+        }
+        if (this.elements.crossfadeBeatSync) {
+            this.elements.crossfadeBeatSync.disabled = !hasMultipleDJs;
+        }
+        if (this.elements.btnStartCrossfade) {
+            this.elements.btnStartCrossfade.disabled = !hasMultipleDJs;
+        }
+
+        // Update crossfade DJ labels
+        if (hasMultipleDJs) {
+            const activeDj = djs.find(d => d.is_active);
+            const otherDjs = djs.filter(d => !d.is_active);
+
+            if (this.elements.crossfadeFrom && activeDj) {
+                this.elements.crossfadeFrom.textContent = activeDj.dj_name;
+                this.elements.crossfadeFrom.classList.add('active');
+            }
+
+            if (this.elements.crossfadeTo && otherDjs.length > 0) {
+                // Default to first non-active DJ
+                this.state.dj.crossfadeTarget = otherDjs[0].dj_id;
+                this.elements.crossfadeTo.textContent = otherDjs[0].dj_name;
+            }
+        } else {
+            if (this.elements.crossfadeFrom) {
+                this.elements.crossfadeFrom.textContent = '--';
+                this.elements.crossfadeFrom.classList.remove('active');
+            }
+            if (this.elements.crossfadeTo) {
+                this.elements.crossfadeTo.textContent = '--';
+            }
+        }
+    }
+
+    _setActiveDJ(djId) {
+        this.ws.send({
+            type: 'set_active_dj',
+            dj_id: djId
+        });
+    }
+
+    _kickDJ(djId) {
+        const dj = this.state.dj.roster.find(d => d.dj_id === djId);
+        const djName = dj ? dj.dj_name : djId;
+
+        if (confirm(`Kick ${djName} from the session?`)) {
+            this.ws.send({
+                type: 'kick_dj',
+                dj_id: djId
+            });
+        }
+    }
+
+    _startCrossfade() {
+        if (!this.state.dj.crossfadeTarget) return;
+
+        const duration = parseInt(this.elements.crossfadeDuration?.value || 4000);
+        const beatSync = this.elements.crossfadeBeatSync?.checked || false;
+
+        this.ws.send({
+            type: 'start_crossfade',
+            from_dj: this.state.dj.activeDjId,
+            to_dj: this.state.dj.crossfadeTarget,
+            duration_ms: duration,
+            beat_sync: beatSync
+        });
     }
 
     _handlePatterns(data) {

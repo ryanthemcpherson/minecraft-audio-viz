@@ -1129,3 +1129,409 @@ body {
     from { opacity: 0.7; }
     to { opacity: 1; }
 }
+
+/* ============================================
+   DJ Management Panel
+   ============================================ */
+
+/* DJ Status Header */
+.dj-status-section {
+    background: linear-gradient(135deg, var(--bg-panel) 0%, rgba(78, 205, 196, 0.1) 100%);
+}
+
+.dj-status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+}
+
+.dj-mode-badge {
+    padding: var(--spacing-xs) var(--spacing-md);
+    border-radius: 12px;
+    font-size: var(--font-size-sm);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.dj-mode-badge.standalone {
+    background: rgba(136, 136, 136, 0.2);
+    color: var(--text-secondary);
+    border: 1px solid var(--text-secondary);
+}
+
+.dj-mode-badge.vj-connected {
+    background: rgba(78, 205, 196, 0.2);
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+    animation: glow-pulse 2s infinite;
+}
+
+@keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 5px rgba(78, 205, 196, 0.3); }
+    50% { box-shadow: 0 0 15px rgba(78, 205, 196, 0.6); }
+}
+
+.dj-status-hint {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.dj-status-hint code {
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--accent-primary);
+    font-size: 0.9em;
+}
+
+/* DJ Roster */
+.dj-roster-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+}
+
+.dj-count {
+    font-size: var(--font-size-sm);
+    color: var(--accent-primary);
+    font-weight: bold;
+}
+
+.dj-roster {
+    min-height: 100px;
+}
+
+.dj-roster-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xl);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.dj-roster-empty .hint {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin-top: var(--spacing-sm);
+}
+
+.dj-roster-empty code {
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--accent-primary);
+}
+
+/* DJ Card */
+.dj-card {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: var(--spacing-sm);
+    transition: all var(--transition-normal);
+}
+
+.dj-card:hover {
+    border-color: var(--accent-primary);
+}
+
+.dj-card.active {
+    background: rgba(78, 205, 196, 0.15);
+    border-color: var(--accent-primary);
+    box-shadow: var(--glow-accent);
+}
+
+.dj-card.active .dj-status-dot {
+    background: var(--accent-secondary);
+    box-shadow: 0 0 8px var(--accent-secondary);
+}
+
+.dj-status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    margin-right: var(--spacing-md);
+    flex-shrink: 0;
+}
+
+.dj-card.active .dj-status-dot {
+    animation: pulse-dot 1s infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+}
+
+.dj-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.dj-name {
+    font-weight: bold;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.dj-card.active .dj-name {
+    color: var(--accent-primary);
+}
+
+.dj-stats {
+    display: flex;
+    gap: var(--spacing-md);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+.dj-stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.dj-stat-label {
+    color: var(--text-muted);
+}
+
+.dj-stat-value {
+    color: var(--text-secondary);
+}
+
+.dj-stat-value.good { color: var(--accent-secondary); }
+.dj-stat-value.warning { color: var(--accent-warning); }
+.dj-stat-value.bad { color: var(--accent-danger); }
+
+.dj-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-left: var(--spacing-md);
+}
+
+.dj-action-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 14px;
+}
+
+.dj-action-btn:hover {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+    border-color: var(--accent-primary);
+}
+
+.dj-action-btn.btn-activate {
+    color: var(--accent-primary);
+}
+
+.dj-action-btn.btn-activate:hover {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+.dj-action-btn.btn-kick {
+    color: var(--accent-danger);
+}
+
+.dj-action-btn.btn-kick:hover {
+    background: var(--accent-danger);
+    color: white;
+}
+
+.dj-live-badge {
+    background: var(--accent-danger);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: var(--font-size-sm);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-left: var(--spacing-sm);
+    animation: live-pulse 1.5s infinite;
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Crossfade Controls */
+.crossfade-controls {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.crossfade-djs {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.crossfade-dj {
+    width: 80px;
+    text-align: center;
+    font-weight: bold;
+    color: var(--text-secondary);
+    padding: var(--spacing-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius);
+}
+
+.crossfade-dj.active {
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+}
+
+.crossfade-slider-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.crossfade-slider {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    background: linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-purple) 100%);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.crossfade-slider:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.crossfade-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.crossfade-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+.crossfade-labels {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.crossfade-options {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.crossfade-options label {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+}
+
+.crossfade-options select {
+    width: auto;
+}
+
+/* DJ Queue */
+.dj-queue {
+    min-height: 60px;
+}
+
+.dj-queue-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+    color: var(--text-secondary);
+}
+
+.dj-queue-item {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: var(--spacing-xs);
+    cursor: grab;
+}
+
+.dj-queue-item:active {
+    cursor: grabbing;
+}
+
+.dj-queue-item.dragging {
+    opacity: 0.5;
+    border-style: dashed;
+}
+
+.dj-queue-position {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border-radius: 50%;
+    font-size: var(--font-size-sm);
+    font-weight: bold;
+    color: var(--text-secondary);
+    margin-right: var(--spacing-sm);
+}
+
+.dj-queue-item:first-child .dj-queue-position {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+.dj-queue-name {
+    flex: 1;
+    font-size: var(--font-size-sm);
+}
+
+.dj-queue-hint {
+    margin-top: var(--spacing-sm);
+}
+
+.dj-queue-hint .hint {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}

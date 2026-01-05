@@ -118,6 +118,7 @@
                 <!-- Tab Bar -->
                 <nav id="tab-bar">
                     <button class="tab active" data-tab="mixer">Live Mixer</button>
+                    <button class="tab" data-tab="djs">DJs</button>
                     <button class="tab" data-tab="timeline">Timeline</button>
                 </nav>
 
@@ -246,6 +247,86 @@
                                 <button class="effect-btn" data-effect="flash">Flash</button>
                                 <button class="effect-btn" data-effect="spin_up">Spin Up</button>
                                 <button class="effect-btn" data-effect="spin_down">Spin Down</button>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- DJ Management Panel -->
+                    <div id="djs-panel" class="tab-panel">
+                        <!-- DJ Status Header -->
+                        <section class="mixer-section dj-status-section">
+                            <div class="dj-status-header">
+                                <h3 class="section-title">DJ Status</h3>
+                                <div class="dj-mode-indicator">
+                                    <span id="dj-mode-badge" class="dj-mode-badge standalone">Standalone Mode</span>
+                                </div>
+                            </div>
+                            <p class="dj-status-hint">
+                                Connect to a VJ Server to enable multi-DJ mode.
+                                Run <code>python -m audio_processor.vj_server</code> to start a VJ server.
+                            </p>
+                        </section>
+
+                        <!-- Connected DJs -->
+                        <section class="mixer-section">
+                            <div class="dj-roster-header">
+                                <h3 class="section-title">Connected DJs</h3>
+                                <span id="dj-count" class="dj-count">0 DJs</span>
+                            </div>
+                            <div id="dj-roster" class="dj-roster">
+                                <div class="dj-roster-empty">
+                                    <p>No DJs connected</p>
+                                    <p class="hint">DJs connect using: <code>--dj-relay</code> mode</p>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Crossfade Controls -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Crossfade</h3>
+                            <div class="crossfade-controls">
+                                <div class="crossfade-djs">
+                                    <span id="crossfade-from" class="crossfade-dj">--</span>
+                                    <div class="crossfade-slider-container">
+                                        <input type="range" id="crossfade-slider"
+                                               min="0" max="100" value="0"
+                                               class="crossfade-slider" disabled>
+                                        <div class="crossfade-labels">
+                                            <span>A</span>
+                                            <span>B</span>
+                                        </div>
+                                    </div>
+                                    <span id="crossfade-to" class="crossfade-dj">--</span>
+                                </div>
+                                <div class="crossfade-options">
+                                    <label>Duration:</label>
+                                    <select id="crossfade-duration" class="field-input" disabled>
+                                        <option value="1000">1 sec</option>
+                                        <option value="2000">2 sec</option>
+                                        <option value="4000" selected>4 sec</option>
+                                        <option value="8000">8 sec</option>
+                                    </select>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="crossfade-beat-sync" disabled>
+                                        Beat Sync
+                                    </label>
+                                    <button id="btn-start-crossfade" class="btn btn-primary btn-small" disabled>
+                                        Start Crossfade
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- DJ Queue -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">DJ Queue</h3>
+                            <div id="dj-queue" class="dj-queue">
+                                <div class="dj-queue-empty">
+                                    <p>Queue empty</p>
+                                </div>
+                            </div>
+                            <div class="dj-queue-hint">
+                                <p class="hint">Drag DJs to reorder. Next DJ auto-activates on disconnect.</p>
                             </div>
                         </section>
                     </div>

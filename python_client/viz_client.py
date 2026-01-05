@@ -112,10 +112,19 @@ class VizClient:
         return response is not None and response.get("type") == "batch_updated"
 
     async def batch_update_fast(self, zone_name: str, entities: list[dict],
-                                 particles: list[dict] = None):
+                                 particles: list[dict] = None,
+                                 audio: dict = None):
         """
         Fire-and-forget batch update for real-time visualization.
         Does not wait for response - much faster for high frame rates.
+
+        Args:
+            zone_name: Target zone
+            entities: List of entity updates
+            particles: Optional particle updates
+            audio: Optional audio data dict with keys:
+                   bands (list[float]), amplitude (float),
+                   is_beat (bool), beat_intensity (float)
         """
         if not self.ws or not self._connected:
             return
@@ -127,6 +136,16 @@ class VizClient:
         }
         if particles:
             message["particles"] = particles
+        if audio:
+            # Include audio data for redstone sensors
+            message["bands"] = audio.get("bands", [0.0] * 6)
+            message["amplitude"] = audio.get("amplitude", 0.0)
+            message["is_beat"] = audio.get("is_beat", False)
+            message["beat_intensity"] = audio.get("beat_intensity", 0.0)
+            # Debug: log first time we send audio
+            if not hasattr(self, '_audio_logged'):
+                self._audio_logged = True
+                logger.info(f"Sending audio data: bands={message['bands'][:2]}...")
 
         try:
             await self.ws.send(json.dumps(message))

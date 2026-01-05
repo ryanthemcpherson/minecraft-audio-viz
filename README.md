@@ -15,8 +15,12 @@ A real-time audio visualization system that captures system audio and displays r
   - Timeline editor for pre-programmed shows
   - Effect triggers (strobe, flash, bass drop)
 - **Minecraft Integration** - Sends visualization data to Minecraft via WebSocket
+- **Multi-DJ Support** - Multiple remote DJs can perform with a central VJ controlling visuals
 
 ## Architecture
+
+### Single DJ Mode (Default)
+
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -30,6 +34,27 @@ A real-time audio visualization system that captures system audio and displays r
            │ Browser 3D    │         │ Admin Panel   │
            │ Preview       │         │ Control UI    │
            └───────────────┘         └───────────────┘
+```
+
+### Multi-DJ Mode
+
+For live events with multiple DJs performing remotely:
+
+```
+┌──────────────┐
+│ DJ 1 (Remote)│───┐
+│ --dj-relay   │   │
+└──────────────┘   │    ┌────────────────┐     ┌─────────────────┐
+                   ├───▶│   VJ Server    │────▶│   Minecraft     │
+┌──────────────┐   │    │  (Central)     │     │   (Shared)      │
+│ DJ 2 (Remote)│───┤    └───────┬────────┘     └─────────────────┘
+│ --dj-relay   │   │            │
+└──────────────┘   │    ┌───────┴────────┐
+                   │    ▼                ▼
+┌──────────────┐   │ ┌───────────┐ ┌───────────┐
+│ DJ 3 (Remote)│───┘ │  Viewers  │ │ VJ Admin  │
+│ --dj-relay   │     │ (Browser) │ │  Panel    │
+└──────────────┘     └───────────┘ └───────────┘
 ```
 
 ## Quick Start
@@ -72,11 +97,15 @@ python -m audio_processor.app_capture --app spotify --no-minecraft
 ```
 minecraft-audio-viz/
 ├── audio_processor/       # Python audio processing
-│   ├── app_capture.py     # Main capture agent
+│   ├── app_capture.py     # Main capture agent (single DJ or relay)
+│   ├── vj_server.py       # Multi-DJ VJ server
+│   ├── dj_relay.py        # DJ relay client
 │   ├── fft_analyzer.py    # FFT frequency analysis
 │   ├── patterns.py        # Visualization patterns
 │   ├── spectrograph.py    # Terminal display
 │   └── timeline/          # Timeline/cue system
+├── configs/               # Configuration files
+│   └── dj_auth.json       # DJ authentication credentials
 ├── admin_panel/           # Web control panel
 │   ├── index.html
 │   ├── css/admin.css
@@ -88,6 +117,56 @@ minecraft-audio-viz/
 ├── python_client/         # Minecraft WebSocket client
 └── shows/                 # Saved show files (JSON)
 ```
+
+## Multi-DJ Mode
+
+For live events with multiple remote DJs:
+
+### 1. Start the VJ Server (Central Control)
+
+```bash
+python -m audio_processor.vj_server --no-minecraft
+```
+
+This starts:
+- DJ connection port: `ws://localhost:9000`
+- Browser preview: `http://localhost:8080`
+- Admin panel: `http://localhost:8080/admin/`
+
+### 2. DJs Connect in Relay Mode
+
+Each DJ runs on their own machine:
+
+```bash
+python -m audio_processor.app_capture --dj-relay \
+    --vj-server ws://VJ_SERVER_IP:9000 \
+    --dj-name "DJ Alice" \
+    --dj-id "dj_alice" \
+    --dj-key "alice123"
+```
+
+### 3. VJ Controls via Admin Panel
+
+The VJ operator can:
+- See all connected DJs with status
+- Switch the active DJ
+- Kick DJs if needed
+- Change visualization patterns
+
+### DJ Auth Config
+
+Edit `configs/dj_auth.json` to set up DJ credentials:
+
+```json
+{
+  "djs": {
+    "dj_alice": {"name": "DJ Alice", "key_hash": "alice123", "priority": 1},
+    "dj_bob": {"name": "DJ Bob", "key_hash": "bob456", "priority": 2}
+  }
+}
+```
+
+For production, use `--require-auth` on the VJ server.
 
 ## Timeline System
 

@@ -172,7 +172,7 @@ class AppAudioCapture:
         self._beat_cooldown = 0.0
 
         # Adaptive threshold (adjustable via UI)
-        self._beat_threshold = 1.3  # Multiplier above average flux
+        self._beat_threshold = 1.1  # Multiplier above average flux (lower = more beats)
 
         # Onset detection state
         self._onset_strength = 0.0
@@ -180,7 +180,7 @@ class AppAudioCapture:
         self._onset_history_size = 15
 
         # Bass weight for beat detection (higher = more bass-focused)
-        self._bass_weight = 0.7  # 70% bass, 30% full spectrum
+        self._bass_weight = 0.85  # 85% bass, 15% full spectrum - better for kick detection
 
         # Smoothing - lower = more reactive
         self._prev_peak = 0.0
@@ -373,15 +373,24 @@ class AppAudioCapture:
         time_since_last = current_time - self._last_beat_time
         cooldown_ready = self._beat_cooldown <= 0
 
+        # Primary detection: flux-based
         if combined_flux > threshold and is_local_peak and time_since_last > self._min_beat_interval and cooldown_ready:
             is_beat = True
-            self._last_beat_time = current_time
-
-            # Intensity based on how much we exceeded threshold (bass-weighted)
             intensity = min(1.0, (combined_flux - avg_flux) / max(0.03, avg_flux))
 
+        # === FALLBACK: Simple bass spike detection ===
+        # If bass energy suddenly jumps above recent average, trigger beat
+        if not is_beat and time_since_last > self._min_beat_interval and cooldown_ready:
+            if len(self._short_history) >= 5:
+                recent_avg = statistics.mean(self._short_history[-5:])
+                # Trigger if current bass is 40% above recent average
+                if bass_energy > recent_avg * 1.4 and bass_energy > 0.3:
+                    is_beat = True
+                    intensity = min(1.0, (bass_energy - recent_avg) / max(0.1, recent_avg))
+
+        if is_beat:
+            self._last_beat_time = current_time
             # Dynamic cooldown based on beat strength
-            # Strong beats = longer cooldown (prevents double-triggers)
             self._beat_cooldown = 0.04 + intensity * 0.06
 
         return is_beat, intensity
@@ -441,8 +450,7 @@ class AppCaptureAgent:
                  http_port: int = 8080,
                  vscode_mode: bool = False,
                  use_fft: bool = True,
-                 low_latency: bool = False,
-                 ultra_low_latency: bool = False):
+                 low_latency: bool = False):
 
         self.app_name = app_name
         self.minecraft_host = minecraft_host
@@ -456,15 +464,6 @@ class AppCaptureAgent:
         self.vscode_mode = vscode_mode
         self.use_fft = use_fft
         self.low_latency = low_latency
-        self.ultra_low_latency = ultra_low_latency
-
-        # Frame timing based on latency mode
-        if ultra_low_latency:
-            self._frame_interval = 0.008  # 125 FPS for ultra-low latency
-        elif low_latency:
-            self._frame_interval = 0.012  # ~83 FPS for low latency
-        else:
-            self._frame_interval = 0.016  # ~60 FPS normal
 
         # Components
         self.capture = AppAudioCapture(app_name)
@@ -487,22 +486,14 @@ class AppCaptureAgent:
         self._using_fft = False
         if use_fft and HAS_FFT and HybridAnalyzer is not None:
             try:
-                self.fft_analyzer = HybridAnalyzer(
-                    low_latency=low_latency,
-                    ultra_low_latency=ultra_low_latency
-                )
+                self.fft_analyzer = HybridAnalyzer(low_latency=low_latency)
                 self._using_fft = self.fft_analyzer.using_fft
                 if self._using_fft:
                     stats = self.fft_analyzer.latency_stats
                     fft_ms = stats.get('fft_latency_ms', 0)
                     hop_ms = stats.get('hop_interval_ms', 0)
-                    if ultra_low_latency:
-                        mode = "ULTRA-LOW-LATENCY"
-                    elif low_latency:
-                        mode = "LOW-LATENCY"
-                    else:
-                        mode = "NORMAL"
-                    logger.info(f"FFT analyzer active [{mode}] - FFT: {fft_ms:.0f}ms, Update: {hop_ms:.0f}ms, Loop: {self._frame_interval*1000:.0f}ms")
+                    mode = "LOW-LATENCY" if low_latency else "NORMAL"
+                    logger.info(f"FFT analyzer active [{mode}] - FFT: {fft_ms:.0f}ms, Update: {hop_ms:.0f}ms")
                 else:
                     logger.info("FFT analyzer initialized - will use when audio available")
             except Exception as e:
@@ -1116,7 +1107,8 @@ class AppCaptureAgent:
             "is_beat": frame.is_beat,
             "beat_intensity": frame.beat_intensity,
             "frame": self._frame_count,
-            "pattern": self._pattern_name
+            "pattern": self._pattern_name,
+            "low_latency": self.capture.low_latency if hasattr(self.capture, 'low_latency') else False
         })
 
         # Send to all clients
@@ -1418,8 +1410,6 @@ class AppCaptureAgent:
                 # Use FFT bands if available, otherwise synthetic
                 if fft_result is not None and self._using_fft:
                     bands = fft_result.bands
-                    # Sanitize bands - protect against NaN/Inf
-                    bands = [max(0.0, min(1.0, b)) if isinstance(b, (int, float)) and -1e10 < b < 1e10 else 0.0 for b in bands]
 
                     # Enhance beat detection with FFT onset info
                     if fft_result.kick_onset and not frame.is_beat:
@@ -1472,12 +1462,12 @@ class AppCaptureAgent:
 
                 # Send same entities to Minecraft
                 if self.viz_client and self.viz_client.connected:
-                    await self._update_minecraft(entities, frame)
+                    await self._update_minecraft(entities, bands, frame)
 
                 # Send same entities to browser previews
                 await self._broadcast_state(entities, bands, frame)
 
-                await asyncio.sleep(self._frame_interval)  # FPS based on latency mode
+                await asyncio.sleep(0.016)  # ~60 FPS
 
         except Exception as e:
             logger.error(f"Capture error: {e}")
@@ -1497,7 +1487,7 @@ class AppCaptureAgent:
         # Use pattern to calculate entity positions
         return self._current_pattern.calculate_entities(audio_state)
 
-    async def _update_minecraft(self, entities: List[dict], frame: AppAudioFrame):
+    async def _update_minecraft(self, entities: List[dict], bands: List[float], frame: AppAudioFrame):
         """Send pre-calculated entities to Minecraft."""
         try:
             particles = []
@@ -1510,7 +1500,20 @@ class AppCaptureAgent:
                     "count": int(20 * frame.beat_intensity)
                 })
 
-            await self.viz_client.batch_update_fast(self.zone, entities, particles)
+            # Include audio data for redstone sensors
+            audio_data = {
+                "bands": bands,
+                "amplitude": frame.peak,
+                "is_beat": frame.is_beat,
+                "beat_intensity": frame.beat_intensity
+            }
+
+            # Debug: log first audio send
+            if not hasattr(self, '_audio_send_logged'):
+                self._audio_send_logged = True
+                logger.info(f"Sending to MC with audio: bands[1]={bands[1]:.3f}, beat={frame.is_beat}")
+
+            await self.viz_client.batch_update_fast(self.zone, entities, particles, audio=audio_data)
 
         except Exception as e:
             logger.error(f"Minecraft update error: {e}")
@@ -1567,8 +1570,6 @@ async def main():
                         help='Disable FFT analysis (use synthetic bands only)')
     parser.add_argument('--low-latency', action='store_true',
                         help='Use low-latency FFT mode (~20ms vs ~45ms, trades bass resolution)')
-    parser.add_argument('--ultra-low-latency', action='store_true',
-                        help='Use ultra-low-latency mode (~10ms FFT, 125 FPS, minimal bass)')
     parser.add_argument('--list-audio', action='store_true',
                         help='List available audio devices and exit')
 
@@ -1618,8 +1619,7 @@ async def main():
         http_port=0 if args.no_http else args.http_port,
         vscode_mode=args.vscode,
         use_fft=not args.no_fft,
-        low_latency=args.low_latency,
-        ultra_low_latency=args.ultra_low_latency
+        low_latency=args.low_latency
     )
 
     # Signal handler

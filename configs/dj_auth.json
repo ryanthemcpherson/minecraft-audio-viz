@@ -1,0 +1,27 @@
+{
+  "djs": {
+    "dj_alice": {
+      "name": "DJ Alice",
+      "key_hash": "alice123",
+      "priority": 1
+    },
+    "dj_bob": {
+      "name": "DJ Bob",
+      "key_hash": "bob456",
+      "priority": 2
+    },
+    "dj_charlie": {
+      "name": "DJ Charlie",
+      "key_hash": "charlie789",
+      "priority": 3
+    }
+  },
+  "vj_operators": {
+    "vj_main": {
+      "name": "Main VJ",
+      "key_hash": "vjpass",
+      "permissions": ["control", "kick_dj", "pattern", "crossfade"]
+    }
+  },
+  "_comment": "For production, use sha256:HASH format for key_hash. Plain text keys are for development only."
+}
