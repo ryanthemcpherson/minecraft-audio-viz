@@ -2,25 +2,34 @@
 
 A real-time audio visualization system that captures system audio and displays reactive visualizations in Minecraft, browser previews, and through a professional admin control panel.
 
+![VJ Multi-DJ Control Panel](sample_images/VJ_multi_dj_client.png)
+
 ## Features
 
 - **Real-time Audio Capture** - Captures audio from any Windows application (Spotify, YouTube, etc.) using WASAPI
-- **FFT Analysis** - Real frequency band analysis with low-latency mode
-- **Multiple Visualization Patterns** - Spectrum bars, wave rings, pulse grids, helix, and more
-- **Browser Preview** - 3D WebGL preview of visualizations
-- **Admin Control Panel** - Professional DJ/VJ-style control interface with:
-  - Live mixer with band faders
-  - Pattern switching
-  - Audio presets (EDM, Chill, Rock, Auto)
-  - Timeline editor for pre-programmed shows
-  - Effect triggers (strobe, flash, bass drop)
-- **Minecraft Integration** - Sends visualization data to Minecraft via WebSocket
+- **FFT Analysis** - Real frequency band analysis with ultra-low latency mode (0.1ms)
+- **Multiple Visualization Patterns** - 15+ patterns including Spectrum Bars, DNA Helix, Atom Model, Galaxy, Sacred Geometry, and more
+- **Browser Preview** - 3D WebGL preview with exact Minecraft parity
+- **Admin Control Panel** - Professional DJ/VJ-style control interface
+- **Minecraft Integration** - Real-time visualization via Display Entities with batched updates
 - **Multi-DJ Support** - Multiple remote DJs can perform with a central VJ controlling visuals
+- **In-Game GUI** - Full menu system for zone management, DJ controls, and settings
+
+## Screenshots
+
+### 3D Browser Preview
+Real-time WebGL preview showing exactly what appears in Minecraft:
+
+![3D Preview](sample_images/3d_preview_parity.png)
+
+### Admin Control Panel
+Professional DJ/VJ interface with live mixer, pattern selection, and effect triggers:
+
+![Admin Panel](sample_images/VJ_multi_dj_client.png)
 
 ## Architecture
 
 ### Single DJ Mode (Default)
-
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -63,59 +72,103 @@ For live events with multiple DJs performing remotely:
 
 - Python 3.8+
 - Windows (for WASAPI audio capture)
+- Java 21+ (for Minecraft plugin)
+- Paper/Spigot 1.21.1+ server
 
 ### Installation
 
 ```bash
-pip install pycaw comtypes websockets pyaudiowpatch numpy scipy
+# Clone the repository
+git clone https://github.com/yourusername/minecraft-audio-viz.git
+cd minecraft-audio-viz
+
+# Install Python dependencies
+pip install -r requirements.txt
 ```
 
 ### Running
 
-1. Start audio capture (with Spotify playing):
+1. **Start audio capture** (with Spotify or any audio playing):
 ```bash
 python -m audio_processor.app_capture --app spotify --no-minecraft
 ```
 
-2. Open in browser:
+2. **Open in browser**:
    - **3D Preview**: http://localhost:8080
    - **Admin Panel**: http://localhost:8080/admin/
+
+3. **For Minecraft integration**:
+   - Build the plugin: `cd minecraft_plugin && mvn package`
+   - Copy `target/audioviz-plugin-*.jar` to your server's `plugins/` folder
+   - Remove `--no-minecraft` flag when running the audio processor
+
+### In-Game Commands
+
+| Command | Description |
+|---------|-------------|
+| `/audioviz menu` | Open the main control panel |
+| `/audioviz dj` | Open DJ control panel directly |
+| `/audioviz give` | Get the menu item (right-click to open) |
+| `/audioviz zone create <name>` | Create a new visualization zone |
+| `/audioviz zone list` | List all zones |
+| `/audioviz reload` | Reload configuration |
 
 ### Command Line Options
 
 ```
---app NAME       Application to capture audio from (default: spotify)
---no-minecraft   Run without Minecraft connection
---no-fft         Disable FFT analysis (use synthetic bands)
---compact        Use compact single-line spectrograph
---broadcast-port WebSocket port for browser (default: 8766)
---http-port      HTTP port for web interface (default: 8080)
+--app NAME          Application to capture audio from (default: spotify)
+--no-minecraft      Run without Minecraft connection
+--no-fft            Disable FFT analysis (use synthetic bands)
+--compact           Use compact single-line spectrograph
+--broadcast-port    WebSocket port for browser (default: 8766)
+--http-port         HTTP port for web interface (default: 8080)
+--low-latency       Enable ultra-low latency mode
 ```
+
+## Visualization Patterns
+
+| Pattern | Description |
+|---------|-------------|
+| Spectrum Bars | Classic frequency bar display |
+| Stacked Tower | Vertical stacking bars |
+| DNA Helix | Double helix rotating structure |
+| Atom Model | Orbital electron visualization |
+| Expanding Sphere | Pulsing sphere that expands with bass |
+| Floating Platforms | Suspended platforms responding to audio |
+| Fountain | Particle fountain effect |
+| Breathing Cube | Cube that expands/contracts with music |
+| Mushroom | Organic mushroom-shaped visualization |
+| Skull | Beat-reactive skull pattern |
+| Sacred Geometry | Mathematical sacred geometry patterns |
+| Vortex | Spinning vortex tunnel |
+| Pyramid | Egyptian pyramid with audio response |
+| Galaxy | Spiral galaxy visualization |
+| Laser Array | Concert-style laser beam array |
+| Supernova | Explosive supernova effect |
 
 ## Project Structure
 
 ```
 minecraft-audio-viz/
 ├── audio_processor/       # Python audio processing
-│   ├── app_capture.py     # Main capture agent (single DJ or relay)
+│   ├── app_capture.py     # Main capture agent
 │   ├── vj_server.py       # Multi-DJ VJ server
 │   ├── dj_relay.py        # DJ relay client
 │   ├── fft_analyzer.py    # FFT frequency analysis
 │   ├── patterns.py        # Visualization patterns
 │   ├── spectrograph.py    # Terminal display
 │   └── timeline/          # Timeline/cue system
-├── configs/               # Configuration files
-│   └── dj_auth.json       # DJ authentication credentials
 ├── admin_panel/           # Web control panel
-│   ├── index.html
-│   ├── css/admin.css
-│   └── js/
 ├── preview_tool/          # 3D browser preview
-│   ├── frontend/
-│   └── backend/
-├── minecraft_plugin/      # Spigot/Paper plugin (Java)
-├── python_client/         # Minecraft WebSocket client
-└── shows/                 # Saved show files (JSON)
+├── minecraft_plugin/      # Paper plugin (Java)
+│   └── src/main/java/com/audioviz/
+│       ├── gui/           # In-game menu system
+│       ├── effects/       # Beat-reactive effects
+│       ├── entities/      # Display entity management
+│       └── zones/         # Visualization zones
+├── configs/               # Configuration files
+├── shows/                 # Saved show files
+└── sample_images/         # Screenshots
 ```
 
 ## Multi-DJ Mode
@@ -152,6 +205,7 @@ The VJ operator can:
 - Switch the active DJ
 - Kick DJs if needed
 - Change visualization patterns
+- Trigger effects (strobe, flash, bass drop)
 
 ### DJ Auth Config
 
@@ -168,6 +222,27 @@ Edit `configs/dj_auth.json` to set up DJ credentials:
 
 For production, use `--require-auth` on the VJ server.
 
+## Minecraft Plugin Features
+
+### GUI Menu System
+- **Main Menu** - Central hub with system status
+- **DJ Control Panel** - Real-time effect controls, presets, zone selection
+- **Settings Menu** - Performance tuning and configuration
+- **Zone Management** - Create, edit, delete visualization zones
+- **Zone Editor** - Adjust size, rotation, entity pools
+
+### Beat Effects
+- Particle bursts on beats
+- Screen shake on bass drops
+- Lightning strikes on drops
+- Explosion visuals
+
+### Performance Optimizations
+- Batched entity updates
+- View distance culling
+- Configurable update intervals
+- Entity pool management
+
 ## Timeline System
 
 The timeline editor allows pre-programming visualization shows:
@@ -176,6 +251,30 @@ The timeline editor allows pre-programming visualization shows:
 - **Cues**: Timed events that trigger actions
 - **Triggers**: Time-based, beat-synced, or manual
 - **Transport**: Play, pause, stop, seek with playhead
+
+## Docker Support
+
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f audio_processor
+```
+
+## Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run with pre-commit hooks
+pre-commit install
+pre-commit run --all-files
+```
 
 ## License
 
