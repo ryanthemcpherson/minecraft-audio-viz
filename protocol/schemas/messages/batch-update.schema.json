@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "batch-update.schema.json",
+  "title": "BatchUpdateMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "batch_update"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "../types/entity-update.schema.json"
+      }
+    },
+    "particles": {
+      "type": "array",
+      "items": {
+        "$ref": "../types/particle-spawn.schema.json"
+      }
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "amplitude": {
+      "type": "number",
+      "minimum": 0
+    },
+    "is_beat": {
+      "type": "boolean"
+    },
+    "beat_intensity": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "required": ["type", "zone", "entities"]
+}

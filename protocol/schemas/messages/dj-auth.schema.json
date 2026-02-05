@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-auth.schema.json",
+  "title": "DjAuthMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_auth"
+    },
+    "v": {
+      "type": "string"
+    },
+    "dj_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dj_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dj_key": {
+      "type": "string"
+    },
+    "direct_mode": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "dj_id", "dj_name", "dj_key"]
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-hologram-config.schema.json",
+  "title": "SetHologramConfigMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_hologram_config"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "config": {
+      "$ref": "../types/hologram-config.schema.json"
+    }
+  },
+  "required": ["type", "zone", "config"]
+}

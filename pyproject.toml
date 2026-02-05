@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "audioviz"
+version = "1.0.0"
+description = "Real-time audio visualization for Minecraft using Display Entities"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Ryan" }
+]
+keywords = ["minecraft", "audio", "visualization", "fft", "beat-detection"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "sounddevice>=0.4.6",
+    "websockets>=12.0",
+    "pycaw>=20230407",
+    "comtypes>=1.2.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+# High-performance FFT backends
+fft = [
+    "spectrograms>=0.2.0",
+    "pyfftw>=0.13.0",
+]
+# Beat detection with aubio
+beat = [
+    "aubio>=0.4.9",
+]
+# Secure password hashing for VJ server auth
+auth = [
+    "bcrypt>=4.0.0",
+]
+# Full installation with all features
+full = [
+    "audioviz[fft,beat,auth]",
+]
+# Development dependencies
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+# Main CLI entry points
+audioviz = "audio_processor.cli:main"
+audioviz-vj = "audio_processor.cli:vj_server"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/minecraft-audio-viz"
+Repository = "https://github.com/yourusername/minecraft-audio-viz"
+
+[tool.hatch.build.targets.wheel]
+packages = ["audio_processor", "python_client"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/audio_processor",
+    "/python_client",
+    "/configs",
+]
+exclude = [
+    "*.pyc",
+    "__pycache__",
+    ".git",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # Line length handled separately
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["audio_processor/tests"]

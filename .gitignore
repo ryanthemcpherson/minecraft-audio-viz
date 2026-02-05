@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Local config
+.env
+.env.local
+config.local.json
+.claude/settings.local.json
+configs/dj_auth.json
+
+# Minecraft plugin build
+minecraft_plugin/target/
+*.jar
+
+# Node modules (if any frontend build tools)
+node_modules/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Audio test files
+*.mp3
+*.wav
+*.flac
+
+# Windows reserved names (can cause issues)
+nul
+NUL
+
+# ===================
+# DJ Client (Tauri)
+# ===================
+
+# Rust/Cargo
+dj_client/src-tauri/target/
+dj_client/src-tauri/Cargo.lock
+
+# Node.js / Frontend
+dj_client/node_modules/
+dj_client/dist/
+dj_client/.vite/
+
+# Tauri build outputs
+dj_client/src-tauri/target/
+dj_client/src-tauri/WixTools/
+dj_client/src-tauri/nsis/
+
+# Keep icons for CI builds (they're small and required)
+# Only ignore the icon generation scripts' intermediate files
+!dj_client/src-tauri/icons/
+
+# Platform-specific builds
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# Lock files (keep package-lock.json for CI reproducibility)
+dj_client/yarn.lock
+dj_client/pnpm-lock.yaml

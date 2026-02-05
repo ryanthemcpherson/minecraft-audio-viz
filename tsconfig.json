@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@admin/*": ["admin_panel/js/*"],
+      "@preview/*": ["preview_tool/frontend/js/*"]
+    }
+  },
+  "include": [
+    "admin_panel/**/*.ts",
+    "admin_panel/**/*.js",
+    "preview_tool/**/*.ts",
+    "preview_tool/**/*.js",
+    "src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

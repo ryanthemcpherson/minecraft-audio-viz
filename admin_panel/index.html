@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCAV Control Panel</title>
+    <link rel="icon" type="image/x-icon" href="../mcav.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../mcav.png">
+    <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header id="header">
+            <div class="header-left">
+                <h1>AudioViz Control</h1>
+                <span id="connection-status" class="status disconnected">Disconnected</span>
+            </div>
+            <div class="header-center">
+                <span class="zone-label">Zone:</span>
+                <select id="zone-select">
+                    <option value="main">main</option>
+                </select>
+            </div>
+            <div class="header-right">
+                <span id="preview-stats" class="preview-stats hidden">
+                    <span id="preview-block-count">0 blocks</span>
+                    <span class="stat-sep">|</span>
+                    <span id="preview-particle-count">0 particles</span>
+                </span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div id="main-content">
+            <!-- Left Sidebar: Zone Overview -->
+            <aside id="zone-overview">
+                <div class="panel">
+                    <h2 class="panel-title">Zone Status</h2>
+
+                    <div class="status-item">
+                        <span class="status-label">Pattern:</span>
+                        <span id="current-pattern" class="status-value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Preset:</span>
+                        <span id="current-preset" class="status-value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">BPM:</span>
+                        <span id="bpm-estimate" class="status-value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Frame:</span>
+                        <span id="frame-count" class="status-value">0</span>
+                    </div>
+
+                    <!-- Beat Indicator -->
+                    <div id="beat-display">
+                        <div id="beat-indicator"></div>
+                        <span id="beat-text">BEAT</span>
+                    </div>
+
+                    <!-- Audio Meters - 5 bands for ultra-low-latency -->
+                    <div id="audio-meters">
+                        <h3 class="section-title">Frequency Bands</h3>
+                        <div class="meter">
+                            <span class="meter-label">Bass</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-0"></div></div>
+                            <span class="meter-value" id="meter-val-0">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Low</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-1"></div></div>
+                            <span class="meter-value" id="meter-val-1">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Mid</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-2"></div></div>
+                            <span class="meter-value" id="meter-val-2">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">High</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-3"></div></div>
+                            <span class="meter-value" id="meter-val-3">0%</span>
+                        </div>
+                        <div class="meter">
+                            <span class="meter-label">Air</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-4"></div></div>
+                            <span class="meter-value" id="meter-val-4">0%</span>
+                        </div>
+                        <!-- Master Volume -->
+                        <div class="meter master">
+                            <span class="meter-label">Master</span>
+                            <div class="meter-bar"><div class="meter-fill" id="meter-master"></div></div>
+                            <span class="meter-value" id="meter-val-master">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="panel">
+                    <h2 class="panel-title">Quick Actions</h2>
+                    <div class="quick-actions">
+                        <button id="btn-blackout" class="btn btn-danger">Blackout</button>
+                        <button id="btn-freeze" class="btn btn-warning">Freeze</button>
+                    </div>
+                    <div class="tap-tempo">
+                        <button id="btn-tap-tempo" class="btn btn-full">Tap Tempo</button>
+                        <span id="tap-bpm">-- BPM</span>
+                    </div>
+                </div>
+
+                <!-- DJ Queue -->
+                <div class="panel">
+                    <h2 class="panel-title">DJ Queue</h2>
+                    <div id="dj-queue" class="dj-queue">
+                        <div class="dj-empty">No DJs connected</div>
+                    </div>
+                    <!-- Connect Code Generator -->
+                    <div class="connect-code-section">
+                        <button id="btn-generate-code" class="btn btn-primary btn-full">
+                            Generate Connect Code
+                        </button>
+                        <div id="active-codes" class="active-codes"></div>
+                    </div>
+                </div>
+
+                <!-- Connect Code Modal -->
+                <div id="code-modal" class="modal hidden">
+                    <div class="modal-backdrop"></div>
+                    <div class="modal-content">
+                        <h3>Connect Code Generated</h3>
+                        <div class="code-display-large" id="modal-code">BEAT-7K3M</div>
+                        <p class="code-instructions">Share this code with a DJ. It expires in <span id="modal-ttl">30</span> minutes.</p>
+                        <div class="modal-actions">
+                            <button id="btn-copy-code" class="btn btn-primary">Copy Code</button>
+                            <button id="btn-close-modal" class="btn btn-secondary">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Work Area -->
+            <main id="work-area">
+                <!-- Tab Bar -->
+                <nav id="tab-bar">
+                    <button class="tab active" data-tab="mixer">Live Mixer</button>
+                    <button class="tab" data-tab="zone">Zone Settings</button>
+                    <button class="tab" data-tab="preview">3D Preview</button>
+                </nav>
+
+                <!-- Tab Content -->
+                <div id="tab-content">
+                    <!-- Live Mixer Panel -->
+                    <div id="mixer-panel" class="tab-panel active">
+                        <!-- Pattern Quick-Switch -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Patterns</h3>
+                            <div id="pattern-grid" class="pattern-grid">
+                                <!-- Populated by JS -->
+                            </div>
+                        </section>
+
+                        <!-- Preset Buttons -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Presets</h3>
+                            <div id="preset-buttons" class="preset-buttons">
+                                <button class="preset-btn active" data-preset="auto">Auto</button>
+                                <button class="preset-btn" data-preset="edm">EDM</button>
+                                <button class="preset-btn" data-preset="chill">Chill</button>
+                                <button class="preset-btn" data-preset="rock">Rock</button>
+                            </div>
+                        </section>
+
+                        <!-- Band Faders - 5 bands for ultra-low-latency -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Band Sensitivity</h3>
+                            <div id="band-faders" class="fader-bank">
+                                <div class="fader" data-band="0">
+                                    <span class="fader-label">Bass</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="1">
+                                    <span class="fader-label">Low</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="2">
+                                    <span class="fader-label">Mid</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="3">
+                                    <span class="fader-label">High</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader" data-band="4">
+                                    <span class="fader-label">Air</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                                <div class="fader fader-master" data-band="master">
+                                    <span class="fader-label">Master</span>
+                                    <div class="fader-track">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                    </div>
+                                    <span class="fader-value">100%</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Effect Controls -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Audio Settings</h3>
+                            <div id="effect-controls" class="controls-grid">
+                                <div class="control-row">
+                                    <label>Attack</label>
+                                    <input type="range" id="ctrl-attack" min="5" max="90" value="35">
+                                    <span class="control-value" id="val-attack">35%</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Release</label>
+                                    <input type="range" id="ctrl-release" min="2" max="30" value="8">
+                                    <span class="control-value" id="val-release">8%</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>AGC Gain</label>
+                                    <input type="range" id="ctrl-agc" min="1" max="12" value="8" step="0.5">
+                                    <span class="control-value" id="val-agc">8x</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Beat Sens</label>
+                                    <input type="range" id="ctrl-beat-sens" min="50" max="200" value="100">
+                                    <span class="control-value" id="val-beat-sens">100%</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Beat Thresh</label>
+                                    <input type="range" id="ctrl-beat-thresh" min="80" max="200" value="130">
+                                    <span class="control-value" id="val-beat-thresh">1.3x</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Block Count</label>
+                                    <input type="range" id="ctrl-blocks" min="8" max="64" value="16">
+                                    <span class="control-value" id="val-blocks">16</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Effect Triggers -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Effects</h3>
+                            <div id="effect-triggers" class="effect-grid">
+                                <button class="effect-btn" data-effect="bass_drop">Bass Drop</button>
+                                <button class="effect-btn" data-effect="strobe">Strobe</button>
+                                <button class="effect-btn" data-effect="flash">Flash</button>
+                                <button class="effect-btn" data-effect="spin_up">Spin Up</button>
+                                <button class="effect-btn" data-effect="spin_down">Spin Down</button>
+                            </div>
+                        </section>
+
+                        <!-- Particle Effects -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Particle Effects</h3>
+                            <div class="control-row">
+                                <label>Global Intensity</label>
+                                <input type="range" id="particle-global-intensity" min="0" max="200" value="100">
+                                <span class="control-value" id="val-particle-intensity">100%</span>
+                            </div>
+                            <div id="particle-effects-container">
+                                <div class="particle-category">
+                                    <h4>Beat Effects</h4>
+                                    <div id="particle-beat-effects" class="particle-toggles">
+                                        <!-- Populated by JS -->
+                                    </div>
+                                </div>
+                                <div class="particle-category">
+                                    <h4>Ambient Effects</h4>
+                                    <div id="particle-ambient-effects" class="particle-toggles">
+                                        <!-- Populated by JS -->
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- Zone Settings Panel -->
+                    <div id="zone-panel" class="tab-panel">
+                        <!-- Render Mode -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Render Mode</h3>
+                            <div class="render-mode-selector">
+                                <button class="render-mode-btn active" data-mode="entities" id="mode-entities">
+                                    <span class="mode-icon">&#x1F9CA;</span>
+                                    <span class="mode-label">Display Entities</span>
+                                    <span class="mode-desc">Java Edition Only</span>
+                                </button>
+                                <button class="render-mode-btn" data-mode="particles" id="mode-particles">
+                                    <span class="mode-icon">&#x2728;</span>
+                                    <span class="mode-label">Particles Only</span>
+                                    <span class="mode-desc">Bedrock Compatible</span>
+                                </button>
+                                <button class="render-mode-btn" data-mode="hybrid" id="mode-hybrid">
+                                    <span class="mode-icon">&#x1F52E;</span>
+                                    <span class="mode-label">Hybrid</span>
+                                    <span class="mode-desc">Both (Mixed Server)</span>
+                                </button>
+                            </div>
+                            <div class="bedrock-notice" id="bedrock-notice" style="display: none;">
+                                <span class="notice-icon">&#x2139;&#xFE0F;</span>
+                                <span>Particle mode uses colored dust, flames, and end rods to visualize audio. Compatible with Bedrock players via Geyser.</span>
+                            </div>
+                        </section>
+
+                        <!-- Particle Visualization Settings (shown in particles/hybrid mode) -->
+                        <section class="mixer-section" id="particle-viz-section" style="display: none;">
+                            <h3 class="section-title">Particle Visualization</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Particle Type</label>
+                                    <select id="particle-viz-type" class="control-select">
+                                        <option value="DUST" selected>Colored Dust</option>
+                                        <option value="FLAME">Flame</option>
+                                        <option value="SOUL_FIRE_FLAME">Soul Fire</option>
+                                        <option value="END_ROD">End Rod</option>
+                                        <option value="ELECTRIC_SPARK">Electric Spark</option>
+                                        <option value="GLOW">Glow</option>
+                                        <option value="WAX_ON">Wax Sparkle</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label>Particle Density</label>
+                                    <input type="range" id="particle-viz-density" min="1" max="10" value="3">
+                                    <span class="control-value" id="val-particle-density">3x</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Color Mode</label>
+                                    <select id="particle-viz-color" class="control-select">
+                                        <option value="frequency" selected>By Frequency Band</option>
+                                        <option value="rainbow">Rainbow Cycle</option>
+                                        <option value="intensity">By Intensity</option>
+                                        <option value="fixed">Fixed Color</option>
+                                    </select>
+                                </div>
+                                <div class="control-row" id="fixed-color-row" style="display: none;">
+                                    <label>Fixed Color</label>
+                                    <input type="color" id="particle-viz-fixed-color" value="#00ffff">
+                                </div>
+                                <div class="control-row">
+                                    <label>Particle Size</label>
+                                    <input type="range" id="particle-viz-size" min="5" max="30" value="15">
+                                    <span class="control-value" id="val-particle-size">1.5</span>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Trail Effect</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="particle-viz-trail">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Entity Configuration -->
+                        <section class="mixer-section" id="entity-config-section">
+                            <h3 class="section-title">Display Entities</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Entity Count</label>
+                                    <input type="range" id="zone-entity-count" min="4" max="128" value="16">
+                                    <span class="control-value" id="val-entity-count">16</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Block Type</label>
+                                    <select id="zone-block-type" class="control-select">
+                                        <option value="SEA_LANTERN" selected>Sea Lantern</option>
+                                        <option value="GLOWSTONE">Glowstone</option>
+                                        <option value="SHROOMLIGHT">Shroomlight</option>
+                                        <option value="REDSTONE_LAMP">Redstone Lamp</option>
+                                        <option value="JACK_O_LANTERN">Jack o'Lantern</option>
+                                        <option value="CRYING_OBSIDIAN">Crying Obsidian</option>
+                                        <option value="MAGMA_BLOCK">Magma Block</option>
+                                        <option value="BEACON">Beacon</option>
+                                        <option value="END_ROD">End Rod</option>
+                                        <option value="AMETHYST_BLOCK">Amethyst Block</option>
+                                        <option value="COPPER_BULB">Copper Bulb</option>
+                                        <option value="FROGLIGHT">Ochre Froglight</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label>Base Scale</label>
+                                    <input type="range" id="zone-base-scale" min="10" max="100" value="50">
+                                    <span class="control-value" id="val-base-scale">0.5</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Max Scale</label>
+                                    <input type="range" id="zone-max-scale" min="50" max="200" value="100">
+                                    <span class="control-value" id="val-max-scale">1.0</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Display Properties -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Display Properties</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Brightness</label>
+                                    <input type="range" id="zone-brightness" min="0" max="15" value="15">
+                                    <span class="control-value" id="val-brightness">15</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Interpolation</label>
+                                    <input type="range" id="zone-interpolation" min="0" max="10" value="2">
+                                    <span class="control-value" id="val-interpolation">2 ticks</span>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Glow on Beat</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="zone-glow-beat">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Dynamic Brightness</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="zone-dynamic-brightness">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Zone Dimensions -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Zone Dimensions</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Size X</label>
+                                    <input type="range" id="zone-size-x" min="5" max="50" value="10">
+                                    <span class="control-value" id="val-size-x">10</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Size Y</label>
+                                    <input type="range" id="zone-size-y" min="5" max="50" value="10">
+                                    <span class="control-value" id="val-size-y">10</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Size Z</label>
+                                    <input type="range" id="zone-size-z" min="5" max="50" value="10">
+                                    <span class="control-value" id="val-size-z">10</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Rotation</label>
+                                    <input type="range" id="zone-rotation" min="0" max="360" value="0" step="15">
+                                    <span class="control-value" id="val-rotation">0°</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Text Overlay -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Text Overlay</h3>
+                            <div class="controls-grid">
+                                <div class="control-row toggle-row">
+                                    <label>Show BPM</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="zone-show-bpm">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Show Pattern Name</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="zone-show-pattern">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Show Band Values</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="zone-show-bands">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Zone Actions -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Zone Actions</h3>
+                            <div class="zone-actions">
+                                <button id="btn-reinit-pool" class="btn btn-primary">Reinitialize Pool</button>
+                                <button id="btn-cleanup-zone" class="btn btn-warning">Cleanup Zone</button>
+                                <button id="btn-reset-defaults" class="btn btn-secondary">Reset Defaults</button>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- 3D Preview Panel -->
+                    <div id="preview-panel" class="tab-panel">
+                        <div class="preview-container">
+                            <!-- Three.js Canvas -->
+                            <div class="preview-canvas-wrapper">
+                                <canvas id="preview-canvas"></canvas>
+
+                                <!-- Audio Meters Overlay -->
+                                <div class="preview-meters" id="preview-meters">
+                                    <div class="preview-meter" data-band="0">
+                                        <div class="preview-meter-fill"><div class="preview-meter-bar" id="preview-band-0"></div></div>
+                                        <span class="preview-meter-label">Bass</span>
+                                    </div>
+                                    <div class="preview-meter" data-band="1">
+                                        <div class="preview-meter-fill"><div class="preview-meter-bar" id="preview-band-1"></div></div>
+                                        <span class="preview-meter-label">Low</span>
+                                    </div>
+                                    <div class="preview-meter" data-band="2">
+                                        <div class="preview-meter-fill"><div class="preview-meter-bar" id="preview-band-2"></div></div>
+                                        <span class="preview-meter-label">Mid</span>
+                                    </div>
+                                    <div class="preview-meter" data-band="3">
+                                        <div class="preview-meter-fill"><div class="preview-meter-bar" id="preview-band-3"></div></div>
+                                        <span class="preview-meter-label">High</span>
+                                    </div>
+                                    <div class="preview-meter" data-band="4">
+                                        <div class="preview-meter-fill"><div class="preview-meter-bar" id="preview-band-4"></div></div>
+                                        <span class="preview-meter-label">Air</span>
+                                    </div>
+                                </div>
+
+                                <!-- Beat Flash Overlay -->
+                                <div class="preview-beat-flash" id="preview-beat-flash"></div>
+                            </div>
+
+                            <!-- Preview Controls Sidebar -->
+                            <div class="preview-sidebar">
+                                <!-- Camera Controls -->
+                                <div class="preview-control-group">
+                                    <h4>Camera</h4>
+                                    <button id="preview-reset-camera" class="btn btn-secondary btn-full">Reset View</button>
+                                    <label class="preview-checkbox">
+                                        <input type="checkbox" id="preview-auto-rotate" checked>
+                                        <span>Auto Rotate</span>
+                                    </label>
+                                    <label class="preview-checkbox">
+                                        <input type="checkbox" id="preview-show-grid" checked>
+                                        <span>Show Floor Grid</span>
+                                    </label>
+                                </div>
+
+                                <!-- Particle Effects -->
+                                <div class="preview-control-group">
+                                    <h4>Particle Effects</h4>
+                                    <label class="preview-checkbox">
+                                        <input type="checkbox" id="preview-particles-enabled" checked>
+                                        <span>Enable Particles</span>
+                                    </label>
+                                    <div class="preview-effect-list">
+                                        <label class="preview-checkbox effect-item">
+                                            <input type="checkbox" id="preview-effect-bass-flame" checked>
+                                            <span>Bass Flames</span>
+                                        </label>
+                                        <label class="preview-checkbox effect-item">
+                                            <input type="checkbox" id="preview-effect-soul-fire" checked>
+                                            <span>Soul Fire</span>
+                                        </label>
+                                        <label class="preview-checkbox effect-item">
+                                            <input type="checkbox" id="preview-effect-beat-ring" checked>
+                                            <span>Beat Ring</span>
+                                        </label>
+                                        <label class="preview-checkbox effect-item">
+                                            <input type="checkbox" id="preview-effect-notes">
+                                            <span>Musical Notes</span>
+                                        </label>
+                                        <label class="preview-checkbox effect-item">
+                                            <input type="checkbox" id="preview-effect-dust">
+                                            <span>Spectrum Dust</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Preview Stats -->
+                                <div class="preview-control-group">
+                                    <h4>Stats</h4>
+                                    <div class="preview-stat-row">
+                                        <span>Blocks:</span>
+                                        <span id="preview-stat-blocks">0/64</span>
+                                    </div>
+                                    <div class="preview-stat-row">
+                                        <span>Particles:</span>
+                                        <span id="preview-stat-particles">0</span>
+                                    </div>
+                                    <div class="preview-stat-row">
+                                        <span>FPS:</span>
+                                        <span id="preview-stat-fps">60</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Status Bar -->
+                <footer id="status-bar">
+                    <div class="status-bar-left">
+                        <span id="latency-display" class="latency">Latency: --ms</span>
+                        <span id="queue-depth-display" class="queue-depth hidden">Queue: 0/500</span>
+                    </div>
+                    <div class="status-bar-right">
+                        <span id="fps-display">-- FPS</span>
+                    </div>
+                </footer>
+            </main>
+        </div>
+    </div>
+
+    <!-- Three.js for 3D Preview -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/particles.js"></script>
+    <script src="js/block-indicators.js"></script>
+    <script type="module" src="js/admin-app.js"></script>
+</body>
+</html>

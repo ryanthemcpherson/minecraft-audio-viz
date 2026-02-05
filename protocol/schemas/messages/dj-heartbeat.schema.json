@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-heartbeat.schema.json",
+  "title": "DjHeartbeatMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_heartbeat"
+    },
+    "v": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "number"
+    },
+    "mc_connected": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "ts"]
+}

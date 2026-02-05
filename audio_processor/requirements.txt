@@ -1,0 +1,18 @@
+# Audio processor dependencies
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Host capture agent (for capturing system audio)
+sounddevice>=0.4.6
+
+# WebSocket client for Minecraft connection
+websockets>=12.0
+
+# High-performance FFT backends - optional (install one for better performance)
+# spectrograms: Rust/FFTW backend (fastest, requires Rust toolchain to build)
+# pyfftw: Python FFTW wrapper (pre-built wheels available)
+spectrograms>=0.2.0
+pyfftw>=0.13.0
+
+# Optional: aubio for beat detection (alternative/verification)
+# aubio>=0.4.9

@@ -1,0 +1,466 @@
+/* AudioViz DJ Client Styles */
+
+:root {
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-dark: #4f46e5;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --bg-dark: #1a1a2e;
+  --bg-card: #25253d;
+  --bg-input: #1e1e36;
+  --text-primary: #f0f0f0;
+  --text-secondary: #a0a0b0;
+  --border: #3a3a5c;
+  --radius: 8px;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+/* App Layout */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.app-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Sections */
+.section {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+/* Input Styles */
+.input-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.select {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 16px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23a0a0b0'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+/* Server Inputs */
+.server-section {
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.server-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.server-host {
+  flex: 1;
+}
+
+.server-port {
+  width: 80px;
+}
+
+.server-separator {
+  color: var(--text-secondary);
+}
+
+/* Connect Code */
+.connect-code {
+  display: flex;
+  flex-direction: column;
+}
+
+.code-inputs {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-group {
+  display: flex;
+  gap: 4px;
+}
+
+.code-input {
+  width: 40px;
+  height: 48px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  background: var(--bg-input);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.code-input:focus {
+  border-color: var(--primary);
+  background: var(--bg-dark);
+}
+
+.code-separator {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.code-display {
+  text-align: center;
+  margin-top: 12px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Audio Source Select */
+.audio-source-select {
+  display: flex;
+  flex-direction: column;
+}
+
+.source-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.source-header .input-label {
+  margin-bottom: 0;
+}
+
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+/* Frequency Meters */
+.frequency-meter {
+  display: flex;
+  flex-direction: column;
+}
+
+.meter-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.meter-bar {
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  gap: 12px;
+}
+
+.meter-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.meter-track {
+  height: 20px;
+  background: var(--bg-dark);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 10px;
+  transition: width 0.05s ease-out;
+}
+
+.meter-value {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+/* Status Panel */
+.status-panel {
+  border-radius: var(--radius);
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.status-panel.active {
+  border-color: var(--success);
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.status-dot.connected {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.status-dot.disconnected {
+  background: var(--danger);
+}
+
+.status-text {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.status-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.status-label {
+  color: var(--text-secondary);
+}
+
+.status-value {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.status-value.warning {
+  color: var(--warning);
+}
+
+.status-value.standby {
+  color: var(--warning);
+}
+
+.live-status {
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--success);
+  border-radius: 20px;
+  color: #000;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #000;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Beat Indicator */
+.beat-indicator {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+
+.beat-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--text-secondary);
+  border-radius: 50%;
+  opacity: 0.3;
+  transition: all 0.1s;
+}
+
+.beat-indicator.active .beat-ring {
+  border-color: var(--primary);
+  opacity: 1;
+  box-shadow: 0 0 12px var(--primary);
+}
+
+.beat-indicator.active .beat-ring.ring-2 {
+  animation: beat-expand 0.3s ease-out;
+}
+
+@keyframes beat-expand {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* Buttons */
+.btn {
+  padding: 16px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.connect-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.btn-connect {
+  background: var(--primary);
+  color: white;
+}
+
+.btn-connect:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.btn-quick-connect {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-quick-connect:hover:not(:disabled) {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.btn-disconnect {
+  background: var(--danger);
+  color: white;
+  margin-top: auto;
+}
+
+.btn-disconnect:hover {
+  background: #dc2626;
+}
+
+/* Error Message */
+.error-message {
+  padding: 12px 16px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: 13px;
+}

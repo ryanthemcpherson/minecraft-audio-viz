@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0.0",
+  "messages": {
+    "dj_auth": "messages/dj-auth.schema.json",
+    "code_auth": "messages/code-auth.schema.json",
+    "dj_audio_frame": "messages/dj-audio-frame.schema.json",
+    "dj_heartbeat": "messages/dj-heartbeat.schema.json",
+    "batch_update": "messages/batch-update.schema.json",
+    "state_broadcast": "messages/state-broadcast.schema.json",
+    "set_zone_config": "messages/set-zone-config.schema.json",
+    "set_renderer_backend": "messages/set-renderer-backend.schema.json",
+    "renderer_capabilities": "messages/renderer-capabilities.schema.json",
+    "get_renderer_capabilities": "messages/get-renderer-capabilities.schema.json",
+    "set_hologram_config": "messages/set-hologram-config.schema.json"
+  },
+  "types": {
+    "audio_state": "types/audio-state.schema.json",
+    "entity_update": "types/entity-update.schema.json",
+    "particle_spawn": "types/particle-spawn.schema.json",
+    "renderer_backend": "types/renderer-backend.schema.json",
+    "hologram_config": "types/hologram-config.schema.json"
+  }
+}
