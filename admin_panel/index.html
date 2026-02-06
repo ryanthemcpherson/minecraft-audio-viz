@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCAV Control Panel</title>
-    <link rel="icon" type="image/x-icon" href="../mcav.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="../mcav.png">
+    <title>MCAV | Control Center</title>
+    <link rel="icon" type="image/x-icon" href="mcav.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="mcav.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin.css">
 </head>
 <body>
@@ -13,7 +16,13 @@
         <!-- Header -->
         <header id="header">
             <div class="header-left">
-                <h1>AudioViz Control</h1>
+                <div class="header-brand">
+                    <img class="header-logo" src="mcav.png" alt="MCAV" draggable="false">
+                    <div class="header-title-group">
+                        <h1>MCAV</h1>
+                        <span class="header-subtitle">Control Center</span>
+                    </div>
+                </div>
                 <span id="connection-status" class="status disconnected">Disconnected</span>
             </div>
             <div class="header-center">
@@ -64,27 +73,27 @@
                     <!-- Audio Meters - 5 bands for ultra-low-latency -->
                     <div id="audio-meters">
                         <h3 class="section-title">Frequency Bands</h3>
-                        <div class="meter">
+                        <div class="meter" data-band="0">
                             <span class="meter-label">Bass</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-0"></div></div>
                             <span class="meter-value" id="meter-val-0">0%</span>
                         </div>
-                        <div class="meter">
+                        <div class="meter" data-band="1">
                             <span class="meter-label">Low</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-1"></div></div>
                             <span class="meter-value" id="meter-val-1">0%</span>
                         </div>
-                        <div class="meter">
+                        <div class="meter" data-band="2">
                             <span class="meter-label">Mid</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-2"></div></div>
                             <span class="meter-value" id="meter-val-2">0%</span>
                         </div>
-                        <div class="meter">
+                        <div class="meter" data-band="3">
                             <span class="meter-label">High</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-3"></div></div>
                             <span class="meter-value" id="meter-val-3">0%</span>
                         </div>
-                        <div class="meter">
+                        <div class="meter" data-band="4">
                             <span class="meter-label">Air</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-4"></div></div>
                             <span class="meter-value" id="meter-val-4">0%</span>
@@ -465,7 +474,7 @@
                                 <div class="control-row">
                                     <label>Rotation</label>
                                     <input type="range" id="zone-rotation" min="0" max="360" value="0" step="15">
-                                    <span class="control-value" id="val-rotation">0°</span>
+                                    <span class="control-value" id="val-rotation">0&deg;</span>
                                 </div>
                             </div>
                         </section>
