@@ -370,13 +370,15 @@ class AdminApp {
         if (this.elements.btnCopyCode) {
             this.elements.btnCopyCode.addEventListener('click', () => {
                 const code = this.elements.modalCode?.textContent || '';
-                navigator.clipboard.writeText(code).then(() => {
-                    this.elements.btnCopyCode.textContent = 'Copied!';
-                    this.elements.btnCopyCode.classList.add('btn-copy-success');
-                    setTimeout(() => {
-                        this.elements.btnCopyCode.textContent = 'Copy Code';
-                        this.elements.btnCopyCode.classList.remove('btn-copy-success');
-                    }, 2000);
+                this._copyToClipboard(code).then((ok) => {
+                    if (ok) {
+                        this.elements.btnCopyCode.textContent = 'Copied!';
+                        this.elements.btnCopyCode.classList.add('btn-copy-success');
+                        setTimeout(() => {
+                            this.elements.btnCopyCode.textContent = 'Copy Code';
+                            this.elements.btnCopyCode.classList.remove('btn-copy-success');
+                        }, 2000);
+                    }
                 });
             });
         }
@@ -422,6 +424,32 @@ class AdminApp {
     _hideCodeModal() {
         if (this.elements.codeModal) {
             this.elements.codeModal.classList.add('hidden');
+        }
+    }
+
+    // Clipboard helper — navigator.clipboard requires HTTPS/localhost.
+    // Falls back to execCommand for plain HTTP (e.g. LAN access).
+    async _copyToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (_) { /* fall through */ }
+        }
+        // Fallback: hidden textarea + execCommand
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            return true;
+        } catch (_) {
+            return false;
+        } finally {
+            document.body.removeChild(ta);
         }
     }
 

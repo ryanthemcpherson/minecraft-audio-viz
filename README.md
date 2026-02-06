@@ -12,9 +12,9 @@
 ---
 
 <p align="center">
-  <img src="sample_images/admin_panel_full.png" alt="Admin Panel" width="32%">
-  <img src="sample_images/admin_panel_3d_preview.png" alt="3D Preview" width="32%">
-  <img src="djclient_preview.png" alt="DJ Client" width="32%">
+  <img src="images/admin_panel_full.png" alt="Admin Panel" width="32%">
+  <img src="images/admin_panel_3d_preview.png" alt="3D Preview" width="32%">
+  <img src="images/djclient_preview.png" alt="DJ Client" width="32%">
 </p>
 
 ---
@@ -104,16 +104,16 @@ audioviz --app spotify --host your-mc-server
 ## Screenshots & Demo
 
 ### Admin Control Panel
-![Admin Panel](sample_images/admin_panel_full.png)
+![Admin Panel](images/admin_panel_full.png)
 
 ### 3D Browser Preview
-![3D Preview](sample_images/preview_active.png)
+![3D Preview](images/preview_active.png)
 
 ### Zone Management
-![Zone Management](sample_images/admin_panel_zones.png)
+![Zone Management](images/admin_panel_zones.png)
 
 ### Multi-DJ Setup
-![Multi-DJ Setup](sample_images/VJ_multi_dj_client.png)
+![Multi-DJ Setup](images/VJ_multi_dj_client.png)
 
 **Demo Video:** [Watch on YouTube](https://www.youtube.com/watch?v=zH30YXrc2uw)
 
@@ -337,7 +337,7 @@ minecraft-audio-viz/
 ├── docs/                  # Architecture and ops docs
 ├── scripts/               # PowerShell quick-start scripts
 ├── shows/                 # Saved show files
-└── sample_images/         # Screenshots
+└── images/         # Screenshots
 ```
 
 ---
