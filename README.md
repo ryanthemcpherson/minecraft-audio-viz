@@ -1,64 +1,64 @@
-# Minecraft Audio Visualizer
+<div align="center">
+  <img src="mcav.png" alt="MCAV Logo" width="64" height="64">
+  <h1>MCAV — Minecraft Audio Visualizer</h1>
+  <p><strong>Real-time audio → reactive visuals in Minecraft, browser, and beyond</strong></p>
 
-![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
-![Java 21](https://img.shields.io/badge/java-21-orange.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
-
-A real-time audio visualization system that captures **Windows system audio** and drives reactive visuals in:
-
-- **Minecraft** (Display Entities with performance batching)
-- **Browser 3D Preview** (WebGL parity with Minecraft output)
-- **Admin Control Panel** (DJ/VJ-style control surface for patterns, effects, zones)
-
-![Admin Control Panel](sample_images/admin_panel_full.png)
+  ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+  ![Java 21](https://img.shields.io/badge/java-21-orange.svg)
+  ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+  ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
+</div>
 
 ---
 
-## Why this exists
-
-If you've ever wanted **festival-style visuals inside Minecraft**—driven by real music, controllable live like a VJ rig—this project provides the full pipeline:
-
-1) capture audio from an app (Spotify/Chrome/etc)
-2) analyze it in real time (FFT + beat-reactive hooks)
-3) render synchronized visuals across Minecraft + web preview + admin UI
+<p align="center">
+  <img src="sample_images/admin_panel_full.png" alt="Admin Panel" width="32%">
+  <img src="sample_images/admin_panel_3d_preview.png" alt="3D Preview" width="32%">
+  <img src="djclient_preview.png" alt="DJ Client" width="32%">
+</p>
 
 ---
 
 ## Features
 
-- **Real-time Audio Capture (Windows / WASAPI)** — capture audio from any Windows app
-- **FFT Analysis** — real frequency-band processing with optional **ultra-low latency (~20ms)**
-- **Multiple Visualization Patterns** — 15+ patterns (Spectrum Bars, DNA Helix, Atom Model, Galaxy, Sacred Geometry, etc.)
-- **Browser Preview** — 3D WebGL preview with Minecraft parity
-- **Admin Control Panel** — VJ-style control interface with debounced controls + effect triggers
-- **Minecraft Integration** — Display Entities + batched updates for performance
-- **Bedrock Mode** — particle-based visualization for Bedrock players via Geyser
-- **Multi-DJ Support** — multiple remote DJs can perform with a central VJ controlling visuals
-- **In-Game GUI** — menu system for zone management, DJ controls, and settings
-- **Docker Support** — containerized VJ server for deployment
-- **Secure Auth** — bcrypt password hashing for DJ authentication
+- **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
+- **Real-time FFT Analysis** — 5-band frequency processing with ultra-low latency (~20ms)
+- **27 Visualization Patterns** — from Spectrum Bars to Galaxy Spirals, Black Holes, Auroras, and more
+- **6 Audio Presets** — auto, edm, chill, rock, hiphop, classical
+- **Minecraft Rendering** — Display Entity batching with interpolation, zone management, beat-reactive particles
+- **3D Browser Preview** — WebGL scene with full Minecraft rendering parity
+- **Admin Control Panel** — VJ-style control surface with live meters, effects, and zone controls
+- **DJ Client** — cross-platform Tauri desktop app for remote DJ sessions
+- **Multi-DJ Support** — multiple remote DJs performing with centralized VJ control
+- **Bedrock Mode** — particle-based visualization for Geyser/Bedrock players
+- **Timeline System** — pre-program timed shows with pattern, preset, and effect cues
+- **Docker Deployment** — containerized VJ server for production events
 
 ---
 
-## Screenshots & Demo
+## Quick Start
 
-### Admin Control Panel
-Latest MCAV control surface with live metrics, pattern switching, effects, and zone controls:
+**Requirements:** Windows, Python 3.11+, and optionally Java 21 + Paper 1.21.1+ for Minecraft
 
-![Admin Panel](sample_images/admin_panel_full.png)
+```bash
+# 1. Clone & install
+git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
+cd minecraft-audio-viz
+uv pip install -e .          # or: pip install -e ".[full]"
 
-### 3D Browser Preview
-Live preview scene during playback, matched to in-game rendering behavior:
+# 2. Run with browser preview
+audioviz --app spotify --preview
 
-![3D Preview](sample_images/preview_active.png)
+# 3. Open in browser
+#    3D Preview:   http://localhost:8080
+#    Admin Panel:  http://localhost:8080/admin/
+```
 
-### Multi-DJ Setup
-Terminal spectrograph + admin panel running together during a live session:
+To connect to Minecraft, build the plugin (`cd minecraft_plugin && mvn package`), drop the jar into your server's `plugins/` folder, and run:
 
-![Multi-DJ Setup](sample_images/VJ_multi_dj_client.png)
-
-**Demo Video:** [Watch on YouTube](https://www.youtube.com/watch?v=zH30YXrc2uw)
+```bash
+audioviz --app spotify --host your-mc-server
+```
 
 ---
 
@@ -101,81 +101,59 @@ Terminal spectrograph + admin panel running together during a live session:
 
 ---
 
-## Quick Start
+## Screenshots & Demo
 
-### Requirements
+### Admin Control Panel
+![Admin Panel](sample_images/admin_panel_full.png)
 
-- **Windows** (required for WASAPI audio capture)
-- **Python 3.11+** (3.12/3.13 also supported)
-- **Java 21+** (for the Minecraft plugin)
-- **Paper/Spigot 1.21.1+** server
+### 3D Browser Preview
+![3D Preview](sample_images/preview_active.png)
 
-### Install
+### Zone Management
+![Zone Management](sample_images/admin_panel_zones.png)
 
-```bash
-git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-cd minecraft-audio-viz
+### Multi-DJ Setup
+![Multi-DJ Setup](sample_images/VJ_multi_dj_client.png)
 
-# recommended
-uv pip install -e .
-
-# or
-pip install -e .
-
-# optional extras (FFT backends, beat detection, auth)
-pip install -e ".[full]"
-```
-
-### Run (preview-first)
-
-1) Start capture + web preview:
-
-```bash
-audioviz --app spotify --preview
-```
-
-2) Open:
-- **3D Preview**: http://localhost:8080
-- **Admin Panel**: http://localhost:8080/admin/
-
-### Connect to Minecraft (optional)
-
-1) Build the plugin:
-
-```bash
-cd minecraft_plugin && mvn package
-```
-
-2) Copy the jar from `target/` into your Paper server `plugins/` folder
-
-3) Run the visualizer pointing at your server:
-
-```bash
-audioviz --app spotify --host your-mc-server
-```
+**Demo Video:** [Watch on YouTube](https://www.youtube.com/watch?v=zH30YXrc2uw)
 
 ---
 
-## Minecraft Commands
+## Visualization Patterns (27)
 
-| Command | Description |
-|---------|-------------|
-| `/audioviz menu` | Open the main control panel (`/av menu`, `/mcav menu`) |
-| `/audioviz zone create <name>` | Create a new visualization zone |
-| `/audioviz zone delete <name>` | Delete a zone |
-| `/audioviz zone list` | List all zones |
-| `/audioviz zone setsize <name> <x> <y> <z>` | Set zone dimensions |
-| `/audioviz zone setrotation <name> <degrees>` | Set zone rotation |
-| `/audioviz zone info <name>` | Show zone details |
-| `/audioviz pool init <zone> [count] [material]` | Initialize display-entity pool |
-| `/audioviz pool cleanup <zone>` | Remove zone entities |
-| `/audioviz test <zone> <wave|pulse|random>` | Run test animation |
-| `/audioviz status` | Show plugin status |
-| `/audioviz help` | Show command help |
+| Pattern | Key | Description |
+|---------|-----|-------------|
+| Spectrum Bars | `bars` | Classic frequency bar display |
+| Stacked Tower | `spectrum` | Vertical stacking bars |
+| Spectrum Tubes | `tubes` | 3D tube-based spectrum analyzer |
+| Spectrum Circle | `circle` | Circular spectrum layout |
+| DNA Helix | `wave` | Double helix rotating structure |
+| Atom Model | `orbit` | Orbital electron visualization |
+| Expanding Sphere | `ring` | Pulsing sphere that expands with bass |
+| Floating Platforms | `columns` | Suspended platforms responding to audio |
+| Fountain | `matrix` | Particle fountain effect |
+| Breathing Cube | `heartbeat` | Cube that expands/contracts with music |
+| Mushroom | `mushroom` | Organic mushroom-shaped visualization |
+| Skull | `skull` | Beat-reactive skull pattern |
+| Sacred Geometry | `sacred` | Mathematical sacred geometry patterns |
+| Vortex | `vortex` | Spinning vortex tunnel |
+| Pyramid | `pyramid` | Egyptian pyramid with audio response |
+| Galaxy Spiral | `galaxy` | Spiral galaxy visualization |
+| Laser Array | `laser` | Concert-style laser beam array |
+| Supernova | `explode` | Explosive supernova effect |
+| Mandala | `mandala` | Symmetrical mandala visualization |
+| Tesseract | `tesseract` | 4D hypercube projection |
+| Crystal Growth | `crystal` | Growing crystal structure |
+| Black Hole | `blackhole` | Gravitational lensing effect |
+| Nebula | `nebula` | Space nebula cloud |
+| Wormhole Portal | `wormhole` | Wormhole tunnel visualization |
+| Aurora | `aurora` | Northern lights effect |
+| Ocean Waves | `ocean` | Ocean wave simulation |
+| Fireflies | `fireflies` | Swarm of glowing fireflies |
 
 ---
 
-## CLI Examples
+## CLI Reference
 
 ```bash
 # Local DJ mode
@@ -215,32 +193,27 @@ audioviz --list-devices                   # list audio devices
 
 ---
 
-## Visualization Patterns
+## Minecraft Commands
 
-| Pattern | Description |
+| Command | Description |
 |---------|-------------|
-| Spectrum Bars | Classic frequency bar display |
-| Stacked Tower | Vertical stacking bars |
-| DNA Helix | Double helix rotating structure |
-| Atom Model | Orbital electron visualization |
-| Expanding Sphere | Pulsing sphere that expands with bass |
-| Floating Platforms | Suspended platforms responding to audio |
-| Fountain | Particle fountain effect |
-| Breathing Cube | Cube that expands/contracts with music |
-| Mushroom | Organic mushroom-shaped visualization |
-| Skull | Beat-reactive skull pattern |
-| Sacred Geometry | Mathematical sacred geometry patterns |
-| Vortex | Spinning vortex tunnel |
-| Pyramid | Egyptian pyramid with audio response |
-| Galaxy | Spiral galaxy visualization |
-| Laser Array | Concert-style laser beam array |
-| Supernova | Explosive supernova effect |
+| `/audioviz menu` | Open the main control panel (`/av menu`, `/mcav menu`) |
+| `/audioviz zone create <name>` | Create a new visualization zone |
+| `/audioviz zone delete <name>` | Delete a zone |
+| `/audioviz zone list` | List all zones |
+| `/audioviz zone setsize <name> <x> <y> <z>` | Set zone dimensions |
+| `/audioviz zone setrotation <name> <degrees>` | Set zone rotation |
+| `/audioviz zone info <name>` | Show zone details |
+| `/audioviz pool init <zone> [count] [material]` | Initialize display-entity pool |
+| `/audioviz pool cleanup <zone>` | Remove zone entities |
+| `/audioviz test <zone> <wave\|pulse\|random>` | Run test animation |
+| `/audioviz status` | Show plugin status |
+| `/audioviz help` | Show command help |
 
 ---
 
-## Multi-DJ Mode (Live Events)
-
-Use Multi-DJ mode when multiple DJs are performing remotely and one VJ controls visuals.
+<details>
+<summary><strong>Multi-DJ Mode (Live Events)</strong></summary>
 
 ### 1) Start the VJ Server (central control)
 
@@ -287,9 +260,10 @@ Example `configs/dj_auth.json`:
 
 For production, run the VJ server with `--require-auth`.
 
----
+</details>
 
-## Minecraft Plugin Features
+<details>
+<summary><strong>Minecraft Plugin Features</strong></summary>
 
 ### GUI menu system
 - Main menu (system status)
@@ -317,19 +291,21 @@ Bedrock players can't see Display Entities, so use particles:
 - Color modes: frequency-based, rainbow, intensity, fixed color
 - Adjustable density + particle size
 
----
+</details>
 
-## Timeline System
+<details>
+<summary><strong>Timeline System</strong></summary>
 
 Pre-program visualization shows:
-- Tracks: Patterns, Presets, Effects, Parameters
-- Cues: timed events that trigger actions
-- Triggers: time-based, beat-synced, or manual
-- Transport: play/pause/stop/seek
+- **Tracks:** Patterns, Presets, Effects, Parameters
+- **Cues:** timed events that trigger actions
+- **Triggers:** time-based, beat-synced, or manual
+- **Transport:** play/pause/stop/seek
 
----
+</details>
 
-## Docker Support
+<details>
+<summary><strong>Docker Support</strong></summary>
 
 The VJ server can run in Docker for deployment:
 
@@ -342,20 +318,24 @@ MINECRAFT_HOST=mc.example.com docker-compose up -d
 
 > Note: **Audio capture requires Windows** and cannot run in Docker. DJs run locally and connect to the containerized VJ server.
 
+</details>
+
 ---
 
 ## Project Structure
 
 ```text
 minecraft-audio-viz/
-├── audio_processor/       # Python audio processing
-├── admin_panel/           # Web control panel
-├── dj_client/             # Desktop DJ client (Tauri)
-├── preview_tool/          # 3D browser preview
-├── minecraft_plugin/      # Paper plugin (Java)
-├── protocol/              # Shared protocol schemas/contracts
+├── audio_processor/       # Python audio processing + FFT + patterns
+├── admin_panel/           # Web control panel (VJ interface)
+├── dj_client/             # Desktop DJ client (Tauri + React)
+├── preview_tool/          # 3D browser preview (Three.js)
+├── minecraft_plugin/      # Paper plugin (Java 21)
+├── python_client/         # VizClient WebSocket library
+├── protocol/              # Shared protocol schemas
 ├── configs/               # Configuration files
 ├── docs/                  # Architecture and ops docs
+├── scripts/               # PowerShell quick-start scripts
 ├── shows/                 # Saved show files
 └── sample_images/         # Screenshots
 ```
