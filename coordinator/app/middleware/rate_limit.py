@@ -1,0 +1,41 @@
+"""Starlette middleware that applies rate-limiting to selected routes."""
+
+from __future__ import annotations
+
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+
+from app.services.rate_limiter import InMemoryRateLimiter
+
+# A single shared rate-limiter instance for the /api/v1/connect endpoint.
+# 10 requests per IP per 60-second window (matches spec).
+_connect_limiter = InMemoryRateLimiter(max_requests=10, window_seconds=60)
+
+
+def get_connect_limiter() -> InMemoryRateLimiter:
+    """Return the module-level connect rate limiter (useful for testing)."""
+    return _connect_limiter
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Apply per-IP rate limiting to the public connect endpoint."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Only rate-limit the public code-resolution endpoint
+        if request.url.path.startswith("/api/v1/connect/"):
+            client_ip = request.client.host if request.client else "unknown"
+            if not _connect_limiter.check(client_ip):
+                remaining = _connect_limiter.remaining(client_ip)
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded. Try again in 60 seconds."},
+                    headers={
+                        "Retry-After": "60",
+                        "X-RateLimit-Limit": str(_connect_limiter.max_requests),
+                        "X-RateLimit-Remaining": str(remaining),
+                    },
+                )
+
+        response = await call_next(request)
+        return response

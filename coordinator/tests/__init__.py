@@ -1,0 +1,1 @@
+"""Coordinator test suite."""
