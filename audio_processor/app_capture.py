@@ -859,7 +859,6 @@ class AppCaptureAgent:
         prediction_lookahead_ms: float = 80.0,
         tick_aligned: bool = False,
     ):
-
         self.app_name = app_name
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
