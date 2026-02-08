@@ -25,7 +25,7 @@ rustfft = "6"
 cpal = "0.15"
 log = "0.4"
 env_logger = "0.10"
-thiserror = "1"
+thiserror = "2"
 rand = "0.8"
 parking_lot = "0.12"
 
