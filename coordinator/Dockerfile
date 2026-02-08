@@ -18,6 +18,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 COPY . .
 
-EXPOSE 8090
+EXPOSE ${PORT:-8090}
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8090"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8090}
