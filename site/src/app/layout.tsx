@@ -9,6 +9,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/mcav.png",
+  },
   title: "MCAV - Minecraft Audio Visualizer",
   description:
     "Real-time audio visualization in Minecraft. Capture system audio, process with FFT analysis, and render reactive 3D structures using Display Entities. No client mods required.",

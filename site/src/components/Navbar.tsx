@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 
 const navLinks = [
   { label: "Features", href: "#features" },
@@ -25,19 +26,15 @@ export default function Navbar() {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         {/* Logo */}
         <a href="#" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-electric-blue to-deep-purple">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-white"
-            >
-              <rect x="3" y="14" width="4" height="7" rx="1" fill="currentColor" />
-              <rect x="10" y="8" width="4" height="13" rx="1" fill="currentColor" />
-              <rect x="17" y="3" width="4" height="18" rx="1" fill="currentColor" />
-            </svg>
-          </div>
+          <Image
+            src="/mcav.png"
+            alt="MCAV"
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
+            style={{ imageRendering: "pixelated" }}
+            priority
+          />
           <span className="text-xl font-bold tracking-tight">MCAV</span>
         </a>
 
