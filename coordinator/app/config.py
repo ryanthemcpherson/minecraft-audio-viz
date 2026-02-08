@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mcav"
 
+    def model_post_init(self, __context: object) -> None:
+        """Ensure the database URL uses the asyncpg driver."""
+        if self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+
     # JWT
     jwt_default_expiry_minutes: int = 15
 
