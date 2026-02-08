@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 
 const VisualizerBackground = dynamic(
   () => import("@/components/VisualizerBackground"),
@@ -34,21 +35,19 @@ export default function Hero() {
 
         {/* Headline */}
         <h1 className="animate-slide-up-delay-1 text-5xl font-bold leading-tight tracking-tight sm:text-6xl md:text-7xl lg:text-8xl">
-          Turn Sound Into{" "}
-          <span className="text-gradient">Worlds</span>
+          Minecraft Audio{" "}
+          <span className="text-gradient">Visualizer</span>
         </h1>
 
         {/* Subline */}
         <p className="animate-slide-up-delay-2 mx-auto mt-6 max-w-2xl text-lg text-text-secondary sm:text-xl md:text-2xl">
-          Real-time audio visualization in Minecraft. No client mods. Pure server-side magic.
+          Real-time audio visualization in Minecraft. No client mods.
         </p>
 
         {/* CTA Buttons */}
         <div className="animate-slide-up-delay-3 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-          <a
-            href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/getting-started"
             className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-electric-blue to-deep-purple px-8 py-4 text-sm font-semibold text-white shadow-lg shadow-electric-blue/20 transition-all hover:shadow-xl hover:shadow-electric-blue/30 hover:brightness-110"
           >
             Get Started
@@ -65,7 +64,7 @@ export default function Hero() {
             >
               <path d="M5 12h14M12 5l7 7-7 7" />
             </svg>
-          </a>
+          </Link>
           <a
             href="#demo"
             className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-8 py-4 text-sm font-semibold text-white backdrop-blur-sm transition-all hover:border-white/20 hover:bg-white/10"

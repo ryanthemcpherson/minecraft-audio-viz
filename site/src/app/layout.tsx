@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   },
   title: "MCAV - Minecraft Audio Visualizer",
   description:
-    "Real-time audio visualization in Minecraft. Capture system audio, process with FFT analysis, and render reactive 3D structures using Display Entities. No client mods required.",
+    "Real-time audio visualization in Minecraft. No client mods. Capture system audio, process with FFT analysis, and render reactive 3D structures using Display Entities.",
   keywords: [
     "Minecraft",
     "audio visualizer",
@@ -28,17 +28,17 @@ export const metadata: Metadata = {
     "WASAPI",
   ],
   openGraph: {
-    title: "MCAV - Turn Sound Into Worlds",
+    title: "MCAV - Minecraft Audio Visualizer",
     description:
-      "Real-time audio visualization in Minecraft. No client mods. Pure server-side magic.",
+      "Real-time audio visualization in Minecraft. No client mods.",
     type: "website",
     siteName: "MCAV",
   },
   twitter: {
     card: "summary_large_image",
-    title: "MCAV - Turn Sound Into Worlds",
+    title: "MCAV - Minecraft Audio Visualizer",
     description:
-      "Real-time audio visualization in Minecraft. No client mods. Pure server-side magic.",
+      "Real-time audio visualization in Minecraft. No client mods.",
   },
 };
 

@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 
 const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "Demo", href: "#demo" },
+  { label: "Getting Started", href: "/getting-started" },
+  { label: "Features", href: "/#features" },
+  { label: "Demo", href: "/#demo" },
   {
     label: "Docs",
     href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/README.md",
@@ -25,7 +27,7 @@ export default function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         {/* Logo */}
-        <a href="#" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2">
           <Image
             src="/mcav.png"
             alt="MCAV"
@@ -36,21 +38,31 @@ export default function Navbar() {
             priority
           />
           <span className="text-xl font-bold tracking-tight">MCAV</span>
-        </a>
+        </Link>
 
         {/* Desktop Links */}
         <div className="hidden items-center gap-8 md:flex">
-          {navLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              target={link.external ? "_blank" : undefined}
-              rel={link.external ? "noopener noreferrer" : undefined}
-              className="text-sm text-text-secondary transition-colors hover:text-white"
-            >
-              {link.label}
-            </a>
-          ))}
+          {navLinks.map((link) =>
+            link.external ? (
+              <a
+                key={link.label}
+                href={link.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-text-secondary transition-colors hover:text-white"
+              >
+                {link.label}
+              </a>
+            ) : (
+              <Link
+                key={link.label}
+                href={link.href}
+                className="text-sm text-text-secondary transition-colors hover:text-white"
+              >
+                {link.label}
+              </Link>
+            )
+          )}
         </div>
 
         {/* Mobile Menu Button */}
@@ -78,18 +90,29 @@ export default function Navbar() {
       {mobileOpen && (
         <div className="border-t border-white/5 bg-[#0a0a0a]/95 backdrop-blur-xl md:hidden">
           <div className="flex flex-col gap-1 px-6 py-4">
-            {navLinks.map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                target={link.external ? "_blank" : undefined}
-                rel={link.external ? "noopener noreferrer" : undefined}
-                onClick={() => setMobileOpen(false)}
-                className="rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
-              >
-                {link.label}
-              </a>
-            ))}
+            {navLinks.map((link) =>
+              link.external ? (
+                <a
+                  key={link.label}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileOpen(false)}
+                  className="rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
+                >
+                  {link.label}
+                </a>
+              ) : (
+                <Link
+                  key={link.label}
+                  href={link.href}
+                  onClick={() => setMobileOpen(false)}
+                  className="rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
+                >
+                  {link.label}
+                </Link>
+              )
+            )}
           </div>
         </div>
       )}

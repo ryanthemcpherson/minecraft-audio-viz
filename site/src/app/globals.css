@@ -139,6 +139,37 @@ body {
 .eq-bar:nth-child(4) { animation-delay: 0.45s; }
 .eq-bar:nth-child(5) { animation-delay: 0.6s; }
 
+/* ---- Callout Boxes ---- */
+
+.callout-tip {
+  border-left: 3px solid var(--color-electric-blue);
+  background: rgba(0, 212, 255, 0.05);
+  padding: 1rem 1.25rem;
+  border-radius: 0 0.75rem 0.75rem 0;
+}
+
+.callout-warning {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.05);
+  padding: 1rem 1.25rem;
+  border-radius: 0 0.75rem 0.75rem 0;
+}
+
+/* ---- FAQ Details ---- */
+
+details.faq-item summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+details.faq-item[open] summary .faq-chevron {
+  transform: rotate(180deg);
+}
+
 /* ---- Scrollbar ---- */
 
 ::-webkit-scrollbar {

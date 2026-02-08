@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const footerLinks = [
   {
     heading: "Project",
@@ -17,7 +19,7 @@ const footerLinks = [
   {
     heading: "Resources",
     links: [
-      { label: "Quick Start", href: "https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start", external: true },
+      { label: "Getting Started", href: "/getting-started" },
       { label: "Architecture", href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/docs/COORDINATOR_ARCHITECTURE.md", external: true },
       { label: "Audio Processing", href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/docs/AUDIO_PROCESSING.md", external: true },
     ],
@@ -80,14 +82,23 @@ export default function Footer() {
               <ul className="flex flex-col gap-3">
                 {group.links.map((link) => (
                   <li key={link.label}>
-                    <a
-                      href={link.href}
-                      target={link.external ? "_blank" : undefined}
-                      rel={link.external ? "noopener noreferrer" : undefined}
-                      className="text-sm text-text-secondary transition-colors hover:text-white"
-                    >
-                      {link.label}
-                    </a>
+                    {link.external ? (
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-text-secondary transition-colors hover:text-white"
+                      >
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        href={link.href}
+                        className="text-sm text-text-secondary transition-colors hover:text-white"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
