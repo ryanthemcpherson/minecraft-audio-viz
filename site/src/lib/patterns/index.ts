@@ -49,6 +49,7 @@ export interface PatternMeta {
   name: string;
   description: string;
   category: string;
+  staticCamera: boolean;
   createPattern: () => VisualizationPattern;
 }
 
@@ -62,6 +63,7 @@ interface PatternEntry {
   id: string;
   cls: PatternClass;
   category: string;
+  staticCamera?: boolean;
 }
 
 const REGISTRY: PatternEntry[] = [
@@ -97,10 +99,10 @@ const REGISTRY: PatternEntry[] = [
   { id: "ocean", cls: OceanWaves, category: "Organic" },
   { id: "fireflies", cls: Fireflies, category: "Organic" },
 
-  // Spectrum Analyzers (3)
-  { id: "bars", cls: SpectrumBars, category: "Spectrum" },
-  { id: "tubes", cls: SpectrumTubes, category: "Spectrum" },
-  { id: "circle", cls: SpectrumCircle, category: "Spectrum" },
+  // Spectrum Analyzers (3) — fixed camera, no rotation
+  { id: "bars", cls: SpectrumBars, category: "Spectrum", staticCamera: true },
+  { id: "tubes", cls: SpectrumTubes, category: "Spectrum", staticCamera: true },
+  { id: "circle", cls: SpectrumCircle, category: "Spectrum", staticCamera: true },
 ];
 
 export function listPatterns(): PatternMeta[] {
@@ -109,6 +111,7 @@ export function listPatterns(): PatternMeta[] {
     name: entry.cls.patternName,
     description: entry.cls.description,
     category: entry.category,
+    staticCamera: entry.staticCamera ?? false,
     createPattern: () => new entry.cls(),
   }));
 }

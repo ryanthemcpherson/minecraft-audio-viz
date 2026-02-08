@@ -59,6 +59,7 @@ export default function PatternGallery() {
               name={pattern.name}
               description={pattern.description}
               category={pattern.category}
+              staticCamera={pattern.staticCamera}
               createPattern={pattern.createPattern}
               index={i}
             />

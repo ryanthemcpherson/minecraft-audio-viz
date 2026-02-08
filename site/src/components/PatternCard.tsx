@@ -10,6 +10,7 @@ interface PatternCardProps {
   name: string;
   description: string;
   category: string;
+  staticCamera: boolean;
   createPattern: () => VisualizationPattern;
   index: number;
 }
@@ -26,6 +27,7 @@ export default function PatternCard({
   name,
   description,
   category,
+  staticCamera,
   createPattern,
   index,
 }: PatternCardProps) {
@@ -112,7 +114,7 @@ export default function PatternCard({
               }}
               frameloop="always"
             >
-              <PatternScene pattern={pattern} phaseOffset={phaseOffset} />
+              <PatternScene pattern={pattern} phaseOffset={phaseOffset} staticCamera={staticCamera} />
             </Canvas>
           </Suspense>
         ) : (

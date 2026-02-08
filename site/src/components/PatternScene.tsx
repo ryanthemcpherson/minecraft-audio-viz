@@ -22,9 +22,10 @@ const BAND_COLORS = [
 interface PatternSceneProps {
   pattern: VisualizationPattern;
   phaseOffset: number;
+  staticCamera?: boolean;
 }
 
-export default function PatternScene({ pattern, phaseOffset }: PatternSceneProps) {
+export default function PatternScene({ pattern, phaseOffset, staticCamera = false }: PatternSceneProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const groupRef = useRef<THREE.Group>(null);
   const maxCount = pattern.config.entityCount;
@@ -56,34 +57,41 @@ export default function PatternScene({ pattern, phaseOffset }: PatternSceneProps
     const scale3d = 6;
     const prev = prevPositions.current!;
 
-    // First pass: compute centroid of visible entities
-    let cx = 0, cy = 0, cz = 0, visCount = 0;
-    for (let i = 0; i < entities.length; i++) {
-      if (i < maxCount && entities[i].visible) {
-        cx += entities[i].x;
-        cy += entities[i].y;
-        cz += entities[i].z;
-        visCount++;
-      }
-    }
-    if (visCount > 0) {
-      cx /= visCount;
-      cy /= visCount;
-      cz /= visCount;
-    } else {
-      cx = 0.5;
-      cy = 0.5;
-      cz = 0.5;
-    }
-
-    // Smooth the center so it doesn't jitter
-    // Snap quickly on the first few frames, then smooth
     const sc = smoothCenter.current;
-    frameCount.current++;
-    const centerLerp = frameCount.current < 10 ? 0.5 : 0.08;
-    sc.x += (cx - sc.x) * centerLerp;
-    sc.y += (cy - sc.y) * centerLerp;
-    sc.z += (cz - sc.z) * centerLerp;
+
+    if (staticCamera) {
+      // Fixed center for spectrum-style patterns — no jiggle
+      sc.x = 0.5;
+      sc.y = 0.35;
+      sc.z = 0.5;
+    } else {
+      // Dynamic centroid tracking for 3D patterns
+      let cx = 0, cy = 0, cz = 0, visCount = 0;
+      for (let i = 0; i < entities.length; i++) {
+        if (i < maxCount && entities[i].visible) {
+          cx += entities[i].x;
+          cy += entities[i].y;
+          cz += entities[i].z;
+          visCount++;
+        }
+      }
+      if (visCount > 0) {
+        cx /= visCount;
+        cy /= visCount;
+        cz /= visCount;
+      } else {
+        cx = 0.5;
+        cy = 0.5;
+        cz = 0.5;
+      }
+
+      // Snap quickly on the first few frames, then smooth
+      frameCount.current++;
+      const centerLerp = frameCount.current < 10 ? 0.5 : 0.08;
+      sc.x += (cx - sc.x) * centerLerp;
+      sc.y += (cy - sc.y) * centerLerp;
+      sc.z += (cz - sc.z) * centerLerp;
+    }
 
     for (let i = 0; i < maxCount; i++) {
       if (i < entities.length && entities[i].visible) {
@@ -135,8 +143,8 @@ export default function PatternScene({ pattern, phaseOffset }: PatternSceneProps
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
-    // Slow auto-rotate
-    if (groupRef.current) {
+    // Slow auto-rotate (skip for static camera patterns)
+    if (groupRef.current && !staticCamera) {
       groupRef.current.rotation.y = time * 0.15;
     }
   });
