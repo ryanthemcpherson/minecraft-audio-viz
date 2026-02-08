@@ -290,12 +290,16 @@ function VisualizerCanvas() {
         height: "100%",
       }}
       frameloop="always"
+      onCreated={({ gl }) => {
+        gl.toneMapping = THREE.ACESFilmicToneMapping;
+        gl.toneMappingExposure = 1.2;
+      }}
     >
-      <ambientLight intensity={0.3} />
+      <ambientLight intensity={0.4} />
       <pointLight position={[5, 8, 5]} intensity={0.6} color="#00D4FF" />
       <pointLight position={[-5, 6, -3]} intensity={0.4} color="#8B5CF6" />
       <pointLight position={[0, 3, -5]} intensity={0.3} color="#FF006E" />
-      <fog attach="fog" args={["#0a0a0a", 6, 18]} />
+      <fog attach="fog" args={["#0a0a0a", 8, 24]} />
       <Scene />
     </Canvas>
   );

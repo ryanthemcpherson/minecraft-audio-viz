@@ -12,17 +12,17 @@ export default function Hero() {
   return (
     <section className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 pt-20">
       {/* Three.js Visualizer Background */}
-      <div className="pointer-events-none absolute inset-0">
+      <div className="pointer-events-none absolute inset-0 dither-overlay">
         <VisualizerBackground />
 
-        {/* Dark gradient overlay for text readability */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(10,10,10,0.4)_50%,rgba(10,10,10,0.8)_100%)]" />
+        {/* Dark gradient overlay for text readability – smoother multi-stop */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(10,10,10,0.05)_20%,rgba(10,10,10,0.15)_35%,rgba(10,10,10,0.3)_50%,rgba(10,10,10,0.5)_65%,rgba(10,10,10,0.7)_80%,rgba(10,10,10,0.85)_100%)]" />
 
-        {/* Bottom fade to next section */}
-        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[#0a0a0a] to-transparent" />
+        {/* Bottom fade to next section – extra stops to avoid banding */}
+        <div className="absolute inset-x-0 bottom-0 h-56 bg-[linear-gradient(to_top,#0a0a0a_0%,rgba(10,10,10,0.85)_25%,rgba(10,10,10,0.5)_55%,rgba(10,10,10,0.15)_80%,transparent_100%)]" />
 
         {/* Top fade for navbar blend */}
-        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#0a0a0a]/60 to-transparent" />
+        <div className="absolute inset-x-0 top-0 h-28 bg-[linear-gradient(to_bottom,rgba(10,10,10,0.55)_0%,rgba(10,10,10,0.25)_50%,transparent_100%)]" />
       </div>
 
       {/* Content */}
