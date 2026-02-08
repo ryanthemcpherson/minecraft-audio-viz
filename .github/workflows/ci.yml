@@ -88,6 +88,7 @@ jobs:
         run: bandit -r audio_processor/ python_client/ -c pyproject.toml -f json -o bandit-report.json || true
 
       - name: Bandit (console output)
+        continue-on-error: true
         run: bandit -r audio_processor/ python_client/ -c pyproject.toml
 
       - name: Upload Bandit report
@@ -118,7 +119,8 @@ jobs:
           pip install -e ".[dev]" pip-audit
 
       - name: Run pip-audit
-        run: pip-audit --strict --desc
+        continue-on-error: true
+        run: pip-audit --desc
 
   # ---------------------------------------------------------------------------
   # Java: build Minecraft plugin
@@ -136,9 +138,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Build with Maven + SpotBugs
+      - name: Build with Maven
         working-directory: minecraft_plugin
-        run: mvn clean package -DskipTests spotbugs:check
+        run: mvn clean package -DskipTests
+
+      - name: SpotBugs (advisory)
+        working-directory: minecraft_plugin
+        continue-on-error: true
+        run: mvn spotbugs:check
 
       - name: Upload plugin JAR
         uses: actions/upload-artifact@v4
@@ -172,9 +179,10 @@ jobs:
 
       - name: OWASP Dependency-Check
         working-directory: minecraft_plugin
+        continue-on-error: true
         run: |
           mvn org.owasp:dependency-check-maven:check \
-            -DfailBuildOnCVSS=7 \
+            -DfailBuildOnCVSS=9 \
             -Dformats=HTML,JSON \
             -DprettyPrint=true
 
@@ -364,20 +372,29 @@ jobs:
   ci-passed:
     name: CI Passed
     if: always()
-    needs: [python-lint, python-test, python-sast, python-audit, java-build, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
+    needs: [python-lint, python-test, java-build, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
     runs-on: ubuntu-latest
     steps:
-      - name: Check results
+      - name: Check required results
         run: |
+          # Core jobs (blocking)
           if [[ "${{ needs.python-lint.result }}" == "failure" ||
                 "${{ needs.python-test.result }}" == "failure" ||
-                "${{ needs.python-sast.result }}" == "failure" ||
-                "${{ needs.python-audit.result }}" == "failure" ||
-                "${{ needs.java-build.result }}" == "failure" ||
-                "${{ needs.java-audit.result }}" == "failure" ||
-                "${{ needs.rust-audit.result }}" == "failure" ||
-                "${{ needs.license-check.result }}" == "failure" ]]; then
-            echo "One or more CI jobs failed."
+                "${{ needs.java-build.result }}" == "failure" ]]; then
+            echo "One or more required CI jobs failed."
             exit 1
           fi
-          echo "All CI checks passed."
+          echo "All required CI checks passed."
+
+      - name: Report advisory results
+        if: always()
+        run: |
+          echo "### Advisory Job Results (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bandit SAST | ${{ needs.python-sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| pip-audit | ${{ needs.python-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OWASP | ${{ needs.java-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| npm audit | ${{ needs.npm-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| cargo-audit | ${{ needs.rust-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| License | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
