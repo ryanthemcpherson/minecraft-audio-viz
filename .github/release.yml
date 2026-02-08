@@ -1,0 +1,27 @@
+changelog:
+  exclude:
+    labels:
+      - dependencies
+    authors:
+      - dependabot
+  categories:
+    - title: "🚀 New Features"
+      labels:
+        - enhancement
+        - feature
+    - title: "🐛 Bug Fixes"
+      labels:
+        - bug
+        - fix
+    - title: "⚡ Performance"
+      labels:
+        - performance
+    - title: "🔒 Security"
+      labels:
+        - security
+    - title: "🏗️ CI/CD"
+      labels:
+        - ci
+    - title: "📦 Other Changes"
+      labels:
+        - "*"

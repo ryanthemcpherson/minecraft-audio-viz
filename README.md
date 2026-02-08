@@ -3,6 +3,10 @@
   <h1>MCAV — Minecraft Audio Visualizer</h1>
   <p><strong>Real-time audio → reactive visuals in Minecraft, browser, and beyond</strong></p>
 
+  [![CI](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/ci.yml)
+  [![Deploy](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/deploy.yml/badge.svg)](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/deploy.yml)
+  [![Security](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/security.yml/badge.svg)](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/security.yml)
+
   ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
   ![Java 21](https://img.shields.io/badge/java-21-orange.svg)
   ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)

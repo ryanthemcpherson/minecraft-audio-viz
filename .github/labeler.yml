@@ -1,0 +1,31 @@
+python:
+  - changed-files:
+    - any-glob-to-any-file: ['audio_processor/**', 'python_client/**', 'pyproject.toml']
+
+java:
+  - changed-files:
+    - any-glob-to-any-file: ['minecraft_plugin/**']
+
+dj-client:
+  - changed-files:
+    - any-glob-to-any-file: ['dj_client/**']
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file: ['.github/**']
+
+admin-panel:
+  - changed-files:
+    - any-glob-to-any-file: ['admin_panel/**']
+
+preview:
+  - changed-files:
+    - any-glob-to-any-file: ['preview_tool/**']
+
+docker:
+  - changed-files:
+    - any-glob-to-any-file: ['Dockerfile', 'docker-compose.yml']
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file: ['docs/**', '*.md']
