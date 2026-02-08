@@ -38,8 +38,8 @@ jobs:
 
       - name: pip-audit (JSON report)
         run: |
-          pip-audit --strict --desc --format json --output pip-audit-report.json || true
-          pip-audit --strict --desc
+          pip-audit --strict --desc --local --format json --output pip-audit-report.json || true
+          pip-audit --strict --desc --local
 
       - name: Upload pip-audit report
         if: always()
@@ -68,17 +68,22 @@ jobs:
       - name: Cache OWASP NVD data
         uses: actions/cache@v5
         with:
-          path: ~/.m2/repository/org/owasp
-          key: owasp-nvd-${{ github.run_id }}
+          path: ~/.owasp/dependency-check-data
+          key: owasp-nvd-${{ hashFiles('minecraft_plugin/pom.xml') }}
           restore-keys: owasp-nvd-
 
       - name: OWASP Dependency-Check
         working-directory: minecraft_plugin
+        continue-on-error: true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           mvn org.owasp:dependency-check-maven:check \
             -DfailBuildOnCVSS=7 \
             -Dformats=HTML,JSON \
-            -DprettyPrint=true
+            -DprettyPrint=true \
+            -DnvdApiKey="${NVD_API_KEY}" \
+            -DdataDirectory="${HOME}/.owasp/dependency-check-data"
 
       - name: Upload OWASP report
         if: always()

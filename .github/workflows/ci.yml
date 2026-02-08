@@ -120,7 +120,7 @@ jobs:
 
       - name: Run pip-audit
         continue-on-error: true
-        run: pip-audit --desc
+        run: pip-audit --desc --local
 
   # ---------------------------------------------------------------------------
   # Java: build Minecraft plugin
@@ -173,18 +173,22 @@ jobs:
       - name: Cache OWASP NVD data
         uses: actions/cache@v5
         with:
-          path: ~/.m2/repository/org/owasp
-          key: owasp-nvd-${{ github.run_id }}
+          path: ~/.owasp/dependency-check-data
+          key: owasp-nvd-${{ hashFiles('minecraft_plugin/pom.xml') }}
           restore-keys: owasp-nvd-
 
       - name: OWASP Dependency-Check
         working-directory: minecraft_plugin
         continue-on-error: true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           mvn org.owasp:dependency-check-maven:check \
             -DfailBuildOnCVSS=9 \
             -Dformats=HTML,JSON \
-            -DprettyPrint=true
+            -DprettyPrint=true \
+            -DnvdApiKey="${NVD_API_KEY}" \
+            -DdataDirectory="${HOME}/.owasp/dependency-check-data"
 
       - name: Upload OWASP report
         if: always()

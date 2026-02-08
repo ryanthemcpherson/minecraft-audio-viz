@@ -17,16 +17,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEV_SERVER: 192.168.1.204
-  DEV_USER: ryan
   DEPLOY_PATH: /home/ryan/minecraft-audio-viz
   PLUGINS_DIR: /home/ryan/minecraft-server/plugins
   JAVA_VERSION: '21'
-  PYTHON_VERSION: '3.12'
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build the Minecraft plugin JAR
+  # Build the Minecraft plugin JAR (on GitHub-hosted runner for caching)
   # ---------------------------------------------------------------------------
   build-plugin:
     name: Build Plugin JAR
@@ -52,7 +49,7 @@ jobs:
           path: minecraft_plugin/target/audioviz-plugin-*.jar
 
   # ---------------------------------------------------------------------------
-  # Run Python tests (unless skipped)
+  # Run Python tests (unless skipped) — on GitHub-hosted runner
   # ---------------------------------------------------------------------------
   test-python:
     name: Python Tests
@@ -61,10 +58,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -75,17 +72,20 @@ jobs:
         run: pytest audio_processor/tests/ -v --tb=short
 
   # ---------------------------------------------------------------------------
-  # Deploy to dev server
+  # Deploy on the dev server itself (self-hosted runner)
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to Dev Server
     needs: [build-plugin, test-python]
     if: always() && needs.build-plugin.result == 'success' && (needs.test-python.result == 'success' || needs.test-python.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev-server]
     environment: dev-server
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          clean: true
 
       - name: Download plugin JAR
         uses: actions/download-artifact@v4
@@ -93,17 +93,13 @@ jobs:
           name: audioviz-plugin
           path: ./plugin-jar/
 
-      - name: Set up SSH key
+      # --- Sync code to deploy path ---
+      - name: Sync repository to deploy path
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEV_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ env.DEV_SERVER }} >> ~/.ssh/known_hosts 2>/dev/null
+          echo "=== Syncing code to ${{ env.DEPLOY_PATH }} ==="
+          mkdir -p "${{ env.DEPLOY_PATH }}"
 
-      - name: Deploy code to server
-        run: |
-          # Sync the repository (excluding build artifacts and local-only files)
-          rsync -avz --delete \
+          rsync -a --delete \
             --exclude '.git' \
             --exclude 'node_modules' \
             --exclude 'target' \
@@ -113,51 +109,56 @@ jobs:
             --exclude '.env' \
             --exclude 'dj_client/src-tauri/target' \
             --exclude 'minecraft_plugin/target' \
-            ./ ${{ env.DEV_USER }}@${{ env.DEV_SERVER }}:${{ env.DEPLOY_PATH }}/
+            "$GITHUB_WORKSPACE/" "${{ env.DEPLOY_PATH }}/"
 
-      - name: Copy plugin JAR to server
+      # --- Copy plugin JAR ---
+      - name: Copy plugin JAR to plugins directory
         run: |
-          scp ./plugin-jar/audioviz-plugin-*.jar \
-            ${{ env.DEV_USER }}@${{ env.DEV_SERVER }}:${{ env.PLUGINS_DIR }}/
+          echo "=== Copying plugin JAR ==="
+          mkdir -p "${{ env.PLUGINS_DIR }}"
+          cp -v ./plugin-jar/audioviz-plugin-*.jar "${{ env.PLUGINS_DIR }}/"
 
-      - name: Run deploy script on server
+      # --- Install Python dependencies ---
+      - name: Install Python dependencies
+        working-directory: ${{ env.DEPLOY_PATH }}
         run: |
-          ssh ${{ env.DEV_USER }}@${{ env.DEV_SERVER }} << 'DEPLOY_EOF'
-            set -euo pipefail
-            cd ${{ env.DEPLOY_PATH }}
+          echo "=== Installing/updating Python dependencies ==="
+          pip install -e ".[dev]" --quiet 2>&1 | tail -5
 
-            echo "=== Installing/updating Python dependencies ==="
-            pip install -e ".[dev]" --quiet 2>&1 | tail -5
+      # --- Run tests on server ---
+      - name: Run tests on server
+        working-directory: ${{ env.DEPLOY_PATH }}
+        continue-on-error: true
+        run: |
+          echo "=== Running Python tests on server ==="
+          pytest audio_processor/tests/ -v --tb=short
 
-            echo "=== Running Python tests on server ==="
-            pytest audio_processor/tests/ -v --tb=short || {
-              echo "WARNING: Tests failed on server, but continuing deploy"
-            }
+      # --- Restart Minecraft server ---
+      - name: Restart Minecraft server
+        run: |
+          echo "=== Restarting Minecraft server ==="
+          sudo systemctl restart minecraft.service
 
-            echo "=== Restarting Minecraft server ==="
-            sudo systemctl restart minecraft.service
+          echo "=== Waiting for Minecraft to start ==="
+          sleep 10
 
-            echo "=== Waiting for Minecraft to start ==="
-            sleep 10
+          echo "=== Health check ==="
+          if systemctl is-active --quiet minecraft.service; then
+            echo "SUCCESS: minecraft.service is running"
+          else
+            echo "ERROR: minecraft.service failed to start"
+            sudo journalctl -u minecraft.service --no-pager -n 30
+            exit 1
+          fi
 
-            echo "=== Health check ==="
-            if systemctl is-active --quiet minecraft.service; then
-              echo "SUCCESS: minecraft.service is running"
-            else
-              echo "ERROR: minecraft.service failed to start"
-              sudo journalctl -u minecraft.service --no-pager -n 30
-              exit 1
-            fi
-
-            echo "=== Deploy complete ==="
-          DEPLOY_EOF
-
+      # --- Summary ---
       - name: Deploy summary
         if: always()
         run: |
           echo "### Deploy Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Server:** ${{ env.DEV_SERVER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner:** $(hostname) (self-hosted)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy Path:** ${{ env.DEPLOY_PATH }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

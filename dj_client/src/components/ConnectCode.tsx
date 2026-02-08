@@ -80,7 +80,7 @@ function ConnectCode({ value, onChange, label = 'Connect Code' }: ConnectCodePro
           {[0, 1, 2, 3].map(i => (
             <input
               key={i}
-              ref={el => (inputRefs.current[i] = el)}
+              ref={el => { inputRefs.current[i] = el; }}
               type="text"
               maxLength={1}
               value={value[i]}
@@ -99,7 +99,7 @@ function ConnectCode({ value, onChange, label = 'Connect Code' }: ConnectCodePro
           {[4, 5, 6, 7].map(i => (
             <input
               key={i}
-              ref={el => (inputRefs.current[i] = el)}
+              ref={el => { inputRefs.current[i] = el; }}
               type="text"
               maxLength={1}
               value={value[i]}
