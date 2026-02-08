@@ -33,7 +33,6 @@ export default function PatternCard({
 }: PatternCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
 
   // Only create the pattern instance when visible
   const pattern = useMemo(() => {
@@ -65,11 +64,7 @@ export default function PatternCard({
   return (
     <div
       ref={containerRef}
-      className={`group glass-card overflow-hidden rounded-2xl transition-all duration-300 ${
-        isHovered ? "ring-1 ring-white/20 shadow-lg shadow-electric-blue/5" : ""
-      }`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      className="group glass-card overflow-hidden rounded-2xl transition-shadow duration-300 hover:ring-1 hover:ring-white/20 hover:shadow-lg hover:shadow-electric-blue/5"
       style={{
         animationDelay: `${index * 0.05}s`,
       }}
