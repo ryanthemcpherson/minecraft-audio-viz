@@ -198,7 +198,7 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
                     );
 
                     if let Ok(json) = serde_json::to_string(&msg) {
-                        if tx.send(Message::Text(json)).await.is_err() {
+                        if tx.send(Message::Text(json.into())).await.is_err() {
                             log::error!("Failed to send audio frame - channel closed");
                             let mut app_state = state_arc.lock();
                             app_state.status.connected = false;

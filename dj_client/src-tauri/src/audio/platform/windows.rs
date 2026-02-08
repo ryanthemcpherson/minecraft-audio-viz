@@ -7,7 +7,7 @@
 
 use crate::audio::sources::{AudioSource, SourceType};
 
-use windows::core::ComInterface;
+use windows::core::Interface;
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Media::Audio::{
     eConsole, eRender, AudioSessionStateActive, IAudioSessionControl, IAudioSessionControl2,

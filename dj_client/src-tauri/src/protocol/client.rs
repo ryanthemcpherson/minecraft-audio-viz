@@ -160,7 +160,7 @@ impl DjClient {
         };
 
         write
-            .send(Message::Text(auth_msg))
+            .send(Message::Text(auth_msg.into()))
             .await
             .map_err(|e| ClientError::SendError(e.to_string()))?;
 
@@ -179,8 +179,8 @@ impl DjClient {
             }
 
             match tokio::time::timeout(remaining, read.next()).await {
-                Ok(Some(Ok(Message::Text(text)))) => {
-                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(Some(Ok(Message::Text(ref text)))) => {
+                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(text) {
                         let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                         match msg_type {
@@ -211,7 +211,7 @@ impl DjClient {
                                 let response = ClockSyncResponse::new(now);
                                 let json = serde_json::to_string(&response).unwrap();
                                 write
-                                    .send(Message::Text(json))
+                                    .send(Message::Text(json.into()))
                                     .await
                                     .map_err(|e| ClientError::SendError(e.to_string()))?;
                                 log::info!("Clock sync completed");
@@ -267,7 +267,7 @@ impl DjClient {
                     _ = shutdown_rx.recv() => {
                         // Send going offline message
                         let _ = write.send(Message::Text(
-                            serde_json::to_string(&GoingOfflineMessage::new()).unwrap()
+                            serde_json::to_string(&GoingOfflineMessage::new()).unwrap().into()
                         )).await;
                         let _ = write.close().await;
                         break;
@@ -282,8 +282,8 @@ impl DjClient {
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(server_msg) = serde_json::from_str::<ServerMessage>(&text) {
+                    Ok(Message::Text(ref text)) => {
+                        if let Ok(server_msg) = serde_json::from_str::<ServerMessage>(text) {
                             handle_server_message(&state_reader, &tx_reader, server_msg).await;
                         }
                     }
@@ -313,7 +313,7 @@ impl DjClient {
             loop {
                 interval.tick().await;
                 let msg = serde_json::to_string(&HeartbeatMessage::new()).unwrap();
-                if tx_heartbeat.send(Message::Text(msg)).await.is_err() {
+                if tx_heartbeat.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
             }
@@ -338,7 +338,7 @@ impl DjClient {
         let json =
             serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
 
-        tx.send(Message::Text(json))
+        tx.send(Message::Text(json.into()))
             .await
             .map_err(|e| ClientError::SendError(e.to_string()))?;
 
@@ -417,7 +417,7 @@ async fn handle_server_message(
 
             let response = ClockSyncResponse::new(now);
             let json = serde_json::to_string(&response).unwrap();
-            let _ = tx.send(Message::Text(json)).await;
+            let _ = tx.send(Message::Text(json.into())).await;
         }
         ServerMessage::HeartbeatAck(ack) => {
             // Calculate latency

@@ -54,6 +54,10 @@ jobs:
         working-directory: dj_client
         run: npx tsc --noEmit
 
+      - name: Build frontend
+        working-directory: dj_client
+        run: npm run build
+
       - name: Check Rust formatting
         working-directory: dj_client/src-tauri
         run: cargo fmt --check
