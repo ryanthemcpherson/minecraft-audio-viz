@@ -703,9 +703,7 @@ class Fountain(VisualizationPattern):
 
             # Respawn if below ground or on beat
             if y < 0 or (audio.is_beat and random.random() < 0.3):
-                x, y, z, vx, vy, vz = self._spawn_particle(audio, i)
-                age = 0.0
-                spin = random.uniform(-1.0, 1.0)
+                x, y, z, vx, vy, vz, age, spin = self._spawn_particle(audio, i)
 
             self._particles[i] = (x, y, z, vx, vy, vz, age, spin)
 
