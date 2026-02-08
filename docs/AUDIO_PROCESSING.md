@@ -7,637 +7,567 @@ Technical documentation for the minecraft-audio-viz audio analysis pipeline.
 ## Table of Contents
 
 1. [System Overview](#system-overview)
-2. [Audio Capture](#audio-capture)
-3. [Beat Detection Algorithm](#beat-detection-algorithm)
-4. [Frequency Band Generation](#frequency-band-generation)
-5. [Auto-Gain Control (AGC)](#auto-gain-control-agc)
-6. [Auto-Calibration System](#auto-calibration-system)
-7. [FFT Integration](#fft-integration)
+2. [DJ Client Audio Capture](#dj-client-audio-capture)
+3. [Client-Side FFT Analysis](#client-side-fft-analysis)
+4. [Beat Detection](#beat-detection)
+5. [WebSocket Protocol](#websocket-protocol)
+6. [VJ Server](#vj-server)
+7. [Visualization Patterns](#visualization-patterns)
 8. [Presets & Tuning](#presets--tuning)
 9. [Data Flow](#data-flow)
-10. [Performance Considerations](#performance-considerations)
+10. [Performance](#performance)
 
 ---
 
 ## System Overview
 
-The audio processing system transforms real-time audio input into visualization data for Minecraft and browser-based displays. The pipeline consists of:
+The audio processing system captures real-time audio on a DJ's machine, performs FFT analysis and beat detection locally, then streams the results to a central VJ server which runs visualization patterns and forwards entity updates to Minecraft and browser clients.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           AUDIO INPUT LAYER                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  Windows WASAPI (pycaw)          │  Optional FFT (pyaudiowpatch)            │
-│  - Per-application capture       │  - Real frequency analysis               │
-│  - Peak level metering           │  - True band separation                  │
-│  - Channel separation            │  - Onset detection enhancement           │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         SIGNAL PROCESSING LAYER                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  Auto-Gain Control (AGC)         │  Band Generation                         │
-│  - Rolling energy history        │  - 5 frequency bands                     │
-│  - Adaptive normalization        │  - Per-band smoothing                    │
-│  - Attack/release dynamics       │  - Spring physics simulation             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          BEAT DETECTION LAYER                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  1. Onset Strength Signal (OSS)  │  4. Beat Prediction                      │
-│  2. Adaptive Thresholding        │  5. Tempo Confidence                     │
-│  3. Tempo Estimation (IOI)       │  6. Phase Tracking                       │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            OUTPUT LAYER                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  WebSocket → Minecraft Plugin    │  WebSocket → Browser Preview             │
-│  - Entity positions              │  - Same entity data                      │
-│  - Audio state for sensors       │  - Band levels                           │
-│  - Beat triggers                 │  - Real-time visualization               │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                     DJ CLIENT (Tauri/Rust)                        │
+│                                                                  │
+│  WASAPI Loopback ─→ Circular Buffer ─→ FFT (rustfft) ─→ Bands   │
+│  (cpal, 48kHz)      (96k samples)      (1024-pt Hann)   Beat    │
+│                                                          BPM     │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │ WebSocket (~60fps)
+                           │ dj_audio_frame
+                           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                     VJ SERVER (Python)                            │
+│                                                                  │
+│  Multi-DJ Management ─→ Pattern Engine ─→ Entity Positions       │
+│  Auth / Connect Codes   28 patterns       Normalized (0-1)       │
+│  Preset Application     AudioState                               │
+└──────────────┬──────────────────────────────┬────────────────────┘
+               │                              │
+               ▼                              ▼
+┌──────────────────────┐       ┌──────────────────────────┐
+│  Minecraft Plugin    │       │  Browser Preview         │
+│  (WebSocket :8765)   │       │  (WebSocket :8766)       │
+│  Display Entities    │       │  Three.js 3D             │
+└──────────────────────┘       └──────────────────────────┘
 ```
 
 ---
 
-## Audio Capture
+## DJ Client Audio Capture
 
-### WASAPI Per-Application Capture
+The DJ Client is a Tauri desktop app (Rust backend, web frontend) that captures system audio and streams analysis results to the VJ server.
 
-The system uses Windows Audio Session API (WASAPI) via `pycaw` to capture audio from specific applications:
+### WASAPI Loopback Capture
 
-```python
-class AppAudioCapture:
-    def __init__(self, app_name: str = "spotify"):
-        self.app_name = app_name.lower()
-        self._session = None
-        self._meter = None
+Audio is captured via Windows Audio Session API (WASAPI) loopback using the `cpal` crate. This captures the default audio output device, meaning any audio playing on the system is captured.
+
+| Parameter | Value |
+|-----------|-------|
+| API | WASAPI shared-mode loopback |
+| Sample Rate | 48,000 Hz |
+| Channels | Mono (multi-channel averaged on capture) |
+| Sample Formats | F32, I16, U16 (auto-detected) |
+| Buffer Size | 2 seconds (96,000 samples circular buffer) |
+
+### Threading Architecture
+
+The capture system uses dedicated OS threads to avoid blocking the audio callback or the async runtime:
+
+```
+┌─────────────────────────────┐
+│  CPAL Audio Stream          │  Real-time callback (cannot block)
+│  multichannel → mono → buf  │
+└─────────────┬───────────────┘
+              │ Circular buffer (96k samples)
+              ▼
+┌─────────────────────────────┐
+│  Analysis Thread            │  Dedicated OS thread
+│  Every ~10ms:               │
+│  1. Read 1024 samples       │
+│  2. Hann window + FFT       │
+│  3. Band extraction + AGC   │
+│  4. Beat detection + BPM    │
+│  5. Update AnalysisResult   │
+└─────────────┬───────────────┘
+              │ Arc<Mutex<AnalysisResult>>
+              ▼
+┌─────────────────────────────┐
+│  Bridge Task (tokio async)  │  ~60fps (16ms interval)
+│  Read analysis → JSON       │
+│  Send via WebSocket         │
+└─────────────────────────────┘
 ```
 
-**Key Methods:**
+### Application Enumeration
 
-| Method | Purpose |
-|--------|---------|
-| `find_session()` | Locates audio session by process name |
-| `get_peak()` | Returns current peak level (0.0-1.0) |
-| `get_channel_peaks()` | Returns per-channel levels (stereo) |
-| `get_frame()` | Returns complete audio frame with beat detection |
-
-**Audio Frame Structure:**
-
-```python
-@dataclass
-class AppAudioFrame:
-    timestamp: float      # Unix timestamp
-    peak: float           # Peak level (0-1)
-    channels: List[float] # Per-channel levels [L, R]
-    is_beat: bool         # Beat detected this frame
-    beat_intensity: float # Beat strength (0-1)
-```
+The client can list active audio applications via WASAPI session enumeration (COM → `IAudioSessionManager2` → iterate sessions). This is used for UI display purposes; actual audio capture remains system-wide loopback.
 
 ---
 
-## Beat Detection Algorithm
+## Client-Side FFT Analysis
 
-The beat detection system implements a multi-stage approach based on research from Percival & Tzanetakis (2014) and modern real-time beat tracking systems.
+All FFT analysis runs in the DJ Client's Rust analysis thread, producing 5 normalized frequency bands at ~100 Hz update rate.
 
-### Stage 1: Onset Strength Signal (OSS)
+### FFT Configuration
 
-The onset strength signal detects sudden increases in energy, which typically correspond to drum hits or note onsets.
+| Parameter | Value |
+|-----------|-------|
+| Algorithm | Radix-2 (rustfft crate) |
+| Window Function | Hann |
+| FFT Size | 1024 samples |
+| Frequency Resolution | 46.875 Hz/bin (48000 / 1024) |
+| Nyquist Frequency | 24,000 Hz |
 
-```python
-# Half-wave rectified spectral flux (only positive changes)
-bass_flux = max(0, bass_energy - self._prev_bass_energy)
-full_flux = max(0, energy - self._prev_energy)
+### 5-Band Frequency Decomposition
 
-# Combined onset strength (bass-weighted for kick detection)
-onset_strength = (bass_flux * 0.7) + (full_flux * 0.3)
-```
+| Band | Name | Frequency Range | FFT Bins | Characteristics |
+|------|------|-----------------|----------|-----------------|
+| 0 | Bass | 40-250 Hz | ~1-5 | Kick drums, bass guitar, toms |
+| 1 | Low-Mid | 250-500 Hz | ~5-11 | Snare body, vocals, warmth |
+| 2 | Mid | 500-2000 Hz | ~11-43 | Vocals, lead instruments |
+| 3 | High-Mid | 2000-6000 Hz | ~43-128 | Presence, snare crack, clarity |
+| 4 | High | 6000-20000 Hz | ~128-512 | Hi-hats, cymbals, air |
 
-**Why Half-Wave Rectification?**
-- Only positive energy changes matter for onset detection
-- Negative changes (energy decreases) are ignored
-- This prevents false triggers during decay phases
+> **Note:** Sub-bass (20-40 Hz) is excluded because a 1024-sample FFT at 48 kHz cannot accurately resolve frequencies below ~47 Hz.
 
-**Bass Weighting (70/30 split):**
-- Kick drums dominate the bass frequencies (60-150 Hz)
-- Most music genres anchor beats on bass/kick
-- Full spectrum captures snare hits and other transients
-
-### Stage 2: Adaptive Thresholding
-
-Static thresholds fail across different songs and genres. The system uses a dynamic threshold based on recent onset statistics:
-
-```python
-recent_onsets = self._onset_history[-60:]  # Last ~1 second at 60fps
-mean_onset = statistics.mean(recent_onsets)
-std_onset = statistics.stdev(recent_onsets)
-
-# Dynamic threshold: mean + 1.2 standard deviations
-threshold = mean_onset + std_onset * 1.2
-
-# Minimum floor to prevent over-triggering in quiet sections
-threshold = max(threshold, 0.02)
-```
-
-**Threshold Formula:**
-```
-threshold = μ + (σ × 1.2)
-```
-
-Where:
-- `μ` = mean onset strength over ~1 second
-- `σ` = standard deviation of onset strengths
-- `1.2` = sensitivity multiplier (lower = more beats detected)
-
-### Stage 3: Peak Picking (Local Maximum Detection)
-
-A beat is only registered if the current frame is a local maximum:
-
-```python
-if len(self._onset_history) >= 5:
-    window = self._onset_history[-5:]
-    current = window[-1]
-    is_local_max = current >= max(window[:-1])
-    is_onset = current > threshold and is_local_max
-```
-
-This prevents multiple triggers for a single beat that spans several frames.
-
-### Stage 4: Tempo Estimation via Inter-Onset Intervals (IOI)
-
-The system estimates tempo by analyzing the time intervals between detected beats:
-
-```python
-if len(self._beat_times) >= 4:
-    intervals = []
-    for i in range(1, len(self._beat_times)):
-        interval = self._beat_times[i] - self._beat_times[i-1]
-        # Only consider reasonable intervals (60-200 BPM range)
-        if 0.3 < interval < 1.0:
-            intervals.append(interval)
-
-    if len(intervals) >= 3:
-        # Median for robustness against outliers
-        median_interval = statistics.median(intervals)
-        new_tempo = 60.0 / median_interval
-
-        # Exponential smoothing
-        alpha = 0.15
-        self._estimated_tempo = (1 - alpha) * self._estimated_tempo + alpha * new_tempo
-```
-
-**Why Median Instead of Mean?**
-- Outliers (missed beats, double-triggers) heavily skew the mean
-- Median provides robust center estimation
-- Example: intervals [0.5, 0.5, 0.5, 2.0] → mean=0.875, median=0.5
-
-**BPM Calculation:**
-```
-BPM = 60 / median_interval_seconds
-```
-
-### Stage 5: Tempo Confidence
-
-Confidence is calculated from the consistency of beat intervals:
-
-```python
-if len(intervals) >= 3:
-    interval_std = statistics.stdev(intervals)
-    # Lower std = more consistent = higher confidence
-    self._tempo_confidence = max(0, min(1, 1.0 - interval_std * 5))
-```
-
-| Interval Std Dev | Confidence | Interpretation |
-|------------------|------------|----------------|
-| 0.00 | 1.0 | Perfect consistency |
-| 0.10 | 0.5 | Moderate consistency |
-| 0.20+ | 0.0 | Poor/inconsistent |
-
-### Stage 6: Beat Prediction (Gap Filling)
-
-When tempo confidence is high, the system can predict expected beats to fill gaps where detection failed:
-
-```python
-if self._tempo_confidence > 0.5 and not is_beat:
-    beat_period = 60.0 / self._estimated_tempo
-    time_since_last = current_time - self._last_beat_time
-
-    # Calculate phase position
-    expected_beats = time_since_last / beat_period
-    fractional = expected_beats - int(expected_beats)
-
-    # If near a beat boundary (within 10% of period)
-    if fractional < 0.1 or fractional > 0.9:
-        # Only predict if some onset activity present
-        if onset_strength > mean_onset * 0.8:
-            is_beat = True
-            intensity = 0.6  # Lower intensity for predicted beats
-```
-
-**Phase Tracking Visualization:**
-```
-Time →  |-------|-------|-------|-------|
-Beats   ↓       ↓       ?       ↓
-                        ↑
-                  Predicted (weak onset detected near expected time)
-```
-
----
-
-## Frequency Band Generation
-
-When FFT is unavailable, the system generates synthetic frequency bands from peak energy:
-
-### Band Configuration
-
-| Band | Name | Frequency Range | Characteristics |
-|------|------|-----------------|-----------------|
-| 0 | Sub-Bass | 20-60 Hz | Sustained, powerful, slow decay |
-| 1 | Bass | 60-250 Hz | Kick drums, bass instruments |
-| 2 | Low-Mid | 250-500 Hz | Body, warmth |
-| 3 | Mid | 500-2000 Hz | Vocals, lead instruments |
-| 4 | Upper-Mid | 2000-4000 Hz | Presence, clarity |
-| 5 | High | 4000-20000 Hz | Air, sparkle, transients |
-
-### Band Generation Pipeline
+### Band Calculation Pipeline
 
 ```
-┌─────────────────┐
-│   Raw Peak      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Auto-Gain      │ ← Rolling history normalization
-│  Control        │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Transient      │ ← Peak delta detection
-│  Detection      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Per-Band       │ ← Different weights per frequency
-│  Calculation    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Phase          │ ← Organic movement via sine waves
-│  Modulation     │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Adaptive       │ ← Per-band history normalization
-│  Normalization  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Energy Decay   │ ← Peak hold with per-band decay rates
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Beat Response  │ ← Per-band beat boost
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Temporal       │ ← Attack/release smoothing
-│  Smoothing      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Spring         │ ← Physical simulation for natural motion
-│  Physics        │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Output         │ ← Soft ceiling compression
-│  Clamping       │
-└─────────────────┘
+1024 samples → Hann Window → FFT → Magnitude Spectrum
+    → Sum magnitudes per band bin range
+    → Divide by bin count (energy average)
+    → Per-band AGC normalization
+    → Envelope following (attack/release)
+    → Output: 5 values in 0.0-1.0 range
 ```
 
-### Temporal Smoothing (Attack/Release)
+### Per-Band AGC (Automatic Gain Control)
 
-```python
-if target > self._smoothed_bands[i]:
-    smooth_factor = self._smooth_attack   # Fast (0.35)
+Each band maintains an independent running maximum for normalization:
+
+```
+if band_value > band_max:
+    band_max = band_value                    # Instant peak capture
 else:
-    smooth_factor = self._smooth_release  # Slow (0.08)
+    band_max *= 0.997                        # Slow decay (~3s to halve at 60fps)
+    band_max = max(band_max, 0.001)          # Floor to prevent division by zero
 
-self._smoothed_bands[i] += (target - self._smoothed_bands[i]) * smooth_factor
+normalized = min(band_value / band_max, 1.0)
 ```
 
-**Exponential Moving Average (EMA):**
+This ensures quiet bands aren't suppressed by loud ones, and the visualization adapts to different volume levels automatically.
+
+### Envelope Following (Attack/Release)
+
+Asymmetric smoothing applied after normalization for responsive but smooth visuals:
+
 ```
-new_value = old_value + (target - old_value) × α
-```
-
-Where `α` is the smoothing factor:
-- Higher α = faster response
-- Attack > Release creates punchy response with smooth decay
-
-### Spring Physics Simulation
-
-Adds natural, organic motion to band levels:
-
-```python
-spring = 50.0 + (i * 10)   # Spring constant (50-100)
-damping = 6.0 + (i * 0.5)  # Damping factor (6-8.5)
-dt = 0.016                  # Time step (~60fps)
-
-displacement = self._smoothed_bands[i] - self._prev_bands[i]
-force = spring * displacement - damping * self._band_velocities[i]
-
-self._band_velocities[i] += force * dt
-new_value = self._prev_bands[i] + self._band_velocities[i] * dt
+if raw > current:
+    smoothed = current + (raw - current) * 0.35    # Attack: fast rise
+else:
+    smoothed = current + (raw - current) * 0.08    # Release: slow decay
 ```
 
-**Spring Equation:**
+The attack/release asymmetry creates punchy response to transients with smooth natural decay.
+
+### Peak Calculation
+
 ```
-F = -kx - cv
+peak = max(smoothed_bands[0..5])
 ```
-Where:
-- `k` = spring constant (stiffness)
-- `x` = displacement from equilibrium
-- `c` = damping coefficient
-- `v` = velocity
 
 ---
 
-## Auto-Gain Control (AGC)
+## Beat Detection
 
-AGC ensures consistent output levels regardless of source volume:
+Beat detection runs client-side on the bass band with adaptive thresholding.
 
-```python
-def _update_agc(self, peak: float) -> float:
-    # Add to rolling history
-    self._energy_history.append(peak)
+### Algorithm
 
-    # Calculate statistics
-    rolling_p90 = sorted(self._energy_history)[int(len(self._energy_history) * 0.9)]
-    reference = max(rolling_p90, rolling_avg * 1.2, 0.05)
+```
+1. Maintain 60-frame history of bass band values
 
-    # Calculate ideal gain
-    ideal_gain = self._agc_target / reference  # Target = 0.85
-    ideal_gain = clamp(ideal_gain, self._agc_min_gain, self._agc_max_gain)
+2. Calculate adaptive threshold:
+   average = mean(bass_history)
+   threshold = average * beat_threshold      # Default: 1.3
 
-    # Attack/release smoothing
-    if ideal_gain > self._agc_gain:
-        self._agc_gain += (ideal_gain - self._agc_gain) * 0.15  # Attack
-    else:
-        self._agc_gain += (ideal_gain - self._agc_gain) * 0.008 # Release
+3. Fire beat when ALL conditions met:
+   - bass > threshold                        # Above adaptive threshold
+   - bass > 0.2                              # Minimum energy gate
+   - cooldown == 0                           # Minimum 8 frames since last beat
 
-    return min(1.0, peak * self._agc_gain)
+4. On beat:
+   beat_intensity = min((bass - threshold) / max(average, 0.01), 1.0)
+   cooldown = 8                              # ~133ms at 60fps
 ```
 
-**AGC Parameters:**
+### Why Bass-Only Detection?
 
-| Parameter | Default | Purpose |
-|-----------|---------|---------|
-| `agc_target` | 0.85 | Target output level (85% of range) |
-| `agc_min_gain` | 1.0 | Never reduce below input |
-| `agc_max_gain` | 8.0 | Maximum boost multiplier |
-| `agc_attack` | 0.15 | Fast response to loud signals |
-| `agc_release` | 0.008 | Slow reduction to prevent pumping |
+Kick drums dominate the bass frequencies (40-250 Hz) and anchor the rhythmic foundation in virtually all modern music genres. Detecting beats on the bass band provides the most reliable and musically meaningful beat signal.
 
-**Why 90th Percentile?**
-- Ignores occasional loud spikes
-- More stable than using maximum
-- Prevents gain from being pulled down by rare peaks
+### BPM Estimation
+
+BPM is estimated from inter-beat intervals:
+
+1. Record timestamps of detected beats (keep last 20)
+2. Calculate intervals between consecutive beats
+3. Filter outliers outside 0.2-2.0 seconds (30-300 BPM range)
+4. Average valid intervals
+5. Convert: `BPM = 60 / average_interval`
+6. Clamp final result to 60-200 BPM
+
+Default BPM is 120 when insufficient beat history exists.
 
 ---
 
-## Auto-Calibration System
+## WebSocket Protocol
 
-The auto-calibration system adapts parameters based on detected music characteristics:
+### Authentication
 
-### Music Analysis
+DJs authenticate with the VJ server using one of two methods:
 
-```python
-def _auto_calibrate(self, energy: float, is_beat: bool):
-    # 1. Track energy variance
-    self._music_variance = min(1.0, energy_stdev / max(0.01, energy_mean) * 2)
-
-    # 2. Estimate tempo from beat intervals
-    if intervals:
-        avg_interval_frames = statistics.median(intervals)
-        self._estimated_bpm = 60 * 60 / avg_interval_frames  # At 60fps
+**Connect Code** (primary - for multi-DJ events):
+```json
+{
+  "type": "code_auth",
+  "code": "BEAT-7K3M",
+  "dj_name": "DJ Spark"
+}
 ```
 
-### Parameter Adjustment Rules
+Connect codes use the format `WORD-XXXX` where WORD is one of 24 memorable words (BEAT, BASS, DROP, WAVE, KICK, SYNC, etc.) and XXXX is 4 random characters (excluding confusables O/0/I/1/L). Codes expire after 30 minutes and are single-use.
 
-| BPM Range | Attack | Release | Music Type |
-|-----------|--------|---------|------------|
-| > 150 | 0.6 | 0.12 | Fast (EDM, D&B) |
-| 110-150 | 0.4 | 0.08 | Medium (House, Pop) |
-| < 110 | 0.25 | 0.05 | Slow (Chill, Ambient) |
-
-**Beat Threshold Adjustment:**
-```python
-target_threshold = 1.1 + self._music_variance * 0.5  # Range: 1.1 to 1.6
+**Direct Credentials** (for private/testing):
+```json
+{
+  "type": "dj_auth",
+  "dj_id": "tauri_dj",
+  "dj_key": "",
+  "dj_name": "Local DJ"
+}
 ```
-- High variance music → Higher threshold (prevent false positives)
-- Low variance music → Lower threshold (more sensitivity)
+
+### Audio Frame Message
+
+Sent from DJ Client to VJ Server at ~60 fps:
+
+```json
+{
+  "type": "dj_audio_frame",
+  "seq": 42,
+  "bands": [0.8, 0.6, 0.5, 0.3, 0.2],
+  "peak": 0.8,
+  "beat": true,
+  "beat_i": 0.75,
+  "bpm": 128.0,
+  "ts": 1707234567.891
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `seq` | integer | Monotonic frame counter |
+| `bands` | float[5] | Normalized frequency bands (0.0-1.0) |
+| `peak` | float | Maximum of bands |
+| `beat` | boolean | Beat detected this frame |
+| `beat_i` | float | Beat intensity (0.0-1.0) |
+| `bpm` | float | Estimated tempo |
+| `ts` | float | Unix timestamp (seconds.ms) |
+
+### Handshake Sequence
+
+```
+Client                              Server
+  │                                    │
+  │──── code_auth / dj_auth ──────────>│
+  │                                    │
+  │<──── auth_success ─────────────────│
+  │<──── clock_sync_request ───────────│
+  │                                    │
+  │──── clock_sync_response ──────────>│
+  │                                    │
+  │  [Connection established]          │
+  │                                    │
+  │──── dj_audio_frame (60fps) ──────>│
+  │──── dj_heartbeat (every 2s) ─────>│
+  │<──── heartbeat_ack ────────────────│
+```
+
+### Server-to-Client Messages
+
+| Message | Payload | Purpose |
+|---------|---------|---------|
+| `auth_success` | `dj_id`, `dj_name`, `is_active` | Confirm authentication |
+| `auth_error` | `error` | Authentication failure |
+| `status_update` | `is_active` | DJ active/inactive toggle |
+| `clock_sync_request` | `server_time` | RTT calculation |
+| `heartbeat_ack` | `server_time` | Latency measurement |
+| `pattern_sync` | `pattern`, `config` | Current pattern info |
+| `config_sync` | `entity_count`, `zone` | Zone configuration |
+| `preset_sync` | `preset` | Active audio preset |
+| `effect_triggered` | `effect` | Particle effect fired |
 
 ---
 
-## FFT Integration
+## VJ Server
 
-When available, real FFT analysis provides true frequency separation:
+The VJ Server (`audio_processor/vj_server.py`) is the central hub that receives audio frames from DJs, runs the pattern engine, and broadcasts visualization data to Minecraft and browser clients.
 
-### HybridAnalyzer
+### Multi-DJ Management
 
-The `HybridAnalyzer` class provides:
-- Real-time FFT via WASAPI loopback
-- Configurable FFT size (512-4096 samples)
-- Low-latency mode option
-- Fallback to synthetic bands
+- Multiple DJs can connect simultaneously
+- Only one DJ is "active" at a time (their audio drives the visualization)
+- VJ admin can switch active DJ, manage queue, and trigger effects
+- DJs are tracked with connection health, frame rate, and latency metrics
 
-**Latency Comparison:**
+### Message Forwarding
 
-| Mode | FFT Size | FFT Latency | Hop Interval | Total |
-|------|----------|-------------|--------------|-------|
-| Normal | 2048 | ~43ms | ~11ms | ~55ms |
-| Low-Latency | 1024 | ~21ms | ~5ms | ~26ms |
+Certain messages from the admin panel are forwarded directly to the Minecraft plugin:
 
-### Band Mapping (FFT)
+- `set_zone_config`, `set_render_mode`, `set_renderer_backend`
+- `set_particle_effect`, `set_particle_config`
+- `init_pool`, `cleanup_zone`
+- `set_entity_glow`, `set_entity_brightness`
+- `set_hologram_config`, `set_particle_viz_config`
 
+### Server-Side Processing
+
+When the VJ server receives a `dj_audio_frame`, it:
+
+1. Updates the DJ's connection state (latency, frame count, bands)
+2. If this DJ is active, constructs an `AudioState` from the frame
+3. Runs the current visualization pattern's `calculate_entities()`
+4. Sends `batch_update` to Minecraft with entity positions
+5. Broadcasts the same data to browser preview clients
+
+---
+
+## Visualization Patterns
+
+Patterns transform audio state into entity positions for rendering in Minecraft.
+
+### AudioState
+
+```python
+class AudioState:
+    bands: List[float]       # 5 frequency band levels (0-1)
+    amplitude: float         # Overall amplitude (0-1)
+    is_beat: bool            # Beat detected this frame
+    beat_intensity: float    # Beat strength (0-1)
+    frame: int               # Frame counter
 ```
-FFT Bins → Frequency Bands
-├── Bins 1-4:   Sub-Bass (20-60 Hz)
-├── Bins 5-16:  Bass (60-250 Hz)
-├── Bins 17-32: Low-Mid (250-500 Hz)
-├── Bins 33-64: Mid (500-2000 Hz)
-├── Bins 65-128: Upper-Mid (2000-4000 Hz)
-└── Bins 129+:  High (4000+ Hz)
+
+### PatternConfig
+
+```python
+class PatternConfig:
+    entity_count: int = 16   # Number of visualization entities
+    zone_size: float = 10.0  # Size of visualization zone
+    beat_boost: float = 1.5  # Scale multiplier on beat frames
+    base_scale: float = 0.2  # Base entity scale
+    max_scale: float = 1.0   # Maximum entity scale
 ```
+
+### Available Patterns (28)
+
+**Original:**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| spectrum | StackedTower | Vertical bar equalizer |
+| ring | ExpandingSphere | Expanding/contracting sphere |
+| wave | DNAHelix | Double helix wave |
+| explode | Supernova | Explosive burst on beat |
+| columns | FloatingPlatforms | Levitating platforms |
+| orbit | AtomModel | Orbiting particles |
+| matrix | Fountain | Upward particle fountain |
+| heartbeat | BreathingCube | Pulsing cube |
+
+**Immersive:**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| mushroom | Mushroom | Growing mushroom shape |
+| skull | Skull | Skull formation |
+| sacred | SacredGeometry | Sacred geometry shapes |
+| vortex | Vortex | Spinning vortex tunnel |
+| pyramid | Pyramid | Reactive pyramid |
+| galaxy | GalaxySpiral | Spiral galaxy arms |
+| laser | LaserArray | Laser beam array |
+
+**Geometric/Abstract:**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| mandala | Mandala | Symmetric mandala |
+| tesseract | Tesseract | 4D hypercube projection |
+| crystal | CrystalGrowth | Growing crystal structure |
+
+**Cosmic/Space:**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| blackhole | BlackHole | Gravitational lensing effect |
+| nebula | Nebula | Nebula cloud formation |
+| wormhole | WormholePortal | Portal tunnel |
+
+**Organic/Nature:**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| aurora | Aurora | Northern lights curtain |
+| ocean | OceanWaves | Ocean wave simulation |
+| fireflies | Fireflies | Floating firefly swarm |
+
+**Spectrum Analyzers:**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| bars | SpectrumBars | Classic bar equalizer |
+| tubes | SpectrumTubes | Cylindrical spectrum |
+| circle | SpectrumCircle | Circular spectrum display |
+
+### Adding a Pattern
+
+Extend `VisualizationPattern` in `audio_processor/patterns.py`:
+
+```python
+class MyPattern(VisualizationPattern):
+    def calculate_entities(self, audio_state: AudioState, config: PatternConfig) -> List[EntityData]:
+        # Return list of entity positions (0-1 normalized coordinates)
+        ...
+```
+
+Register in `get_pattern()` and `list_patterns()`.
 
 ---
 
 ## Presets & Tuning
 
+Audio presets configure the beat detection sensitivity, attack/release dynamics, and per-band weighting. Presets are applied server-side and can be switched via the admin panel.
+
 ### Available Presets
 
-```python
-PRESETS = {
-    "auto": {
-        "attack": 0.35,
-        "release": 0.08,
-        "beat_threshold": 1.3,
-        "agc_max_gain": 8.0,
-        "beat_sensitivity": 1.0,
-        "bass_weight": 0.7,
-        "auto_calibrate": True
-    },
-    "edm": {
-        "attack": 0.7,           # Punchy response
-        "release": 0.15,         # Quick decay
-        "beat_threshold": 1.1,   # More beats detected
-        "agc_max_gain": 10.0,    # Higher dynamic range
-        "beat_sensitivity": 1.5, # Stronger beat response
-        "bass_weight": 0.85,     # Heavy kick focus
-        "auto_calibrate": False
-    },
-    "chill": {
-        "attack": 0.25,          # Smooth response
-        "release": 0.05,         # Gentle decay
-        "beat_threshold": 1.6,   # Fewer beats
-        "agc_max_gain": 6.0,
-        "beat_sensitivity": 0.7,
-        "bass_weight": 0.5,      # Balanced
-        "auto_calibrate": False
-    },
-    "rock": {
-        "attack": 0.5,
-        "release": 0.12,
-        "beat_threshold": 1.3,
-        "agc_max_gain": 8.0,
-        "beat_sensitivity": 1.2,
-        "bass_weight": 0.65,     # Drum-focused
-        "auto_calibrate": False
-    }
-}
-```
+| Preset | Attack | Release | Beat Threshold | Beat Sensitivity | Bass Weight | Style |
+|--------|--------|---------|----------------|------------------|-------------|-------|
+| **auto** | 0.35 | 0.08 | 1.3 | 1.0 | 0.7 | Balanced default, auto-calibration on |
+| **edm** | 0.7 | 0.15 | 1.1 | 1.5 | 0.85 | Punchy, heavy bass focus |
+| **chill** | 0.25 | 0.05 | 1.6 | 0.7 | 0.5 | Smooth, fewer beats |
+| **rock** | 0.5 | 0.12 | 1.3 | 1.2 | 0.65 | Drum-focused |
+| **hiphop** | 0.6 | 0.1 | 1.2 | 1.3 | 0.8 | 808 bass focus |
+| **classical** | 0.2 | 0.04 | 1.8 | 0.5 | 0.4 | Very smooth, minimal beats |
 
 ### Per-Band Sensitivity
 
-Each frequency band can be individually adjusted:
+Each preset can adjust individual band responsiveness:
 
-```python
-"band_sensitivity": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-#                    Sub  Bass Low  Mid  High Air
-```
+| Preset | Bass | Low-Mid | Mid | High-Mid | High |
+|--------|------|---------|-----|----------|------|
+| auto | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 |
+| edm | 1.5 | 0.8 | 0.9 | 1.2 | 1.0 |
+| chill | 0.9 | 1.0 | 1.1 | 1.2 | 1.3 |
+| rock | 1.2 | 1.0 | 1.0 | 0.9 | 0.8 |
+| hiphop | 1.4 | 0.9 | 1.0 | 1.1 | 0.9 |
+| classical | 0.8 | 1.0 | 1.2 | 1.3 | 1.4 |
 
-EDM Example:
-```python
-"band_sensitivity": [1.5, 1.3, 0.8, 0.9, 1.2, 1.0]
-# Boosts sub-bass and bass for kick detection
-```
+### Parameter Reference
+
+| Parameter | Range | Description |
+|-----------|-------|-------------|
+| `attack` | 0.0-1.0 | How fast bands rise (higher = snappier) |
+| `release` | 0.0-1.0 | How fast bands fall (higher = faster decay) |
+| `beat_threshold` | 0.5-3.0 | Multiplier over average for beat detection (lower = more beats) |
+| `beat_sensitivity` | 0.0-2.0 | Overall beat response strength |
+| `bass_weight` | 0.0-1.0 | Weight of bass in beat detection |
+| `agc_max_gain` | 1.0-10.0 | Maximum automatic gain boost |
+| `auto_calibrate` | bool | Self-tune parameters based on music |
 
 ---
 
 ## Data Flow
 
-### Per-Frame Processing
+### End-to-End Frame Flow
 
-```python
-# 1. Capture audio frame
-frame = self.capture.get_frame()
-
-# 2. Try FFT analysis (if available)
-fft_result = self.fft_analyzer.analyze() if self.fft_analyzer else None
-
-# 3. Generate bands (FFT or synthetic)
-if fft_result and self._using_fft:
-    bands = fft_result.bands
-else:
-    bands = self._generate_bands(frame.peak, frame.channels, frame.is_beat)
-
-# 4. Auto-calibrate (if enabled)
-if self._auto_calibrate_enabled:
-    self._auto_calibrate(frame.peak, frame.is_beat)
-
-# 5. Calculate entity positions
-audio_state = AudioState(
-    bands=bands,
-    amplitude=frame.peak,
-    is_beat=frame.is_beat,
-    beat_intensity=frame.beat_intensity,
-    frame=self._frame_count
-)
-entities = self._current_pattern.calculate_entities(audio_state)
-
-# 6. Send to outputs
-await self.viz_client.batch_update_fast(zone, entities, audio=audio_data)
-await self._broadcast_state(entities, bands, frame)
+```
+1. WASAPI captures system audio (48kHz mono)
+         │
+2. Samples pushed to 2-second circular buffer
+         │
+3. Analysis thread reads 1024 samples every ~10ms
+         │
+4. Hann window → FFT → 5-band extraction → AGC → envelope
+         │
+5. Beat detection on bass band → BPM estimation
+         │
+6. AnalysisResult shared via Arc<Mutex>
+         │
+7. Bridge task reads at ~60fps, builds JSON message
+         │
+8. dj_audio_frame sent via WebSocket to VJ Server (:9000)
+         │
+9. VJ Server constructs AudioState from frame
+         │
+10. Pattern engine calculates entity positions (normalized 0-1)
+         │
+11. batch_update sent to Minecraft (:8765) and browsers (:8766)
+         │
+12. Minecraft plugin converts to world coordinates via ZoneManager
 ```
 
-### Audio State Structure
+### Minecraft batch_update Message
 
-```python
-class AudioState:
-    bands: List[float]      # 5 frequency band levels (0-1)
-    amplitude: float        # Overall amplitude (0-1)
-    is_beat: bool           # Beat detected this frame
-    beat_intensity: float   # Beat strength (0-1)
-    frame: int              # Frame counter
+```json
+{
+  "type": "batch_update",
+  "zone": "main",
+  "entities": [
+    {
+      "id": "block_0",
+      "x": 0.5,
+      "y": 0.8,
+      "z": 0.5,
+      "scale": 0.6,
+      "band": 0,
+      "visible": true
+    }
+  ],
+  "bands": [0.8, 0.6, 0.4, 0.3, 0.2],
+  "amplitude": 0.75,
+  "is_beat": true,
+  "beat_intensity": 0.9
+}
 ```
+
+Entity positions use normalized coordinates (0-1) which the Minecraft plugin's ZoneManager converts to world coordinates based on the configured zone dimensions.
 
 ---
 
-## Performance Considerations
+## Performance
 
-### Target Frame Rate: 60 FPS (16.67ms per frame)
+### Latency Budget
 
-**Processing Budget:**
+| Stage | Typical Latency |
+|-------|-----------------|
+| WASAPI loopback capture | 10-20 ms |
+| FFT analysis (1024-pt) | < 1 ms |
+| WebSocket transmission | 1-5 ms (LAN) |
+| VJ Server processing | < 1 ms |
+| Minecraft entity update | 0-50 ms (tick-aligned) |
+| **Total end-to-end** | **~30-70 ms** |
 
-| Component | Time Budget | Actual |
-|-----------|-------------|--------|
-| Audio capture | 1ms | ~0.5ms |
-| FFT (if enabled) | 5ms | 2-4ms |
-| Band generation | 2ms | ~1ms |
-| Beat detection | 1ms | ~0.5ms |
-| Pattern calculation | 3ms | 1-2ms |
-| WebSocket send | 2ms | ~1ms |
-| **Total** | ~14ms | ~8ms |
+### DJ Client Threading Model
 
-### Optimization Techniques
+| Thread/Task | Purpose | Timing |
+|-------------|---------|--------|
+| CPAL audio callback | Capture → circular buffer | Real-time (hardware-driven) |
+| Analysis thread | FFT + beat detection | ~10 ms loop |
+| Bridge task (async) | Read analysis → WebSocket send | ~16 ms (60fps) |
+| Writer task (async) | Drain message queue to socket | Continuous |
+| Reader task (async) | Listen for server messages | Continuous |
+| Heartbeat task (async) | Send periodic heartbeats | Every 2 seconds |
 
-1. **Rolling Windows**: Fixed-size deques prevent memory growth
-2. **Vectorized Math**: NumPy for FFT operations
-3. **Fire-and-Forget**: `batch_update_fast()` doesn't wait for response
-4. **Median Filtering**: O(n log n) but more robust than iterative
-5. **Early Exit**: Skip processing for silent/inactive sections
+### Key Design Decisions
 
-### Memory Usage
-
-| Buffer | Size | Purpose |
-|--------|------|---------|
-| `_onset_history` | 256 frames | ~4 seconds for beat detection |
-| `_beat_times` | 10 seconds | Tempo estimation window |
-| `_energy_history` | 90 frames | AGC normalization |
-| `_band_histories` | 45×6 frames | Per-band normalization |
-
----
-
-## References
-
-1. Percival, G., & Tzanetakis, G. (2014). "Streamlined Tempo Estimation Based on Autocorrelation and Cross-correlation With Pulses"
-2. Bello, J. P., et al. (2005). "A Tutorial on Onset Detection in Music Signals"
-3. Dixon, S. (2006). "Onset Detection Revisited"
-4. Böck, S., & Schedl, M. (2011). "Enhanced Beat Tracking With Context-Aware Neural Networks"
+- **Dedicated threads for audio**: CPAL's real-time audio callback cannot block, so FFT runs in a separate OS thread rather than in the callback
+- **Arc<Mutex> over channels**: Analysis results are polled (latest-wins), not queued, so a shared mutex is simpler than a channel
+- **60fps bridge rate**: Matches typical display refresh and Minecraft's internal timing without overwhelming the network
+- **Per-band AGC**: Prevents loud bass from drowning out treble, maintaining visual balance across the frequency spectrum

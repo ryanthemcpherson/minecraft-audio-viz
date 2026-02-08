@@ -2,6 +2,11 @@ package com.audioviz.commands;
 
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.gui.menus.MainMenu;
+import com.audioviz.stages.Stage;
+import com.audioviz.stages.StageManager;
+import com.audioviz.stages.StageTemplate;
+import com.audioviz.stages.StageZoneConfig;
+import com.audioviz.stages.StageZoneRole;
 import com.audioviz.zones.VisualizationZone;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -14,6 +19,7 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class AudioVizCommand implements CommandExecutor, TabCompleter {
@@ -36,6 +42,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         switch (subCommand) {
             case "menu" -> handleMenuCommand(sender);
             case "zone" -> handleZoneCommand(sender, Arrays.copyOfRange(args, 1, args.length));
+            case "stage" -> handleStageCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "pool" -> handlePoolCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "status" -> handleStatusCommand(sender);
             case "test" -> handleTestCommand(sender, Arrays.copyOfRange(args, 1, args.length));
@@ -187,6 +194,245 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleStageCommand(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage <create|delete|list|info|activate|deactivate|move|rotate>");
+            return;
+        }
+
+        StageManager stageManager = plugin.getStageManager();
+        String action = args[0].toLowerCase();
+
+        switch (action) {
+            case "create" -> {
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage(ChatColor.RED + "Only players can create stages.");
+                    return;
+                }
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage create <name> <template>");
+                    sender.sendMessage(ChatColor.GRAY + "Templates: " + String.join(", ", stageManager.getTemplateNames()));
+                    return;
+                }
+                String stageName = args[1];
+                String templateName = args[2];
+
+                if (stageManager.stageExists(stageName)) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + stageName + "' already exists!");
+                    return;
+                }
+
+                if (stageManager.getTemplate(templateName) == null) {
+                    sender.sendMessage(ChatColor.RED + "Unknown template '" + templateName + "'.");
+                    sender.sendMessage(ChatColor.GRAY + "Available: " + String.join(", ", stageManager.getTemplateNames()));
+                    return;
+                }
+
+                Stage stage = stageManager.createStage(stageName, player.getLocation(), templateName);
+                if (stage != null) {
+                    sender.sendMessage(ChatColor.GREEN + "Created stage '" + stageName + "' from template '" + templateName + "'!");
+                    sender.sendMessage(ChatColor.GRAY + "Zones: " + stage.getRoleToZone().size() +
+                        " | Use '/audioviz stage activate " + stageName + "' to start");
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Failed to create stage.");
+                }
+            }
+
+            case "delete" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage delete <name>");
+                    return;
+                }
+                if (stageManager.deleteStage(args[1])) {
+                    sender.sendMessage(ChatColor.GREEN + "Deleted stage '" + args[1] + "' and all its zones.");
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                }
+            }
+
+            case "list" -> {
+                var stages = stageManager.getAllStages();
+                if (stages.isEmpty()) {
+                    sender.sendMessage(ChatColor.YELLOW + "No stages defined.");
+                    sender.sendMessage(ChatColor.GRAY + "Create one with: /audioviz stage create <name> <template>");
+                    return;
+                }
+                sender.sendMessage(ChatColor.GOLD + "=== Stages ===");
+                for (Stage stage : stages) {
+                    String status = stage.isActive() ? ChatColor.GREEN + "ACTIVE" : ChatColor.GRAY + "inactive";
+                    String pin = stage.isPinned() ? ChatColor.GOLD + "\u2605 " : "";
+                    String tag = stage.getTag().isEmpty() ? "" : ChatColor.GRAY + " #" + stage.getTag();
+                    sender.sendMessage(pin + ChatColor.AQUA + "- " + stage.getName() +
+                        ChatColor.GRAY + " [" + stage.getTemplateName() + ", " +
+                        stage.getRoleToZone().size() + " zones] " + status + tag);
+                }
+            }
+
+            case "info" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage info <name>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                sender.sendMessage(ChatColor.GOLD + "=== Stage: " + stage.getName() + " ===");
+                sender.sendMessage(ChatColor.WHITE + "ID: " + ChatColor.GRAY + stage.getId());
+                sender.sendMessage(ChatColor.WHITE + "Template: " + ChatColor.GRAY + stage.getTemplateName());
+                sender.sendMessage(ChatColor.WHITE + "Active: " + (stage.isActive() ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
+                sender.sendMessage(ChatColor.WHITE + "Pinned: " + (stage.isPinned() ? ChatColor.GOLD + "\u2605 Yes" : ChatColor.GRAY + "No"));
+                if (!stage.getTag().isEmpty()) {
+                    sender.sendMessage(ChatColor.WHITE + "Tag: " + ChatColor.GRAY + stage.getTag());
+                }
+                sender.sendMessage(ChatColor.WHITE + "Anchor: " + ChatColor.GRAY + formatLocation(stage.getAnchor()));
+                sender.sendMessage(ChatColor.WHITE + "Rotation: " + ChatColor.GRAY + stage.getRotation() + "\u00B0");
+                sender.sendMessage(ChatColor.WHITE + "Zones:");
+                for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+                    StageZoneRole role = entry.getKey();
+                    String zoneName = entry.getValue();
+                    StageZoneConfig config = stage.getZoneConfigs().get(role);
+                    int entities = plugin.getEntityPoolManager().getEntityCount(zoneName);
+                    sender.sendMessage(ChatColor.AQUA + "  " + role.getDisplayName() +
+                        ChatColor.GRAY + " -> " + zoneName +
+                        " [" + entities + " entities, pattern=" +
+                        (config != null ? config.getPattern() : "?") + "]");
+                }
+            }
+
+            case "activate" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage activate <name>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                stageManager.activateStage(stage);
+                sender.sendMessage(ChatColor.GREEN + "Stage '" + stage.getName() + "' activated! " +
+                    stage.getTotalEntityCount() + " entities spawned.");
+            }
+
+            case "deactivate" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage deactivate <name>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                stageManager.deactivateStage(stage);
+                sender.sendMessage(ChatColor.GREEN + "Stage '" + stage.getName() + "' deactivated.");
+            }
+
+            case "move" -> {
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage(ChatColor.RED + "Only players can move stages.");
+                    return;
+                }
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage move <name>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                stageManager.moveStage(stage, player.getLocation());
+                sender.sendMessage(ChatColor.GREEN + "Stage '" + stage.getName() + "' moved to your location.");
+            }
+
+            case "rotate" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage rotate <name> <degrees>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                try {
+                    float degrees = Float.parseFloat(args[2]);
+                    stageManager.rotateStage(stage, degrees);
+                    sender.sendMessage(ChatColor.GREEN + "Stage rotated to " + degrees + "\u00B0");
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(ChatColor.RED + "Invalid rotation value.");
+                }
+            }
+
+            case "pin" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage pin <name>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                stage.setPinned(!stage.isPinned());
+                stageManager.saveStages();
+                sender.sendMessage(stage.isPinned()
+                    ? ChatColor.GOLD + "\u2605 " + ChatColor.GREEN + "Stage '" + stage.getName() + "' pinned."
+                    : ChatColor.GRAY + "Stage '" + stage.getName() + "' unpinned.");
+            }
+
+            case "tag" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage tag <name> <tag|clear>");
+                    return;
+                }
+                Stage stage = stageManager.getStage(args[1]);
+                if (stage == null) {
+                    sender.sendMessage(ChatColor.RED + "Stage '" + args[1] + "' not found.");
+                    return;
+                }
+                if (args[2].equalsIgnoreCase("clear")) {
+                    stage.setTag("");
+                    sender.sendMessage(ChatColor.GREEN + "Tag cleared from stage '" + stage.getName() + "'.");
+                } else {
+                    stage.setTag(args[2]);
+                    sender.sendMessage(ChatColor.GREEN + "Stage '" + stage.getName() + "' tagged as '" + stage.getTag() + "'.");
+                }
+                stageManager.saveStages();
+            }
+
+            case "search" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage search <query>");
+                    return;
+                }
+                String query = args[1].toLowerCase();
+                var matches = stageManager.getAllStages().stream()
+                    .filter(s -> s.getName().toLowerCase().contains(query)
+                        || s.getTemplateName().toLowerCase().contains(query)
+                        || s.getTag().toLowerCase().contains(query))
+                    .toList();
+                if (matches.isEmpty()) {
+                    sender.sendMessage(ChatColor.YELLOW + "No stages matching '" + args[1] + "'.");
+                } else {
+                    sender.sendMessage(ChatColor.GOLD + "=== Search Results (" + matches.size() + ") ===");
+                    for (Stage s : matches) {
+                        String status = s.isActive() ? ChatColor.GREEN + "ACTIVE" : ChatColor.GRAY + "inactive";
+                        String pin = s.isPinned() ? ChatColor.GOLD + "\u2605 " : "";
+                        String tag = s.getTag().isEmpty() ? "" : ChatColor.GRAY + " #" + s.getTag();
+                        sender.sendMessage(pin + ChatColor.AQUA + s.getName() +
+                            ChatColor.GRAY + " [" + s.getTemplateName() + "] " + status + tag);
+                    }
+                }
+            }
+
+            default -> sender.sendMessage(ChatColor.RED + "Unknown stage action. Use create, delete, list, info, activate, deactivate, move, rotate, pin, tag, or search");
+        }
+    }
+
     private void handlePoolCommand(CommandSender sender, String[] args) {
         if (args.length < 2) {
             sender.sendMessage(ChatColor.RED + "Usage: /audioviz pool <init|cleanup> <zone> [count] [material]");
@@ -332,6 +578,15 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone list" + ChatColor.WHITE + " - List all zones");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone setsize <name> <x> <y> <z>" + ChatColor.WHITE + " - Set zone dimensions");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone info <name>" + ChatColor.WHITE + " - Show zone details");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage create <name> <template>" + ChatColor.WHITE + " - Create stage from template");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage delete <name>" + ChatColor.WHITE + " - Delete a stage");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage list" + ChatColor.WHITE + " - List all stages");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage info <name>" + ChatColor.WHITE + " - Show stage details");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage activate <name>" + ChatColor.WHITE + " - Activate a stage");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage deactivate <name>" + ChatColor.WHITE + " - Deactivate a stage");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage pin <name>" + ChatColor.WHITE + " - Toggle pin/favorite");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage tag <name> <tag|clear>" + ChatColor.WHITE + " - Set/clear category tag");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage search <query>" + ChatColor.WHITE + " - Search stages");
         sender.sendMessage(ChatColor.AQUA + "/audioviz pool init <zone> [count] [material]" + ChatColor.WHITE + " - Create entity pool");
         sender.sendMessage(ChatColor.AQUA + "/audioviz pool cleanup <zone>" + ChatColor.WHITE + " - Remove entities");
         sender.sendMessage(ChatColor.AQUA + "/audioviz test <zone> <animation>" + ChatColor.WHITE + " - Test animation");
@@ -343,10 +598,11 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("menu", "zone", "pool", "status", "test", "help"));
+            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "test", "help"));
         } else if (args.length == 2) {
             switch (args[0].toLowerCase()) {
                 case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info"));
+                case "stage" -> completions.addAll(Arrays.asList("create", "delete", "list", "info", "activate", "deactivate", "move", "rotate", "pin", "tag", "search"));
                 case "pool" -> completions.addAll(Arrays.asList("init", "cleanup"));
                 case "test" -> completions.addAll(plugin.getZoneManager().getZoneNames());
             }
@@ -357,8 +613,25 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                         completions.addAll(plugin.getZoneManager().getZoneNames());
                     }
                 }
+                case "stage" -> {
+                    if (args[1].equalsIgnoreCase("create") || args[1].equalsIgnoreCase("search")) {
+                        // Stage name/query - no auto-complete
+                    } else if (!args[1].equalsIgnoreCase("list")) {
+                        completions.addAll(plugin.getStageManager().getStageNames());
+                    }
+                }
                 case "pool" -> completions.addAll(plugin.getZoneManager().getZoneNames());
                 case "test" -> completions.addAll(Arrays.asList("wave", "pulse", "random"));
+            }
+        } else if (args.length == 4) {
+            if (args[0].equalsIgnoreCase("stage") && args[1].equalsIgnoreCase("create")) {
+                // Template names
+                completions.addAll(plugin.getStageManager().getTemplateNames());
+            } else if (args[0].equalsIgnoreCase("stage") && args[1].equalsIgnoreCase("tag")) {
+                // Tag suggestions: existing tags + common suggestions + "clear"
+                completions.add("clear");
+                completions.addAll(plugin.getStageManager().getAllTags());
+                completions.addAll(Arrays.asList("venue", "event", "test", "archive"));
             }
         } else if (args.length == 5 && args[0].equalsIgnoreCase("pool") && args[1].equalsIgnoreCase("init")) {
             // Material suggestions

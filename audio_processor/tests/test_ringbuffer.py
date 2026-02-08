@@ -2,17 +2,16 @@
 Tests for the lock-free SPSC ring buffer.
 """
 
-import pytest
-import numpy as np
 import threading
 import time
 
+import numpy as np
+import pytest
+
 from audio_processor.ringbuffer import (
-    SPSCRingBuffer,
-    AudioChunkBuffer,
-    BufferStats,
     CHUNK_FLAG_BEAT,
-    CHUNK_FLAG_SILENCE,
+    AudioChunkBuffer,
+    SPSCRingBuffer,
 )
 
 

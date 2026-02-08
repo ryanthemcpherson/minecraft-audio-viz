@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-preset.schema.json",
+  "title": "SetPresetMessage",
+  "description": "Apply an audio processing preset or custom settings.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_preset"
+    },
+    "v": {
+      "type": "string"
+    },
+    "preset": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named preset (e.g. default, edm, chill, rock, hiphop, classical, bass_heavy, vocal)"
+        },
+        {
+          "type": "object",
+          "description": "Custom audio settings dict",
+          "properties": {
+            "attack": { "type": "number", "minimum": 0, "maximum": 1 },
+            "release": { "type": "number", "minimum": 0, "maximum": 1 },
+            "beat_threshold": { "type": "number", "minimum": 0 },
+            "min_db": { "type": "number" },
+            "max_db": { "type": "number" }
+          }
+        }
+      ]
+    }
+  },
+  "required": ["type", "preset"]
+}

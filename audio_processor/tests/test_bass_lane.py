@@ -2,9 +2,10 @@
 Tests for the parallel bass lane (instant kick detection).
 """
 
-import pytest
-import numpy as np
 import time
+
+import numpy as np
+import pytest
 
 from audio_processor.fft_analyzer import BassLane
 
@@ -21,11 +22,7 @@ class TestBassLane:
     def test_create_custom(self):
         """Test creation with custom parameters."""
         bass_lane = BassLane(
-            sample_rate=48000,
-            cutoff_hz=100.0,
-            attack_ms=2.0,
-            release_ms=100.0,
-            onset_threshold=0.2
+            sample_rate=48000, cutoff_hz=100.0, attack_ms=2.0, release_ms=100.0, onset_threshold=0.2
         )
         assert bass_lane.sample_rate == 48000
         assert bass_lane.cutoff_hz == 100.0
@@ -55,8 +52,7 @@ class TestBassLane:
         timestamp = time.time()
         for i in range(10):
             energy, onset, strength = bass_lane.process_samples(
-                bass_sine[i*256:(i+1)*256],
-                timestamp + i * 0.006
+                bass_sine[i * 256 : (i + 1) * 256], timestamp + i * 0.006
             )
 
         # Should have non-zero bass energy
@@ -76,8 +72,7 @@ class TestBassLane:
         bass_energy = 0.0
         for i in range(10):
             bass_energy, onset, strength = bass_lane_bass.process_samples(
-                bass_sine[i*256:(i+1)*256],
-                timestamp + i * 0.006
+                bass_sine[i * 256 : (i + 1) * 256], timestamp + i * 0.006
             )
 
         # Test with high frequency
@@ -88,8 +83,7 @@ class TestBassLane:
         high_energy = 0.0
         for i in range(10):
             high_energy, onset, strength = bass_lane_high.process_samples(
-                high_sine[i*256:(i+1)*256],
-                timestamp + i * 0.006
+                high_sine[i * 256 : (i + 1) * 256], timestamp + i * 0.006
             )
 
         # The single-pole IIR filter will attenuate high frequencies relative to bass
@@ -101,7 +95,9 @@ class TestBassLane:
         raw_high = bass_lane_high.current_envelope
 
         # High frequency raw envelope should be significantly lower
-        assert raw_high < raw_bass * 0.5, f"High freq raw {raw_high} should be << bass raw {raw_bass}"
+        assert raw_high < raw_bass * 0.5, (
+            f"High freq raw {raw_high} should be << bass raw {raw_bass}"
+        )
 
     def test_onset_detection(self):
         """Test onset detection on transient."""
@@ -111,7 +107,7 @@ class TestBassLane:
             cutoff_hz=150.0,
             attack_ms=1.0,
             release_ms=50.0,
-            onset_threshold=0.1
+            onset_threshold=0.1,
         )
 
         # Simulate a kick drum transient:
@@ -130,10 +126,8 @@ class TestBassLane:
         # Process the transient
         onset_detected = False
         for i in range(4):
-            chunk = kick[i*128:(i+1)*128]
-            energy, onset, strength = bass_lane.process_samples(
-                chunk, 0.2 + i * 0.003
-            )
+            chunk = kick[i * 128 : (i + 1) * 128]
+            energy, onset, strength = bass_lane.process_samples(chunk, 0.2 + i * 0.003)
             if onset:
                 onset_detected = True
                 break
@@ -208,7 +202,7 @@ class TestBassLane:
             audio = np.sin(2 * np.pi * 80 * t).astype(np.float32) * amplitude
 
             for i in range(5):
-                bass_lane.process_samples(audio[i*100:(i+1)*100], time.time())
+                bass_lane.process_samples(audio[i * 100 : (i + 1) * 100], time.time())
 
             # Check normalized envelope is in valid range
             assert 0.0 <= bass_lane.normalized_envelope <= 1.0
@@ -223,10 +217,10 @@ class TestBassLaneIntegration:
         from audio_processor.fft_analyzer import FFTResult
 
         # Verify FFTResult has bass lane fields
-        assert hasattr(FFTResult, '__dataclass_fields__')
+        assert hasattr(FFTResult, "__dataclass_fields__")
         fields = FFTResult.__dataclass_fields__
-        assert 'instant_bass' in fields
-        assert 'instant_kick_onset' in fields
+        assert "instant_bass" in fields
+        assert "instant_kick_onset" in fields
 
 
 if __name__ == "__main__":

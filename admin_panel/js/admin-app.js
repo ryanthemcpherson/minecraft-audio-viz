@@ -614,7 +614,7 @@ class AdminApp {
         });
 
         // Show loading indicator on zone panel
-        const zonePanel = document.getElementById('zones-panel');
+        const zonePanel = document.getElementById('zone-panel');
         if (zonePanel) {
             zonePanel.classList.toggle('loading', loading);
         }
@@ -905,6 +905,7 @@ class AdminApp {
         const isEnabled = this.state.enabledParticleEffects.has(effectId);
         this.ws.send({
             type: 'set_particle_effect',
+            zone: this.state.zone.name || 'main',
             effect: effectId,
             enabled: !isEnabled
         });
@@ -913,6 +914,7 @@ class AdminApp {
     _sendParticleConfig(config) {
         this.ws.send({
             type: 'set_particle_config',
+            zone: this.state.zone.name || 'main',
             ...config
         });
     }
@@ -1423,6 +1425,12 @@ class AdminApp {
     }
 
     _handleKeyboard(e) {
+        // Escape key closes any open modal regardless of focus
+        if (e.key === 'Escape') {
+            this._hideCodeModal();
+            return;
+        }
+
         // Ignore if typing in an input
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
             return;

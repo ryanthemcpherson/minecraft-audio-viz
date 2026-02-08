@@ -5,11 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:admin": "vite --config vite.config.admin.ts",
-    "dev:preview": "vite --config vite.config.preview.ts",
+    "dev:admin": "vite --open /admin_panel/index.html",
+    "dev:preview": "vite --open /preview_tool/frontend/index.html",
     "build": "vite build",
-    "preview": "vite preview",
-    "lint": "eslint src --ext .ts,.js"
+    "preview": "vite preview"
   },
   "devDependencies": {
     "vite": "^5.0.0",

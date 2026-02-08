@@ -16,25 +16,27 @@ import json
 import logging
 import random
 import time
-from typing import Optional, Callable, List, TYPE_CHECKING
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 if TYPE_CHECKING:
+    from audio_processor.patterns import PatternConfig, VisualizationPattern
     from python_client.viz_client import VizClient
-    from audio_processor.patterns import VisualizationPattern, PatternConfig, AudioState
 
 try:
     import websockets
+
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
 
-logger = logging.getLogger('dj_relay')
+logger = logging.getLogger("dj_relay")
 
 
 @dataclass
 class DJRelayConfig:
     """Configuration for DJ relay mode."""
+
     vj_server_url: str = "ws://localhost:9000"
     dj_id: str = "dj_1"
     dj_name: str = "DJ 1"
@@ -77,9 +79,9 @@ class DJRelay:
         self._heartbeat_failures = 0
 
         # Direct mode - Minecraft connection and pattern engine
-        self.viz_client: Optional['VizClient'] = None
-        self.pattern: Optional['VisualizationPattern'] = None
-        self.pattern_config: Optional['PatternConfig'] = None
+        self.viz_client: Optional["VizClient"] = None
+        self.pattern: Optional["VisualizationPattern"] = None
+        self.pattern_config: Optional["PatternConfig"] = None
         self._pattern_name: str = "spectrum"
         self._mc_connected: bool = False  # Track Minecraft connection status
         self._zone: str = config.zone
@@ -102,7 +104,7 @@ class DJRelay:
         self,
         on_status_change: Optional[Callable[[bool], None]] = None,
         on_disconnect: Optional[Callable[[], None]] = None,
-        on_pattern_change: Optional[Callable[[str], None]] = None
+        on_pattern_change: Optional[Callable[[str], None]] = None,
     ):
         """Set callback functions."""
         self._on_status_change = on_status_change
@@ -123,33 +125,31 @@ class DJRelay:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                logger.info(f"Connecting to VJ server: {self.config.vj_server_url} (attempt {attempt}/{max_attempts})")
+                logger.info(
+                    f"Connecting to VJ server: {self.config.vj_server_url} (attempt {attempt}/{max_attempts})"
+                )
                 self._websocket = await asyncio.wait_for(
-                    websockets.connect(self.config.vj_server_url),
-                    timeout=10.0
+                    websockets.connect(self.config.vj_server_url), timeout=10.0
                 )
                 self._connected = True
 
                 # Send authentication
                 auth_msg = {
-                    'type': 'dj_auth',
-                    'dj_id': self.config.dj_id,
-                    'dj_name': self.config.dj_name,
-                    'dj_key': self.config.dj_key,
-                    'direct_mode': self.config.direct_mode
+                    "type": "dj_auth",
+                    "dj_id": self.config.dj_id,
+                    "dj_name": self.config.dj_name,
+                    "dj_key": self.config.dj_key,
+                    "direct_mode": self.config.direct_mode,
                 }
                 await self._websocket.send(json.dumps(auth_msg))
 
                 # Wait for auth response
-                response = await asyncio.wait_for(
-                    self._websocket.recv(),
-                    timeout=5.0
-                )
+                response = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
                 data = json.loads(response)
 
-                if data.get('type') == 'auth_success':
+                if data.get("type") == "auth_success":
                     self._authenticated = True
-                    self._is_active = data.get('is_active', False)
+                    self._is_active = data.get("is_active", False)
                     logger.info(f"Authenticated as {self.config.dj_name}")
                     if self._is_active:
                         logger.info("You are now LIVE!")
@@ -157,21 +157,22 @@ class DJRelay:
                     # Handle clock synchronization request from server
                     # This corrects for clock skew between DJ and server
                     try:
-                        sync_msg = await asyncio.wait_for(
-                            self._websocket.recv(),
-                            timeout=5.0
-                        )
+                        sync_msg = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
                         sync_data = json.loads(sync_msg)
-                        if sync_data.get('type') == 'clock_sync_request':
+                        if sync_data.get("type") == "clock_sync_request":
                             t2 = time.time()  # DJ time when received
                             # Small delay for processing
                             t3 = time.time()  # DJ time when sending response
-                            await self._websocket.send(json.dumps({
-                                'type': 'clock_sync_response',
-                                'server_time': sync_data.get('server_time'),
-                                'dj_recv_time': t2,
-                                'dj_send_time': t3
-                            }))
+                            await self._websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "clock_sync_response",
+                                        "server_time": sync_data.get("server_time"),
+                                        "dj_recv_time": t2,
+                                        "dj_send_time": t3,
+                                    }
+                                )
+                            )
                             logger.debug("Clock sync completed")
                     except asyncio.TimeoutError:
                         logger.debug("No clock sync request received (older server)")
@@ -210,25 +211,26 @@ class DJRelay:
     async def _setup_direct_mode(self, auth_data: dict):
         """Set up direct Minecraft connection after VJ server auth."""
         # Get Minecraft host from auth response or config
-        mc_host = auth_data.get('minecraft_host', self.config.minecraft_host)
-        mc_port = auth_data.get('minecraft_port', self.config.minecraft_port)
+        mc_host = auth_data.get("minecraft_host", self.config.minecraft_host)
+        mc_port = auth_data.get("minecraft_port", self.config.minecraft_port)
 
         if not mc_host:
             logger.warning("Direct mode: No Minecraft host specified, using localhost")
-            mc_host = 'localhost'
+            mc_host = "localhost"
 
         # Get zone and entity info from auth response
-        self._zone = auth_data.get('zone', self.config.zone)
-        self._entity_count = auth_data.get('entity_count', self.config.entity_count)
+        self._zone = auth_data.get("zone", self.config.zone)
+        self._entity_count = auth_data.get("entity_count", self.config.entity_count)
 
         # Initialize pattern from VJ server's current pattern
-        pattern_name = auth_data.get('current_pattern', 'spectrum')
+        pattern_name = auth_data.get("current_pattern", "spectrum")
         self._init_pattern(pattern_name)
 
         # Connect to Minecraft
         logger.info(f"Direct mode: Connecting to Minecraft at {mc_host}:{mc_port}")
         try:
             from python_client.viz_client import VizClient
+
             self.viz_client = VizClient(mc_host, mc_port)
             if await self.viz_client.connect():
                 self._mc_connected = True
@@ -248,6 +250,7 @@ class DJRelay:
         """Initialize visualization pattern."""
         try:
             from audio_processor.patterns import PatternConfig, get_pattern
+
             self.pattern_config = PatternConfig(entity_count=self._entity_count)
             self.pattern = get_pattern(pattern_name, self.pattern_config)
             self._pattern_name = pattern_name
@@ -262,11 +265,11 @@ class DJRelay:
 
             if config_data:
                 self.pattern_config = PatternConfig(
-                    entity_count=config_data.get('entity_count', self._entity_count),
-                    zone_size=config_data.get('zone_size', 10.0),
-                    beat_boost=config_data.get('beat_boost', 1.5),
-                    base_scale=config_data.get('base_scale', 0.2),
-                    max_scale=config_data.get('max_scale', 1.0)
+                    entity_count=config_data.get("entity_count", self._entity_count),
+                    zone_size=config_data.get("zone_size", 10.0),
+                    beat_boost=config_data.get("beat_boost", 1.5),
+                    base_scale=config_data.get("base_scale", 0.2),
+                    max_scale=config_data.get("max_scale", 1.0),
                 )
             else:
                 self.pattern_config = PatternConfig(entity_count=self._entity_count)
@@ -282,8 +285,8 @@ class DJRelay:
 
     async def _handle_config_sync(self, data: dict):
         """Handle configuration sync from VJ server (entity count, zone changes)."""
-        new_entity_count = data.get('entity_count')
-        new_zone = data.get('zone')
+        new_entity_count = data.get("entity_count")
+        new_zone = data.get("zone")
         reinit_pool = False
 
         if new_entity_count and new_entity_count != self._entity_count:
@@ -300,7 +303,9 @@ class DJRelay:
         if reinit_pool and self.viz_client and self._mc_connected:
             try:
                 await self.viz_client.init_pool(self._zone, self._entity_count, "SEA_LANTERN")
-                logger.info(f"Re-initialized entity pool: zone={self._zone}, count={self._entity_count}")
+                logger.info(
+                    f"Re-initialized entity pool: zone={self._zone}, count={self._entity_count}"
+                )
             except Exception as e:
                 logger.error(f"Failed to re-initialize entity pool: {e}")
 
@@ -313,9 +318,7 @@ class DJRelay:
         if self._websocket and self._connected:
             try:
                 # Send going offline message
-                await self._websocket.send(json.dumps({
-                    'type': 'going_offline'
-                }))
+                await self._websocket.send(json.dumps({"type": "going_offline"}))
                 await self._websocket.close()
             except Exception as e:
                 logger.debug(f"Error during disconnect: {e}")
@@ -356,16 +359,16 @@ class DJRelay:
         self._frames_sent += 1
 
         frame = {
-            'type': 'dj_audio_frame',
-            'seq': self._seq,
-            'ts': time.time(),
-            'bands': bands,
-            'peak': peak,
-            'beat': is_beat,
-            'beat_i': beat_intensity,
-            'bpm': bpm,
-            'i_bass': instant_bass,      # Bass lane energy (instant)
-            'i_kick': instant_kick,      # Bass lane kick detection (instant)
+            "type": "dj_audio_frame",
+            "seq": self._seq,
+            "ts": time.time(),
+            "bands": bands,
+            "peak": peak,
+            "beat": is_beat,
+            "beat_i": beat_intensity,
+            "bpm": bpm,
+            "i_bass": instant_bass,  # Bass lane energy (instant)
+            "i_kick": instant_kick,  # Bass lane kick detection (instant)
         }
 
         try:
@@ -394,13 +397,10 @@ class DJRelay:
             self._mc_connected = self.viz_client.connected
 
         try:
-            heartbeat = {
-                'type': 'dj_heartbeat',
-                'ts': now
-            }
+            heartbeat = {"type": "dj_heartbeat", "ts": now}
             # Include Minecraft connection status in direct mode
             if self.config.direct_mode:
-                heartbeat['mc_connected'] = self._mc_connected
+                heartbeat["mc_connected"] = self._mc_connected
 
             await self._websocket.send(json.dumps(heartbeat))
             # Reset heartbeat failures on success
@@ -410,7 +410,9 @@ class DJRelay:
             logger.debug(f"Failed to send heartbeat: {e}")
             self._heartbeat_failures += 1
             if self._heartbeat_failures >= 3:
-                logger.warning(f"Heartbeat failures exceeded threshold ({self._heartbeat_failures}), triggering reconnection")
+                logger.warning(
+                    f"Heartbeat failures exceeded threshold ({self._heartbeat_failures}), triggering reconnection"
+                )
                 self._connected = False
                 if self._on_disconnect:
                     self._on_disconnect()
@@ -425,11 +427,11 @@ class DJRelay:
             async for message in self._websocket:
                 try:
                     data = json.loads(message)
-                    msg_type = data.get('type')
+                    msg_type = data.get("type")
 
-                    if msg_type == 'status_update':
+                    if msg_type == "status_update":
                         was_active = self._is_active
-                        self._is_active = data.get('is_active', False)
+                        self._is_active = data.get("is_active", False)
 
                         if was_active != self._is_active:
                             status = "LIVE" if self._is_active else "standby"
@@ -437,19 +439,19 @@ class DJRelay:
                             if self._on_status_change:
                                 self._on_status_change(self._is_active)
 
-                    elif msg_type == 'heartbeat_ack':
+                    elif msg_type == "heartbeat_ack":
                         # Calculate latency
-                        if 'server_time' in data:
-                            latency = (time.time() - data['server_time']) * 1000
+                        if "server_time" in data:
+                            (time.time() - data["server_time"]) * 1000
                             # Could track this for display
 
-                    elif msg_type == 'pattern_sync':
+                    elif msg_type == "pattern_sync":
                         # VJ server is broadcasting a pattern change
-                        pattern_name = data.get('pattern', 'spectrum')
-                        pattern_config = data.get('config')
+                        pattern_name = data.get("pattern", "spectrum")
+                        pattern_config = data.get("config")
                         self._set_pattern(pattern_name, pattern_config)
 
-                    elif msg_type == 'config_sync':
+                    elif msg_type == "config_sync":
                         # VJ server is updating configuration (entity count, zone, etc.)
                         await self._handle_config_sync(data)
 
@@ -481,10 +483,16 @@ class DJRelay:
                     asyncio.create_task(self.receive_messages())
                 else:
                     # Calculate exponential backoff with jitter
-                    backoff = min(self.config.reconnect_interval * (1.5 ** self._reconnect_attempts), 30.0)
-                    backoff += random.uniform(0, backoff * 0.1)  # Add jitter to prevent thundering herd
+                    backoff = min(
+                        self.config.reconnect_interval * (1.5**self._reconnect_attempts), 30.0
+                    )
+                    backoff += random.uniform(
+                        0, backoff * 0.1
+                    )  # Add jitter to prevent thundering herd
                     self._reconnect_attempts += 1
-                    logger.info(f"Reconnect attempt {self._reconnect_attempts} failed, waiting {backoff:.1f}s before retry")
+                    logger.info(
+                        f"Reconnect attempt {self._reconnect_attempts} failed, waiting {backoff:.1f}s before retry"
+                    )
                     await asyncio.sleep(backoff)
                     continue
 
@@ -512,13 +520,7 @@ class DJRelayAgent:
     sending to Minecraft, sends frames to the VJ server.
     """
 
-    def __init__(
-        self,
-        relay: DJRelay,
-        capture,
-        fft_analyzer=None,
-        spectrograph=None
-    ):
+    def __init__(self, relay: DJRelay, capture, fft_analyzer=None, spectrograph=None):
         self.relay = relay
         self.capture = capture
         self.fft_analyzer = fft_analyzer
@@ -561,16 +563,20 @@ class DJRelayAgent:
 
                 if self.fft_analyzer is not None:
                     fft_result = self.fft_analyzer.analyze(
-                        synthetic_peak=frame.peak,
-                        synthetic_bands=None
+                        synthetic_peak=frame.peak, synthetic_bands=None
                     )
                     if fft_result and self.fft_analyzer.using_fft:
                         bands = fft_result.bands
                         # Sanitize
-                        bands = [max(0.0, min(1.0, b)) if isinstance(b, (int, float)) and -1e10 < b < 1e10 else 0.0 for b in bands]
+                        bands = [
+                            max(0.0, min(1.0, b))
+                            if isinstance(b, (int, float)) and -1e10 < b < 1e10
+                            else 0.0
+                            for b in bands
+                        ]
                         # Get bass lane results for instant kick detection
-                        instant_bass = getattr(fft_result, 'instant_bass', 0.0)
-                        instant_kick = getattr(fft_result, 'instant_kick_onset', False)
+                        instant_bass = getattr(fft_result, "instant_bass", 0.0)
+                        instant_kick = getattr(fft_result, "instant_kick_onset", False)
                     else:
                         bands = self._generate_bands(frame.peak, frame.is_beat)
                 else:
@@ -595,9 +601,15 @@ class DJRelayAgent:
                 if not success and not self.relay.connected:
                     # Connection lost, try to reconnect with exponential backoff
                     self._agent_reconnect_attempts += 1
-                    backoff = min(self.relay.config.reconnect_interval * (1.5 ** (self._agent_reconnect_attempts - 1)), 30.0)
+                    backoff = min(
+                        self.relay.config.reconnect_interval
+                        * (1.5 ** (self._agent_reconnect_attempts - 1)),
+                        30.0,
+                    )
                     backoff += random.uniform(0, backoff * 0.1)  # Add jitter
-                    logger.warning(f"Connection lost, reconnect attempt {self._agent_reconnect_attempts} after {backoff:.1f}s...")
+                    logger.warning(
+                        f"Connection lost, reconnect attempt {self._agent_reconnect_attempts} after {backoff:.1f}s..."
+                    )
                     await asyncio.sleep(backoff)
                     if await self.relay.connect():
                         self._agent_reconnect_attempts = 0  # Reset on success
@@ -606,8 +618,15 @@ class DJRelayAgent:
                     continue
 
                 # Direct mode: Send visualization directly to Minecraft (if active DJ)
-                if direct_mode and self.relay.is_active and self.relay.viz_client and self.relay.pattern:
-                    await self._send_to_minecraft(bands, frame.peak, frame.is_beat, frame.beat_intensity)
+                if (
+                    direct_mode
+                    and self.relay.is_active
+                    and self.relay.viz_client
+                    and self.relay.pattern
+                ):
+                    await self._send_to_minecraft(
+                        bands, frame.peak, frame.is_beat, frame.beat_intensity
+                    )
 
                 # Update spectrograph
                 if self.spectrograph:
@@ -619,17 +638,17 @@ class DJRelayAgent:
                     if self.fft_analyzer is not None:
                         stats = self.fft_analyzer.latency_stats
                         if stats:
-                            latency_ms = stats.get('fft_latency_ms', 0.0)
+                            latency_ms = stats.get("fft_latency_ms", 0.0)
                     self.spectrograph.set_stats(
                         preset=f"DJ:{status}",
                         using_fft=self.fft_analyzer is not None and self.fft_analyzer.using_fft,
-                        latency_ms=latency_ms
+                        latency_ms=latency_ms,
                     )
                     self.spectrograph.display(
                         bands=bands,
                         amplitude=frame.peak,
                         is_beat=frame.is_beat,
-                        beat_intensity=frame.beat_intensity
+                        beat_intensity=frame.beat_intensity,
                     )
 
                 await asyncio.sleep(0.016)
@@ -648,7 +667,9 @@ class DJRelayAgent:
                 except Exception:
                     pass
 
-    async def _send_to_minecraft(self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float):
+    async def _send_to_minecraft(
+        self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float
+    ):
         """Send visualization directly to Minecraft (direct mode only)."""
         try:
             from audio_processor.patterns import AudioState
@@ -659,7 +680,7 @@ class DJRelayAgent:
                 amplitude=peak,
                 is_beat=is_beat,
                 beat_intensity=beat_intensity,
-                frame=self._frame_count
+                frame=self._frame_count,
             )
 
             # Calculate entities using the pattern
@@ -668,18 +689,18 @@ class DJRelayAgent:
             # Prepare particles for beats
             particles = []
             if is_beat and beat_intensity > 0.2:
-                particles.append({
-                    'particle': 'NOTE',
-                    'x': 0.5, 'y': 0.5, 'z': 0.5,
-                    'count': int(20 * beat_intensity)
-                })
+                particles.append(
+                    {
+                        "particle": "NOTE",
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "count": int(20 * beat_intensity),
+                    }
+                )
 
             # Send directly to Minecraft
-            await self.relay.viz_client.batch_update_fast(
-                self.relay._zone,
-                entities,
-                particles
-            )
+            await self.relay.viz_client.batch_update_fast(self.relay._zone, entities, particles)
 
         except Exception as e:
             logger.debug(f"Failed to send to Minecraft: {e}")
@@ -690,11 +711,11 @@ class DJRelayAgent:
 
         # 5-band system: bass, low-mid, mid, high-mid, high
         targets = [
-            peak * 0.9,   # Bass (includes kick)
-            peak * 0.7,   # Low-mid
-            peak * 0.6,   # Mid
-            peak * 0.5,   # High-mid
-            peak * 0.4,   # High/Air
+            peak * 0.9,  # Bass (includes kick)
+            peak * 0.7,  # Low-mid
+            peak * 0.6,  # Mid
+            peak * 0.5,  # High-mid
+            peak * 0.4,  # High/Air
         ]
 
         if is_beat:
@@ -702,9 +723,13 @@ class DJRelayAgent:
 
         for i in range(5):
             if targets[i] > self._smoothed_bands[i]:
-                self._smoothed_bands[i] += (targets[i] - self._smoothed_bands[i]) * self._smooth_attack
+                self._smoothed_bands[i] += (
+                    targets[i] - self._smoothed_bands[i]
+                ) * self._smooth_attack
             else:
-                self._smoothed_bands[i] += (targets[i] - self._smoothed_bands[i]) * self._smooth_release
+                self._smoothed_bands[i] += (
+                    targets[i] - self._smoothed_bands[i]
+                ) * self._smooth_release
 
             # Add slight variation
             self._smoothed_bands[i] += random.uniform(-0.02, 0.02)

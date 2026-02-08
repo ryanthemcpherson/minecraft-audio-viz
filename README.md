@@ -358,7 +358,7 @@ cd minecraft_plugin && mvn package
 
 - **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server can run on Linux/Docker, but DJs must run on Windows.
 - **Display Entities require Java Edition** — Bedrock players (via Geyser) need to use Particles mode instead.
-- **Sub-bass detection limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz.
+- **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
 
 ---
 

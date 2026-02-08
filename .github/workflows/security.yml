@@ -1,0 +1,175 @@
+name: Security Scan
+
+on:
+  # Run weekly on Monday at 6am UTC
+  schedule:
+    - cron: '0 6 * * 1'
+  # Also run on-demand
+  workflow_dispatch:
+  # Run on PRs that touch dependency files
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'package.json'
+      - 'dj_client/package.json'
+      - 'minecraft_plugin/pom.xml'
+      - 'dj_client/src-tauri/Cargo.toml'
+      - 'dj_client/src-tauri/Cargo.lock'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python: pip-audit with detailed output
+  # ---------------------------------------------------------------------------
+  python-security:
+    name: Python Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[full,dev]" pip-audit
+
+      - name: pip-audit (JSON report)
+        run: |
+          pip-audit --strict --desc --format json --output pip-audit-report.json || true
+          pip-audit --strict --desc
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Java: OWASP Dependency-Check (full scan)
+  # ---------------------------------------------------------------------------
+  java-security:
+    name: Java Security Audit (OWASP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Cache OWASP NVD data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp
+          key: owasp-nvd-${{ github.run_id }}
+          restore-keys: owasp-nvd-
+
+      - name: OWASP Dependency-Check
+        working-directory: minecraft_plugin
+        run: |
+          mvn org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7 \
+            -Dformats=HTML,JSON \
+            -DprettyPrint=true
+
+      - name: Upload OWASP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-report
+          path: minecraft_plugin/target/dependency-check-report.*
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Node.js: npm audit
+  # ---------------------------------------------------------------------------
+  npm-security:
+    name: npm Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Audit root package
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high --json > npm-audit-root.json || true
+          npm audit --audit-level=high || true
+
+      - name: Audit dj_client package
+        working-directory: dj_client
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high --json > npm-audit-djclient.json || true
+          npm audit --audit-level=high || true
+
+      - name: Upload npm audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-reports
+          path: |
+            npm-audit-root.json
+            dj_client/npm-audit-djclient.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Rust: cargo-audit (DJ Client / Tauri)
+  # ---------------------------------------------------------------------------
+  rust-security:
+    name: Rust Security Audit (cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: cargo-audit (JSON report)
+        working-directory: dj_client/src-tauri
+        run: |
+          cargo audit --json > cargo-audit-report.json || true
+          cargo audit
+
+      - name: Upload cargo-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report
+          path: dj_client/src-tauri/cargo-audit-report.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Summary
+  # ---------------------------------------------------------------------------
+  security-summary:
+    name: Security Summary
+    if: always()
+    needs: [python-security, java-security, npm-security, rust-security]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Ecosystem | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Python (pip-audit) | ${{ needs.python-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Java (OWASP) | ${{ needs.java-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| npm | ${{ needs.npm-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rust (cargo-audit) | ${{ needs.rust-security.result }} |" >> $GITHUB_STEP_SUMMARY

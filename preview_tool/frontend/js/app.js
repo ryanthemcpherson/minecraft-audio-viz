@@ -28,8 +28,12 @@ let autoRotate = true;
 
 // New systems
 let particleSystem = null;
+let particleEntityRenderer = null;
 let blockIndicators = null;
 let showBlockGrid = true;
+
+// View mode: 'blocks', 'particles', 'hybrid'
+let viewMode = 'blocks';
 
 // Audio state - 5 bands for ultra-low-latency mode
 let audioState = {
@@ -139,9 +143,15 @@ function init() {
     // Create visualization blocks
     createBlocks();
 
-    // Initialize particle system
+    // Initialize particle system (increased capacity for particle mode)
     if (typeof ParticleSystem !== 'undefined') {
-        particleSystem = new ParticleSystem(scene, 500);
+        particleSystem = new ParticleSystem(scene, 2000);
+    }
+
+    // Initialize particle entity renderer for particle/hybrid view modes
+    if (typeof ParticleEntityRenderer !== 'undefined') {
+        particleEntityRenderer = new ParticleEntityRenderer(scene, 1500);
+        particleEntityRenderer.setVisible(false);  // Hidden by default (block mode)
     }
 
     // Initialize block indicators
@@ -156,6 +166,7 @@ function init() {
     setupControls();
     setupMouseControls();
     setupParticleToggles();
+    setupViewModeControls();
 
     // Connect WebSocket
     connectWebSocket();
@@ -167,7 +178,7 @@ function init() {
 
 function createBlock(index) {
     const geometry = new THREE.BoxGeometry(CONFIG.blockSize, CONFIG.blockSize, CONFIG.blockSize);
-    const bandIndex = index % 6;
+    const bandIndex = index % 5;
     const material = new THREE.MeshStandardMaterial({
         color: CONFIG.colors[bandIndex],
         roughness: 0.3,
@@ -372,6 +383,56 @@ function setupParticleToggles() {
     });
 }
 
+function setupViewModeControls() {
+    const radios = document.querySelectorAll('input[name="view-mode"]');
+    radios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                viewMode = e.target.value;
+                applyViewMode();
+            }
+        });
+    });
+}
+
+function applyViewMode() {
+    // Block visibility
+    const showBlocks = (viewMode === 'blocks' || viewMode === 'hybrid');
+    blocks.forEach(block => {
+        block.visible = showBlocks;
+    });
+
+    // Particle entity renderer visibility
+    if (particleEntityRenderer) {
+        const showEntityParticles = (viewMode === 'particles' || viewMode === 'hybrid');
+        particleEntityRenderer.setVisible(showEntityParticles);
+        particleEntityRenderer.setGlowVisible(showEntityParticles);
+        if (!showEntityParticles) {
+            particleEntityRenderer.clear();
+        }
+    }
+}
+
+function updateParticleEntities() {
+    if (!particleEntityRenderer) return;
+    if (viewMode !== 'particles' && viewMode !== 'hybrid') return;
+
+    const entities = audioState.entities;
+    if (!entities || entities.length === 0) return;
+
+    particleEntityRenderer.updateFromEntities(
+        entities,
+        audioState.bands,
+        CONFIG.zoneSize,
+        CONFIG.centerOffset
+    );
+
+    // Notify beat events
+    if (audioState.isBeat) {
+        particleEntityRenderer.onBeat(audioState.beatIntensity);
+    }
+}
+
 function connectWebSocket() {
     const statusEl = document.getElementById('connection-status');
     const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
@@ -530,10 +591,14 @@ function updateStatusBar() {
         blockStatus.textContent = `Blocks: ${stats.active}/${stats.total}`;
     }
 
-    // Particle status
+    // Particle status (combine counts from effects + entity renderer)
     const particleStatus = document.getElementById('particle-status');
-    if (particleStatus && particleSystem) {
-        particleStatus.textContent = `Particles: ${particleSystem.getActiveCount()}`;
+    if (particleStatus) {
+        let totalParticles = particleSystem ? particleSystem.getActiveCount() : 0;
+        if (particleEntityRenderer && (viewMode === 'particles' || viewMode === 'hybrid')) {
+            totalParticles += particleEntityRenderer.getActiveCount();
+        }
+        particleStatus.textContent = `Particles: ${totalParticles}`;
     }
 }
 
@@ -658,6 +723,7 @@ function updateBlockTargets() {
 
     const zoneSize = CONFIG.zoneSize;
     const offset = CONFIG.centerOffset;
+    const showBlocks = (viewMode === 'blocks' || viewMode === 'hybrid');
 
     blocks.forEach((block, i) => {
         const entity = entities[i];
@@ -667,6 +733,9 @@ function updateBlockTargets() {
         block.userData.targetY = entity.y * zoneSize;
         block.userData.targetZ = (entity.z * zoneSize) - offset;
         block.userData.targetScale = entity.scale * 1.5;
+
+        // Hide blocks in particle-only mode
+        block.visible = showBlocks;
 
         const bandIndex = entity.band || 0;
         if (block.userData.bandIndex !== bandIndex) {
@@ -678,6 +747,9 @@ function updateBlockTargets() {
         const bandValue = audioState.bands[bandIndex] || 0;
         block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
     });
+
+    // Update particle entity renderer (particles/hybrid modes)
+    updateParticleEntities();
 }
 
 function animate() {
@@ -710,9 +782,14 @@ function animate() {
         block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
     });
 
-    // Update particle system
+    // Update particle system (beat/ambient effects)
     if (particleSystem) {
         particleSystem.update(dt);
+    }
+
+    // Update particle entity renderer (particle/hybrid view mode)
+    if (particleEntityRenderer && (viewMode === 'particles' || viewMode === 'hybrid')) {
+        particleEntityRenderer.update(dt);
     }
 
     // Auto rotate camera

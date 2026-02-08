@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "get-zones.schema.json",
+  "title": "GetZonesMessage",
+  "description": "Request to list all visualization zones.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "get_zones"
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}

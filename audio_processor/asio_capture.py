@@ -19,8 +19,8 @@ References:
 import logging
 import queue
 import time
-from typing import Optional, List, Tuple, Callable
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AsioDeviceInfo:
     """Information about an ASIO device."""
+
     index: int
     name: str
     input_channels: int
@@ -58,7 +59,7 @@ def list_asio_devices() -> List[AsioDeviceInfo]:
         # Find ASIO host API
         asio_api_idx = None
         for i, api in enumerate(hostapis):
-            if 'asio' in api['name'].lower():
+            if "asio" in api["name"].lower():
                 asio_api_idx = i
                 break
 
@@ -68,17 +69,19 @@ def list_asio_devices() -> List[AsioDeviceInfo]:
 
         # Get devices for ASIO API
         for i, dev in enumerate(all_devices):
-            if dev['hostapi'] == asio_api_idx:
-                devices.append(AsioDeviceInfo(
-                    index=i,
-                    name=dev['name'],
-                    input_channels=dev['max_input_channels'],
-                    output_channels=dev['max_output_channels'],
-                    default_samplerate=dev['default_samplerate'],
-                    default_low_latency=dev['default_low_input_latency'],
-                    default_high_latency=dev['default_high_input_latency'],
-                    is_asio=True
-                ))
+            if dev["hostapi"] == asio_api_idx:
+                devices.append(
+                    AsioDeviceInfo(
+                        index=i,
+                        name=dev["name"],
+                        input_channels=dev["max_input_channels"],
+                        output_channels=dev["max_output_channels"],
+                        default_samplerate=dev["default_samplerate"],
+                        default_low_latency=dev["default_low_input_latency"],
+                        default_high_latency=dev["default_high_input_latency"],
+                        is_asio=True,
+                    )
+                )
 
     except ImportError:
         logger.error("sounddevice not installed")
@@ -100,7 +103,7 @@ def check_asio_available() -> Tuple[bool, str]:
 
         hostapis = sd.query_hostapis()
         for api in hostapis:
-            if 'asio' in api['name'].lower():
+            if "asio" in api["name"].lower():
                 devices = list_asio_devices()
                 if devices:
                     return True, f"ASIO available with {len(devices)} device(s)"
@@ -209,9 +212,11 @@ class AsioCapture:
 
             # Calculate latency
             latency_ms = (self.buffer_size / self.sample_rate) * 1000
-            logger.info(f"Opening ASIO stream: device={self.device}, "
-                       f"rate={self.sample_rate}, buffer={self.buffer_size} "
-                       f"({latency_ms:.2f}ms)")
+            logger.info(
+                f"Opening ASIO stream: device={self.device}, "
+                f"rate={self.sample_rate}, buffer={self.buffer_size} "
+                f"({latency_ms:.2f}ms)"
+            )
 
             self._stream = sd.InputStream(
                 device=self.device,
@@ -220,8 +225,8 @@ class AsioCapture:
                 blocksize=self.buffer_size,
                 callback=audio_callback,
                 dtype=np.float32,
-                latency='low',
-                extra_settings=asio_settings
+                latency="low",
+                extra_settings=asio_settings,
             )
 
             self._stream.start()
@@ -289,8 +294,10 @@ def print_asio_info():
             print(f"\n  [{dev.index}] {dev.name}")
             print(f"      Inputs: {dev.input_channels}, Outputs: {dev.output_channels}")
             print(f"      Sample Rate: {dev.default_samplerate:.0f} Hz")
-            print(f"      Latency: {dev.default_low_latency*1000:.2f}ms (low) / "
-                  f"{dev.default_high_latency*1000:.2f}ms (high)")
+            print(
+                f"      Latency: {dev.default_low_latency * 1000:.2f}ms (low) / "
+                f"{dev.default_high_latency * 1000:.2f}ms (high)"
+            )
 
     else:
         print("\nTo enable ASIO support:")

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trigger-effect.schema.json",
+  "title": "TriggerEffectMessage",
+  "description": "Trigger a VJ effect. Toggle effects (blackout, freeze) use intensity 0 to disable. Timed effects (flash, strobe, pulse, wave, spiral, explode) auto-expire after duration.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "trigger_effect"
+    },
+    "v": {
+      "type": "string"
+    },
+    "effect": {
+      "type": "string",
+      "enum": ["blackout", "freeze", "flash", "strobe", "pulse", "wave", "spiral", "explode"],
+      "description": "Effect type to trigger"
+    },
+    "intensity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Effect intensity (0 = disable for toggle effects, 0-1 for timed)"
+    },
+    "duration": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Duration in milliseconds (ignored for toggle effects)"
+    }
+  },
+  "required": ["type", "effect", "intensity"]
+}

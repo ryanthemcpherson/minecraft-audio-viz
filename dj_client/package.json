@@ -1,11 +1,13 @@
 {
   "name": "dj-client",
   "version": "1.0.0",
-  "description": "AudioViz DJ Client",
+  "description": "MCAV DJ Client",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "npm run test:rust",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri"
   },

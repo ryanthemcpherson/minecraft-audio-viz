@@ -14,25 +14,22 @@ On Windows, this uses WASAPI loopback to capture all system audio.
 
 import argparse
 import asyncio
-import sys
+import logging
+import math
 import os
 import signal
-import math
-import logging
+import sys
 from typing import Optional
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from audio_processor.processor import AudioProcessor, AudioFrame
-from audio_processor.spectrograph import TerminalSpectrograph, SpectrographConfig
+from audio_processor.processor import AudioFrame, AudioProcessor
+from audio_processor.spectrograph import SpectrographConfig, TerminalSpectrograph
 from python_client.viz_client import VizClient
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('capture_agent')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("capture_agent")
 
 
 class CaptureAgent:
@@ -46,12 +43,14 @@ class CaptureAgent:
     4. VizClient sends entity updates to Minecraft
     """
 
-    def __init__(self,
-                 minecraft_host: str = "localhost",
-                 minecraft_port: int = 8765,
-                 zone: str = "main",
-                 entity_count: int = 16,
-                 show_spectrograph: bool = True):
+    def __init__(
+        self,
+        minecraft_host: str = "localhost",
+        minecraft_port: int = 8765,
+        zone: str = "main",
+        entity_count: int = 16,
+        show_spectrograph: bool = True,
+    ):
         """
         Initialize the capture agent.
 
@@ -71,18 +70,11 @@ class CaptureAgent:
         # Components
         self.viz_client: Optional[VizClient] = None
         self.audio_processor = AudioProcessor(
-            sample_rate=48000,
-            channels=2,
-            smoothing=0.2,
-            beat_sensitivity=1.3
+            sample_rate=48000, channels=2, smoothing=0.2, beat_sensitivity=1.3
         )
 
         if show_spectrograph:
-            config = SpectrographConfig(
-                bar_width=30,
-                use_colors=True,
-                clear_screen=True
-            )
+            config = SpectrographConfig(bar_width=30, use_colors=True, clear_screen=True)
             self.spectrograph = TerminalSpectrograph(config)
         else:
             self.spectrograph = None
@@ -98,14 +90,16 @@ class CaptureAgent:
         self.viz_client = VizClient(self.minecraft_host, self.minecraft_port)
 
         if not await self.viz_client.connect():
-            logger.error(f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
+            logger.error(
+                f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
+            )
             return False
 
         logger.info(f"Connected to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
 
         # Check if zone exists
         zones = await self.viz_client.get_zones()
-        zone_names = [z['name'] for z in zones]
+        zone_names = [z["name"] for z in zones]
 
         if self.zone not in zone_names:
             logger.warning(f"Zone '{self.zone}' not found. Available zones: {zone_names}")
@@ -131,20 +125,19 @@ class CaptureAgent:
 
         # On Windows, look for WASAPI loopback devices
         loopback_device = None
-        default_output = None
 
         for i, device in enumerate(devices):
-            name = device['name'].lower()
+            name = device["name"].lower()
 
             # Check for loopback indicator
-            if 'loopback' in name:
+            if "loopback" in name:
                 loopback_device = i
                 logger.info(f"Found loopback device: {device['name']}")
                 break
 
             # Track default output for fallback
-            if device['max_input_channels'] > 0:
-                if 'stereo mix' in name or 'what u hear' in name:
+            if device["max_input_channels"] > 0:
+                if "stereo mix" in name or "what u hear" in name:
                     loopback_device = i
                     logger.info(f"Found stereo mix device: {device['name']}")
                     break
@@ -153,8 +146,10 @@ class CaptureAgent:
             # Try to find any device that can capture desktop audio
             logger.warning("No loopback device found. Listing available input devices:")
             for i, device in enumerate(devices):
-                if device['max_input_channels'] > 0:
-                    logger.info(f"  [{i}] {device['name']} (inputs: {device['max_input_channels']})")
+                if device["max_input_channels"] > 0:
+                    logger.info(
+                        f"  [{i}] {device['name']} (inputs: {device['max_input_channels']})"
+                    )
 
             logger.info("\nTips for Windows:")
             logger.info("1. Install 'sounddevice' with loopback support")
@@ -173,7 +168,7 @@ class CaptureAgent:
 
         # Convert float32 audio to int16 PCM
         # sounddevice provides float32 audio in range [-1, 1]
-        pcm_data = (indata * 32767).astype('int16').tobytes()
+        pcm_data = (indata * 32767).astype("int16").tobytes()
 
         # Process audio
         frame = self.audio_processor.process_pcm(pcm_data)
@@ -188,10 +183,7 @@ class CaptureAgent:
         """Process audio frames and update visualization."""
         while self._running:
             try:
-                frame = await asyncio.wait_for(
-                    self._pending_frames.get(),
-                    timeout=0.1
-                )
+                frame = await asyncio.wait_for(self._pending_frames.get(), timeout=0.1)
 
                 # Update spectrograph
                 if self.spectrograph:
@@ -199,7 +191,7 @@ class CaptureAgent:
                         bands=frame.bands,
                         amplitude=frame.amplitude,
                         is_beat=frame.is_beat,
-                        beat_intensity=frame.beat_intensity
+                        beat_intensity=frame.beat_intensity,
                     )
 
                 # Update Minecraft
@@ -237,25 +229,22 @@ class CaptureAgent:
                     scale = min(1.0, scale * 1.3)
                     y = min(1.0, y + 0.1)
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "scale": scale,
-                    "visible": True
-                })
+                entities.append(
+                    {"id": f"block_{i}", "x": x, "y": y, "z": z, "scale": scale, "visible": True}
+                )
 
             # Add particles on beats
             particles = []
             if frame.is_beat and frame.beat_intensity > 0.3:
-                particles.append({
-                    "particle": "NOTE",
-                    "x": 0.5,
-                    "y": 0.5,
-                    "z": 0.5,
-                    "count": int(15 * frame.beat_intensity)
-                })
+                particles.append(
+                    {
+                        "particle": "NOTE",
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "count": int(15 * frame.beat_intensity),
+                    }
+                )
 
             await self.viz_client.batch_update(self.zone, entities, particles)
 
@@ -269,8 +258,8 @@ class CaptureAgent:
         Args:
             device: Audio device index (None for auto-detect loopback)
         """
-        import sounddevice as sd
         import numpy as np
+        import sounddevice as sd
 
         self._running = True
         self._loop = asyncio.get_event_loop()
@@ -283,7 +272,7 @@ class CaptureAgent:
         if device is None:
             # Use default input as fallback
             logger.warning("Using default input device. For system audio, specify --device")
-            device_info = sd.query_devices(kind='input')
+            device_info = sd.query_devices(kind="input")
         else:
             device_info = sd.query_devices(device)
 
@@ -302,7 +291,7 @@ class CaptureAgent:
                 channels=channels,
                 dtype=np.float32,
                 blocksize=blocksize,
-                callback=self._audio_callback
+                callback=self._audio_callback,
             )
 
             logger.info("Starting audio capture...")
@@ -353,22 +342,33 @@ class CaptureAgent:
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='AudioViz Host Capture Agent - Captures system audio for Minecraft visualization'
+        description="AudioViz Host Capture Agent - Captures system audio for Minecraft visualization"
     )
-    parser.add_argument('--host', type=str, default='192.168.208.1',
-                        help='Minecraft server IP (default: 192.168.208.1)')
-    parser.add_argument('--port', type=int, default=8765,
-                        help='WebSocket port (default: 8765)')
-    parser.add_argument('--zone', type=str, default='main',
-                        help='Visualization zone name (default: main)')
-    parser.add_argument('--entities', type=int, default=16,
-                        help='Number of visualization entities (default: 16)')
-    parser.add_argument('--device', type=int, default=None,
-                        help='Audio device index (default: auto-detect loopback)')
-    parser.add_argument('--no-spectrograph', action='store_true',
-                        help='Disable terminal spectrograph')
-    parser.add_argument('--list-devices', action='store_true',
-                        help='List available audio devices and exit')
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="192.168.208.1",
+        help="Minecraft server IP (default: 192.168.208.1)",
+    )
+    parser.add_argument("--port", type=int, default=8765, help="WebSocket port (default: 8765)")
+    parser.add_argument(
+        "--zone", type=str, default="main", help="Visualization zone name (default: main)"
+    )
+    parser.add_argument(
+        "--entities", type=int, default=16, help="Number of visualization entities (default: 16)"
+    )
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=None,
+        help="Audio device index (default: auto-detect loopback)",
+    )
+    parser.add_argument(
+        "--no-spectrograph", action="store_true", help="Disable terminal spectrograph"
+    )
+    parser.add_argument(
+        "--list-devices", action="store_true", help="List available audio devices and exit"
+    )
 
     args = parser.parse_args()
 
@@ -386,9 +386,9 @@ async def main():
         devices = sd.query_devices()
         for i, device in enumerate(devices):
             dtype = ""
-            if device['max_input_channels'] > 0:
+            if device["max_input_channels"] > 0:
                 dtype += "IN"
-            if device['max_output_channels'] > 0:
+            if device["max_output_channels"] > 0:
                 dtype += "/OUT" if dtype else "OUT"
             print(f"[{i:2d}] {device['name']}")
             print(f"     {dtype} - {int(device['default_samplerate'])} Hz")
@@ -405,7 +405,7 @@ async def main():
         minecraft_port=args.port,
         zone=args.zone,
         entity_count=args.entities,
-        show_spectrograph=not args.no_spectrograph
+        show_spectrograph=not args.no_spectrograph,
     )
 
     # Setup signal handlers

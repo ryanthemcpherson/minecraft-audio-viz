@@ -4,6 +4,7 @@ import com.audioviz.AudioVizPlugin;
 import com.audioviz.gui.Menu;
 import com.audioviz.gui.MenuManager;
 import com.audioviz.gui.builder.ItemBuilder;
+import com.audioviz.stages.Stage;
 import com.audioviz.zones.VisualizationZone;
 import org.bukkit.ChatColor;
 import org.bukkit.DyeColor;
@@ -146,26 +147,34 @@ public class ZoneManagementMenu implements Menu {
 
         Material material = hasEntities ? Material.BEACON : Material.GLASS;
 
+        List<String> lore = new ArrayList<>();
+        lore.add("&7ID: &f" + zone.getId());
+
+        // Show stage ownership if this zone belongs to a stage
+        Stage ownerStage = plugin.getStageManager().findStageForZone(zone.getName());
+        if (ownerStage != null) {
+            lore.add("&7Stage: &d" + ownerStage.getName());
+        }
+
+        lore.add("");
+        lore.add("&7Location:");
+        lore.add("&f  World: &7" + zone.getOrigin().getWorld().getName());
+        lore.add("&f  X: &7" + String.format("%.1f", zone.getOrigin().getX()));
+        lore.add("&f  Y: &7" + String.format("%.1f", zone.getOrigin().getY()));
+        lore.add("&f  Z: &7" + String.format("%.1f", zone.getOrigin().getZ()));
+        lore.add("");
+        lore.add("&7Size: &f" + (int) zone.getSize().getX() + " x " +
+            (int) zone.getSize().getY() + " x " +
+            (int) zone.getSize().getZ());
+        lore.add("&7Rotation: &f" + (int) zone.getRotation() + "\u00B0");
+        lore.add("&7Entities: &f" + entityCount);
+        lore.add("");
+        lore.add("&eLeft-click to edit");
+        lore.add("&cShift-click to delete");
+
         return new ItemBuilder(material)
             .name("&e" + zone.getName())
-            .lore(
-                "&7ID: &f" + zone.getId(),
-                "",
-                "&7Location:",
-                "&f  World: &7" + zone.getOrigin().getWorld().getName(),
-                "&f  X: &7" + String.format("%.1f", zone.getOrigin().getX()),
-                "&f  Y: &7" + String.format("%.1f", zone.getOrigin().getY()),
-                "&f  Z: &7" + String.format("%.1f", zone.getOrigin().getZ()),
-                "",
-                "&7Size: &f" + (int) zone.getSize().getX() + " x " +
-                    (int) zone.getSize().getY() + " x " +
-                    (int) zone.getSize().getZ(),
-                "&7Rotation: &f" + (int) zone.getRotation() + "\u00B0",
-                "&7Entities: &f" + entityCount,
-                "",
-                "&eLeft-click to edit",
-                "&cShift-click to delete"
-            )
+            .lore(lore)
             .build();
     }
 

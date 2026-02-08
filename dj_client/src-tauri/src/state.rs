@@ -82,3 +82,37 @@ impl Default for AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_connection_status_is_disconnected() {
+        let status = ConnectionStatus::default();
+
+        assert!(!status.connected);
+        assert!(!status.is_active);
+        assert_eq!(status.latency_ms, 0.0);
+        assert_eq!(status.queue_position, 0);
+        assert_eq!(status.total_djs, 0);
+        assert!(status.active_dj_name.is_none());
+        assert!(status.error.is_none());
+    }
+
+    #[test]
+    fn default_app_state_has_expected_server_defaults() {
+        let state = AppState::default();
+
+        assert!(state.client.is_none());
+        assert!(state.audio_capture.is_none());
+        assert_eq!(state.bands, [0.0; 5]);
+        assert_eq!(state.peak, 0.0);
+        assert!(!state.is_beat);
+        assert_eq!(state.beat_intensity, 0.0);
+        assert_eq!(state.bpm, 120.0);
+        assert_eq!(state.server_host, "192.168.1.204");
+        assert_eq!(state.server_port, 9000);
+        assert!(state.bridge_shutdown_tx.is_none());
+    }
+}

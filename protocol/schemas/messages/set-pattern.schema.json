@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-pattern.schema.json",
+  "title": "SetPatternMessage",
+  "description": "Change the active visualization pattern.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_pattern"
+    },
+    "v": {
+      "type": "string"
+    },
+    "pattern": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pattern identifier (e.g. bars, grid, circle, wave, dna_helix, etc.)"
+    }
+  },
+  "required": ["type", "pattern"]
+}

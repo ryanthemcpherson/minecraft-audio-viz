@@ -8,17 +8,19 @@ Usage:
 """
 
 import asyncio
-import numpy as np
-import time
-import sys
 import os
+import sys
+import time
+
+import numpy as np
 from scipy.io import wavfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from audio_processor.processor import AudioProcessor, AudioFrame
-from viz_client import VizClient
 import click
+from viz_client import VizClient
+
+from audio_processor.processor import AudioFrame, AudioProcessor
 
 
 def generate_test_audio(filepath: str, duration: float = 30.0, bpm: float = 120.0):
@@ -32,8 +34,8 @@ def generate_test_audio(filepath: str, duration: float = 30.0, bpm: float = 120.
     # Initialize output
     audio = np.zeros_like(t)
 
-    # Bass drone (sub-bass + bass)
-    audio += np.sin(2 * np.pi * 55 * t) * 0.2  # Sub-bass A1
+    # Bass drone (bass band: 40-250Hz)
+    audio += np.sin(2 * np.pi * 55 * t) * 0.2  # Low bass A1
     audio += np.sin(2 * np.pi * 110 * t) * 0.15  # Bass A2
 
     # Mid melody (simple arpeggio pattern)
@@ -105,10 +107,7 @@ class SyncVisualizer:
         self.grid_size = int(np.ceil(np.sqrt(entity_count)))
 
         self.processor = AudioProcessor(
-            sample_rate=48000,
-            channels=2,
-            smoothing=0.15,
-            beat_sensitivity=1.3
+            sample_rate=48000, channels=2, smoothing=0.15, beat_sensitivity=1.3
         )
 
         self._running = False
@@ -135,7 +134,7 @@ class SyncVisualizer:
 
         # Process in 20ms chunks
         chunk_samples = int(sample_rate * 0.02)
-        chunk_bytes = chunk_samples * 2 * 2  # 2 channels, 2 bytes per sample
+        chunk_samples * 2 * 2  # 2 channels, 2 bytes per sample
 
         total_chunks = len(data) // chunk_samples
 
@@ -208,36 +207,33 @@ class SyncVisualizer:
                 y = min(1.0, y + 0.15)
                 scale = min(1.0, scale * 1.3)
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": x,
-                "y": y,
-                "z": z,
-                "scale": scale,
-                "visible": True
-            })
+            entities.append(
+                {"id": f"block_{i}", "x": x, "y": y, "z": z, "scale": scale, "visible": True}
+            )
 
         # Particles on beat
         particles = []
         if frame.is_beat and frame.beat_intensity > 0.3:
-            particles.append({
-                "particle": "NOTE",
-                "x": 0.5,
-                "y": 0.5,
-                "z": 0.5,
-                "count": int(10 * frame.beat_intensity)
-            })
+            particles.append(
+                {
+                    "particle": "NOTE",
+                    "x": 0.5,
+                    "y": 0.5,
+                    "z": 0.5,
+                    "count": int(10 * frame.beat_intensity),
+                }
+            )
 
         await self.viz_client.batch_update(self.zone, entities, particles)
 
 
 @click.command()
-@click.option('--host', default='192.168.208.1', help='Minecraft WebSocket host')
-@click.option('--port', default=8765, help='Minecraft WebSocket port')
-@click.option('--zone', default='main', help='Visualization zone')
-@click.option('--entities', default=25, help='Number of entities')
-@click.option('--duration', '-d', default=30.0, help='Audio duration in seconds')
-@click.option('--bpm', default=120.0, help='Beats per minute')
+@click.option("--host", default="192.168.208.1", help="Minecraft WebSocket host")
+@click.option("--port", default=8765, help="Minecraft WebSocket port")
+@click.option("--zone", default="main", help="Visualization zone")
+@click.option("--entities", default=25, help="Number of entities")
+@click.option("--duration", "-d", default=30.0, help="Audio duration in seconds")
+@click.option("--bpm", default=120.0, help="Beats per minute")
 def main(host, port, zone, entities, duration, bpm):
     """Generate audio file and visualize in sync."""
     asyncio.run(run_sync_test(host, port, zone, entities, duration, bpm))
@@ -247,9 +243,9 @@ async def run_sync_test(host, port, zone, entities, duration, bpm):
     """Run the synchronized test."""
     # Generate audio file
     wav_path = "/mnt/c/Users/Ryan/Desktop/audioviz_test.wav"
-    actual_duration = generate_test_audio(wav_path, duration, bpm)
+    generate_test_audio(wav_path, duration, bpm)
 
-    print(f"\nAudio file created at: C:\\Users\\Ryan\\Desktop\\audioviz_test.wav")
+    print("\nAudio file created at: C:\\Users\\Ryan\\Desktop\\audioviz_test.wav")
 
     # Connect to Minecraft
     client = VizClient(host, port)
@@ -261,7 +257,7 @@ async def run_sync_test(host, port, zone, entities, duration, bpm):
 
     # Check zone
     zones = await client.get_zones()
-    zone_names = [z['name'] for z in zones]
+    zone_names = [z["name"] for z in zones]
     if zone not in zone_names:
         print(f"Zone '{zone}' not found. Available: {zone_names}")
         await client.disconnect()
@@ -279,5 +275,5 @@ async def run_sync_test(host, port, zone, entities, duration, bpm):
         await client.disconnect()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

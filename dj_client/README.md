@@ -39,6 +39,11 @@ A lightweight, cross-platform desktop application for DJs to connect to AudioViz
    npm run tauri build
    ```
 
+5. **Run automated tests:**
+   ```bash
+   npm test
+   ```
+
 ## Usage
 
 ### For DJs

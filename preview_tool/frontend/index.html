@@ -92,6 +92,38 @@
                     </div>
                 </div>
 
+                <!-- View Mode Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">View Mode</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="view-mode-group">
+                            <label class="view-mode-option">
+                                <input type="radio" name="view-mode" value="blocks" checked>
+                                <span class="view-mode-label">
+                                    <span class="view-mode-icon block-mode-icon"></span>
+                                    <span class="view-mode-text">Block</span>
+                                </span>
+                            </label>
+                            <label class="view-mode-option">
+                                <input type="radio" name="view-mode" value="particles">
+                                <span class="view-mode-label">
+                                    <span class="view-mode-icon particle-mode-icon"></span>
+                                    <span class="view-mode-text">Particle</span>
+                                </span>
+                            </label>
+                            <label class="view-mode-option">
+                                <input type="radio" name="view-mode" value="hybrid">
+                                <span class="view-mode-label">
+                                    <span class="view-mode-icon hybrid-mode-icon"></span>
+                                    <span class="view-mode-text">Hybrid</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Presets Panel -->
                 <div class="panel">
                     <div class="panel-header">
@@ -103,6 +135,8 @@
                             <button class="preset-btn" data-preset="edm">EDM</button>
                             <button class="preset-btn" data-preset="chill">Chill</button>
                             <button class="preset-btn" data-preset="rock">Rock</button>
+                            <button class="preset-btn" data-preset="hiphop">Hip-Hop</button>
+                            <button class="preset-btn" data-preset="classical">Classical</button>
                         </div>
                     </div>
                 </div>
@@ -270,6 +304,7 @@
             </div>
             <div class="status-section right">
                 <span class="status-item">
+                    <span class="latency-dot" id="latency-dot"></span>
                     <span id="latency-display">Latency: --ms</span>
                 </span>
             </div>
@@ -284,5 +319,24 @@
     <script src="js/particles.js"></script>
     <script src="js/block-indicators.js"></script>
     <script src="js/app.js"></script>
+
+    <!-- Latency dot color coding (CSS-driven, hooks into existing latency display) -->
+    <script>
+    (function() {
+        const dot = document.getElementById('latency-dot');
+        const el = document.getElementById('latency-display');
+        if (!dot || !el) return;
+        const observer = new MutationObserver(function() {
+            const match = el.textContent.match(/([\d.]+)\s*ms/);
+            if (!match) return;
+            const ms = parseFloat(match[1]);
+            dot.classList.remove('latency-good', 'latency-warn', 'latency-bad');
+            if (ms < 20) dot.classList.add('latency-good');
+            else if (ms <= 50) dot.classList.add('latency-warn');
+            else dot.classList.add('latency-bad');
+        });
+        observer.observe(el, { childList: true, characterData: true, subtree: true });
+    })();
+    </script>
 </body>
 </html>

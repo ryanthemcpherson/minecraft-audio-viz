@@ -92,8 +92,9 @@ public class EntityPoolManager {
                     BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(material.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(3); // 3 ticks for smoother interpolation
+                        entity.setInterpolationDuration(2); // 2 ticks - responsive interpolation
                         entity.setInterpolationDelay(0);
+                        entity.setTeleportDuration(1); // Smooth position changes over 1 tick
                         entity.setTransformation(createTransformation(0, 0, 0, 0.5f));
                         entity.setPersistent(false);
                     });
@@ -139,6 +140,7 @@ public class EntityPoolManager {
                     entity.setBrightness(new Display.Brightness(15, 15));
                     entity.setInterpolationDuration(2);
                     entity.setInterpolationDelay(0);
+                    entity.setTeleportDuration(1); // Smooth position changes over 1 tick
                     entity.setPersistent(false);
                 });
 
@@ -183,9 +185,18 @@ public class EntityPoolManager {
                     entity.teleport(update.location());
                 }
 
-                // Apply transformation update
+                // Apply per-entity interpolation duration if specified
+                if (update.hasInterpolation()) {
+                    display.setInterpolationDuration(update.interpolationDuration());
+                }
+
+                // Apply transformation update (only if changed to avoid resetting interpolation)
                 if (update.hasTransform() && update.transformation() != null) {
-                    display.setTransformation(update.transformation());
+                    Transformation currentTransform = display.getTransformation();
+                    if (!update.transformation().equals(currentTransform)) {
+                        display.setTransformation(update.transformation());
+                        display.setInterpolationDelay(0); // Start interpolation immediately
+                    }
                 }
 
                 // Apply brightness update

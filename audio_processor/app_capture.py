@@ -11,29 +11,31 @@ Usage:
 
 import argparse
 import asyncio
-import sys
 import os
 import signal
+import sys
 
-# Fix Windows console encoding for unicode characters (spectrograph uses █░● etc)
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-import math
-import time
+# Fix Windows console encoding for unicode characters (spectrograph uses Ã¢â€“Ë†Ã¢â€“â€˜Ã¢â€”Â etc)
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+import http.server
 import json
 import logging
-import threading
-import http.server
+import math
 import socketserver
-from pathlib import Path
-from typing import Optional, List, Dict, Set
+import threading
+import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional, Set
+
 import numpy as np
 
 # Optional aubio for optimized beat detection
 try:
     import aubio
+
     HAS_AUBIO = True
 except ImportError:
     HAS_AUBIO = False
@@ -42,22 +44,22 @@ except ImportError:
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from audio_processor.patterns import PATTERNS, AudioState, PatternConfig, get_pattern, list_patterns
 from audio_processor.spectrograph import TerminalSpectrograph
-from audio_processor.patterns import (
-    PatternConfig, AudioState, get_pattern, list_patterns, PATTERNS
-)
 from python_client.viz_client import VizClient
 
 try:
     import websockets
     from websockets.server import serve as ws_serve
+
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
 
 # Optional FFT analyzer
 try:
-    from audio_processor.fft_analyzer import HybridAnalyzer, FFTResult
+    from audio_processor.fft_analyzer import FFTResult, HybridAnalyzer
+
     HAS_FFT = True
 except ImportError:
     HAS_FFT = False
@@ -66,11 +68,10 @@ except ImportError:
 
 # Optional timeline engine
 try:
-    from audio_processor.timeline import (
-        TimelineEngine, TimelineState, Show, Cue, CueType
-    )
+    from audio_processor.timeline import Cue, Show, TimelineEngine, TimelineState
     from audio_processor.timeline.cue_executor import CueExecutor
     from audio_processor.timeline.show_storage import ShowStorage
+
     HAS_TIMELINE = True
 except ImportError:
     HAS_TIMELINE = False
@@ -78,11 +79,8 @@ except ImportError:
     TimelineState = None
     Show = None
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('app_capture')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("app_capture")
 
 
 # === AUDIO PRESETS ===
@@ -94,29 +92,29 @@ PRESETS = {
         "beat_threshold": 1.3,
         "agc_max_gain": 8.0,
         "beat_sensitivity": 1.0,
-        "bass_weight": 0.7,      # Balanced bass weight
-        "band_sensitivity": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        "auto_calibrate": True  # Future: self-tuning
+        "bass_weight": 0.7,  # Balanced bass weight
+        "band_sensitivity": [1.0, 1.0, 1.0, 1.0, 1.0],  # [bass, low_mid, mid, high_mid, high]
+        "auto_calibrate": True,  # Future: self-tuning
     },
     "edm": {
-        "attack": 0.7,           # Fast attack for punchy beats
-        "release": 0.15,         # Quick decay for fast BPM
-        "beat_threshold": 1.1,   # Lower threshold = more beats detected
-        "agc_max_gain": 10.0,    # Higher gain for dynamic range
-        "beat_sensitivity": 1.5, # Stronger beat response
-        "bass_weight": 0.85,     # Heavy bass focus for EDM kicks
-        "band_sensitivity": [1.5, 1.3, 0.8, 0.9, 1.2, 1.0],  # Boost bass
-        "auto_calibrate": False
+        "attack": 0.7,  # Fast attack for punchy beats
+        "release": 0.15,  # Quick decay for fast BPM
+        "beat_threshold": 1.1,  # Lower threshold = more beats detected
+        "agc_max_gain": 10.0,  # Higher gain for dynamic range
+        "beat_sensitivity": 1.5,  # Stronger beat response
+        "bass_weight": 0.85,  # Heavy bass focus for EDM kicks
+        "band_sensitivity": [1.5, 0.8, 0.9, 1.2, 1.0],  # Boost bass
+        "auto_calibrate": False,
     },
     "chill": {
-        "attack": 0.25,          # Slower attack for smoother response
-        "release": 0.05,         # Smooth decay
-        "beat_threshold": 1.6,   # Higher threshold = fewer beats
+        "attack": 0.25,  # Slower attack for smoother response
+        "release": 0.05,  # Smooth decay
+        "beat_threshold": 1.6,  # Higher threshold = fewer beats
         "agc_max_gain": 6.0,
         "beat_sensitivity": 0.7,
-        "bass_weight": 0.5,      # Less bass focus, more balanced
-        "band_sensitivity": [0.8, 0.9, 1.0, 1.1, 1.2, 1.3],  # Boost highs
-        "auto_calibrate": False
+        "bass_weight": 0.5,  # Less bass focus, more balanced
+        "band_sensitivity": [0.9, 1.0, 1.1, 1.2, 1.3],  # Boost highs
+        "auto_calibrate": False,
     },
     "rock": {
         "attack": 0.5,
@@ -124,19 +122,20 @@ PRESETS = {
         "beat_threshold": 1.3,
         "agc_max_gain": 8.0,
         "beat_sensitivity": 1.2,
-        "bass_weight": 0.65,     # Drum-focused
-        "band_sensitivity": [1.2, 1.1, 1.0, 1.0, 0.9, 0.8],  # Guitar/drums focus
-        "auto_calibrate": False
-    }
+        "bass_weight": 0.65,  # Drum-focused
+        "band_sensitivity": [1.2, 1.0, 1.0, 0.9, 0.8],  # Guitar/drums focus
+        "auto_calibrate": False,
+    },
 }
 
 
 @dataclass
 class AppAudioFrame:
     """Audio frame from application capture."""
+
     timestamp: float
-    peak: float           # Peak level (0-1)
-    channels: List[float] # Per-channel levels
+    peak: float  # Peak level (0-1)
+    channels: List[float]  # Per-channel levels
     is_beat: bool
     beat_intensity: float
 
@@ -194,12 +193,12 @@ class AubioBeatDetector:
 
         # Check for common octave-related ratios
         corrections = [
-            (0.5, 2.0),    # Half tempo -> double it
-            (0.66, 1.5),   # 2/3 tempo -> multiply by 1.5
-            (0.75, 1.333), # 3/4 tempo -> multiply by 4/3
+            (0.5, 2.0),  # Half tempo -> double it
+            (0.66, 1.5),  # 2/3 tempo -> multiply by 1.5
+            (0.75, 1.333),  # 3/4 tempo -> multiply by 4/3
             (1.33, 0.75),  # 4/3 tempo -> multiply by 3/4
             (1.5, 0.666),  # 3/2 tempo -> multiply by 2/3
-            (2.0, 0.5),    # Double tempo -> halve it
+            (2.0, 0.5),  # Double tempo -> halve it
         ]
 
         for target_ratio, correction in corrections:
@@ -223,6 +222,7 @@ class AubioBeatDetector:
 
         # Apply Gaussian smoothing to histogram (reduces noise)
         from scipy.ndimage import gaussian_filter1d
+
         try:
             smoothed = gaussian_filter1d(hist.astype(float), sigma=2)
         except Exception:
@@ -353,10 +353,13 @@ class AppAudioCapture:
     Supports automatic fallback to system loopback if target app not found.
     """
 
-    def __init__(self, app_name: str = "spotify",
-                 fallback_to_loopback: bool = True,
-                 max_retries: int = 5,
-                 retry_interval: float = 2.0):
+    def __init__(
+        self,
+        app_name: str = "spotify",
+        fallback_to_loopback: bool = True,
+        max_retries: int = 5,
+        retry_interval: float = 2.0,
+    ):
         """
         Initialize app audio capture.
 
@@ -430,7 +433,6 @@ class AppAudioCapture:
         """Find the audio session for the target application."""
         try:
             from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-            from comtypes import CLSCTX_ALL
 
             sessions = AudioUtilities.GetAllSessions()
 
@@ -438,7 +440,9 @@ class AppAudioCapture:
                 if session.Process:
                     process_name = session.Process.name().lower()
                     if self.app_name in process_name:
-                        logger.info(f"Found audio session: {session.Process.name()} (PID: {session.Process.pid})")
+                        logger.info(
+                            f"Found audio session: {session.Process.name()} (PID: {session.Process.pid})"
+                        )
                         self._session = session
 
                         # Get the audio meter interface
@@ -473,8 +477,10 @@ class AppAudioCapture:
                 return True
 
             if attempt < self._max_retries - 1:
-                logger.info(f"Retry {attempt + 1}/{self._max_retries} for '{self.app_name}' "
-                           f"in {self._retry_interval}s...")
+                logger.info(
+                    f"Retry {attempt + 1}/{self._max_retries} for '{self.app_name}' "
+                    f"in {self._retry_interval}s..."
+                )
                 time.sleep(self._retry_interval)
 
         # All retries failed - try fallback
@@ -489,10 +495,7 @@ class AppAudioCapture:
 
         try:
             if HAS_FFT:
-                self._fallback_analyzer = HybridAnalyzer(
-                    low_latency=True,
-                    ultra_low_latency=True
-                )
+                self._fallback_analyzer = HybridAnalyzer(low_latency=True, ultra_low_latency=True)
                 self._using_fallback = True
                 logger.info("Fallback to HybridAnalyzer (system loopback) enabled")
                 return True
@@ -530,7 +533,7 @@ class AppAudioCapture:
         return self._using_fallback
 
     @property
-    def fallback_analyzer(self) -> Optional['HybridAnalyzer']:
+    def fallback_analyzer(self) -> Optional["HybridAnalyzer"]:
         """Get the fallback analyzer (if in fallback mode)."""
         return self._fallback_analyzer
 
@@ -544,10 +547,7 @@ class AppAudioCapture:
 
             for session in sessions:
                 if session.Process:
-                    result.append({
-                        'name': session.Process.name(),
-                        'pid': session.Process.pid
-                    })
+                    result.append({"name": session.Process.name(), "pid": session.Process.pid})
 
             return result
 
@@ -599,7 +599,7 @@ class AppAudioCapture:
             peak=smoothed_peak,
             channels=channels,
             is_beat=is_beat,
-            beat_intensity=beat_intensity
+            beat_intensity=beat_intensity,
         )
 
     def _detect_beat(self, energy: float, bass_energy: float = None) -> tuple:
@@ -643,7 +643,7 @@ class AppAudioCapture:
         if self._onset_count >= self._onset_history_size:
             recent_onsets = self._onset_history
         else:
-            recent_onsets = self._onset_history[:self._onset_count]
+            recent_onsets = self._onset_history[: self._onset_count]
 
         # NumPy vectorized operations (with empty array guards)
         if len(recent_onsets) > 0:
@@ -661,7 +661,9 @@ class AppAudioCapture:
         is_onset = False
         if self._onset_count >= 5:
             # Get last 5 values from circular buffer (most recent first)
-            indices = np.array([(self._onset_idx - 1 - i) % self._onset_history_size for i in range(5)])
+            indices = np.array(
+                [(self._onset_idx - 1 - i) % self._onset_history_size for i in range(5)]
+            )
             window = self._onset_history[indices]
             current = window[0]
 
@@ -686,7 +688,7 @@ class AppAudioCapture:
                 if self._beat_count >= self._max_beat_times:
                     valid_times = self._beat_times.copy()
                 else:
-                    valid_times = self._beat_times[:self._beat_count].copy()
+                    valid_times = self._beat_times[: self._beat_count].copy()
 
                 # Sort times (circular buffer may be out of order)
                 sorted_times = np.sort(valid_times[valid_times > 0])
@@ -737,11 +739,13 @@ class AppAudioCapture:
                         # Add to BPM history for even more stable estimation
                         self._bpm_history[self._bpm_history_idx] = new_tempo
                         self._bpm_history_idx = (self._bpm_history_idx + 1) % len(self._bpm_history)
-                        self._bpm_history_count = min(self._bpm_history_count + 1, len(self._bpm_history))
+                        self._bpm_history_count = min(
+                            self._bpm_history_count + 1, len(self._bpm_history)
+                        )
 
                         # Use stable tempo from history
                         if self._bpm_history_count >= 10:
-                            valid_history = self._bpm_history[:self._bpm_history_count]
+                            valid_history = self._bpm_history[: self._bpm_history_count]
                             # Re-run histogram on history for maximum stability
                             hist2, edges2 = np.histogram(valid_history, bins=bins)
                             peak_idx2 = np.argmax(hist2)
@@ -749,12 +753,16 @@ class AppAudioCapture:
 
                             # Very slow adaptation for stability
                             alpha = 0.08
-                            self._stable_tempo = (1 - alpha) * self._stable_tempo + alpha * stable_bpm
+                            self._stable_tempo = (
+                                1 - alpha
+                            ) * self._stable_tempo + alpha * stable_bpm
                             self._estimated_tempo = self._stable_tempo
                         else:
                             # Fast adaptation during warmup
                             alpha = 0.2
-                            self._estimated_tempo = (1 - alpha) * self._estimated_tempo + alpha * new_tempo
+                            self._estimated_tempo = (
+                                1 - alpha
+                            ) * self._estimated_tempo + alpha * new_tempo
 
                         self._estimated_tempo = float(np.clip(self._estimated_tempo, 60, 200))
 
@@ -762,7 +770,9 @@ class AppAudioCapture:
                         # How many intervals agree with the estimated tempo?
                         expected_interval = 60.0 / self._estimated_tempo
                         agreeing = np.sum(np.abs(valid_intervals - expected_interval) < 0.05)
-                        self._tempo_confidence = float(np.clip(agreeing / len(valid_intervals), 0, 1))
+                        self._tempo_confidence = float(
+                            np.clip(agreeing / len(valid_intervals), 0, 1)
+                        )
 
             # This is a beat!
             is_beat = True
@@ -789,17 +799,18 @@ class AppAudioCapture:
 
 class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler that serves from multiple directories based on URL path."""
+
     directory_map = {}
 
     def translate_path(self, path):
         """Translate URL path to file system path."""
-        path = path.split('?')[0].split('#')[0]
+        path = path.split("?")[0].split("#")[0]
         for url_prefix, fs_directory in self.directory_map.items():
             if path.startswith(url_prefix):
-                relative_path = path[len(url_prefix):].lstrip('/')
+                relative_path = path[len(url_prefix) :].lstrip("/")
                 return os.path.join(fs_directory, relative_path)
-        if '/' in self.directory_map:
-            return os.path.join(self.directory_map['/'], path.lstrip('/'))
+        if "/" in self.directory_map:
+            return os.path.join(self.directory_map["/"], path.lstrip("/"))
         return super().translate_path(path)
 
     def log_message(self, format, *args):
@@ -809,12 +820,12 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
 def run_http_server(port: int, directory: str):
     """Run HTTP server for static files in a separate thread."""
     project_root = Path(directory).parent.parent
-    admin_dir = project_root / 'admin_panel'
+    admin_dir = project_root / "admin_panel"
 
     # Configure directory mapping
     MultiDirectoryHandler.directory_map = {
-        '/admin': str(admin_dir) if admin_dir.exists() else str(directory),
-        '/': str(directory),
+        "/admin": str(admin_dir) if admin_dir.exists() else str(directory),
+        "/": str(directory),
     }
 
     os.chdir(str(project_root))
@@ -829,23 +840,25 @@ class AppCaptureAgent:
     data to Minecraft and browser preview.
     """
 
-    def __init__(self,
-                 app_name: str = "spotify",
-                 minecraft_host: str = "localhost",
-                 minecraft_port: int = 8765,
-                 zone: str = "main",
-                 entity_count: int = 16,
-                 show_spectrograph: bool = True,
-                 compact_spectrograph: bool = False,
-                 broadcast_port: int = 8766,
-                 http_port: int = 8080,
-                 vscode_mode: bool = False,
-                 use_fft: bool = True,
-                 low_latency: bool = False,
-                 ultra_low_latency: bool = False,
-                 use_beat_prediction: bool = False,
-                 prediction_lookahead_ms: float = 80.0,
-                 tick_aligned: bool = False):
+    def __init__(
+        self,
+        app_name: str = "spotify",
+        minecraft_host: str = "localhost",
+        minecraft_port: int = 8765,
+        zone: str = "main",
+        entity_count: int = 16,
+        show_spectrograph: bool = True,
+        compact_spectrograph: bool = False,
+        broadcast_port: int = 8766,
+        http_port: int = 8080,
+        vscode_mode: bool = False,
+        use_fft: bool = True,
+        low_latency: bool = False,
+        ultra_low_latency: bool = False,
+        use_beat_prediction: bool = False,
+        prediction_lookahead_ms: float = 80.0,
+        tick_aligned: bool = False,
+    ):
 
         self.app_name = app_name
         self.minecraft_host = minecraft_host
@@ -877,12 +890,11 @@ class AppCaptureAgent:
         if show_spectrograph:
             if compact_spectrograph:
                 from audio_processor.spectrograph import CompactSpectrograph
+
                 self.spectrograph = CompactSpectrograph()
             else:
                 # Pass vscode_mode - None means auto-detect, True forces VS Code mode
-                self.spectrograph = TerminalSpectrograph(
-                    vscode_mode=True if vscode_mode else None
-                )
+                self.spectrograph = TerminalSpectrograph(vscode_mode=True if vscode_mode else None)
         else:
             self.spectrograph = None
 
@@ -895,13 +907,13 @@ class AppCaptureAgent:
                     low_latency=low_latency,
                     ultra_low_latency=ultra_low_latency,
                     use_beat_prediction=use_beat_prediction,
-                    prediction_lookahead_ms=prediction_lookahead_ms
+                    prediction_lookahead_ms=prediction_lookahead_ms,
                 )
                 self._using_fft = self.fft_analyzer.using_fft
                 if self._using_fft:
                     stats = self.fft_analyzer.latency_stats
-                    fft_ms = stats.get('fft_latency_ms', 0)
-                    hop_ms = stats.get('hop_interval_ms', 0)
+                    fft_ms = stats.get("fft_latency_ms", 0)
+                    hop_ms = stats.get("hop_interval_ms", 0)
                     if ultra_low_latency:
                         mode = "ULTRA-LOW-LATENCY"
                     elif low_latency:
@@ -910,7 +922,9 @@ class AppCaptureAgent:
                         mode = "NORMAL"
                     if use_beat_prediction:
                         mode += "+PREDICTION"
-                    logger.info(f"FFT analyzer active [{mode}] - FFT: {fft_ms:.0f}ms, Update: {hop_ms:.0f}ms")
+                    logger.info(
+                        f"FFT analyzer active [{mode}] - FFT: {fft_ms:.0f}ms, Update: {hop_ms:.0f}ms"
+                    )
                 else:
                     logger.info("FFT analyzer initialized - will use when audio available")
             except Exception as e:
@@ -946,13 +960,13 @@ class AppCaptureAgent:
 
         # Rolling energy history for AGC (Auto-Gain Control)
         self._agc_history_size = 90  # ~1.5 seconds at 60fps
-        self._energy_history = []     # Rolling peak values
-        self._agc_gain = 1.0          # Current gain multiplier
-        self._agc_target = 0.85       # Target output level (85% of range)
-        self._agc_attack = 0.15       # Fast attack - respond quickly to loud
-        self._agc_release = 0.008     # Very slow release - don't drop too fast
-        self._agc_min_gain = 1.0      # Minimum gain (never reduce below input)
-        self._agc_max_gain = 8.0      # Maximum gain boost
+        self._energy_history = []  # Rolling peak values
+        self._agc_gain = 1.0  # Current gain multiplier
+        self._agc_target = 0.85  # Target output level (85% of range)
+        self._agc_attack = 0.15  # Fast attack - respond quickly to loud
+        self._agc_release = 0.008  # Very slow release - don't drop too fast
+        self._agc_min_gain = 1.0  # Minimum gain (never reduce below input)
+        self._agc_max_gain = 8.0  # Maximum gain boost
 
         # Per-band rolling history for adaptive normalization
         self._band_history_size = 45  # ~0.75 seconds per band
@@ -961,8 +975,8 @@ class AppCaptureAgent:
 
         # Temporal smoothing (exponential moving average)
         self._smoothed_bands = [0.0] * 5
-        self._smooth_attack = 0.35    # Fast attack (respond to increases)
-        self._smooth_release = 0.08   # Slower release (decay smoothly)
+        self._smooth_attack = 0.35  # Fast attack (respond to increases)
+        self._smooth_release = 0.08  # Slower release (decay smoothly)
 
         # Band simulation state
         self._prev_bands = [0.0] * 5
@@ -1012,6 +1026,7 @@ class AppCaptureAgent:
         self.cue_executor = None
         self.show_storage = None
         self._active_effects = {}  # Active effects with end times
+        self._last_entities = []  # Last frame's entities (for freeze effect)
 
         if HAS_TIMELINE:
             self.timeline = TimelineEngine()
@@ -1023,13 +1038,12 @@ class AppCaptureAgent:
                 pattern_handler=self._set_pattern_from_cue,
                 preset_handler=self._apply_preset,
                 parameter_handler=self._set_parameter_from_cue,
-                effect_handler=self._trigger_effect
+                effect_handler=self._trigger_effect,
             )
 
             # Wire up timeline callbacks
             self.timeline.set_callbacks(
-                on_cue_fire=self._on_cue_fire,
-                on_state_change=self._on_timeline_state_change
+                on_cue_fire=self._on_cue_fire, on_state_change=self._on_timeline_state_change
             )
 
             logger.info("Timeline engine initialized")
@@ -1054,14 +1068,113 @@ class AppCaptureAgent:
             logger.info(f"Cue: Parameter {param_name} set to {value}")
 
     def _trigger_effect(self, effect_type: str, intensity: float, duration: int):
-        """Trigger a visual effect."""
+        """Trigger a visual effect. Intensity 0 = disable (for toggle effects)."""
+        # Toggle effects (blackout, freeze): intensity 0 means turn OFF
+        if intensity <= 0 and effect_type in ("blackout", "freeze"):
+            if effect_type in self._active_effects:
+                del self._active_effects[effect_type]
+                logger.info(f"Effect disabled: {effect_type}")
+                # Re-show entities when blackout ends
+                if effect_type == "blackout" and self.viz_client and self.viz_client.connected:
+                    asyncio.ensure_future(self.viz_client.set_visible(self.zone, True))
+            return
+
+        # For toggle effects, use a very long duration (they're disabled explicitly)
+        if effect_type in ("blackout", "freeze"):
+            duration = 999999999  # Effectively infinite until toggled off
+
         end_time = time.time() + (duration / 1000)
         self._active_effects[effect_type] = {
             "intensity": intensity,
             "end_time": end_time,
-            "duration": duration
+            "duration": duration,
+            "start_time": time.time(),
         }
-        logger.info(f"Effect triggered: {effect_type} (intensity={intensity}, duration={duration}ms)")
+        logger.info(
+            f"Effect triggered: {effect_type} (intensity={intensity}, duration={duration}ms)"
+        )
+
+        # Blackout: immediately hide all entities in Minecraft
+        if effect_type == "blackout":
+            if self.viz_client and self.viz_client.connected:
+                asyncio.ensure_future(self.viz_client.set_visible(self.zone, False))
+
+    def _apply_effects(self, entities: List[dict], bands: List[float], frame) -> List[dict]:
+        """Apply active effects to entity output. Returns modified entities."""
+        if not self._active_effects:
+            return entities
+
+        now = time.time()
+
+        # Blackout: return empty entities (hide everything)
+        if "blackout" in self._active_effects:
+            return []
+
+        # Freeze: return last frame's entities (don't update)
+        if "freeze" in self._active_effects:
+            if hasattr(self, "_last_entities") and self._last_entities:
+                return self._last_entities
+            return entities
+
+        modified = [dict(e) for e in entities]  # Shallow copy
+
+        for effect_type, effect in self._active_effects.items():
+            intensity = effect["intensity"]
+            elapsed = now - effect["start_time"]
+            duration_s = effect["duration"] / 1000.0
+            progress = min(1.0, elapsed / duration_s) if duration_s > 0 else 1.0
+
+            if effect_type == "flash":
+                # Flash: boost all entity scales to max, fade over duration
+                flash_mult = intensity * (1.0 - progress)
+                for e in modified:
+                    e["scale"] = min(1.0, e.get("scale", 0.5) + flash_mult * 0.5)
+                    e["y"] = min(1.0, e.get("y", 0) + flash_mult * 0.2)
+
+            elif effect_type == "strobe":
+                # Strobe: rapid on/off toggling (8Hz)
+                strobe_on = int(elapsed * 8) % 2 == 0
+                if not strobe_on:
+                    for e in modified:
+                        e["scale"] = 0.01  # Nearly invisible
+
+            elif effect_type == "pulse":
+                # Pulse: rhythmic scale oscillation
+                pulse_val = math.sin(elapsed * math.pi * 4) * intensity
+                for e in modified:
+                    base_scale = e.get("scale", 0.5)
+                    e["scale"] = max(0.05, base_scale * (1.0 + pulse_val * 0.5))
+
+            elif effect_type == "wave":
+                # Wave: ripple through entities based on position
+                for i, e in enumerate(modified):
+                    phase = (i / max(1, len(modified))) * math.pi * 2
+                    wave_val = math.sin(elapsed * 3.0 + phase) * intensity
+                    e["y"] = max(0, min(1.0, e.get("y", 0) + wave_val * 0.3))
+
+            elif effect_type == "spiral":
+                # Spiral: rotate entities in a spiral pattern
+                for i, e in enumerate(modified):
+                    angle = elapsed * 2.0 + (i / max(1, len(modified))) * math.pi * 2
+                    radius = 0.3 * intensity * (1.0 - progress * 0.5)
+                    e["x"] = max(0, min(1.0, 0.5 + math.cos(angle) * radius))
+                    e["z"] = max(0, min(1.0, 0.5 + math.sin(angle) * radius))
+
+            elif effect_type == "explode":
+                # Explode: push all entities outward from center, then fade
+                explode_force = intensity * (1.0 - progress)
+                for e in modified:
+                    dx = e.get("x", 0.5) - 0.5
+                    dy = e.get("y", 0.5) - 0.5
+                    dz = e.get("z", 0.5) - 0.5
+                    dist = max(0.1, (dx * dx + dy * dy + dz * dz) ** 0.5)
+                    force = explode_force / dist * 0.3
+                    e["x"] = max(0, min(1.0, e.get("x", 0.5) + dx * force))
+                    e["y"] = max(0, min(1.0, e.get("y", 0.5) + dy * force))
+                    e["z"] = max(0, min(1.0, e.get("z", 0.5) + dz * force))
+                    e["scale"] = max(0.05, e.get("scale", 0.5) * (1.0 + explode_force * 0.5))
+
+        return modified
 
     def _on_cue_fire(self, cue):
         """Called when a cue fires."""
@@ -1097,7 +1210,9 @@ class AppCaptureAgent:
         self._current_preset = preset_name
 
         logger.info(f"  Attack: {self._smooth_attack}, Release: {self._smooth_release}")
-        logger.info(f"  Beat threshold: {self.capture._beat_threshold}, Bass weight: {self.capture._bass_weight}")
+        logger.info(
+            f"  Beat threshold: {self.capture._beat_threshold}, Bass weight: {self.capture._bass_weight}"
+        )
 
         # Enable/disable auto-calibration based on preset
         self._auto_calibrate_enabled = preset.get("auto_calibrate", False)
@@ -1211,8 +1326,10 @@ class AppCaptureAgent:
 
         # Log calibration results periodically
         if self._calibration_frame_count % 300 == 0:  # Every 5 seconds
-            logger.debug(f"Auto-cal: BPM≈{self._estimated_bpm:.0f}, var={self._music_variance:.2f}, "
-                        f"thresh={self.capture._beat_threshold:.2f}, attack={self._smooth_attack:.2f}")
+            logger.debug(
+                f"Auto-cal: BPMÃ¢â€°Ë†{self._estimated_bpm:.0f}, var={self._music_variance:.2f}, "
+                f"thresh={self.capture._beat_threshold:.2f}, attack={self._smooth_attack:.2f}"
+            )
 
     def _apply_audio_setting(self, setting: str, value: float):
         """Apply an audio reactivity setting from the UI."""
@@ -1247,11 +1364,11 @@ class AppCaptureAgent:
         logger.info(f"Browser preview connected. Clients: {len(self._broadcast_clients)}")
 
         # Send available patterns on connect
-        await websocket.send(json.dumps({
-            "type": "patterns",
-            "patterns": list_patterns(),
-            "current": self._pattern_name
-        }))
+        await websocket.send(
+            json.dumps(
+                {"type": "patterns", "patterns": list_patterns(), "current": self._pattern_name}
+            )
+        )
 
         try:
             async for message in websocket:
@@ -1278,8 +1395,41 @@ class AppCaptureAgent:
                         count = max(8, min(64, count))  # Clamp between 8 and 64
                         self.entity_count = count
                         self._pattern_config = PatternConfig(entity_count=count)
-                        self._current_pattern = get_pattern(self._pattern_name, self._pattern_config)
+                        self._current_pattern = get_pattern(
+                            self._pattern_name, self._pattern_config
+                        )
                         logger.info(f"Set block count to: {count}")
+                        # Also resize Minecraft entity pool
+                        if self.viz_client and self.viz_client.connected:
+                            try:
+                                await self.viz_client.init_pool(self.zone, count)
+                            except Exception as e:
+                                logger.warning(f"Failed to resize MC pool: {e}")
+
+                    elif msg_type in (
+                        "set_render_mode",
+                        "set_zone_config",
+                        "set_renderer_backend",
+                        "get_renderer_capabilities",
+                        "renderer_capabilities",
+                        "set_particle_viz_config",
+                        "set_particle_config",
+                        "set_particle_effect",
+                        "set_hologram_config",
+                        "set_entity_glow",
+                        "set_entity_brightness",
+                    ):
+                        # Forward zone/rendering messages to Minecraft
+                        if self.viz_client and self.viz_client.connected:
+                            try:
+                                # Add zone field if missing (for particle effect toggles)
+                                if "zone" not in data:
+                                    data["zone"] = self.zone
+                                response = await self.viz_client.send(data)
+                                if response:
+                                    await websocket.send(json.dumps(response))
+                            except Exception as e:
+                                logger.warning(f"Failed to forward {msg_type} to MC: {e}")
 
                     elif msg_type == "set_audio_setting":
                         # Update audio reactivity settings
@@ -1294,7 +1444,9 @@ class AppCaptureAgent:
                         if 0 <= band < 5:
                             self._band_sensitivity[band] = max(0.0, min(2.0, sensitivity))
                             band_names = ["Bass", "Low", "Mid", "High", "Air"]
-                            logger.info(f"{band_names[band]} sensitivity: {self._band_sensitivity[band]:.0%}")
+                            logger.info(
+                                f"{band_names[band]} sensitivity: {self._band_sensitivity[band]:.0%}"
+                            )
 
                     elif msg_type == "set_preset":
                         # Apply preset configuration
@@ -1304,29 +1456,39 @@ class AppCaptureAgent:
                         await self._broadcast_preset_change(preset_name)
 
                     elif msg_type == "get_patterns":
-                        await websocket.send(json.dumps({
-                            "type": "patterns",
-                            "patterns": list_patterns(),
-                            "current": self._pattern_name
-                        }))
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "patterns",
+                                    "patterns": list_patterns(),
+                                    "current": self._pattern_name,
+                                }
+                            )
+                        )
 
                     elif msg_type == "get_state":
                         # Send full state snapshot
-                        await websocket.send(json.dumps({
-                            "type": "state_snapshot",
-                            "pattern": self._pattern_name,
-                            "preset": self._current_preset,
-                            "patterns": list_patterns(),
-                            "timeline": self.timeline.get_status() if self.timeline else None,
-                            "settings": {
-                                "attack": self._smooth_attack,
-                                "release": self._smooth_release,
-                                "agc_max_gain": self._agc_max_gain,
-                                "beat_sensitivity": self._beat_sensitivity,
-                                "beat_threshold": self.capture._beat_threshold,
-                                "band_sensitivity": self._band_sensitivity
-                            }
-                        }))
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "state_snapshot",
+                                    "pattern": self._pattern_name,
+                                    "preset": self._current_preset,
+                                    "patterns": list_patterns(),
+                                    "timeline": self.timeline.get_status()
+                                    if self.timeline
+                                    else None,
+                                    "settings": {
+                                        "attack": self._smooth_attack,
+                                        "release": self._smooth_release,
+                                        "agc_max_gain": self._agc_max_gain,
+                                        "beat_sensitivity": self._beat_sensitivity,
+                                        "beat_threshold": self.capture._beat_threshold,
+                                        "band_sensitivity": self._band_sensitivity,
+                                    },
+                                }
+                            )
+                        )
 
                     # === TIMELINE MESSAGES ===
                     elif msg_type == "timeline_play":
@@ -1365,27 +1527,22 @@ class AppCaptureAgent:
 
                             if show:
                                 self.timeline.load_show(show)
-                                await websocket.send(json.dumps({
-                                    "type": "show_loaded",
-                                    "show": show.to_dict()
-                                }))
+                                await websocket.send(
+                                    json.dumps({"type": "show_loaded", "show": show.to_dict()})
+                                )
                             await self._broadcast_timeline_status()
 
                     elif msg_type == "save_show":
                         if self.timeline and self.show_storage and self.timeline.show:
                             filepath = self.show_storage.save(self.timeline.show)
-                            await websocket.send(json.dumps({
-                                "type": "show_saved",
-                                "filepath": filepath
-                            }))
+                            await websocket.send(
+                                json.dumps({"type": "show_saved", "filepath": filepath})
+                            )
 
                     elif msg_type == "list_shows":
                         if self.show_storage:
                             shows = self.show_storage.list_shows()
-                            await websocket.send(json.dumps({
-                                "type": "show_list",
-                                "shows": shows
-                            }))
+                            await websocket.send(json.dumps({"type": "show_list", "shows": shows}))
 
                     elif msg_type == "new_show":
                         if self.timeline:
@@ -1394,20 +1551,18 @@ class AppCaptureAgent:
                             bpm = data.get("bpm", 128.0)
                             show = Show(name=name, duration=duration, bpm=bpm)
                             self.timeline.load_show(show)
-                            await websocket.send(json.dumps({
-                                "type": "show_loaded",
-                                "show": show.to_dict()
-                            }))
+                            await websocket.send(
+                                json.dumps({"type": "show_loaded", "show": show.to_dict()})
+                            )
                             await self._broadcast_timeline_status()
 
                     elif msg_type == "create_demo_show":
                         if self.timeline and self.show_storage:
                             show = self.show_storage.create_demo_show()
                             self.timeline.load_show(show)
-                            await websocket.send(json.dumps({
-                                "type": "show_loaded",
-                                "show": show.to_dict()
-                            }))
+                            await websocket.send(
+                                json.dumps({"type": "show_loaded", "show": show.to_dict()})
+                            )
                             await self._broadcast_timeline_status()
 
                     elif msg_type == "fire_cue":
@@ -1438,10 +1593,9 @@ class AppCaptureAgent:
                             if track:
                                 cue = Cue.from_dict(cue_data)
                                 track.add_cue(cue)
-                                await websocket.send(json.dumps({
-                                    "type": "cue_added",
-                                    "cue": cue.to_dict()
-                                }))
+                                await websocket.send(
+                                    json.dumps({"type": "cue_added", "cue": cue.to_dict()})
+                                )
 
                     elif msg_type == "update_cue":
                         if self.timeline and self.timeline.show:
@@ -1457,10 +1611,11 @@ class AppCaptureAgent:
                                             cue.duration = updates["duration"]
                                         if "name" in updates:
                                             cue.name = updates["name"]
-                                        await websocket.send(json.dumps({
-                                            "type": "cue_updated",
-                                            "cue": cue.to_dict()
-                                        }))
+                                        await websocket.send(
+                                            json.dumps(
+                                                {"type": "cue_updated", "cue": cue.to_dict()}
+                                            )
+                                        )
                                         break
 
                     elif msg_type == "delete_cue":
@@ -1468,10 +1623,9 @@ class AppCaptureAgent:
                             cue_id = data.get("cue_id")
                             for track in self.timeline.show.tracks:
                                 if track.remove_cue(cue_id):
-                                    await websocket.send(json.dumps({
-                                        "type": "cue_deleted",
-                                        "cue_id": cue_id
-                                    }))
+                                    await websocket.send(
+                                        json.dumps({"type": "cue_deleted", "cue_id": cue_id})
+                                    )
                                     break
 
                 except json.JSONDecodeError:
@@ -1484,11 +1638,9 @@ class AppCaptureAgent:
 
     async def _broadcast_pattern_change(self):
         """Broadcast pattern change to all connected clients."""
-        message = json.dumps({
-            "type": "pattern_changed",
-            "pattern": self._pattern_name,
-            "patterns": list_patterns()
-        })
+        message = json.dumps(
+            {"type": "pattern_changed", "pattern": self._pattern_name, "patterns": list_patterns()}
+        )
         for client in list(self._broadcast_clients):
             try:
                 await client.send(message)
@@ -1498,18 +1650,20 @@ class AppCaptureAgent:
     async def _broadcast_preset_change(self, preset_name: str):
         """Broadcast preset change to all connected clients."""
         preset = PRESETS.get(preset_name, PRESETS["auto"])
-        message = json.dumps({
-            "type": "preset_changed",
-            "preset": preset_name,
-            "settings": {
-                "attack": preset["attack"],
-                "release": preset["release"],
-                "beat_threshold": preset["beat_threshold"],
-                "agc_max_gain": preset["agc_max_gain"],
-                "beat_sensitivity": preset["beat_sensitivity"],
-                "band_sensitivity": preset["band_sensitivity"]
+        message = json.dumps(
+            {
+                "type": "preset_changed",
+                "preset": preset_name,
+                "settings": {
+                    "attack": preset["attack"],
+                    "release": preset["release"],
+                    "beat_threshold": preset["beat_threshold"],
+                    "agc_max_gain": preset["agc_max_gain"],
+                    "beat_sensitivity": preset["beat_sensitivity"],
+                    "band_sensitivity": preset["band_sensitivity"],
+                },
             }
-        })
+        )
         for client in list(self._broadcast_clients):
             try:
                 await client.send(message)
@@ -1521,39 +1675,42 @@ class AppCaptureAgent:
         if not self._broadcast_clients or not self.timeline:
             return
 
-        message = json.dumps({
-            "type": "timeline_status",
-            **self.timeline.get_status()
-        })
+        message = json.dumps({"type": "timeline_status", **self.timeline.get_status()})
         for client in list(self._broadcast_clients):
             try:
                 await client.send(message)
             except Exception:
                 self._broadcast_clients.discard(client)
 
-    async def _broadcast_state(self, entities: List[dict], bands: List[float], frame: AppAudioFrame):
+    async def _broadcast_state(
+        self, entities: List[dict], bands: List[float], frame: AppAudioFrame
+    ):
         """Broadcast visualization state to all connected browser previews."""
         if not self._broadcast_clients:
             return
 
         # Get latency stats from FFT analyzer
         latency_ms = 0.0
-        if self.fft_analyzer and hasattr(self.fft_analyzer, 'latency_ms'):
+        if self.fft_analyzer and hasattr(self.fft_analyzer, "latency_ms"):
             latency_ms = self.fft_analyzer.latency_ms
 
-        message = json.dumps({
-            "type": "state",
-            "entities": entities,
-            "bands": bands,
-            "amplitude": frame.peak,
-            "is_beat": frame.is_beat,
-            "beat_intensity": frame.beat_intensity,
-            "frame": self._frame_count,
-            "pattern": self._pattern_name,
-            "low_latency": self.capture.low_latency if hasattr(self.capture, 'low_latency') else False,
-            "latency_ms": round(latency_ms, 1),
-            "bpm": round(self._estimated_bpm, 1)
-        })
+        message = json.dumps(
+            {
+                "type": "state",
+                "entities": entities,
+                "bands": bands,
+                "amplitude": frame.peak,
+                "is_beat": frame.is_beat,
+                "beat_intensity": frame.beat_intensity,
+                "frame": self._frame_count,
+                "pattern": self._pattern_name,
+                "low_latency": self.capture.low_latency
+                if hasattr(self.capture, "low_latency")
+                else False,
+                "latency_ms": round(latency_ms, 1),
+                "bpm": round(self._estimated_bpm, 1),
+            }
+        )
 
         # Send to all clients
         for client in list(self._broadcast_clients):
@@ -1569,11 +1726,7 @@ class AppCaptureAgent:
             return
 
         try:
-            server = await ws_serve(
-                self._handle_broadcast_client,
-                "0.0.0.0",
-                self.broadcast_port
-            )
+            server = await ws_serve(self._handle_broadcast_client, "0.0.0.0", self.broadcast_port)
             logger.info(f"Browser preview server at ws://localhost:{self.broadcast_port}")
             return server
         except Exception as e:
@@ -1585,14 +1738,16 @@ class AppCaptureAgent:
         self.viz_client = VizClient(self.minecraft_host, self.minecraft_port)
 
         if not await self.viz_client.connect():
-            logger.error(f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
+            logger.error(
+                f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
+            )
             return False
 
         logger.info(f"Connected to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
 
         # Check zone
         zones = await self.viz_client.get_zones()
-        zone_names = [z['name'] for z in zones]
+        zone_names = [z["name"] for z in zones]
 
         if self.zone not in zone_names:
             if zone_names:
@@ -1627,7 +1782,7 @@ class AppCaptureAgent:
         energy_arr = np.array(self._energy_history)
         if len(energy_arr) == 0:
             return min(1.0, peak * 2.0)
-        rolling_max = float(np.max(energy_arr))
+        float(np.max(energy_arr))
         rolling_avg = float(np.mean(energy_arr))
         rolling_p90 = float(np.percentile(energy_arr, 90))
 
@@ -1743,7 +1898,11 @@ class AppCaptureAgent:
             if is_beat:
                 # Variance-based beat intensity (NumPy optimized)
                 if len(self._energy_history) > 5:
-                    recent_energy = np.array(self._energy_history[-15:]) if len(self._energy_history) >= 15 else np.array(self._energy_history)
+                    recent_energy = (
+                        np.array(self._energy_history[-15:])
+                        if len(self._energy_history) >= 15
+                        else np.array(self._energy_history)
+                    )
                     if len(recent_energy) > 1:
                         variance = float(np.var(recent_energy))
                     else:
@@ -1757,15 +1916,15 @@ class AppCaptureAgent:
                 beat_multiplier *= self._beat_sensitivity
 
                 # 5-band beat response: bass, low-mid, mid, high-mid, high
-                if i == 0:      # Bass: massive boom (combined kick)
+                if i == 0:  # Bass: massive boom (combined kick)
                     beat_boost = 0.5 * beat_multiplier
-                elif i == 1:    # Low-mid: solid hit
+                elif i == 1:  # Low-mid: solid hit
                     beat_boost = 0.38 * beat_multiplier
-                elif i == 2:    # Mid: clear flash
+                elif i == 2:  # Mid: clear flash
                     beat_boost = 0.28 * beat_multiplier
-                elif i == 3:    # High-mid: sparkle
+                elif i == 3:  # High-mid: sparkle
                     beat_boost = 0.2 * beat_multiplier + random.uniform(0, 0.1)
-                else:           # High: shimmer
+                else:  # High: shimmer
                     beat_boost = 0.15 * beat_multiplier + random.uniform(0, 0.12)
 
             # === 11. STEREO VARIATION ===
@@ -1815,9 +1974,7 @@ class AppCaptureAgent:
             frontend_dir = Path(__file__).parent.parent / "preview_tool" / "frontend"
             if frontend_dir.exists():
                 http_thread = threading.Thread(
-                    target=run_http_server,
-                    args=(self.http_port, str(frontend_dir)),
-                    daemon=True
+                    target=run_http_server, args=(self.http_port, str(frontend_dir)), daemon=True
                 )
                 http_thread.start()
                 logger.info(f"HTTP server at http://localhost:{self.http_port}")
@@ -1825,7 +1982,7 @@ class AppCaptureAgent:
                 logger.warning(f"Frontend directory not found: {frontend_dir}")
 
         # Start broadcast server for browser previews
-        broadcast_server = await self._start_broadcast_server()
+        await self._start_broadcast_server()
 
         # Find the app's audio session
         logger.info(f"Looking for '{self.app_name}' audio session...")
@@ -1857,7 +2014,7 @@ class AppCaptureAgent:
                 if self.fft_analyzer is not None:
                     fft_result = self.fft_analyzer.analyze(
                         synthetic_peak=frame.peak,
-                        synthetic_bands=None  # Will generate if needed
+                        synthetic_bands=None,  # Will generate if needed
                     )
                     # Update using_fft status
                     self._using_fft = self.fft_analyzer.using_fft
@@ -1868,12 +2025,17 @@ class AppCaptureAgent:
                 aubio_bpm = 0.0
                 if self._use_aubio and self._aubio_detector and self._using_fft:
                     # Get audio samples from FFT analyzer's buffer if available
-                    if hasattr(self.fft_analyzer, 'fft_analyzer') and self.fft_analyzer.fft_analyzer:
+                    if (
+                        hasattr(self.fft_analyzer, "fft_analyzer")
+                        and self.fft_analyzer.fft_analyzer
+                    ):
                         fft_inner = self.fft_analyzer.fft_analyzer
-                        if hasattr(fft_inner, '_sample_buffer') and fft_inner._buffer_pos >= 512:
+                        if hasattr(fft_inner, "_sample_buffer") and fft_inner._buffer_pos >= 512:
                             # Use the sample buffer from FFT analyzer
                             samples = fft_inner._sample_buffer[:512].copy()
-                            aubio_beat, aubio_bpm, aubio_conf = self._aubio_detector.process(samples)
+                            aubio_beat, aubio_bpm, aubio_conf = self._aubio_detector.process(
+                                samples
+                            )
 
                             # Use aubio's BPM estimate (more accurate)
                             if aubio_bpm > 30 and aubio_bpm < 250:
@@ -1922,10 +2084,17 @@ class AppCaptureAgent:
                 now = time.time()
                 expired = [k for k, v in self._active_effects.items() if now >= v["end_time"]]
                 for k in expired:
+                    # Re-show entities when blackout ends
+                    if k == "blackout" and self.viz_client and self.viz_client.connected:
+                        asyncio.ensure_future(self.viz_client.set_visible(self.zone, True))
                     del self._active_effects[k]
 
                 # Calculate entity positions ONCE (single source of truth)
                 entities = self._calculate_entities(bands, frame)
+
+                # Apply active effects (blackout, freeze, strobe, etc.)
+                entities = self._apply_effects(entities, bands, frame)
+                self._last_entities = entities
 
                 # Update spectrograph
                 if self.spectrograph:
@@ -1938,13 +2107,13 @@ class AppCaptureAgent:
                         release=self._smooth_release,
                         threshold=self.capture._beat_threshold,
                         clients=len(self._broadcast_clients),
-                        using_fft=self._using_fft
+                        using_fft=self._using_fft,
                     )
                     self.spectrograph.display(
                         bands=bands,
                         amplitude=frame.peak,
                         is_beat=frame.is_beat,
-                        beat_intensity=frame.beat_intensity
+                        beat_intensity=frame.beat_intensity,
                     )
 
                 # Send to Minecraft (tick-aligned or immediate)
@@ -1969,7 +2138,9 @@ class AppCaptureAgent:
                 if self.tick_aligned:
                     # Calculate time until next tick
                     elapsed = time.time() - self._last_mc_send_time
-                    sleep_time = max(0.001, self._mc_tick_interval - elapsed - 0.005)  # Wake 5ms early
+                    sleep_time = max(
+                        0.001, self._mc_tick_interval - elapsed - 0.005
+                    )  # Wake 5ms early
                     await asyncio.sleep(sleep_time)
                 else:
                     await asyncio.sleep(0.016)  # ~60 FPS
@@ -2011,11 +2182,13 @@ class AppCaptureAgent:
                 peak=frame.peak,
                 bands=frame.bands,
                 is_beat=True,
-                beat_intensity=max(0.7, frame.beat_intensity),  # Predicted beats get decent intensity
+                beat_intensity=max(
+                    0.7, frame.beat_intensity
+                ),  # Predicted beats get decent intensity
                 raw_amplitude=frame.raw_amplitude,
                 low_frequency=frame.low_frequency,
                 high_frequency=frame.high_frequency,
-                spectral_flux=frame.spectral_flux
+                spectral_flux=frame.spectral_flux,
             )
 
         return frame
@@ -2028,39 +2201,47 @@ class AppCaptureAgent:
             amplitude=frame.peak,
             is_beat=frame.is_beat,
             beat_intensity=frame.beat_intensity,
-            frame=self._frame_count
+            frame=self._frame_count,
         )
 
         # Use pattern to calculate entity positions
         return self._current_pattern.calculate_entities(audio_state)
 
-    async def _update_minecraft(self, entities: List[dict], bands: List[float], frame: AppAudioFrame):
+    async def _update_minecraft(
+        self, entities: List[dict], bands: List[float], frame: AppAudioFrame
+    ):
         """Send pre-calculated entities to Minecraft."""
         try:
             particles = []
             if frame.is_beat and frame.beat_intensity > 0.2:
-                particles.append({
-                    "particle": "NOTE",
-                    "x": 0.5,
-                    "y": 0.5,
-                    "z": 0.5,
-                    "count": int(20 * frame.beat_intensity)
-                })
+                particles.append(
+                    {
+                        "particle": "NOTE",
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "count": int(20 * frame.beat_intensity),
+                    }
+                )
 
             # Include audio data for redstone sensors
             audio_data = {
                 "bands": bands,
                 "amplitude": frame.peak,
                 "is_beat": frame.is_beat,
-                "beat_intensity": frame.beat_intensity
+                "beat_intensity": frame.beat_intensity,
             }
 
             # Debug: log first audio send
-            if not hasattr(self, '_audio_send_logged'):
+            if not hasattr(self, "_audio_send_logged"):
                 self._audio_send_logged = True
-                logger.info(f"Sending to MC with audio: bands[1]={bands[1]:.3f}, beat={frame.is_beat}")
+                logger.info(
+                    f"Sending to MC with audio: bands[1]={bands[1]:.3f}, beat={frame.is_beat}"
+                )
 
-            await self.viz_client.batch_update_fast(self.zone, entities, particles, audio=audio_data)
+            await self.viz_client.batch_update_fast(
+                self.zone, entities, particles, audio=audio_data
+            )
 
         except Exception as e:
             logger.error(f"Minecraft update error: {e}")
@@ -2085,50 +2266,85 @@ class AppCaptureAgent:
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='AudioViz Per-App Capture - Captures audio from a specific application'
+        description="AudioViz Per-App Capture - Captures audio from a specific application"
     )
-    parser.add_argument('--app', type=str, default='spotify',
-                        help='Application name to capture (default: spotify)')
-    parser.add_argument('--host', type=str, default='192.168.208.1',
-                        help='Minecraft server IP (default: 192.168.208.1)')
-    parser.add_argument('--port', type=int, default=8765,
-                        help='WebSocket port (default: 8765)')
-    parser.add_argument('--zone', type=str, default='main',
-                        help='Visualization zone name (default: main)')
-    parser.add_argument('--entities', type=int, default=16,
-                        help='Number of visualization entities (default: 16)')
-    parser.add_argument('--no-spectrograph', action='store_true',
-                        help='Disable terminal spectrograph')
-    parser.add_argument('--compact', action='store_true',
-                        help='Use compact single-line spectrograph instead of TUI')
-    parser.add_argument('--broadcast-port', type=int, default=8766,
-                        help='WebSocket port for browser preview (default: 8766)')
-    parser.add_argument('--http-port', type=int, default=8080,
-                        help='HTTP port for web interface (default: 8080)')
-    parser.add_argument('--no-http', action='store_true',
-                        help='Disable built-in HTTP server (use external dev server)')
-    parser.add_argument('--list', action='store_true',
-                        help='List active audio sessions and exit')
-    parser.add_argument('--no-minecraft', action='store_true',
-                        help='Run without Minecraft connection (spectrograph only)')
-    parser.add_argument('--vscode', action='store_true',
-                        help='VS Code terminal compatibility mode (auto-detected usually)')
-    parser.add_argument('--no-fft', action='store_true',
-                        help='Disable FFT analysis (use synthetic bands only)')
-    parser.add_argument('--low-latency', action='store_true',
-                        help='Use low-latency FFT mode (~25ms total, smaller buffers)')
-    parser.add_argument('--ultra-low-latency', action='store_true',
-                        help='Ultra-low-latency mode (~15ms, WASAPI exclusive, reduced bass)')
-    parser.add_argument('--tick-aligned', action='store_true',
-                        help='Align updates to Minecraft 20 TPS with beat prediction')
-    parser.add_argument('--list-audio', action='store_true',
-                        help='List available audio devices and exit')
+    parser.add_argument(
+        "--app", type=str, default="spotify", help="Application name to capture (default: spotify)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="192.168.208.1",
+        help="Minecraft server IP (default: 192.168.208.1)",
+    )
+    parser.add_argument("--port", type=int, default=8765, help="WebSocket port (default: 8765)")
+    parser.add_argument(
+        "--zone", type=str, default="main", help="Visualization zone name (default: main)"
+    )
+    parser.add_argument(
+        "--entities", type=int, default=16, help="Number of visualization entities (default: 16)"
+    )
+    parser.add_argument(
+        "--no-spectrograph", action="store_true", help="Disable terminal spectrograph"
+    )
+    parser.add_argument(
+        "--compact", action="store_true", help="Use compact single-line spectrograph instead of TUI"
+    )
+    parser.add_argument(
+        "--broadcast-port",
+        type=int,
+        default=8766,
+        help="WebSocket port for browser preview (default: 8766)",
+    )
+    parser.add_argument(
+        "--http-port", type=int, default=8080, help="HTTP port for web interface (default: 8080)"
+    )
+    parser.add_argument(
+        "--no-http",
+        action="store_true",
+        help="Disable built-in HTTP server (use external dev server)",
+    )
+    parser.add_argument("--list", action="store_true", help="List active audio sessions and exit")
+    parser.add_argument(
+        "--no-minecraft",
+        action="store_true",
+        help="Run without Minecraft connection (spectrograph only)",
+    )
+    parser.add_argument(
+        "--vscode",
+        action="store_true",
+        help="VS Code terminal compatibility mode (auto-detected usually)",
+    )
+    parser.add_argument(
+        "--no-fft", action="store_true", help="Disable FFT analysis (use synthetic bands only)"
+    )
+    parser.add_argument(
+        "--low-latency",
+        action="store_true",
+        help="Use low-latency FFT mode (~25ms total, smaller buffers)",
+    )
+    parser.add_argument(
+        "--ultra-low-latency",
+        action="store_true",
+        help="Ultra-low-latency mode (~15ms, WASAPI exclusive, reduced bass)",
+    )
+    parser.add_argument(
+        "--tick-aligned",
+        action="store_true",
+        help="Align updates to Minecraft 20 TPS with beat prediction",
+    )
+    parser.add_argument(
+        "--list-audio", action="store_true", help="List available audio devices and exit"
+    )
 
     args = parser.parse_args()
 
     # Check for pycaw
     try:
-        from pycaw.pycaw import AudioUtilities
+        import importlib.util
+
+        if importlib.util.find_spec("pycaw") is None:
+            raise ImportError("pycaw not found")
     except ImportError:
         logger.error("pycaw not installed. Run: pip install pycaw comtypes")
         sys.exit(1)
@@ -2137,6 +2353,7 @@ async def main():
     if args.list_audio:
         if HAS_FFT:
             from audio_processor.fft_analyzer import list_audio_devices
+
             list_audio_devices()
         else:
             print("FFT not available. Install sounddevice: pip install sounddevice")
@@ -2171,8 +2388,8 @@ async def main():
         vscode_mode=args.vscode,
         use_fft=not args.no_fft,
         low_latency=args.low_latency,
-        ultra_low_latency=getattr(args, 'ultra_low_latency', False),
-        tick_aligned=args.tick_aligned
+        ultra_low_latency=getattr(args, "ultra_low_latency", False),
+        tick_aligned=args.tick_aligned,
     )
 
     # Signal handler

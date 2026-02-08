@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audio-state.schema.json",
+  "title": "AudioStateMessage",
+  "description": "High-frequency audio state update sent from processor to plugin. Contains current FFT bands, beat detection, and frame counter.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "audio_state"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "description": "5-band FFT: [bass, low_mid, mid, high_mid, high]"
+    },
+    "amplitude": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Overall audio amplitude (0-1)"
+    },
+    "is_beat": {
+      "type": "boolean",
+      "description": "Whether a beat was detected this frame"
+    },
+    "beat_intensity": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Beat intensity (0 = no beat, higher = stronger)"
+    },
+    "frame": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonically increasing frame counter"
+    }
+  },
+  "required": ["type", "zone", "bands", "amplitude", "is_beat", "beat_intensity", "frame"]
+}

@@ -107,16 +107,21 @@
                     </div>
                 </div>
 
-                <!-- Quick Actions -->
-                <div class="panel">
-                    <h2 class="panel-title">Quick Actions</h2>
-                    <div class="quick-actions">
-                        <button id="btn-blackout" class="btn btn-danger">Blackout</button>
-                        <button id="btn-freeze" class="btn btn-warning">Freeze</button>
+                <!-- Performance Controls -->
+                <div class="panel panel-performance">
+                    <div class="perf-buttons">
+                        <button id="btn-blackout" class="btn btn-perf btn-perf-blackout">
+                            <span class="perf-icon">&#x26AB;</span>
+                            <span class="perf-label">Blackout</span>
+                        </button>
+                        <button id="btn-freeze" class="btn btn-perf btn-perf-freeze">
+                            <span class="perf-icon">&#x2744;</span>
+                            <span class="perf-label">Freeze</span>
+                        </button>
                     </div>
                     <div class="tap-tempo">
-                        <button id="btn-tap-tempo" class="btn btn-full">Tap Tempo</button>
-                        <span id="tap-bpm">-- BPM</span>
+                        <button id="btn-tap-tempo" class="btn btn-tap">Tap Tempo</button>
+                        <span id="tap-bpm" class="bpm-display">-- BPM</span>
                     </div>
                 </div>
 
@@ -629,7 +634,7 @@
                         <span id="queue-depth-display" class="queue-depth hidden">Queue: 0/500</span>
                     </div>
                     <div class="status-bar-right">
-                        <span id="fps-display">-- FPS</span>
+                        <span id="fps-display" class="fps-indicator">-- FPS</span>
                     </div>
                 </footer>
             </main>

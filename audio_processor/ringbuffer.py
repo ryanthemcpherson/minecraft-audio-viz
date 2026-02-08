@@ -16,19 +16,20 @@ Usage:
         timestamp, audio_data = result
 """
 
-import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Tuple
-import threading
+
+import numpy as np
 
 
 @dataclass
 class BufferStats:
     """Statistics for ring buffer operations."""
+
     writes: int = 0
     reads: int = 0
-    overruns: int = 0      # Writes dropped due to full buffer
-    underruns: int = 0     # Read attempts on empty buffer
+    overruns: int = 0  # Writes dropped due to full buffer
+    underruns: int = 0  # Read attempts on empty buffer
     capacity: int = 0
     current_fill: int = 0
 
@@ -79,7 +80,7 @@ class SPSCRingBuffer:
         # Atomic indices (GIL makes int operations atomic in CPython)
         # Using separate variables instead of a shared structure for cache efficiency
         self._write_idx = 0  # Next slot to write
-        self._read_idx = 0   # Next slot to read
+        self._read_idx = 0  # Next slot to read
 
         # Statistics (thread-safe via GIL for simple increments)
         self._stats = BufferStats(capacity=capacity)
@@ -254,8 +255,13 @@ class AudioChunkBuffer(SPSCRingBuffer):
     - Optional flags per chunk
     """
 
-    def __init__(self, capacity: int = 16, max_chunk_size: int = 4096,
-                 channels: int = 2, qpc_frequency: int = 0):
+    def __init__(
+        self,
+        capacity: int = 16,
+        max_chunk_size: int = 4096,
+        channels: int = 2,
+        qpc_frequency: int = 0,
+    ):
         """
         Initialize audio chunk buffer.
 
@@ -275,8 +281,7 @@ class AudioChunkBuffer(SPSCRingBuffer):
         # Frame counter
         self._next_frame_number = 0
 
-    def write_chunk(self, timestamp: float, data: np.ndarray,
-                    flags: int = 0) -> bool:
+    def write_chunk(self, timestamp: float, data: np.ndarray, flags: int = 0) -> bool:
         """
         Write audio chunk with extended metadata.
 
@@ -353,9 +358,13 @@ CHUNK_FLAG_SILENCE = 0x02
 CHUNK_FLAG_CLIPPING = 0x04
 
 
-def create_audio_buffer(capacity: int = 16, max_frames: int = 2048,
-                        channels: int = 2, use_extended: bool = False,
-                        qpc_frequency: int = 0) -> SPSCRingBuffer:
+def create_audio_buffer(
+    capacity: int = 16,
+    max_frames: int = 2048,
+    channels: int = 2,
+    use_extended: bool = False,
+    qpc_frequency: int = 0,
+) -> SPSCRingBuffer:
     """
     Factory function to create appropriate ring buffer.
 

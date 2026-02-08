@@ -3,13 +3,14 @@ import { useRef, KeyboardEvent, ClipboardEvent } from 'react';
 interface ConnectCodeProps {
   value: string[];
   onChange: (value: string[]) => void;
+  label?: string;
 }
 
 // Valid characters for connect code
 // Word portion (first 4) can have O/I, suffix (last 4) avoids confusables
 const VALID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789';
 
-function ConnectCode({ value, onChange }: ConnectCodeProps) {
+function ConnectCode({ value, onChange, label = 'Connect Code' }: ConnectCodeProps) {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const handleKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
@@ -73,7 +74,7 @@ function ConnectCode({ value, onChange }: ConnectCodeProps) {
 
   return (
     <div className="connect-code">
-      <label className="input-label">Connect Code</label>
+      <label className="input-label">{label}</label>
       <div className="code-inputs">
         <div className="code-group">
           {[0, 1, 2, 3].map(i => (

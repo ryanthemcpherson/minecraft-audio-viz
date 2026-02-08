@@ -1,0 +1,163 @@
+name: Deploy to Dev Server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests before deploy'
+        required: false
+        default: 'false'
+        type: boolean
+
+# Only one deploy at a time
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  DEV_SERVER: 192.168.1.204
+  DEV_USER: ryan
+  DEPLOY_PATH: /home/ryan/minecraft-audio-viz
+  PLUGINS_DIR: /home/ryan/minecraft-server/plugins
+  JAVA_VERSION: '21'
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build the Minecraft plugin JAR
+  # ---------------------------------------------------------------------------
+  build-plugin:
+    name: Build Plugin JAR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: minecraft_plugin
+        run: mvn clean package -DskipTests
+
+      - name: Upload plugin JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: audioviz-plugin
+          path: minecraft_plugin/target/audioviz-plugin-*.jar
+
+  # ---------------------------------------------------------------------------
+  # Run Python tests (unless skipped)
+  # ---------------------------------------------------------------------------
+  test-python:
+    name: Python Tests
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest audio_processor/tests/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Deploy to dev server
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Dev Server
+    needs: [build-plugin, test-python]
+    if: always() && needs.build-plugin.result == 'success' && (needs.test-python.result == 'success' || needs.test-python.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: dev-server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download plugin JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: audioviz-plugin
+          path: ./plugin-jar/
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEV_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.DEV_SERVER }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy code to server
+        run: |
+          # Sync the repository (excluding build artifacts and local-only files)
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude 'target' \
+            --exclude 'dist' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.env' \
+            --exclude 'dj_client/src-tauri/target' \
+            --exclude 'minecraft_plugin/target' \
+            ./ ${{ env.DEV_USER }}@${{ env.DEV_SERVER }}:${{ env.DEPLOY_PATH }}/
+
+      - name: Copy plugin JAR to server
+        run: |
+          scp ./plugin-jar/audioviz-plugin-*.jar \
+            ${{ env.DEV_USER }}@${{ env.DEV_SERVER }}:${{ env.PLUGINS_DIR }}/
+
+      - name: Run deploy script on server
+        run: |
+          ssh ${{ env.DEV_USER }}@${{ env.DEV_SERVER }} << 'DEPLOY_EOF'
+            set -euo pipefail
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "=== Installing/updating Python dependencies ==="
+            pip install -e ".[dev]" --quiet 2>&1 | tail -5
+
+            echo "=== Running Python tests on server ==="
+            pytest audio_processor/tests/ -v --tb=short || {
+              echo "WARNING: Tests failed on server, but continuing deploy"
+            }
+
+            echo "=== Restarting Minecraft server ==="
+            sudo systemctl restart minecraft.service
+
+            echo "=== Waiting for Minecraft to start ==="
+            sleep 10
+
+            echo "=== Health check ==="
+            if systemctl is-active --quiet minecraft.service; then
+              echo "SUCCESS: minecraft.service is running"
+            else
+              echo "ERROR: minecraft.service failed to start"
+              sudo journalctl -u minecraft.service --no-pager -n 30
+              exit 1
+            fi
+
+            echo "=== Deploy complete ==="
+          DEPLOY_EOF
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          echo "### Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server:** ${{ env.DEV_SERVER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

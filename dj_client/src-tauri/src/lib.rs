@@ -1,4 +1,4 @@
-//! AudioViz DJ Client Library
+//! MCAV DJ Client Library
 //!
 //! Cross-platform DJ client for connecting to VJ servers and streaming
 //! audio visualizations to Minecraft.
@@ -12,8 +12,8 @@ use protocol::{AudioFrameMessage, DjClient, DjClientConfig};
 use state::AppState;
 
 use parking_lot::Mutex;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tauri::State;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -148,10 +148,7 @@ async fn connect_direct(
 }
 
 /// Bridge task: reads audio analysis and sends frames to VJ server at ~60fps
-async fn run_bridge(
-    state_arc: Arc<Mutex<AppState>>,
-    mut shutdown_rx: mpsc::Receiver<()>,
-) {
+async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Receiver<()>) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
     FRAME_SEQ.store(0, Ordering::Relaxed);
 
@@ -275,7 +272,10 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     // Signal bridge task to stop (it handles client disconnect)
     let (shutdown_tx, capture) = {
         let mut app_state = state.0.lock();
-        (app_state.bridge_shutdown_tx.take(), app_state.audio_capture.take())
+        (
+            app_state.bridge_shutdown_tx.take(),
+            app_state.audio_capture.take(),
+        )
     };
 
     if let Some(tx) = shutdown_tx {

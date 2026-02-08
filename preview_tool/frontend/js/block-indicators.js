@@ -51,8 +51,8 @@ class BlockIndicatorSystem {
                 );
 
                 // Assign band based on position (diagonal gradient)
-                const bandIndex = Math.floor(((x + z) / (this.gridSize * 2 - 2)) * 6);
-                cube.userData.bandIndex = Math.min(5, bandIndex);
+                const bandIndex = Math.floor(((x + z) / (this.gridSize * 2 - 2)) * 5);
+                cube.userData.bandIndex = Math.min(4, bandIndex);
                 cube.userData.gridX = x;
                 cube.userData.gridZ = z;
                 cube.userData.intensity = 0;

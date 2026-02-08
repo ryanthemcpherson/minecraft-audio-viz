@@ -1,6 +1,7 @@
 package com.audioviz;
 
 import com.audioviz.commands.AudioVizCommand;
+import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
 import com.audioviz.entities.EntityPoolManager;
 import com.audioviz.entities.EntityUpdateStats;
@@ -8,6 +9,7 @@ import com.audioviz.gui.ChatInputManager;
 import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererRegistry;
+import com.audioviz.stages.StageManager;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
@@ -29,6 +31,8 @@ public class AudioVizPlugin extends JavaPlugin {
     private EntityUpdateStats entityUpdateStats;
     private ParticleVisualizationManager particleVisualizationManager;
     private RendererRegistry rendererRegistry;
+    private StageManager stageManager;
+    private StageDecoratorManager decoratorManager;
 
     @Override
     public void onEnable() {
@@ -60,8 +64,16 @@ public class AudioVizPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
 
-        // Load zones from config
+        // Initialize stage manager
+        this.stageManager = new StageManager(this);
+
+        // Initialize stage decorator manager
+        this.decoratorManager = new StageDecoratorManager(this);
+        this.decoratorManager.start();
+
+        // Load zones and stages from config
         zoneManager.loadZones();
+        stageManager.loadStages();
 
         // Register commands
         AudioVizCommand commandExecutor = new AudioVizCommand(this);
@@ -91,9 +103,17 @@ public class AudioVizPlugin extends JavaPlugin {
             menuManager.clearAllSessions();
         }
 
-        // Save zones
+        // Save zones and stages
+        if (stageManager != null) {
+            stageManager.saveStages();
+        }
         if (zoneManager != null) {
             zoneManager.saveZones();
+        }
+
+        // Stop decorator manager before entity cleanup
+        if (decoratorManager != null) {
+            decoratorManager.stop();
         }
 
         // Cleanup entity pools
@@ -165,5 +185,13 @@ public class AudioVizPlugin extends JavaPlugin {
 
     public RendererRegistry getRendererRegistry() {
         return rendererRegistry;
+    }
+
+    public StageManager getStageManager() {
+        return stageManager;
+    }
+
+    public StageDecoratorManager getDecoratorManager() {
+        return decoratorManager;
     }
 }

@@ -68,10 +68,17 @@ public class AudioState {
     }
 
     /**
-     * Get high frequency level (band 3, 2-6kHz).
+     * Get high-mid frequency level (band 3, 2-6kHz).
+     */
+    public double getHighMid() {
+        return getBand(3);
+    }
+
+    /**
+     * Get high frequency level (band 4, 6-20kHz).
      */
     public double getHigh() {
-        return getBand(3);
+        return getBand(4);
     }
 
     /**

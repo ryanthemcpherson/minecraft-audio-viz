@@ -3,15 +3,15 @@ Timeline Engine for AudioViz show playback.
 Handles timeline state, cue scheduling, and playback control.
 """
 
-import time
 import logging
+import time
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Callable, List, Dict, Any
-from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
 
-from .models import Show, Cue, CueType, TriggerType
+from .models import Cue, Show, TriggerType
 
-logger = logging.getLogger('timeline')
+logger = logging.getLogger("timeline")
 
 
 class TimelineState(Enum):
@@ -23,6 +23,7 @@ class TimelineState(Enum):
 @dataclass
 class PendingCue:
     """A cue waiting to be executed."""
+
     cue: Cue
     scheduled_time: float  # When to fire (real time)
 
@@ -40,9 +41,9 @@ class TimelineEngine:
         self.state: TimelineState = TimelineState.STOPPED
 
         # Playback timing
-        self.position: int = 0          # Current position in ms
+        self.position: int = 0  # Current position in ms
         self._play_start_time: float = 0  # Real time when playback started
-        self._play_start_pos: int = 0     # Position when playback started
+        self._play_start_pos: int = 0  # Position when playback started
 
         # Cue management
         self._pending_cues: List[PendingCue] = []
@@ -66,7 +67,7 @@ class TimelineEngine:
         self,
         on_cue_fire: Optional[Callable[[Cue], None]] = None,
         on_state_change: Optional[Callable[[TimelineState], None]] = None,
-        on_position_change: Optional[Callable[[int], None]] = None
+        on_position_change: Optional[Callable[[int], None]] = None,
     ):
         """Set callback functions for timeline events."""
         self._on_cue_fire = on_cue_fire
@@ -82,7 +83,9 @@ class TimelineEngine:
         self._pending_cues.clear()
         self._beat_pending_cues.clear()
         show.reset_cues()
-        logger.info(f"Loaded show: {show.name} ({show.duration}ms, {len(show.get_all_cues())} cues)")
+        logger.info(
+            f"Loaded show: {show.name} ({show.duration}ms, {len(show.get_all_cues())} cues)"
+        )
 
     def play(self):
         """Start or resume playback."""
@@ -241,7 +244,7 @@ class TimelineEngine:
             "show_name": self.show.name if self.show else None,
             "bpm": self.show.bpm if self.show else 0,
             "loop": self.loop,
-            "next_cue": self._get_next_cue_info()
+            "next_cue": self._get_next_cue_info(),
         }
 
     def get_cue_list(self) -> List[Dict[str, Any]]:
@@ -249,11 +252,7 @@ class TimelineEngine:
         if not self.show:
             return []
         return [
-            {
-                **cue.to_dict(),
-                "fired": cue.fired,
-                "armed": cue.armed
-            }
+            {**cue.to_dict(), "fired": cue.fired, "armed": cue.armed}
             for cue in self.show.get_all_cues()
         ]
 
@@ -353,7 +352,7 @@ class TimelineEngine:
                     "id": cue.id,
                     "name": cue.name,
                     "start_time": cue.start_time,
-                    "time_until": cue.start_time - self.position
+                    "time_until": cue.start_time - self.position,
                 }
         return None
 

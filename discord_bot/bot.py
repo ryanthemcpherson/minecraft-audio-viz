@@ -1,6 +1,10 @@
 """
 AudioViz Discord Bot
-Joins voice channels, captures audio, and sends visualization data to Minecraft.
+
+Joins voice channels, captures mixed audio, and streams it to the AudioViz
+processor for real-time visualization in Minecraft. Designed for remote audio
+streaming and multi-user sync — local audio capture uses WASAPI directly.
+
 Uses slash commands for modern Discord integration.
 """
 

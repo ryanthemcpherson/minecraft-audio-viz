@@ -15,12 +15,12 @@ References:
 - Ellis "Beat tracking by dynamic programming" (2007)
 """
 
-import time
-import math
 import logging
+import math
+import time
 from collections import deque
-from dataclasses import dataclass, field
-from typing import Optional, Callable, List, Tuple
+from dataclasses import dataclass
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 
@@ -30,13 +30,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BeatPrediction:
     """Information about predicted beats."""
-    next_beat_time: float       # Unix timestamp of next predicted beat
-    time_to_next_beat: float    # Seconds until next beat
-    beat_phase: float           # Current position in beat cycle (0-1)
-    tempo_bpm: float            # Current tempo estimate
-    tempo_confidence: float     # Confidence in tempo (0-1)
-    is_downbeat: bool           # Whether next beat is a downbeat (bar start)
-    beats_per_bar: int          # Detected meter (usually 4)
+
+    next_beat_time: float  # Unix timestamp of next predicted beat
+    time_to_next_beat: float  # Seconds until next beat
+    beat_phase: float  # Current position in beat cycle (0-1)
+    tempo_bpm: float  # Current tempo estimate
+    tempo_confidence: float  # Confidence in tempo (0-1)
+    is_downbeat: bool  # Whether next beat is a downbeat (bar start)
+    beats_per_bar: int  # Detected meter (usually 4)
 
 
 class BeatPredictor:
@@ -55,8 +56,8 @@ class BeatPredictor:
         min_bpm: float = 60.0,
         max_bpm: float = 200.0,
         prediction_lookahead: float = 0.100,  # Predict 100ms ahead
-        tempo_smoothing: float = 0.95,        # How much to smooth tempo changes
-        phase_correction_rate: float = 0.1,   # How fast to correct phase drift
+        tempo_smoothing: float = 0.95,  # How much to smooth tempo changes
+        phase_correction_rate: float = 0.1,  # How fast to correct phase drift
     ):
         """
         Initialize beat predictor.
@@ -75,19 +76,19 @@ class BeatPredictor:
         self.phase_correction_rate = phase_correction_rate
 
         # Tempo estimation state
-        self._tempo_bpm = 120.0           # Current tempo estimate
-        self._tempo_confidence = 0.0       # Confidence in estimate
-        self._beat_period = 0.5            # Seconds per beat (60/BPM)
+        self._tempo_bpm = 120.0  # Current tempo estimate
+        self._tempo_confidence = 0.0  # Confidence in estimate
+        self._beat_period = 0.5  # Seconds per beat (60/BPM)
 
         # Tempo histogram (bins from min_bpm to max_bpm)
         self._histogram_bins = int(max_bpm - min_bpm) + 1
         self._tempo_histogram = np.zeros(self._histogram_bins, dtype=np.float32)
-        self._histogram_decay = 0.995      # Slow decay for stability
+        self._histogram_decay = 0.995  # Slow decay for stability
 
         # Phase tracking
-        self._beat_phase = 0.0             # 0-1 position in beat cycle
+        self._beat_phase = 0.0  # 0-1 position in beat cycle
         self._last_phase_update = time.time()
-        self._phase_locked = False         # Whether we're confidently locked to phase
+        self._phase_locked = False  # Whether we're confidently locked to phase
 
         # Onset tracking for tempo/phase detection
         self._onset_times: deque = deque(maxlen=64)
@@ -95,7 +96,7 @@ class BeatPredictor:
 
         # Beat counting (for downbeat detection)
         self._beat_count = 0
-        self._beats_per_bar = 4            # Assume 4/4 time
+        self._beats_per_bar = 4  # Assume 4/4 time
 
         # Callbacks
         self._on_beat_predicted: Optional[Callable[[BeatPrediction], None]] = None
@@ -134,8 +135,11 @@ class BeatPredictor:
                     if self._tempo_confidence > 0.3:
                         expected_ioi = self._beat_period
                         # Allow IOIs that are multiples (half, normal, double)
-                        ratios = [ioi / expected_ioi, ioi / (expected_ioi * 2),
-                                  ioi / (expected_ioi * 0.5)]
+                        ratios = [
+                            ioi / expected_ioi,
+                            ioi / (expected_ioi * 2),
+                            ioi / (expected_ioi * 0.5),
+                        ]
                         best_ratio = min(ratios, key=lambda r: abs(r - 1.0))
 
                         # Only accept if reasonably close to expected
@@ -222,8 +226,9 @@ class BeatPredictor:
             # Only update if new estimate is close or more confident
             tempo_diff = abs(refined_bpm - self._tempo_bpm)
             if tempo_diff < 5 or new_confidence > self._tempo_confidence:
-                self._tempo_bpm = (self._tempo_bpm * self.tempo_smoothing +
-                                   refined_bpm * (1 - self.tempo_smoothing))
+                self._tempo_bpm = self._tempo_bpm * self.tempo_smoothing + refined_bpm * (
+                    1 - self.tempo_smoothing
+                )
         else:
             self._tempo_bpm = refined_bpm
 
@@ -291,7 +296,7 @@ class BeatPredictor:
             tempo_bpm=self._tempo_bpm,
             tempo_confidence=self._tempo_confidence,
             is_downbeat=is_downbeat,
-            beats_per_bar=self._beats_per_bar
+            beats_per_bar=self._beats_per_bar,
         )
 
     def should_fire_beat(self) -> Tuple[bool, float]:
@@ -307,16 +312,17 @@ class BeatPredictor:
         if self._tempo_confidence < 0.2:
             return False, 0.0
 
-        current_time = time.time()
+        time.time()
         prediction = self.get_prediction()
 
         # Fire beat if we're within lookahead window of next beat
         # and haven't already fired for this beat
         time_to_beat = prediction.time_to_next_beat
 
-        if (time_to_beat <= self.prediction_lookahead and
-            prediction.next_beat_time > self._last_predicted_beat_time + self._beat_period * 0.5):
-
+        if (
+            time_to_beat <= self.prediction_lookahead
+            and prediction.next_beat_time > self._last_predicted_beat_time + self._beat_period * 0.5
+        ):
             self._last_predicted_beat_time = prediction.next_beat_time
 
             # Intensity based on downbeat and confidence
@@ -387,9 +393,7 @@ class PredictiveBeatSync:
             lookahead_ms: How many ms ahead to predict beats.
                          Should match your total system latency.
         """
-        self.predictor = BeatPredictor(
-            prediction_lookahead=lookahead_ms / 1000.0
-        )
+        self.predictor = BeatPredictor(prediction_lookahead=lookahead_ms / 1000.0)
         self._last_kick_time = 0.0
         self._min_kick_interval = 0.15  # 150ms min between kicks
 
@@ -426,14 +430,14 @@ class PredictiveBeatSync:
         prediction = self.predictor.get_prediction()
 
         return {
-            'predicted_beat': should_fire,
-            'beat_intensity': intensity,
-            'tempo_bpm': prediction.tempo_bpm,
-            'tempo_confidence': prediction.tempo_confidence,
-            'beat_phase': prediction.beat_phase,
-            'phase_intensity': self.predictor.get_beat_intensity_at_phase(),
-            'is_downbeat': prediction.is_downbeat,
-            'time_to_next_beat': prediction.time_to_next_beat,
+            "predicted_beat": should_fire,
+            "beat_intensity": intensity,
+            "tempo_bpm": prediction.tempo_bpm,
+            "tempo_confidence": prediction.tempo_confidence,
+            "beat_phase": prediction.beat_phase,
+            "phase_intensity": self.predictor.get_beat_intensity_at_phase(),
+            "is_downbeat": prediction.is_downbeat,
+            "time_to_next_beat": prediction.time_to_next_beat,
         }
 
 
@@ -467,8 +471,10 @@ if __name__ == "__main__":
         should_fire, intensity = predictor.should_fire_beat()
         if should_fire:
             prediction = predictor.get_prediction()
-            print(f"PREDICTED BEAT! BPM: {prediction.tempo_bpm:.1f}, "
-                  f"Confidence: {prediction.tempo_confidence:.2f}, "
-                  f"Lookahead: {prediction.time_to_next_beat*1000:.0f}ms")
+            print(
+                f"PREDICTED BEAT! BPM: {prediction.tempo_bpm:.1f}, "
+                f"Confidence: {prediction.tempo_confidence:.2f}, "
+                f"Lookahead: {prediction.time_to_next_beat * 1000:.0f}ms"
+            )
 
         time.sleep(0.016)  # 60 FPS

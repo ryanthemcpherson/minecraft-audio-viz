@@ -11,11 +11,11 @@ Run with: pytest audio_processor/tests/test_connectivity.py -v
 """
 
 import asyncio
-import pytest
-import time
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import json
+import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # Mark entire module as async tests
 pytestmark = pytest.mark.asyncio
@@ -33,7 +33,7 @@ class MockWebSocket:
         self.closed = False
         self.close_code = None
         self.close_reason = None
-        self.remote_address = ('127.0.0.1', 12345)
+        self.remote_address = ("127.0.0.1", 12345)
 
     async def send(self, message):
         """Record sent message."""
@@ -49,6 +49,7 @@ class MockWebSocket:
             return json.dumps(response)
         # No more responses - simulate connection closed
         import websockets.exceptions
+
         raise websockets.exceptions.ConnectionClosed(None, None)
 
     async def close(self, code=1000, reason=""):
@@ -74,13 +75,14 @@ class TestDJRelayExponentialBackoff:
     def relay_config(self):
         """Create a test DJRelayConfig."""
         from audio_processor.dj_relay import DJRelayConfig
+
         return DJRelayConfig(
             vj_server_url="ws://localhost:9999",
             dj_id="test_dj",
             dj_name="Test DJ",
             dj_key="test_key",
             reconnect_interval=1.0,  # Short interval for tests
-            max_connect_attempts=3
+            max_connect_attempts=3,
         )
 
     async def test_backoff_increases_with_each_failure(self, relay_config):
@@ -98,12 +100,13 @@ class TestDJRelayExponentialBackoff:
 
         # Also capture sleep times to verify backoff
         original_sleep = asyncio.sleep
+
         async def mock_sleep(delay):
             backoff_times.append(delay)
             await original_sleep(0.01)  # Actually sleep a tiny bit
 
-        with patch('websockets.connect', mock_connect):
-            with patch('asyncio.sleep', mock_sleep):
+        with patch("websockets.connect", mock_connect):
+            with patch("asyncio.sleep", mock_sleep):
                 result = await relay.connect()
 
         # Should fail after max_connect_attempts
@@ -118,8 +121,9 @@ class TestDJRelayExponentialBackoff:
         # Second backoff should be larger than first (exponential)
         # First backoff: 1.0 * 1.5^0 = 1.0 (plus jitter)
         # Second backoff: 1.0 * 1.5^1 = 1.5 (plus jitter)
-        assert backoff_times[1] > backoff_times[0], \
+        assert backoff_times[1] > backoff_times[0], (
             f"Backoff should increase: {backoff_times[0]:.2f} -> {backoff_times[1]:.2f}"
+        )
 
     async def test_backoff_resets_on_success(self, relay_config):
         """Verify backoff resets after successful connection."""
@@ -133,11 +137,9 @@ class TestDJRelayExponentialBackoff:
         async def mock_connect(*args, **kwargs):
             nonlocal attempt_count
             attempt_count += 1
-            return MockWebSocket(
-                responses=[{'type': 'auth_success', 'is_active': False}]
-            )
+            return MockWebSocket(responses=[{"type": "auth_success", "is_active": False}])
 
-        with patch('websockets.connect', mock_connect):
+        with patch("websockets.connect", mock_connect):
             # First connection should succeed
             result = await relay.connect()
             assert result is True
@@ -161,8 +163,8 @@ class TestDJRelayExponentialBackoff:
             backoff_times.append(delay)
             # Don't actually sleep in tests
 
-        with patch('websockets.connect', mock_connect):
-            with patch('asyncio.sleep', mock_sleep):
+        with patch("websockets.connect", mock_connect):
+            with patch("asyncio.sleep", mock_sleep):
                 await relay.connect()
 
         # All backoff times should be <= 30 + jitter (max ~33)
@@ -177,11 +179,12 @@ class TestDJRelayHeartbeatFailure:
     def relay_config(self):
         """Create a test DJRelayConfig."""
         from audio_processor.dj_relay import DJRelayConfig
+
         return DJRelayConfig(
             vj_server_url="ws://localhost:9999",
             dj_id="test_dj",
             dj_name="Test DJ",
-            heartbeat_interval=0.1  # Short interval for tests
+            heartbeat_interval=0.1,  # Short interval for tests
         )
 
     async def test_disconnect_after_three_heartbeat_failures(self, relay_config):
@@ -194,6 +197,7 @@ class TestDJRelayHeartbeatFailure:
         relay._last_heartbeat = 0  # Force heartbeat to be sent
 
         disconnect_called = False
+
         def on_disconnect():
             nonlocal disconnect_called
             disconnect_called = True
@@ -211,7 +215,7 @@ class TestDJRelayHeartbeatFailure:
             result = await relay.send_heartbeat()
             assert result is False
             assert relay._heartbeat_failures == i + 1
-            assert relay._connected is True, f"Should not disconnect after {i+1} failures"
+            assert relay._connected is True, f"Should not disconnect after {i + 1} failures"
 
         # Third heartbeat failure should trigger disconnect
         relay._last_heartbeat = 0
@@ -252,7 +256,7 @@ class TestVizClientConnectionTimeout:
         client = VizClient(
             host="localhost",
             port=9999,
-            connect_timeout=0.5  # Short timeout for tests
+            connect_timeout=0.5,  # Short timeout for tests
         )
 
         # Mock websockets.connect to hang forever
@@ -260,7 +264,7 @@ class TestVizClientConnectionTimeout:
             await asyncio.sleep(10)  # Longer than timeout
             return MagicMock()
 
-        with patch('websockets.connect', mock_connect):
+        with patch("websockets.connect", mock_connect):
             result = await client.connect()
 
         assert result is False
@@ -276,7 +280,7 @@ class TestVizClientConnectionTimeout:
         async def mock_connect(*args, **kwargs):
             raise ConnectionRefusedError("Connection refused")
 
-        with patch('websockets.connect', mock_connect):
+        with patch("websockets.connect", mock_connect):
             result = await client.connect()
 
         assert result is False
@@ -291,10 +295,7 @@ class TestVizClientReconnection:
         from python_client.viz_client import VizClient
 
         client = VizClient(
-            host="localhost",
-            port=9999,
-            auto_reconnect=True,
-            max_reconnect_attempts=5
+            host="localhost", port=9999, auto_reconnect=True, max_reconnect_attempts=5
         )
 
         sleep_times = []
@@ -309,8 +310,8 @@ class TestVizClientReconnection:
             sleep_times.append(delay)
             # Don't actually sleep
 
-        with patch('websockets.connect', mock_connect):
-            with patch('asyncio.sleep', mock_sleep):
+        with patch("websockets.connect", mock_connect):
+            with patch("asyncio.sleep", mock_sleep):
                 result = await client.reconnect()
 
         assert result is False
@@ -324,19 +325,15 @@ class TestVizClientReconnection:
         # Expected: 1.0, 1.5, 2.25, 3.375, 5.0625
         for i in range(1, len(sleep_times)):
             # Each delay should be approximately 1.5x the previous (within tolerance for floating point)
-            ratio = sleep_times[i] / sleep_times[i-1]
-            assert 1.4 <= ratio <= 1.6, \
-                f"Backoff ratio should be ~1.5, got {ratio:.2f}"
+            ratio = sleep_times[i] / sleep_times[i - 1]
+            assert 1.4 <= ratio <= 1.6, f"Backoff ratio should be ~1.5, got {ratio:.2f}"
 
     async def test_reconnection_max_attempts(self):
         """Verify reconnection stops after max attempts."""
         from python_client.viz_client import VizClient
 
         client = VizClient(
-            host="localhost",
-            port=9999,
-            auto_reconnect=True,
-            max_reconnect_attempts=3
+            host="localhost", port=9999, auto_reconnect=True, max_reconnect_attempts=3
         )
 
         connect_attempts = 0
@@ -346,8 +343,8 @@ class TestVizClientReconnection:
             connect_attempts += 1
             raise ConnectionRefusedError("Connection refused")
 
-        with patch('websockets.connect', mock_connect):
-            with patch('asyncio.sleep', AsyncMock()):
+        with patch("websockets.connect", mock_connect):
+            with patch("asyncio.sleep", AsyncMock()):
                 result = await client.reconnect()
 
         assert result is False
@@ -358,27 +355,23 @@ class TestVizClientReconnection:
         from python_client.viz_client import VizClient
 
         client = VizClient(
-            host="localhost",
-            port=9999,
-            auto_reconnect=True,
-            max_reconnect_attempts=5
+            host="localhost", port=9999, auto_reconnect=True, max_reconnect_attempts=5
         )
         client._reconnect_attempts = 3  # Simulate previous failed attempts
 
         # Create mock websocket that behaves well
         mock_ws = MagicMock()
-        mock_ws.recv = AsyncMock(return_value=json.dumps({
-            'type': 'welcome',
-            'message': 'Connected'
-        }))
+        mock_ws.recv = AsyncMock(
+            return_value=json.dumps({"type": "welcome", "message": "Connected"})
+        )
         mock_ws.send = AsyncMock()
         mock_ws.close = AsyncMock()
 
         async def mock_connect(*args, **kwargs):
             return mock_ws
 
-        with patch('websockets.connect', mock_connect):
-            with patch('asyncio.sleep', AsyncMock()):
+        with patch("websockets.connect", mock_connect):
+            with patch("asyncio.sleep", AsyncMock()):
                 result = await client.reconnect()
 
         # Stop background tasks that were started during connect
@@ -473,8 +466,8 @@ class TestAdminPanelReconnect:
 
         # Verify exponential pattern until max
         for i in range(1, len(delays)):
-            if delays[i-1] < max_delay / multiplier:
-                expected = delays[i-1] * multiplier
+            if delays[i - 1] < max_delay / multiplier:
+                expected = delays[i - 1] * multiplier
                 assert abs(delays[i] - expected) < 0.01
 
 

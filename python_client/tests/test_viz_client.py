@@ -2,8 +2,9 @@
 
 import asyncio
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from python_client.viz_client import VizClient
 
@@ -167,11 +168,7 @@ class TestVizClientReconnect:
     @pytest.mark.asyncio
     async def test_reconnect_exhausted_attempts(self):
         """Test reconnection failure after exhausting attempts."""
-        client = VizClient(
-            connect_timeout=0.01,
-            auto_reconnect=True,
-            max_reconnect_attempts=2
-        )
+        client = VizClient(connect_timeout=0.01, auto_reconnect=True, max_reconnect_attempts=2)
         client._reconnect_attempts = 0
 
         with patch("python_client.viz_client.websockets.connect") as mock_connect:
@@ -189,15 +186,9 @@ class TestVizClientReconnect:
     @pytest.mark.asyncio
     async def test_exponential_backoff(self):
         """Test that reconnection uses exponential backoff."""
-        client = VizClient(
-            connect_timeout=0.01,
-            auto_reconnect=True,
-            max_reconnect_attempts=3
-        )
+        client = VizClient(connect_timeout=0.01, auto_reconnect=True, max_reconnect_attempts=3)
 
         delays = []
-
-        original_sleep = asyncio.sleep
 
         async def mock_sleep(delay):
             delays.append(delay)
@@ -206,6 +197,7 @@ class TestVizClientReconnect:
 
         with patch("python_client.viz_client.asyncio.sleep", side_effect=mock_sleep):
             with patch("python_client.viz_client.websockets.connect") as mock_connect:
+
                 async def timeout_connect(uri):
                     raise asyncio.TimeoutError()
 
