@@ -5,7 +5,6 @@ import { useState } from "react";
 const navLinks = [
   { label: "Features", href: "#features" },
   { label: "Demo", href: "#demo" },
-  { label: "Join Show", href: "#join" },
   {
     label: "Docs",
     href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/README.md",

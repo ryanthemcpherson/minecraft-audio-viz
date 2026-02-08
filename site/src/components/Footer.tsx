@@ -10,7 +10,6 @@ const footerLinks = [
   {
     heading: "Community",
     links: [
-      { label: "Discord", href: "#", external: true },
       { label: "Discussions", href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/discussions", external: true },
       { label: "Issues", href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/issues", external: true },
     ],

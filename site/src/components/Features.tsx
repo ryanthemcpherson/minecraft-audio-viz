@@ -57,7 +57,7 @@ const features = [
   {
     title: "DJ Connect Codes",
     description:
-      "Join live shows with simple WORD-XXXX codes. No IP addresses, no port forwarding. The coordinator handles everything.",
+      "Share connect codes with your audience so they can watch your visualization show live in Minecraft. No IP addresses, no port forwarding.",
     icon: (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />

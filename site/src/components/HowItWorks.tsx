@@ -58,8 +58,8 @@ export default function HowItWorks() {
             How It Works
           </p>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-            From sound wave to{" "}
-            <span className="text-gradient">block world</span>
+            From Audio to{" "}
+            <span className="text-gradient">Architecture</span>
           </h2>
         </div>
 
