@@ -15,6 +15,9 @@ on:
       - 'minecraft_plugin/pom.xml'
       - 'dj_client/src-tauri/Cargo.toml'
       - 'dj_client/src-tauri/Cargo.lock'
+      - 'site/package.json'
+      - 'worker/package.json'
+      - 'coordinator/pyproject.toml'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -120,6 +123,20 @@ jobs:
           npm audit --audit-level=high --json > npm-audit-djclient.json || true
           npm audit --audit-level=high || true
 
+      - name: Audit site package
+        working-directory: site
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high --json > npm-audit-site.json || true
+          npm audit --audit-level=high || true
+
+      - name: Audit worker package
+        working-directory: worker
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high --json > npm-audit-worker.json || true
+          npm audit --audit-level=high || true
+
       - name: Upload npm audit reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -128,6 +145,8 @@ jobs:
           path: |
             npm-audit-root.json
             dj_client/npm-audit-djclient.json
+            site/npm-audit-site.json
+            worker/npm-audit-worker.json
           retention-days: 30
 
   # ---------------------------------------------------------------------------

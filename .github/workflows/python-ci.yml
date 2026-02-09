@@ -6,14 +6,18 @@ on:
     paths:
       - 'audio_processor/**'
       - 'python_client/**'
+      - 'coordinator/**'
       - 'pyproject.toml'
+      - 'coordinator/pyproject.toml'
       - '.github/workflows/python-ci.yml'
   pull_request:
     branches: [main]
     paths:
       - 'audio_processor/**'
       - 'python_client/**'
+      - 'coordinator/**'
       - 'pyproject.toml'
+      - 'coordinator/pyproject.toml'
 
 jobs:
   lint:
@@ -35,6 +39,12 @@ jobs:
 
       - name: Run ruff format check
         run: ruff format --check audio_processor/ python_client/
+
+      - name: Run ruff check (coordinator)
+        run: ruff check coordinator/
+
+      - name: Run ruff format check (coordinator)
+        run: ruff format --check coordinator/
 
   test:
     name: Test (Python ${{ matrix.python-version }})

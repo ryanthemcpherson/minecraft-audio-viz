@@ -9,19 +9,19 @@
 - **mcav.live** domain purchased and transferred to Cloudflare DNS (propagating)
 - **Hosting decision: Railway** ($5/mo hobby tier) replaces Cloudflare Pages + Fly.io
   - Better DX, native monorepo support, PostgreSQL included, WebSocket support
-  - Deployed from [ryanthemcpherson/mcav-site](https://github.com/ryanthemcpherson/mcav-site) (private repo)
-- **mcav-site repo** created with:
+  - Deployed from monorepo (`site/`, `coordinator/`, `worker/`)
+- **Web platform** (in monorepo):
   - `site/` — Next.js 15 landing page (Tailwind, dark theme, App Router)
   - `coordinator/` — FastAPI DJ coordinator (connect codes, JWT auth, rate limiting)
-- **Main repo** may go private; mcav-site is already private
+  - `worker/` — Cloudflare Workers tenant router
 
 ### Railway Architecture
 ```
-Railway Project: mcav-site
+Railway Project: mcav
   |
-  +-- Service: site          → Next.js app  → mcav.live
-  +-- Service: coordinator   → FastAPI app  → api.mcav.live
-  +-- Service: postgres      → PostgreSQL   → internal
+  +-- Service: site          → Next.js app (site/)          → mcav.live
+  +-- Service: coordinator   → FastAPI app (coordinator/)   → api.mcav.live
+  +-- Service: postgres      → PostgreSQL                   → internal
 ```
 
 ---

@@ -8,7 +8,10 @@
 #   make test-all    - Lint + test + build
 #   make clean       - Remove build artifacts
 
-.PHONY: test lint format build deploy test-all clean install dev-install help
+.PHONY: test lint format build deploy test-all clean install dev-install help \
+       site-install site-dev site-build site-lint \
+       coordinator-install coordinator-dev coordinator-test coordinator-lint \
+       worker-install worker-dev
 
 # ---------------------------------------------------------------------------
 # Default target
@@ -77,11 +80,51 @@ docker-logs: ## Tail VJ server logs
 	docker-compose logs -f --tail=50
 
 # ---------------------------------------------------------------------------
+# Site (Next.js)
+# ---------------------------------------------------------------------------
+site-install: ## Install site dependencies
+	cd site && npm ci
+
+site-dev: ## Run site dev server (http://localhost:3000)
+	cd site && npm run dev
+
+site-build: ## Build site for production
+	cd site && npm run build
+
+site-lint: ## Lint site code
+	cd site && npm run lint
+
+# ---------------------------------------------------------------------------
+# Coordinator (FastAPI)
+# ---------------------------------------------------------------------------
+coordinator-install: ## Install coordinator dependencies
+	cd coordinator && pip install -e ".[dev]"
+
+coordinator-dev: ## Run coordinator dev server (http://localhost:8090)
+	cd coordinator && uvicorn app.main:app --reload --port 8090
+
+coordinator-test: ## Run coordinator tests
+	cd coordinator && pytest tests/ -v --tb=short
+
+coordinator-lint: ## Lint coordinator code
+	ruff check coordinator/
+	ruff format --check coordinator/
+
+# ---------------------------------------------------------------------------
+# Worker (Cloudflare)
+# ---------------------------------------------------------------------------
+worker-install: ## Install worker dependencies
+	cd worker && npm install
+
+worker-dev: ## Run worker dev server
+	cd worker && npm run dev
+
+# ---------------------------------------------------------------------------
 # Combined targets
 # ---------------------------------------------------------------------------
-test-all: lint test build ## Run lint + tests + build (full CI locally)
+test-all: lint test coordinator-lint coordinator-test site-lint build ## Run all lint + tests + build
 
-ci: lint format-check test build ## Mirror the CI pipeline locally
+ci: lint format-check test coordinator-lint coordinator-test site-lint site-build build ## Mirror the CI pipeline locally
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -89,5 +132,7 @@ ci: lint format-check test build ## Mirror the CI pipeline locally
 clean: ## Remove build artifacts
 	rm -rf minecraft_plugin/target
 	rm -rf dist/ build/ *.egg-info
+	rm -rf site/.next site/out
+	rm -rf coordinator/*.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -delete 2>/dev/null || true

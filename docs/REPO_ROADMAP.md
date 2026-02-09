@@ -16,9 +16,10 @@ It now includes a renderer-backend architecture, central DJ coordinator service,
 
 ## Live Infrastructure
 - **Domain**: mcav.live (purchased, Cloudflare DNS)
-- **Site + API repo**: [ryanthemcpherson/mcav-site](https://github.com/ryanthemcpherson/mcav-site) (private)
+- **Web platform** (merged into monorepo):
   - `site/` — Next.js 15 landing page
   - `coordinator/` — FastAPI DJ coordinator API
+  - `worker/` — Cloudflare Workers tenant router
 - **Hosting**: Railway ($5/mo hobby tier, PostgreSQL included)
 - **MC server**: 192.168.1.204 (Paper 1.21.1, systemd, PlugManX hot-reload)
 
@@ -148,7 +149,7 @@ Create a backend interface inside Minecraft runtime:
 
 7. ~~No public domain or hosted presence~~ PARTIALLY RESOLVED
 - ~~mcav.live is available ($2.98/yr) — registration is a priority.~~ ✅ mcav.live purchased, Cloudflare DNS.
-- mcav-site repo created with Next.js landing + FastAPI coordinator. Railway deployment pending.
+- mcav-site merged into monorepo (`site/`, `coordinator/`, `worker/`). Railway deployment pending.
 - No public-facing documentation site yet.
 
 ## Backlog By Product Part
@@ -337,10 +338,10 @@ Done when:
 8. **Decompose `vj_server.py`** — Convert to package per [refactoring plan](REFACTORING_PLANS.md#part-2-decompose-vj_serverpy).
 9. **Wire `RendererBackend` into MessageHandler** — Complete integration per [refactoring plan](REFACTORING_PLANS.md#part-3-wire-rendererbackend-into-the-message-pipeline).
 10. ~~**Register mcav.live domain**~~ ✅ DONE — Purchased, Cloudflare DNS.
-11. ~~**Build central DJ coordinator**~~ ✅ DONE — [mcav-site/coordinator](https://github.com/ryanthemcpherson/mcav-site) per [architecture doc](COORDINATOR_ARCHITECTURE.md).
+11. ~~**Build central DJ coordinator**~~ ✅ DONE — `coordinator/` in monorepo per [architecture doc](COORDINATOR_ARCHITECTURE.md).
 12. Add contract fixture tests that validate messages against protocol schemas.
 13. Build DJ Client per-app WASAPI capture pipeline (Rust).
-14. Deploy mcav-site to Railway (site + coordinator + PostgreSQL).
+14. Deploy to Railway (site + coordinator + PostgreSQL).
 15. Prepare launch content per [GTM strategy](GTM_STRATEGY.md).
 
 ## Ownership Suggestion
