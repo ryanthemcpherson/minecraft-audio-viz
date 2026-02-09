@@ -335,14 +335,25 @@ minecraft-audio-viz/
 ├── dj_client/             # Desktop DJ client (Tauri + React)
 ├── preview_tool/          # 3D browser preview (Three.js)
 ├── minecraft_plugin/      # Paper plugin (Java 21)
+├── site/                  # Landing page (Next.js 15, mcav.live)
+├── coordinator/           # DJ coordinator API (FastAPI, PostgreSQL)
+├── worker/                # Tenant router (Cloudflare Workers)
 ├── python_client/         # VizClient WebSocket library
 ├── protocol/              # Shared protocol schemas
 ├── configs/               # Configuration files
 ├── docs/                  # Architecture and ops docs
 ├── scripts/               # PowerShell quick-start scripts
 ├── shows/                 # Saved show files
-└── images/         # Screenshots
+└── images/                # Screenshots
 ```
+
+### Web Platform (mcav.live)
+
+| Component | Path | Stack | Purpose |
+|-----------|------|-------|---------|
+| Landing Site | `site/` | Next.js 15, Tailwind CSS 4, Three.js | Product page, pattern gallery, getting started |
+| Coordinator | `coordinator/` | FastAPI, SQLAlchemy, PostgreSQL | DJ connect codes, show management, JWT auth |
+| Tenant Router | `worker/` | Cloudflare Workers, TypeScript | Multi-tenant subdomain routing |
 
 ---
 

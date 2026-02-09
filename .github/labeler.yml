@@ -29,3 +29,15 @@ docker:
 documentation:
   - changed-files:
     - any-glob-to-any-file: ['docs/**', '*.md']
+
+site:
+  - changed-files:
+    - any-glob-to-any-file: ['site/**']
+
+coordinator:
+  - changed-files:
+    - any-glob-to-any-file: ['coordinator/**']
+
+worker:
+  - changed-files:
+    - any-glob-to-any-file: ['worker/**']
