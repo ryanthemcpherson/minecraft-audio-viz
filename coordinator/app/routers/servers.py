@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,20 +16,11 @@ from app.models.schemas import (
     RegisterServerRequest,
     RegisterServerResponse,
 )
+from app.services.password import hash_password, verify_password
 
 import secrets as _secrets
 
 router = APIRouter(tags=["servers"])
-
-
-def _hash_api_key(plain: str) -> str:
-    """Bcrypt-hash an API key for storage."""
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
-
-
-def _verify_api_key(plain: str, hashed: str) -> bool:
-    """Constant-time comparison of a plaintext key against a bcrypt hash."""
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 async def _authenticate_server(
@@ -47,7 +37,7 @@ async def _authenticate_server(
     servers = result.scalars().all()
 
     for server in servers:
-        if _verify_api_key(api_key, server.api_key_hash):
+        if verify_password(api_key, server.api_key_hash):
             return server
 
     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -74,7 +64,7 @@ async def register_server(
     and **never** returned again.
     """
     # Hash the caller-supplied API key
-    api_key_hash = _hash_api_key(body.api_key)
+    api_key_hash = hash_password(body.api_key)
 
     # Generate a per-server JWT secret
     jwt_secret = f"jws_{_secrets.token_urlsafe(32)}"

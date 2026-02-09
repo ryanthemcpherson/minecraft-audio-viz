@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useAuth } from "@/components/AuthProvider";
 
 const navLinks = [
   { label: "Getting Started", href: "/getting-started" },
@@ -23,6 +24,8 @@ const navLinks = [
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user, loading, logout } = useAuth();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-xl">
@@ -63,6 +66,63 @@ export default function Navbar() {
                 {link.label}
               </Link>
             )
+          )}
+
+          {/* Auth section */}
+          {!loading && (
+            <>
+              {user ? (
+                <div className="relative">
+                  <button
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/5"
+                  >
+                    {user.avatar_url ? (
+                      <img
+                        src={user.avatar_url}
+                        alt={user.display_name}
+                        className="h-7 w-7 rounded-full"
+                      />
+                    ) : (
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-xs font-bold">
+                        {user.display_name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-sm text-zinc-300">
+                      {user.display_name}
+                    </span>
+                  </button>
+
+                  {userMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-48 rounded-xl border border-white/10 bg-[#111] py-1 shadow-xl">
+                      <Link
+                        href="/dashboard"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="block px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
+                      >
+                        Dashboard
+                      </Link>
+                      <button
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          logout();
+                        }}
+                        className="block w-full px-4 py-2 text-left text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
+                      >
+                        Log out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  href="/login"
+                  className="rounded-lg bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  Log in
+                </Link>
+              )}
+            </>
           )}
         </div>
 
@@ -113,6 +173,40 @@ export default function Navbar() {
                   {link.label}
                 </Link>
               )
+            )}
+
+            {/* Mobile auth */}
+            {!loading && (
+              <div className="mt-2 border-t border-white/5 pt-3">
+                {user ? (
+                  <>
+                    <Link
+                      href="/dashboard"
+                      onClick={() => setMobileOpen(false)}
+                      className="block rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
+                    >
+                      Dashboard
+                    </Link>
+                    <button
+                      onClick={() => {
+                        setMobileOpen(false);
+                        logout();
+                      }}
+                      className="block w-full rounded-lg px-4 py-3 text-left text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
+                    >
+                      Log out
+                    </button>
+                  </>
+                ) : (
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileOpen(false)}
+                    className="block rounded-lg px-4 py-3 text-sm font-medium text-[#00D4FF] transition-colors hover:bg-white/5"
+                  >
+                    Log in
+                  </Link>
+                )}
+              </div>
             )}
           </div>
         </div>

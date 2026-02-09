@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
 from app.config import Settings
 from app.database import get_session
 from app.main import create_app
+from app.middleware.rate_limit import get_auth_limiter, get_connect_limiter
 from app.models.db import Base
 
 
@@ -47,7 +48,11 @@ def settings() -> Settings:
         jwt_default_expiry_minutes=15,
         rate_limit_resolve_per_minute=10,
         rate_limit_register_per_hour=5,
+        rate_limit_auth_per_minute=100,  # relaxed for tests
         cors_origins=["http://localhost:3000"],
+        user_jwt_secret="test-user-jwt-secret",
+        user_jwt_expiry_minutes=60,
+        refresh_token_expiry_days=30,
     )
 
 
@@ -86,6 +91,10 @@ async def client(settings: Settings, db_session: AsyncSession) -> AsyncIterator[
         yield db_session
 
     app.dependency_overrides[get_session] = _override_get_session
+
+    # Reset rate limiters between tests so they don't bleed across test cases
+    get_connect_limiter().reset()
+    get_auth_limiter().reset()
 
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
