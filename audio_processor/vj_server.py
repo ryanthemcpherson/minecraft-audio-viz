@@ -22,12 +22,14 @@ import json
 import logging
 import math
 import os
+import posixpath
 import secrets
 import signal
 import socketserver
 import sys
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -382,14 +384,23 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
 
     directory_map = {}
 
+    def _safe_join(self, base: str, path: str) -> str:
+        path = path.split("?", 1)[0].split("#", 1)[0]
+        path = posixpath.normpath(urllib.parse.unquote(path))
+        words = [word for word in path.split("/") if word not in ("", ".", "..")]
+        full_path = base
+        for word in words:
+            full_path = os.path.join(full_path, word)
+        return full_path
+
     def translate_path(self, path):
-        path = path.split("?")[0].split("#")[0]
+        path = path.split("?", 1)[0].split("#", 1)[0]
         for url_prefix, fs_directory in self.directory_map.items():
-            if path.startswith(url_prefix):
+            if path == url_prefix or path.startswith(f"{url_prefix}/"):
                 relative_path = path[len(url_prefix) :].lstrip("/")
-                return os.path.join(fs_directory, relative_path)
+                return self._safe_join(fs_directory, relative_path)
         if "/" in self.directory_map:
-            return os.path.join(self.directory_map["/"], path.lstrip("/"))
+            return self._safe_join(self.directory_map["/"], path)
         return super().translate_path(path)
 
     def log_message(self, format, *args):
