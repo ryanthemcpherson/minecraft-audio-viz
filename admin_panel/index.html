@@ -23,15 +23,28 @@
                         <span class="header-subtitle">Control Center</span>
                     </div>
                 </div>
-                <span id="connection-status" class="status disconnected">Disconnected</span>
+                <div class="connection-status-wrapper">
+                    <span id="connection-status" class="status disconnected">Disconnected</span>
+                    <button id="btn-reconnect" class="btn btn-reconnect hidden">Reconnect</button>
+                </div>
             </div>
             <div class="header-center">
-                <span class="zone-label">Zone:</span>
+                <span class="zone-label">Stage:</span>
                 <select id="zone-select">
                     <option value="main">main</option>
                 </select>
             </div>
             <div class="header-right">
+                <div class="service-status">
+                    <div class="service-indicator" id="svc-python">
+                        <span class="svc-dot"></span>
+                        <span class="svc-label">Server</span>
+                    </div>
+                    <div class="service-indicator" id="svc-minecraft">
+                        <span class="svc-dot"></span>
+                        <span class="svc-label">Minecraft</span>
+                    </div>
+                </div>
                 <span id="preview-stats" class="preview-stats hidden">
                     <span id="preview-block-count">0 blocks</span>
                     <span class="stat-sep">|</span>
@@ -125,9 +138,17 @@
                     </div>
                 </div>
 
-                <!-- DJ Queue -->
+                <!-- DJ Management -->
                 <div class="panel">
-                    <h2 class="panel-title">DJ Queue</h2>
+                    <h2 class="panel-title">DJ Management</h2>
+
+                    <!-- Pending Approvals -->
+                    <div id="dj-pending-section" class="dj-pending-section hidden">
+                        <h3 class="subsection-title">Pending Approval</h3>
+                        <div id="dj-pending-queue" class="dj-pending-queue"></div>
+                    </div>
+
+                    <!-- Active DJ Queue -->
                     <div id="dj-queue" class="dj-queue">
                         <div class="dj-empty">No DJs connected</div>
                     </div>
@@ -162,6 +183,7 @@
                     <button class="tab active" data-tab="mixer">Live Mixer</button>
                     <button class="tab" data-tab="zone">Zone Settings</button>
                     <button class="tab" data-tab="preview">3D Preview</button>
+                    <button class="tab" data-tab="banner">DJ Banner</button>
                 </nav>
 
                 <!-- Tab Content -->
@@ -312,6 +334,17 @@
 
                     <!-- Zone Settings Panel -->
                     <div id="zone-panel" class="tab-panel">
+                        <!-- Available Stages -->
+                        <section class="mixer-section">
+                            <div class="section-header">
+                                <h3 class="section-title">Available Stages</h3>
+                                <button id="btn-refresh-zones" class="btn btn-secondary btn-sm">Refresh</button>
+                            </div>
+                            <div id="zone-list" class="zone-list">
+                                <div class="zone-empty">Loading stages...</div>
+                            </div>
+                        </section>
+
                         <!-- Render Mode -->
                         <section class="mixer-section">
                             <h3 class="section-title">Render Mode</h3>
@@ -625,6 +658,139 @@
                         </div>
                     </div>
 
+                    <!-- DJ Banner Panel -->
+                    <div id="banner-panel" class="tab-panel">
+                        <!-- DJ Selector -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">DJ Banner Profile</h3>
+                            <div class="control-row">
+                                <label>Select DJ</label>
+                                <select id="banner-dj-select" class="control-select">
+                                    <option value="">-- Select DJ --</option>
+                                </select>
+                            </div>
+                        </section>
+
+                        <!-- Banner Mode -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Banner Mode</h3>
+                            <div class="banner-mode-selector">
+                                <button class="render-mode-btn active" data-banner-mode="text" id="banner-mode-text">
+                                    <span class="mode-label">Text</span>
+                                    <span class="mode-desc">DJ Name Display</span>
+                                </button>
+                                <button class="render-mode-btn" data-banner-mode="image" id="banner-mode-image">
+                                    <span class="mode-label">Logo</span>
+                                    <span class="mode-desc">PNG Pixel Art</span>
+                                </button>
+                            </div>
+                        </section>
+
+                        <!-- Text Mode Settings -->
+                        <section class="mixer-section" id="banner-text-settings">
+                            <h3 class="section-title">Text Settings</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Font Style</label>
+                                    <select id="banner-text-style" class="control-select">
+                                        <option value="bold">Bold</option>
+                                        <option value="block">Block Letters</option>
+                                        <option value="neon">Neon Glow</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label>Color Mode</label>
+                                    <select id="banner-text-color-mode" class="control-select">
+                                        <option value="frequency" selected>By Frequency</option>
+                                        <option value="rainbow">Rainbow Cycle</option>
+                                        <option value="fixed">Fixed Color</option>
+                                    </select>
+                                </div>
+                                <div class="control-row" id="banner-fixed-color-row" style="display: none;">
+                                    <label>Fixed Color</label>
+                                    <select id="banner-text-fixed-color" class="control-select">
+                                        <option value="c">Red</option>
+                                        <option value="6">Gold</option>
+                                        <option value="e">Yellow</option>
+                                        <option value="a">Green</option>
+                                        <option value="b">Aqua</option>
+                                        <option value="9">Blue</option>
+                                        <option value="d">Pink</option>
+                                        <option value="f" selected>White</option>
+                                        <option value="5">Purple</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label>Text Format</label>
+                                    <input type="text" id="banner-text-format" class="control-input" value="%s" placeholder="%s = DJ name">
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Image Mode Settings -->
+                        <section class="mixer-section" id="banner-image-settings" style="display: none;">
+                            <h3 class="section-title">Logo Settings</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Logo Image</label>
+                                    <div class="file-upload-area">
+                                        <input type="file" id="banner-logo-file" accept="image/png,image/jpeg,image/webp" style="display:none;">
+                                        <button id="btn-upload-logo" class="btn btn-secondary">Upload Logo</button>
+                                        <span id="banner-logo-filename" class="file-name">No file selected</span>
+                                    </div>
+                                </div>
+                                <div class="control-row">
+                                    <label>Grid Width</label>
+                                    <input type="range" id="banner-grid-width" min="8" max="32" value="24" class="slider">
+                                    <span class="control-value" id="val-banner-grid-width">24</span>
+                                </div>
+                                <div class="control-row">
+                                    <label>Grid Height</label>
+                                    <input type="range" id="banner-grid-height" min="4" max="16" value="12" class="slider">
+                                    <span class="control-value" id="val-banner-grid-height">12</span>
+                                </div>
+                            </div>
+                            <!-- Logo Preview -->
+                            <div id="banner-logo-preview" class="logo-preview">
+                                <canvas id="banner-preview-canvas" width="240" height="120"></canvas>
+                            </div>
+                        </section>
+
+                        <!-- Reactivity Settings -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Audio Reactivity</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Pulse Intensity</label>
+                                    <input type="range" id="banner-pulse-intensity" min="0" max="100" value="30" class="slider">
+                                    <span class="control-value" id="val-banner-pulse">30%</span>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Brightness React</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="banner-brightness-react" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Glow on Beat</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="banner-glow-beat" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Save/Apply -->
+                        <section class="mixer-section">
+                            <div class="zone-actions">
+                                <button id="btn-save-banner-profile" class="btn btn-primary">Save Profile</button>
+                                <button id="btn-apply-banner-now" class="btn btn-secondary">Apply Now</button>
+                            </div>
+                        </section>
+                    </div>
+
                 </div>
 
                 <!-- Status Bar -->
@@ -646,5 +812,8 @@
     <script src="js/particles.js"></script>
     <script src="js/block-indicators.js"></script>
     <script type="module" src="js/admin-app.js"></script>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
 </body>
 </html>

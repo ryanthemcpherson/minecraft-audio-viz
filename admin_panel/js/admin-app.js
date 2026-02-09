@@ -44,6 +44,9 @@ class AdminApp {
             // DJ roster state
             djRoster: [],
             activeDJ: null,
+            pendingDJs: [],
+            // Service status
+            minecraftConnected: false,
             // Connect codes state
             connectCodes: [],
             // Zone settings
@@ -131,6 +134,7 @@ class AdminApp {
         this._setupEventListeners();
         this._setupWebSocket();
         this._setupDJQueueDelegation();
+        this._setupDJPendingDelegation();
 
         // Start connection
         this.ws.connect();
@@ -215,6 +219,24 @@ class AdminApp {
         this.elements.modalTtl = document.getElementById('modal-ttl');
         this.elements.btnCopyCode = document.getElementById('btn-copy-code');
         this.elements.btnCloseModal = document.getElementById('btn-close-modal');
+
+        // Reconnect button
+        this.elements.btnReconnect = document.getElementById('btn-reconnect');
+
+        // Service status indicators
+        this.elements.svcPython = document.getElementById('svc-python');
+        this.elements.svcMinecraft = document.getElementById('svc-minecraft');
+
+        // DJ Pending section
+        this.elements.djPendingSection = document.getElementById('dj-pending-section');
+        this.elements.djPendingQueue = document.getElementById('dj-pending-queue');
+
+        // Zone/stage list
+        this.elements.zoneList = document.getElementById('zone-list');
+        this.elements.btnRefreshZones = document.getElementById('btn-refresh-zones');
+
+        // Toast container
+        this.elements.toastContainer = document.getElementById('toast-container');
 
         // Zone settings elements
         this.elements.zoneSelect = document.getElementById('zone-select');
@@ -348,6 +370,20 @@ class AdminApp {
                 const val = parseInt(this.elements.particleGlobalIntensity.value);
                 document.getElementById('val-particle-intensity').textContent = `${val}%`;
                 sendParticleIntensity(val);
+            });
+        }
+
+        // Reconnect button
+        if (this.elements.btnReconnect) {
+            this.elements.btnReconnect.addEventListener('click', () => {
+                this.ws.manualReconnect();
+            });
+        }
+
+        // Refresh zones button
+        if (this.elements.btnRefreshZones) {
+            this.elements.btnRefreshZones.addEventListener('click', () => {
+                this.ws.send({ type: 'get_zones' });
             });
         }
 
@@ -509,6 +545,9 @@ class AdminApp {
         // Particle visualization config
         this._setupParticleVizListeners();
 
+        // Banner settings
+        this._setupBannerListeners();
+
         // Entity count
         this._setupZoneControl('zone-entity-count', 'val-entity-count', (val) => {
             this.state.zone.entityCount = val;
@@ -668,16 +707,20 @@ class AdminApp {
         this.ws.addEventListener('connected', () => {
             this.state.connected = true;
             this._setConnectionStatus('connected');
+            this._showToast('Connected to server', 'success');
             // Request initial state
             this.ws.send({ type: 'get_particle_effects' });
             this.ws.send({ type: 'get_zones' });
             this.ws.send({ type: 'get_zone', zone: this.state.zone.name });
             this.ws.send({ type: 'get_connect_codes' });
+            this.ws.send({ type: 'get_pending_djs' });
         });
 
         this.ws.addEventListener('disconnected', () => {
             this.state.connected = false;
+            this.state.minecraftConnected = false;
             this._setConnectionStatus('disconnected');
+            this._updateServiceIndicators();
         });
 
         this.ws.addEventListener('error', () => {
@@ -686,6 +729,7 @@ class AdminApp {
 
         this.ws.addEventListener('reconnect_failed', () => {
             this._setConnectionStatus('failed');
+            this._showToast('Connection failed. Click Reconnect to retry.', 'error', 0);
         });
 
         // Handle incoming messages
@@ -712,6 +756,20 @@ class AdminApp {
                 }
                 if (data.zone !== undefined) {
                     this.state.currentZone = data.zone;
+                }
+                // Handle initial MC status from vj_state
+                if (data.minecraft_connected !== undefined) {
+                    this.state.minecraftConnected = data.minecraft_connected;
+                    this._updateServiceIndicators();
+                    this._updateMCDependentControls();
+                }
+                // Handle initial pending DJs from vj_state
+                if (data.pending_djs) {
+                    this.state.pendingDJs = data.pending_djs;
+                    this._renderPendingDJs();
+                }
+                if (data.banner_profiles) {
+                    this.state.bannerProfiles = data.banner_profiles;
                 }
                 break;
 
@@ -786,6 +844,59 @@ class AdminApp {
                 this.state.connectCodes = data.codes || [];
                 this._renderConnectCodes();
                 break;
+
+            case 'minecraft_status':
+                this._handleMinecraftStatus(data);
+                break;
+
+            case 'dj_pending':
+                // New DJ requesting approval
+                this._handleDJPending(data);
+                break;
+
+            case 'pending_djs':
+                // Full list of pending DJs
+                this.state.pendingDJs = data.pending || [];
+                this._renderPendingDJs();
+                break;
+
+            case 'dj_approved':
+            case 'dj_denied':
+                // DJ was approved/denied, refresh pending list
+                this.ws.send({ type: 'get_pending_djs' });
+                break;
+
+            case 'banner_profile':
+                this._handleBannerProfile(data);
+                break;
+
+            case 'banner_profile_saved':
+                this._showToast('Banner profile saved', 'success');
+                break;
+
+            case 'banner_logo_processed':
+                this._showToast(`Logo processed: ${data.grid_width}x${data.grid_height} pixels`, 'success');
+                break;
+
+            case 'all_banner_profiles':
+                this.state.bannerProfiles = data.profiles || {};
+                break;
+
+            case 'banner_config_received':
+                this._showToast('Banner applied to Minecraft', 'success');
+                break;
+
+            case 'error':
+                this._showToast(data.message || 'An error occurred', 'error');
+                break;
+
+            case 'zone_cleaned':
+                this._showToast(`Zone "${data.zone || 'unknown'}" cleaned up`, 'success');
+                break;
+
+            case 'pool_initialized':
+                this._showToast(`Pool initialized: ${data.count || '?'} entities`, 'success');
+                break;
         }
     }
 
@@ -806,6 +917,9 @@ class AdminApp {
             // Select current zone
             this.elements.zoneSelect.value = this.state.zone.name;
         }
+
+        // Render the zone list in the Zone Settings tab
+        this._renderZoneList(data.zones || []);
     }
 
     _handleParticleEffects(data) {
@@ -927,9 +1041,11 @@ class AdminApp {
     }
 
     _handleDJRoster(data) {
-        this.state.djRoster = data.dj_roster || [];
+        // Server sends 'dj_roster' in vj_state, but 'roster' in dj_roster broadcasts
+        this.state.djRoster = data.dj_roster || data.roster || [];
         this.state.activeDJ = data.active_dj || null;
         this._renderDJQueue();
+        this._updateBannerDJSelector();
     }
 
     _renderDJQueue() {
@@ -949,38 +1065,108 @@ class AdminApp {
             return;
         }
 
-        this.state.djRoster.forEach(dj => {
+        this.state.djRoster.forEach((dj, index) => {
+            const isActive = dj.dj_id === this.state.activeDJ;
             const djEl = document.createElement('div');
-            djEl.className = 'dj-item' + (dj.dj_id === this.state.activeDJ ? ' active' : '');
+            djEl.className = 'dj-item' + (isActive ? ' active' : '');
 
-            const statusSpan = document.createElement('span');
-            statusSpan.className = 'dj-status';
-            statusSpan.textContent = dj.dj_id === this.state.activeDJ ? '🎧' : '⏸️';
+            // Position number
+            const posSpan = document.createElement('span');
+            posSpan.className = 'dj-position';
+            posSpan.textContent = `#${index + 1}`;
+
+            // Name and stats
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'dj-info';
 
             const nameSpan = document.createElement('span');
             nameSpan.className = 'dj-name';
             nameSpan.textContent = dj.dj_name;
 
+            infoDiv.appendChild(nameSpan);
+
+            // Stats row (BPM, latency, FPS)
+            if (dj.bpm || dj.latency_ms !== undefined || dj.fps !== undefined) {
+                const statsDiv = document.createElement('div');
+                statsDiv.className = 'dj-stats';
+                if (dj.bpm) {
+                    const bpmStat = document.createElement('span');
+                    bpmStat.className = 'dj-stat';
+                    bpmStat.textContent = `${Math.round(dj.bpm)} BPM`;
+                    statsDiv.appendChild(bpmStat);
+                }
+                if (dj.latency_ms !== undefined) {
+                    const latStat = document.createElement('span');
+                    latStat.className = 'dj-stat';
+                    latStat.textContent = `${Math.round(dj.latency_ms)}ms`;
+                    if (dj.latency_ms > 200) latStat.classList.add('warning');
+                    statsDiv.appendChild(latStat);
+                }
+                if (dj.fps !== undefined) {
+                    const fpsStat = document.createElement('span');
+                    fpsStat.className = 'dj-stat';
+                    fpsStat.textContent = `${Math.round(dj.fps)} FPS`;
+                    statsDiv.appendChild(fpsStat);
+                }
+                infoDiv.appendChild(statsDiv);
+            }
+
+            // Actions area
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'dj-actions';
 
-            if (dj.dj_id !== this.state.activeDJ) {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-small';
-                btn.dataset.action = 'activate';
-                btn.dataset.dj = dj.dj_id;
-                btn.textContent = 'Go Live';
-                actionsDiv.appendChild(btn);
-            } else {
+            if (isActive) {
                 const badge = document.createElement('span');
-                badge.className = 'live-badge';
+                badge.className = 'dj-badge-live';
                 badge.textContent = 'LIVE';
                 actionsDiv.appendChild(badge);
+            } else {
+                const goLiveBtn = document.createElement('button');
+                goLiveBtn.className = 'btn btn-go-live';
+                goLiveBtn.dataset.action = 'activate';
+                goLiveBtn.dataset.dj = dj.dj_id;
+                goLiveBtn.textContent = 'Go Live';
+                actionsDiv.appendChild(goLiveBtn);
             }
 
-            djEl.appendChild(statusSpan);
-            djEl.appendChild(nameSpan);
+            // Queue reorder controls
+            const queueControls = document.createElement('div');
+            queueControls.className = 'dj-queue-controls';
+
+            if (index > 0) {
+                const upBtn = document.createElement('button');
+                upBtn.className = 'btn btn-queue-move';
+                upBtn.dataset.action = 'move_up';
+                upBtn.dataset.dj = dj.dj_id;
+                upBtn.dataset.position = index;
+                upBtn.textContent = '\u25B2';
+                upBtn.title = 'Move up';
+                queueControls.appendChild(upBtn);
+            }
+            if (index < this.state.djRoster.length - 1) {
+                const downBtn = document.createElement('button');
+                downBtn.className = 'btn btn-queue-move';
+                downBtn.dataset.action = 'move_down';
+                downBtn.dataset.dj = dj.dj_id;
+                downBtn.dataset.position = index;
+                downBtn.textContent = '\u25BC';
+                downBtn.title = 'Move down';
+                queueControls.appendChild(downBtn);
+            }
+
+            const kickBtn = document.createElement('button');
+            kickBtn.className = 'btn btn-kick';
+            kickBtn.dataset.action = 'kick';
+            kickBtn.dataset.dj = dj.dj_id;
+            kickBtn.dataset.name = dj.dj_name;
+            kickBtn.textContent = 'Kick';
+            kickBtn.title = 'Kick DJ';
+            queueControls.appendChild(kickBtn);
+
+            djEl.appendChild(posSpan);
+            djEl.appendChild(infoDiv);
             djEl.appendChild(actionsDiv);
+            djEl.appendChild(queueControls);
             container.appendChild(djEl);
         });
     }
@@ -992,9 +1178,42 @@ class AdminApp {
         if (!container || container._delegationSetup) return;
 
         container.addEventListener('click', (e) => {
-            const btn = e.target.closest('[data-action="activate"]');
-            if (btn && btn.dataset.dj) {
-                this.ws.send({ type: 'set_active_dj', dj_id: btn.dataset.dj });
+            const btn = e.target.closest('[data-action]');
+            if (!btn || !btn.dataset.dj) return;
+
+            const action = btn.dataset.action;
+            const djId = btn.dataset.dj;
+
+            switch (action) {
+                case 'activate':
+                    this.ws.send({ type: 'set_active_dj', dj_id: djId });
+                    this._showToast('Switching active DJ...', 'info');
+                    break;
+
+                case 'move_up': {
+                    const pos = parseInt(btn.dataset.position);
+                    if (pos > 0) {
+                        this.ws.send({ type: 'reorder_dj_queue', dj_id: djId, new_position: pos - 1 });
+                    }
+                    break;
+                }
+
+                case 'move_down': {
+                    const pos = parseInt(btn.dataset.position);
+                    if (pos < this.state.djRoster.length - 1) {
+                        this.ws.send({ type: 'reorder_dj_queue', dj_id: djId, new_position: pos + 1 });
+                    }
+                    break;
+                }
+
+                case 'kick': {
+                    const name = btn.dataset.name || djId;
+                    if (confirm(`Kick DJ "${name}"?`)) {
+                        this.ws.send({ type: 'kick_dj', dj_id: djId });
+                        this._showToast(`Kicked DJ "${name}"`, 'info');
+                    }
+                    break;
+                }
             }
         });
         container._delegationSetup = true;
@@ -1133,6 +1352,14 @@ class AdminApp {
         }
 
         el.textContent = statusText;
+
+        // Show/hide reconnect button
+        if (this.elements.btnReconnect) {
+            this.elements.btnReconnect.classList.toggle('hidden', status !== 'failed');
+        }
+
+        // Update service indicators
+        this._updateServiceIndicators();
     }
 
     _updateMeters() {
@@ -1497,6 +1724,10 @@ class AdminApp {
     }
 
     _reinitPool() {
+        if (!this.state.minecraftConnected) {
+            this._showToast('Minecraft not connected', 'warning');
+            return;
+        }
         const zone = this.state.zone;
         this.ws.send({
             type: 'init_pool',
@@ -1506,14 +1737,20 @@ class AdminApp {
             brightness: zone.brightness,
             interpolation: zone.interpolation
         });
+        this._showToast('Reinitializing entity pool...', 'info');
     }
 
     _cleanupZone() {
+        if (!this.state.minecraftConnected) {
+            this._showToast('Minecraft not connected', 'warning');
+            return;
+        }
         if (confirm('This will remove all entities in the zone. Continue?')) {
             this.ws.send({
                 type: 'cleanup_zone',
                 zone: this.state.zone.name
             });
+            this._showToast('Cleaning up zone...', 'info');
         }
     }
 
@@ -1738,6 +1975,247 @@ class AdminApp {
                 particle_size: pv.particleSize,
                 trail: pv.trail
             }
+        });
+    }
+
+    // === Toast Notification System ===
+
+    _showToast(message, type = 'info', duration = 4000) {
+        const container = this.elements.toastContainer;
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+
+        container.appendChild(toast);
+
+        // Trigger show animation
+        requestAnimationFrame(() => toast.classList.add('show'));
+
+        // Auto-dismiss (0 = persistent until manually dismissed or replaced)
+        if (duration > 0) {
+            setTimeout(() => this._dismissToast(toast), duration);
+        }
+    }
+
+    _dismissToast(toast) {
+        if (!toast || !toast.parentNode) return;
+        toast.classList.remove('show');
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 300);
+    }
+
+    // === Service Status Indicators ===
+
+    _updateServiceIndicators() {
+        const pythonDot = this.elements.svcPython?.querySelector('.svc-dot');
+        const mcDot = this.elements.svcMinecraft?.querySelector('.svc-dot');
+
+        if (pythonDot) {
+            pythonDot.classList.toggle('connected', this.state.connected);
+            pythonDot.classList.toggle('disconnected', !this.state.connected);
+        }
+
+        if (mcDot) {
+            mcDot.classList.toggle('connected', this.state.minecraftConnected);
+            mcDot.classList.toggle('disconnected', !this.state.minecraftConnected);
+        }
+    }
+
+    _handleMinecraftStatus(data) {
+        const wasConnected = this.state.minecraftConnected;
+        this.state.minecraftConnected = data.connected;
+        this._updateServiceIndicators();
+        this._updateMCDependentControls();
+
+        // Notify on status change
+        if (data.connected && !wasConnected) {
+            this._showToast('Minecraft connected', 'success');
+        } else if (!data.connected && wasConnected) {
+            this._showToast('Minecraft disconnected', 'warning');
+        }
+    }
+
+    _updateMCDependentControls() {
+        const mcDependent = [this.elements.btnReinitPool, this.elements.btnCleanupZone];
+        mcDependent.forEach(btn => {
+            if (btn) {
+                btn.disabled = !this.state.minecraftConnected;
+                btn.title = this.state.minecraftConnected ? '' : 'Minecraft not connected';
+            }
+        });
+    }
+
+    // === DJ Pending Approval ===
+
+    _handleDJPending(data) {
+        // A new DJ is requesting approval - add to pending list
+        const dj = data.dj || data;
+        const exists = this.state.pendingDJs.some(d => d.dj_id === dj.dj_id);
+        if (!exists) {
+            this.state.pendingDJs.push(dj);
+        }
+        this._renderPendingDJs();
+        this._showToast(`DJ "${dj.dj_name || 'Unknown'}" requesting approval`, 'info', 8000);
+    }
+
+    _renderPendingDJs() {
+        const section = this.elements.djPendingSection;
+        const container = this.elements.djPendingQueue;
+        if (!section || !container) return;
+
+        // Clear existing
+        while (container.firstChild) {
+            container.removeChild(container.firstChild);
+        }
+
+        // Show/hide section
+        section.classList.toggle('hidden', this.state.pendingDJs.length === 0);
+
+        this.state.pendingDJs.forEach(dj => {
+            const item = document.createElement('div');
+            item.className = 'dj-pending-item';
+            item.dataset.djId = dj.dj_id;
+
+            const info = document.createElement('div');
+            info.className = 'dj-pending-info';
+
+            const name = document.createElement('span');
+            name.className = 'dj-pending-name';
+            name.textContent = dj.dj_name || 'Unknown DJ';
+
+            const meta = document.createElement('span');
+            meta.className = 'dj-pending-meta';
+            const waitTime = dj.waiting_since
+                ? Math.floor((Date.now() / 1000 - dj.waiting_since) / 60)
+                : 0;
+            meta.textContent = waitTime > 0 ? `Waiting ${waitTime}m` : 'Just now';
+            if (dj.direct_mode) {
+                const badge = document.createElement('span');
+                badge.className = 'dj-badge-direct';
+                badge.textContent = 'DIRECT';
+                meta.appendChild(badge);
+            }
+
+            info.appendChild(name);
+            info.appendChild(meta);
+
+            const actions = document.createElement('div');
+            actions.className = 'dj-pending-actions';
+
+            const approveBtn = document.createElement('button');
+            approveBtn.className = 'btn btn-approve';
+            approveBtn.dataset.action = 'approve';
+            approveBtn.dataset.dj = dj.dj_id;
+            approveBtn.textContent = 'Approve';
+
+            const denyBtn = document.createElement('button');
+            denyBtn.className = 'btn btn-deny';
+            denyBtn.dataset.action = 'deny';
+            denyBtn.dataset.dj = dj.dj_id;
+            denyBtn.textContent = 'Deny';
+
+            actions.appendChild(approveBtn);
+            actions.appendChild(denyBtn);
+
+            item.appendChild(info);
+            item.appendChild(actions);
+            container.appendChild(item);
+        });
+    }
+
+    _setupDJPendingDelegation() {
+        const container = this.elements.djPendingQueue;
+        if (!container || container._delegationSetup) return;
+
+        container.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-action]');
+            if (!btn || !btn.dataset.dj) return;
+
+            if (btn.dataset.action === 'approve') {
+                this.ws.send({ type: 'approve_dj', dj_id: btn.dataset.dj });
+                this._showToast('DJ approved', 'success');
+                // Optimistically remove from pending
+                this.state.pendingDJs = this.state.pendingDJs.filter(d => d.dj_id !== btn.dataset.dj);
+                this._renderPendingDJs();
+            } else if (btn.dataset.action === 'deny') {
+                this.ws.send({ type: 'deny_dj', dj_id: btn.dataset.dj });
+                this._showToast('DJ denied', 'info');
+                this.state.pendingDJs = this.state.pendingDJs.filter(d => d.dj_id !== btn.dataset.dj);
+                this._renderPendingDJs();
+            }
+        });
+        container._delegationSetup = true;
+    }
+
+    // === Zone/Stage List ===
+
+    _renderZoneList(zones) {
+        const container = this.elements.zoneList;
+        if (!container) return;
+
+        while (container.firstChild) {
+            container.removeChild(container.firstChild);
+        }
+
+        if (!zones || zones.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'zone-empty';
+            empty.textContent = 'No stages found';
+            container.appendChild(empty);
+            return;
+        }
+
+        zones.forEach(zone => {
+            const item = document.createElement('div');
+            item.className = 'zone-item';
+
+            const info = document.createElement('div');
+            info.className = 'zone-info';
+
+            const name = document.createElement('span');
+            name.className = 'zone-name';
+            name.textContent = zone.name;
+
+            const meta = document.createElement('span');
+            meta.className = 'zone-meta';
+            meta.textContent = `${zone.entity_count || 0} entities`;
+
+            info.appendChild(name);
+            info.appendChild(meta);
+
+            const actions = document.createElement('div');
+            actions.className = 'zone-actions';
+
+            if (zone.name === this.state.zone.name) {
+                const badge = document.createElement('span');
+                badge.className = 'zone-badge-active';
+                badge.textContent = 'ACTIVE';
+                actions.appendChild(badge);
+            } else {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-small';
+                btn.textContent = 'Select';
+                btn.addEventListener('click', () => {
+                    this.state.zone.name = zone.name;
+                    if (this.elements.zoneSelect) {
+                        this.elements.zoneSelect.value = zone.name;
+                    }
+                    this._setZoneControlsLoading(true);
+                    this._requestZoneStatus();
+                    this.ws.send({ type: 'get_zones' });
+                    this._showToast(`Switched to stage "${zone.name}"`, 'info');
+                });
+                actions.appendChild(btn);
+            }
+
+            item.appendChild(info);
+            item.appendChild(actions);
+            container.appendChild(item);
         });
     }
 
@@ -2218,6 +2696,269 @@ class AdminApp {
                 }
             }
         }
+    }
+    // ========== Banner System ==========
+
+    _setupBannerListeners() {
+        // Banner mode toggle
+        const modeButtons = document.querySelectorAll('[data-banner-mode]');
+        modeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                modeButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const mode = btn.dataset.bannerMode;
+                const textSettings = document.getElementById('banner-text-settings');
+                const imageSettings = document.getElementById('banner-image-settings');
+                if (textSettings) textSettings.style.display = mode === 'text' ? '' : 'none';
+                if (imageSettings) imageSettings.style.display = mode === 'image' ? '' : 'none';
+            });
+        });
+
+        // Color mode dropdown - show/hide fixed color row
+        const colorModeSelect = document.getElementById('banner-text-color-mode');
+        if (colorModeSelect) {
+            colorModeSelect.addEventListener('change', () => {
+                const fixedRow = document.getElementById('banner-fixed-color-row');
+                if (fixedRow) fixedRow.style.display = colorModeSelect.value === 'fixed' ? '' : 'none';
+            });
+        }
+
+        // Grid width/height sliders
+        const gridW = document.getElementById('banner-grid-width');
+        const gridH = document.getElementById('banner-grid-height');
+        if (gridW) {
+            gridW.addEventListener('input', () => {
+                const label = document.getElementById('val-banner-grid-width');
+                if (label) label.textContent = gridW.value;
+            });
+        }
+        if (gridH) {
+            gridH.addEventListener('input', () => {
+                const label = document.getElementById('val-banner-grid-height');
+                if (label) label.textContent = gridH.value;
+            });
+        }
+
+        // Pulse intensity slider
+        const pulse = document.getElementById('banner-pulse-intensity');
+        if (pulse) {
+            pulse.addEventListener('input', () => {
+                const label = document.getElementById('val-banner-pulse');
+                if (label) label.textContent = pulse.value + '%';
+            });
+        }
+
+        // Upload logo button
+        const uploadBtn = document.getElementById('btn-upload-logo');
+        const fileInput = document.getElementById('banner-logo-file');
+        if (uploadBtn && fileInput) {
+            uploadBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', () => this._handleLogoUpload());
+        }
+
+        // Save profile button
+        const saveBtn = document.getElementById('btn-save-banner-profile');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => this._saveBannerProfile());
+        }
+
+        // Apply now button
+        const applyBtn = document.getElementById('btn-apply-banner-now');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', () => this._applyBannerNow());
+        }
+
+        // DJ selector - load profile when DJ changes
+        const djSelect = document.getElementById('banner-dj-select');
+        if (djSelect) {
+            djSelect.addEventListener('change', () => {
+                const djId = djSelect.value;
+                if (djId) {
+                    this.ws.send({ type: 'get_banner_profile', dj_id: djId });
+                }
+            });
+        }
+    }
+
+    _handleLogoUpload() {
+        const fileInput = document.getElementById('banner-logo-file');
+        const filenameLabel = document.getElementById('banner-logo-filename');
+        const djSelect = document.getElementById('banner-dj-select');
+        if (!fileInput || !fileInput.files[0] || !djSelect) return;
+
+        const file = fileInput.files[0];
+        if (filenameLabel) filenameLabel.textContent = file.name;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            // Draw preview
+            this._drawLogoPreview(e.target.result);
+
+            // Convert to base64 (strip data:image/...;base64, prefix)
+            const base64 = e.target.result.split(',')[1];
+            const gridW = parseInt(document.getElementById('banner-grid-width')?.value || '24');
+            const gridH = parseInt(document.getElementById('banner-grid-height')?.value || '12');
+
+            this.ws.send({
+                type: 'upload_banner_logo',
+                dj_id: djSelect.value,
+                image_base64: base64,
+                grid_width: gridW,
+                grid_height: gridH,
+                filename: file.name,
+            });
+        };
+        reader.readAsDataURL(file);
+    }
+
+    _drawLogoPreview(dataUrl) {
+        const canvas = document.getElementById('banner-preview-canvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.onload = () => {
+            const gridW = parseInt(document.getElementById('banner-grid-width')?.value || '24');
+            const gridH = parseInt(document.getElementById('banner-grid-height')?.value || '12');
+
+            canvas.width = gridW * 10;
+            canvas.height = gridH * 10;
+            ctx.imageSmoothingEnabled = false;
+
+            // Draw downsampled then scale up for pixel-art preview
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = gridW;
+            tempCanvas.height = gridH;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(img, 0, 0, gridW, gridH);
+
+            ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+        };
+        img.src = dataUrl;
+    }
+
+    _saveBannerProfile() {
+        const djSelect = document.getElementById('banner-dj-select');
+        if (!djSelect || !djSelect.value) {
+            this._showToast('Select a DJ first', 'error');
+            return;
+        }
+
+        const activeMode = document.querySelector('[data-banner-mode].active');
+        const profile = {
+            banner_mode: activeMode ? activeMode.dataset.bannerMode : 'text',
+            text_style: document.getElementById('banner-text-style')?.value || 'bold',
+            text_color_mode: document.getElementById('banner-text-color-mode')?.value || 'frequency',
+            text_fixed_color: document.getElementById('banner-text-fixed-color')?.value || 'f',
+            text_format: document.getElementById('banner-text-format')?.value || '%s',
+            grid_width: parseInt(document.getElementById('banner-grid-width')?.value || '24'),
+            grid_height: parseInt(document.getElementById('banner-grid-height')?.value || '12'),
+        };
+
+        this.ws.send({
+            type: 'set_banner_profile',
+            dj_id: djSelect.value,
+            profile: profile,
+        });
+    }
+
+    _applyBannerNow() {
+        const djSelect = document.getElementById('banner-dj-select');
+        if (!djSelect || !djSelect.value) {
+            this._showToast('Select a DJ first', 'error');
+            return;
+        }
+
+        const activeMode = document.querySelector('[data-banner-mode].active');
+        const msg = {
+            type: 'banner_config',
+            banner_mode: activeMode ? activeMode.dataset.bannerMode : 'text',
+            text_style: document.getElementById('banner-text-style')?.value || 'bold',
+            text_color_mode: document.getElementById('banner-text-color-mode')?.value || 'frequency',
+            text_fixed_color: document.getElementById('banner-text-fixed-color')?.value || 'f',
+            text_format: document.getElementById('banner-text-format')?.value || '%s',
+            grid_width: parseInt(document.getElementById('banner-grid-width')?.value || '24'),
+            grid_height: parseInt(document.getElementById('banner-grid-height')?.value || '12'),
+        };
+
+        this.ws.send(msg);
+    }
+
+    _handleBannerProfile(data) {
+        if (!data.profile) return;
+        const p = data.profile;
+
+        // Set mode
+        const modeButtons = document.querySelectorAll('[data-banner-mode]');
+        modeButtons.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.bannerMode === (p.banner_mode || 'text'));
+        });
+        const textSettings = document.getElementById('banner-text-settings');
+        const imageSettings = document.getElementById('banner-image-settings');
+        if (textSettings) textSettings.style.display = p.banner_mode === 'image' ? 'none' : '';
+        if (imageSettings) imageSettings.style.display = p.banner_mode === 'image' ? '' : 'none';
+
+        // Set text fields
+        const textStyle = document.getElementById('banner-text-style');
+        if (textStyle) textStyle.value = p.text_style || 'bold';
+
+        const colorMode = document.getElementById('banner-text-color-mode');
+        if (colorMode) {
+            colorMode.value = p.text_color_mode || 'frequency';
+            const fixedRow = document.getElementById('banner-fixed-color-row');
+            if (fixedRow) fixedRow.style.display = colorMode.value === 'fixed' ? '' : 'none';
+        }
+
+        const fixedColor = document.getElementById('banner-text-fixed-color');
+        if (fixedColor) fixedColor.value = p.text_fixed_color || 'f';
+
+        const textFormat = document.getElementById('banner-text-format');
+        if (textFormat) textFormat.value = p.text_format || '%s';
+
+        // Set grid dimensions
+        const gridW = document.getElementById('banner-grid-width');
+        if (gridW) {
+            gridW.value = p.grid_width || 24;
+            const label = document.getElementById('val-banner-grid-width');
+            if (label) label.textContent = gridW.value;
+        }
+
+        const gridH = document.getElementById('banner-grid-height');
+        if (gridH) {
+            gridH.value = p.grid_height || 12;
+            const label = document.getElementById('val-banner-grid-height');
+            if (label) label.textContent = gridH.value;
+        }
+
+        // Show logo filename if available
+        const filenameLabel = document.getElementById('banner-logo-filename');
+        if (filenameLabel) {
+            filenameLabel.textContent = p.logo_filename || (p.has_image ? 'Logo uploaded' : 'No file selected');
+        }
+    }
+
+    /**
+     * Update the DJ selector dropdown when the roster changes.
+     * Called from _handleDJRoster.
+     */
+    _updateBannerDJSelector() {
+        const select = document.getElementById('banner-dj-select');
+        if (!select) return;
+
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">-- Select DJ --</option>';
+
+        if (this.state.djRoster) {
+            this.state.djRoster.forEach(dj => {
+                const opt = document.createElement('option');
+                opt.value = dj.dj_id;
+                opt.textContent = dj.dj_name + (dj.is_active ? ' (Active)' : '');
+                select.appendChild(opt);
+            });
+        }
+
+        // Restore selection
+        if (currentVal) select.value = currentVal;
     }
 }
 

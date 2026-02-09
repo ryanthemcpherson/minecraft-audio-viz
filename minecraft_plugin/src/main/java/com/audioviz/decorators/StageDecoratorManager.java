@@ -1,6 +1,7 @@
 package com.audioviz.decorators;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.decorators.impl.DJBannerDecorator;
 import com.audioviz.decorators.impl.DJTransitionDecorator;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.stages.Stage;
@@ -26,6 +27,9 @@ public class StageDecoratorManager {
     private volatile AudioState currentAudioState;
     private volatile DJInfo currentDJInfo = DJInfo.none();
     private DJInfo previousDJInfo = DJInfo.none();
+
+    // Banner config (updated from banner_config messages)
+    private volatile BannerConfig currentBannerConfig;
 
     // Transition control
     private volatile boolean transitionInProgress = false;
@@ -204,6 +208,31 @@ public class StageDecoratorManager {
                 }
             }
         }
+    }
+
+    // ========== Banner Config ==========
+
+    /**
+     * Update banner config. Called from MessageHandler on banner_config messages.
+     * Notifies all active DJBannerDecorator instances.
+     */
+    public void updateBannerConfig(BannerConfig config) {
+        this.currentBannerConfig = config;
+
+        for (List<StageDecorator> decorators : stageDecorators.values()) {
+            for (StageDecorator decorator : decorators) {
+                if (decorator instanceof DJBannerDecorator banner && decorator.isEnabled()) {
+                    banner.onBannerConfigChanged(config);
+                }
+            }
+        }
+    }
+
+    /**
+     * Get current banner config.
+     */
+    public BannerConfig getCurrentBannerConfig() {
+        return currentBannerConfig;
     }
 
     // ========== Transition Control ==========

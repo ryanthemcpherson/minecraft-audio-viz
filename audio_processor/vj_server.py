@@ -162,6 +162,7 @@ FORWARD_TO_MINECRAFT = {
     "cleanup_zone",
     "set_entity_glow",
     "set_entity_brightness",
+    "banner_config",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -457,6 +458,14 @@ class VJServer:
         self._dj_queue: List[str] = []  # Priority queue of DJ IDs
         self._dj_lock = asyncio.Lock()  # Lock for DJ dictionary operations
 
+        # Pending DJ approval queue (connect-code DJs that need VJ approval)
+        self._pending_djs: Dict[
+            str, dict
+        ] = {}  # dj_id -> {dj_id, dj_name, websocket, waiting_since, ...}
+
+        # Track last known MC connection state for change detection
+        self._last_mc_connected: bool = False
+
         # Connect codes for DJ client authentication
         self._connect_codes: Dict[str, ConnectCode] = {}  # code -> ConnectCode
         self._code_cleanup_task: Optional[asyncio.Task] = None
@@ -505,6 +514,10 @@ class VJServer:
         self._fallback_peak = 0.0
         self._last_frame_time = time.time()
 
+        # DJ banner profiles: dj_id -> banner config dict
+        self._dj_banner_profiles: Dict[str, dict] = {}
+        self._load_banner_profiles()
+
     @property
     def active_dj(self) -> Optional[DJConnection]:
         """Get the currently active DJ."""
@@ -531,8 +544,11 @@ class VJServer:
         # Take snapshot of current DJs dict to avoid iteration issues
         djs_snapshot = dict(self._djs)
         active_dj_id = self._active_dj_id
+        queue_snapshot = list(self._dj_queue)
 
         for dj_id, dj in djs_snapshot.items():
+            # Determine queue position (0-based index in _dj_queue)
+            queue_pos = queue_snapshot.index(dj_id) if dj_id in queue_snapshot else 999
             roster.append(
                 {
                     "dj_id": dj_id,
@@ -546,10 +562,11 @@ class VJServer:
                     "last_frame_age_ms": round((time.time() - dj.last_frame_at) * 1000, 0),
                     "direct_mode": dj.direct_mode,
                     "mc_connected": dj.mc_connected if dj.direct_mode else None,
+                    "queue_position": queue_pos,
                 }
             )
-        # Sort by priority, then by connection time
-        roster.sort(key=lambda x: (x["priority"], x["connected_at"]))
+        # Sort by queue position (respects manual reordering)
+        roster.sort(key=lambda x: x["queue_position"])
         return roster
 
     def get_health_stats(self) -> dict:
@@ -632,6 +649,114 @@ class VJServer:
                 priority = 10  # Default priority for code-authenticated DJs
 
                 logger.info(f"DJ code auth successful: {dj_name} with code {code}")
+
+                # Connect-code DJs go into pending approval queue
+                direct_mode = data.get("direct_mode", False)
+                pending_info = {
+                    "dj_id": dj_id,
+                    "dj_name": dj_name,
+                    "websocket": websocket,
+                    "waiting_since": time.time(),
+                    "direct_mode": direct_mode,
+                    "priority": priority,
+                    "code": code,
+                }
+                self._pending_djs[dj_id] = pending_info
+
+                # Tell the DJ they're waiting for approval
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "type": "auth_pending",
+                            "message": "Waiting for VJ approval...",
+                            "dj_id": dj_id,
+                        }
+                    )
+                )
+
+                # Notify admin panel
+                await self._broadcast_to_browsers(
+                    json.dumps(
+                        {
+                            "type": "dj_pending",
+                            "dj": {
+                                "dj_id": dj_id,
+                                "dj_name": dj_name,
+                                "waiting_since": pending_info["waiting_since"],
+                                "direct_mode": direct_mode,
+                            },
+                        }
+                    )
+                )
+
+                logger.info(f"DJ {dj_name} ({dj_id}) placed in approval queue")
+
+                # Wait for approval or denial (the DJ stays connected)
+                try:
+                    while dj_id in self._pending_djs:
+                        # Check for messages from the pending DJ (heartbeat/disconnect)
+                        try:
+                            msg = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                            msg_data = json.loads(msg)
+                            if msg_data.get("type") == "ping":
+                                await websocket.send(json.dumps({"type": "pong"}))
+                        except asyncio.TimeoutError:
+                            # Just a timeout on recv, keep waiting
+                            pass
+                        except websockets.exceptions.ConnectionClosed:
+                            # DJ disconnected while waiting
+                            self._pending_djs.pop(dj_id, None)
+                            logger.info(
+                                f"Pending DJ {dj_name} disconnected while waiting for approval"
+                            )
+                            await self._broadcast_to_browsers(
+                                json.dumps(
+                                    {
+                                        "type": "dj_denied",
+                                        "dj_id": dj_id,
+                                    }
+                                )
+                            )
+                            return
+                except Exception as e:
+                    self._pending_djs.pop(dj_id, None)
+                    logger.warning(f"Error in pending DJ wait loop: {e}")
+                    return
+
+                # If we get here, the DJ was removed from pending (approved or denied)
+                # Check if they were approved (they'll be in self._djs by now)
+                if dj_id not in self._djs:
+                    # They were denied
+                    return
+
+                # They were approved - run the frame handling loop
+                dj = self._djs[dj_id]
+
+                # Handle incoming frames (same pattern as credentialed DJs)
+                async for message in websocket:
+                    try:
+                        frame_data = json.loads(message)
+                        frame_type = frame_data.get("type")
+
+                        if frame_type == "dj_audio_frame":
+                            await self._handle_dj_frame(dj, frame_data)
+                        elif frame_type == "dj_heartbeat":
+                            dj.last_heartbeat = time.time()
+                            if dj.direct_mode:
+                                dj.mc_connected = frame_data.get("mc_connected", False)
+                            await websocket.send(
+                                json.dumps({"type": "heartbeat_ack", "server_time": time.time()})
+                            )
+                        elif frame_type == "going_offline":
+                            logger.info(
+                                f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully"
+                            )
+                            break
+                    except json.JSONDecodeError:
+                        logger.debug(f"Invalid JSON from DJ {dj_name}")
+                    except Exception as e:
+                        logger.error(f"Error processing DJ frame: {e}")
+                return
 
             elif msg_type == "dj_auth":
                 # Traditional credential-based authentication
@@ -810,7 +935,11 @@ class VJServer:
         except Exception as e:
             logger.error(f"DJ connection error: {e}")
         finally:
-            # Clean up (with lock)
+            # Clean up pending DJs
+            if dj_id and dj_id in self._pending_djs:
+                self._pending_djs.pop(dj_id, None)
+
+            # Clean up active DJs (with lock)
             if dj_id:
                 async with self._dj_lock:
                     if dj_id in self._djs:
@@ -927,6 +1056,128 @@ class VJServer:
         except Exception as e:
             logger.debug(f"Failed to send dj_info to Minecraft: {e}")
 
+        # Also send banner config for the active DJ
+        await self._send_banner_config_to_minecraft(dj_id)
+
+    async def _send_banner_config_to_minecraft(self, dj_id: Optional[str]):
+        """Send banner config for the active DJ to Minecraft."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+
+        profile = self._dj_banner_profiles.get(dj_id, {}) if dj_id else {}
+
+        msg = {
+            "type": "banner_config",
+            "banner_mode": profile.get("banner_mode", "text"),
+            "text_style": profile.get("text_style", "bold"),
+            "text_color_mode": profile.get("text_color_mode", "frequency"),
+            "text_fixed_color": profile.get("text_fixed_color", "f"),
+            "text_format": profile.get("text_format", "%s"),
+            "grid_width": profile.get("grid_width", 24),
+            "grid_height": profile.get("grid_height", 12),
+            "image_pixels": profile.get("image_pixels", []),
+        }
+
+        try:
+            await self.viz_client.send(msg)
+            logger.debug(f"Sent banner_config to Minecraft for DJ: {dj_id}")
+        except Exception as e:
+            logger.debug(f"Failed to send banner_config: {e}")
+
+    # ========== Banner Profile Management ==========
+
+    def _load_banner_profiles(self):
+        """Load banner profiles from disk."""
+        path = Path("configs/dj_banner_profiles.json")
+        if not path.exists():
+            return
+
+        try:
+            with open(path, "r") as f:
+                profiles = json.load(f)
+
+            for dj_id, profile in profiles.items():
+                if profile.get("has_image"):
+                    pixel_path = Path(f"configs/banners/{dj_id}_pixels.bin")
+                    if pixel_path.exists():
+                        import struct
+
+                        with open(pixel_path, "rb") as f:
+                            data = f.read()
+                        pixels = [
+                            struct.unpack(">i", data[i : i + 4])[0] for i in range(0, len(data), 4)
+                        ]
+                        profile["image_pixels"] = pixels
+                self._dj_banner_profiles[dj_id] = profile
+
+            logger.info(f"Loaded {len(self._dj_banner_profiles)} banner profiles")
+        except Exception as e:
+            logger.warning(f"Failed to load banner profiles: {e}")
+
+    def _save_banner_profiles(self):
+        """Save banner profiles to disk."""
+        path = Path("configs/dj_banner_profiles.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        profiles_for_save = {}
+        for dj_id, profile in self._dj_banner_profiles.items():
+            save_profile = {k: v for k, v in profile.items() if k != "image_pixels"}
+            if profile.get("image_pixels"):
+                # Save pixel data as a separate binary file
+                pixel_dir = Path("configs/banners")
+                pixel_dir.mkdir(parents=True, exist_ok=True)
+                pixel_path = pixel_dir / f"{dj_id}_pixels.bin"
+                import struct
+
+                try:
+                    with open(pixel_path, "wb") as f:
+                        for p in profile["image_pixels"]:
+                            f.write(struct.pack(">i", p))
+                    save_profile["has_image"] = True
+                except Exception as e:
+                    logger.warning(f"Failed to save pixel data for {dj_id}: {e}")
+            profiles_for_save[dj_id] = save_profile
+
+        try:
+            with open(path, "w") as f:
+                json.dump(profiles_for_save, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save banner profiles: {e}")
+
+    def _process_logo_image(
+        self, image_base64: str, grid_width: int, grid_height: int
+    ) -> Optional[List[int]]:
+        """Downsample a PNG image to a pixel grid for TextDisplay rendering.
+
+        Returns list of ARGB int values.
+        """
+        try:
+            import base64
+            import io
+
+            from PIL import Image
+
+            image_data = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(image_data))
+            img = img.convert("RGBA")
+            img = img.resize((grid_width, grid_height), Image.Resampling.LANCZOS)
+
+            pixels = []
+            for y in range(grid_height):
+                for x in range(grid_width):
+                    r, g, b, a = img.getpixel((x, y))
+                    # Pack as ARGB int (Java Color.fromARGB format)
+                    argb = (a << 24) | (r << 16) | (g << 8) | b
+                    pixels.append(argb)
+
+            return pixels
+        except ImportError:
+            logger.error("Pillow (PIL) required for logo processing: pip install Pillow")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to process logo image: {e}")
+            return None
+
     async def _auto_switch_dj(self):
         """Automatically switch to next available DJ."""
         async with self._dj_lock:
@@ -956,7 +1207,17 @@ class VJServer:
         self._browser_connects += 1
         logger.info(f"Browser client connected. Total: {len(self._broadcast_clients)}")
 
-        # Send initial state
+        # Send initial state (includes MC status and pending DJs)
+        mc_connected = self.viz_client is not None and self.viz_client.connected
+        pending_list = [
+            {
+                "dj_id": info["dj_id"],
+                "dj_name": info["dj_name"],
+                "waiting_since": info["waiting_since"],
+                "direct_mode": info.get("direct_mode", False),
+            }
+            for info in self._pending_djs.values()
+        ]
         await websocket.send(
             json.dumps(
                 {
@@ -968,6 +1229,12 @@ class VJServer:
                     "dj_roster": self._get_dj_roster(),
                     "active_dj": self._active_dj_id,
                     "health_stats": self.get_health_stats(),
+                    "minecraft_connected": mc_connected,
+                    "pending_djs": pending_list,
+                    "banner_profiles": {
+                        did: {k: v for k, v in prof.items() if k != "image_pixels"}
+                        for did, prof in self._dj_banner_profiles.items()
+                    },
                 }
             )
         )
@@ -986,15 +1253,33 @@ class VJServer:
                         self._browser_last_pong[websocket] = time.time()
 
                     elif msg_type == "get_state":
+                        mc_status = self.viz_client is not None and self.viz_client.connected
+                        pending = [
+                            {
+                                "dj_id": info["dj_id"],
+                                "dj_name": info["dj_name"],
+                                "waiting_since": info["waiting_since"],
+                                "direct_mode": info.get("direct_mode", False),
+                            }
+                            for info in self._pending_djs.values()
+                        ]
                         await websocket.send(
                             json.dumps(
                                 {
                                     "type": "vj_state",
                                     "patterns": list_patterns(),
                                     "current_pattern": self._pattern_name,
+                                    "entity_count": self.entity_count,
+                                    "zone": self.zone,
                                     "dj_roster": self._get_dj_roster(),
                                     "active_dj": self._active_dj_id,
                                     "health_stats": self.get_health_stats(),
+                                    "minecraft_connected": mc_status,
+                                    "pending_djs": pending,
+                                    "banner_profiles": {
+                                        did: {k: v for k, v in prof.items() if k != "image_pixels"}
+                                        for did, prof in self._dj_banner_profiles.items()
+                                    },
                                 }
                             )
                         )
@@ -1082,6 +1367,37 @@ class VJServer:
                             )
                         )
 
+                    elif msg_type == "get_pending_djs":
+                        pending_list = [
+                            {
+                                "dj_id": info["dj_id"],
+                                "dj_name": info["dj_name"],
+                                "waiting_since": info["waiting_since"],
+                                "direct_mode": info.get("direct_mode", False),
+                            }
+                            for info in self._pending_djs.values()
+                        ]
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "pending_djs",
+                                    "pending": pending_list,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "approve_dj":
+                        await self._approve_pending_dj(data.get("dj_id"))
+
+                    elif msg_type == "deny_dj":
+                        await self._deny_pending_dj(data.get("dj_id"))
+
+                    elif msg_type == "reorder_dj_queue":
+                        dj_id = data.get("dj_id")
+                        new_pos = data.get("new_position")
+                        if dj_id and new_pos is not None:
+                            await self._reorder_dj_queue(dj_id, int(new_pos))
+
                     elif msg_type in ("set_entity_count", "set_block_count"):
                         new_count = data.get("count", 16)
                         if 1 <= new_count <= 256:
@@ -1137,7 +1453,7 @@ class VJServer:
                                 self._pattern_config.beat_threshold = config.beat_threshold
                                 self._band_sensitivity = list(config.band_sensitivity)
                                 # Broadcast settings to DJs
-                                await self._broadcast_preset_to_djs(config.to_dict())
+                                await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
                                 logger.info(f"Preset applied: {preset_name}")
                             else:
                                 logger.warning(f"Unknown preset: {preset_name}")
@@ -1293,6 +1609,91 @@ class VJServer:
                             self._active_effects.pop("freeze", None)
                         logger.info(f"Freeze: {self._freeze}")
 
+                    # ========== Banner Profile Management ==========
+
+                    elif msg_type == "set_banner_profile":
+                        dj_id = data.get("dj_id")
+                        profile = data.get("profile", {})
+                        if dj_id:
+                            self._dj_banner_profiles[dj_id] = profile
+                            self._save_banner_profiles()
+                            # If this DJ is currently active, push to Minecraft
+                            if dj_id == self._active_dj_id:
+                                await self._send_banner_config_to_minecraft(dj_id)
+                            await websocket.send(
+                                json.dumps({"type": "banner_profile_saved", "dj_id": dj_id})
+                            )
+                            logger.info(f"Banner profile saved for DJ: {dj_id}")
+
+                    elif msg_type == "get_banner_profile":
+                        dj_id = data.get("dj_id")
+                        profile = self._dj_banner_profiles.get(dj_id, {})
+                        # Strip image_pixels for transport (send separately if needed)
+                        safe_profile = {k: v for k, v in profile.items() if k != "image_pixels"}
+                        safe_profile["has_image"] = bool(profile.get("image_pixels"))
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "banner_profile",
+                                    "dj_id": dj_id,
+                                    "profile": safe_profile,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "get_all_banner_profiles":
+                        profiles_summary = {}
+                        for did, prof in self._dj_banner_profiles.items():
+                            summary = {k: v for k, v in prof.items() if k != "image_pixels"}
+                            summary["has_image"] = bool(prof.get("image_pixels"))
+                            profiles_summary[did] = summary
+                        await websocket.send(
+                            json.dumps(
+                                {"type": "all_banner_profiles", "profiles": profiles_summary}
+                            )
+                        )
+
+                    elif msg_type == "upload_banner_logo":
+                        dj_id = data.get("dj_id")
+                        image_data = data.get("image_base64")
+                        grid_width = min(48, max(4, data.get("grid_width", 24)))
+                        grid_height = min(24, max(2, data.get("grid_height", 12)))
+                        if dj_id and image_data:
+                            pixels = self._process_logo_image(image_data, grid_width, grid_height)
+                            if pixels is not None:
+                                profile = self._dj_banner_profiles.setdefault(dj_id, {})
+                                profile["banner_mode"] = "image"
+                                profile["image_pixels"] = pixels
+                                profile["grid_width"] = grid_width
+                                profile["grid_height"] = grid_height
+                                profile["logo_filename"] = data.get("filename", "logo.png")
+                                self._save_banner_profiles()
+                                if dj_id == self._active_dj_id:
+                                    await self._send_banner_config_to_minecraft(dj_id)
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "banner_logo_processed",
+                                            "dj_id": dj_id,
+                                            "grid_width": grid_width,
+                                            "grid_height": grid_height,
+                                            "pixel_count": len(pixels),
+                                        }
+                                    )
+                                )
+                                logger.info(
+                                    f"Logo processed for DJ {dj_id}: {grid_width}x{grid_height}"
+                                )
+                            else:
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "message": "Failed to process logo image. Is Pillow installed?",
+                                        }
+                                    )
+                                )
+
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
                         if self.viz_client and self.viz_client.connected:
@@ -1345,6 +1746,143 @@ class VJServer:
             except Exception:
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
+
+    async def _broadcast_to_browsers(self, message: str):
+        """Broadcast a pre-serialized JSON message to all browser clients."""
+        dead_clients = set()
+        for client in list(self._broadcast_clients):
+            try:
+                await client.send(message)
+            except Exception:
+                dead_clients.add(client)
+        self._broadcast_clients -= dead_clients
+
+    async def _broadcast_minecraft_status(self):
+        """Broadcast Minecraft connection status to all browser clients."""
+        mc_connected = self.viz_client is not None and self.viz_client.connected
+        if mc_connected != self._last_mc_connected:
+            self._last_mc_connected = mc_connected
+            await self._broadcast_to_browsers(
+                json.dumps(
+                    {
+                        "type": "minecraft_status",
+                        "connected": mc_connected,
+                    }
+                )
+            )
+            logger.info(f"[MC STATUS] Broadcasting minecraft_connected={mc_connected}")
+
+    async def _approve_pending_dj(self, dj_id: str):
+        """Approve a pending DJ and move them to the active DJ list."""
+        if not dj_id or dj_id not in self._pending_djs:
+            logger.warning(f"Cannot approve DJ {dj_id}: not in pending queue")
+            return
+
+        info = self._pending_djs.pop(dj_id)
+        ws = info["websocket"]
+
+        # Create the DJ connection object
+        async with self._dj_lock:
+            if dj_id in self._djs:
+                logger.warning(f"DJ {dj_id} already in active list")
+                return
+
+            dj = DJConnection(
+                dj_id=dj_id,
+                dj_name=info["dj_name"],
+                websocket=ws,
+                priority=info.get("priority", 10),
+                direct_mode=info.get("direct_mode", False),
+            )
+            self._djs[dj_id] = dj
+            self._dj_queue.append(dj_id)
+
+        self._dj_connects += 1
+        logger.info(f"[DJ APPROVED] {info['dj_name']} ({dj_id})")
+
+        # Send auth_approved to the DJ
+        try:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "auth_approved",
+                        "dj_id": dj_id,
+                        "dj_name": info["dj_name"],
+                        "is_active": self._active_dj_id == dj_id,
+                        "current_pattern": self._pattern_name,
+                        "pattern_config": {
+                            "entity_count": self.entity_count,
+                            "zone_size": self._pattern_config.zone_size,
+                            "beat_boost": self._pattern_config.beat_boost,
+                            "base_scale": self._pattern_config.base_scale,
+                            "max_scale": self._pattern_config.max_scale,
+                        },
+                    }
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send auth_approved to DJ {dj_id}: {e}")
+
+        # If no active DJ, make this one active
+        if self._active_dj_id is None:
+            await self._set_active_dj(dj_id)
+
+        # Broadcast roster update
+        await self._broadcast_dj_roster()
+        await self._broadcast_to_browsers(
+            json.dumps(
+                {
+                    "type": "dj_approved",
+                    "dj_id": dj_id,
+                }
+            )
+        )
+
+    async def _deny_pending_dj(self, dj_id: str):
+        """Deny a pending DJ and close their connection."""
+        if not dj_id or dj_id not in self._pending_djs:
+            logger.warning(f"Cannot deny DJ {dj_id}: not in pending queue")
+            return
+
+        info = self._pending_djs.pop(dj_id)
+        ws = info["websocket"]
+
+        logger.info(f"[DJ DENIED] {info['dj_name']} ({dj_id})")
+
+        # Send denial and close
+        try:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "auth_denied",
+                        "message": "Connection denied by VJ",
+                    }
+                )
+            )
+            await ws.close(4006, "Connection denied by VJ")
+        except Exception:
+            pass
+
+        await self._broadcast_to_browsers(
+            json.dumps(
+                {
+                    "type": "dj_denied",
+                    "dj_id": dj_id,
+                }
+            )
+        )
+
+    async def _reorder_dj_queue(self, dj_id: str, new_position: int):
+        """Move a DJ to a new position in the queue."""
+        async with self._dj_lock:
+            if dj_id not in self._dj_queue:
+                return
+            self._dj_queue.remove(dj_id)
+            new_position = max(0, min(len(self._dj_queue), new_position))
+            self._dj_queue.insert(new_position, dj_id)
+            logger.info(f"DJ queue reordered: {dj_id} -> position {new_position}")
+
+        await self._broadcast_dj_roster()
 
     def _cleanup_expired_codes(self):
         """Remove expired or used connect codes."""
@@ -1447,7 +1985,7 @@ class VJServer:
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
-    async def _broadcast_preset_to_djs(self, preset: dict):
+    async def _broadcast_preset_to_djs(self, preset: dict, preset_name: str = None):
         """Broadcast preset changes (attack/release/threshold) to all DJs."""
         message = json.dumps({"type": "preset_sync", "preset": preset})
 
@@ -1458,7 +1996,9 @@ class VJServer:
                 logger.debug(f"Failed to send preset sync to DJ {dj.dj_id}: {e}")
 
         # Also broadcast to browser clients
-        browser_msg = json.dumps({"type": "preset_changed", "preset": preset})
+        browser_msg = json.dumps(
+            {"type": "preset_changed", "preset": preset_name or "custom", "settings": preset}
+        )
         dead_clients = set()
         for client in list(self._broadcast_clients):
             try:
@@ -1625,6 +2165,8 @@ class VJServer:
 
                 # Check if we need to reconnect
                 if self.viz_client is None or not self.viz_client.connected:
+                    # Broadcast disconnection status to browsers
+                    await self._broadcast_minecraft_status()
                     logger.info(
                         f"[MC RECONNECT] Minecraft disconnected, attempting reconnection (backoff={self._mc_reconnect_backoff:.1f}s)"
                     )
@@ -1640,6 +2182,8 @@ class VJServer:
                             self._mc_reconnect_count += 1
                             # Reset backoff on success
                             self._mc_reconnect_backoff = 5.0
+                            # Broadcast MC status change to browsers
+                            await self._broadcast_minecraft_status()
                         else:
                             logger.warning(
                                 f"[MC RECONNECT] Reconnection failed, will retry in {self._mc_reconnect_backoff:.1f}s"

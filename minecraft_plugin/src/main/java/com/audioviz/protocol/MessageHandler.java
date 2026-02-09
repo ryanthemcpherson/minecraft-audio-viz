@@ -1,6 +1,7 @@
 package com.audioviz.protocol;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.decorators.BannerConfig;
 import com.audioviz.decorators.DJInfo;
 import com.audioviz.effects.BeatEffectConfig;
 import com.audioviz.effects.BeatEventManager;
@@ -78,6 +79,8 @@ public class MessageHandler {
             case "get_stage_templates" -> handleGetStageTemplates();
             // DJ info
             case "dj_info" -> handleDjInfo(message);
+            // Banner config
+            case "banner_config" -> handleBannerConfig(message);
             default -> createError("Unknown message type: " + type);
         };
     }
@@ -931,6 +934,22 @@ public class MessageHandler {
         JsonObject response = new JsonObject();
         response.addProperty("type", "dj_info_received");
         response.addProperty("dj_name", djName);
+        return response;
+    }
+
+    // ========== Banner Config Handler ==========
+
+    private JsonObject handleBannerConfig(JsonObject message) {
+        BannerConfig bannerConfig = BannerConfig.fromJson(message);
+
+        if (plugin.getDecoratorManager() != null) {
+            plugin.getDecoratorManager().updateBannerConfig(bannerConfig);
+        }
+
+        plugin.getLogger().info("Banner config received: " + bannerConfig);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "banner_config_received");
         return response;
     }
 

@@ -2,6 +2,7 @@ package com.audioviz.decorators;
 
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.decorators.impl.*;
+import com.audioviz.decorators.impl.DJBannerDecorator;
 import com.audioviz.stages.Stage;
 import org.bukkit.Material;
 
@@ -34,7 +35,11 @@ public enum DecoratorType {
 
     TRANSITION("transition", "DJ Transitions", Material.NETHER_STAR,
         "Dramatic effects when the DJ switches",
-        DJTransitionDecorator::new);
+        DJTransitionDecorator::new),
+
+    BANNER("banner", "DJ Banner", Material.PAINTING,
+        "Background LED wall with DJ name or logo",
+        DJBannerDecorator::new);
 
     private final String id;
     private final String displayName;
