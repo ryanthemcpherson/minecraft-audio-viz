@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
+from app.models.db import Base
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.models.db import Base
-
 # Alembic Config object
 config = context.config
+
+# Override URL from environment variable (Railway, production, etc.)
+_db_url = os.environ.get("MCAV_DATABASE_URL")
+if _db_url:
+    # Railway provides postgresql:// but asyncpg needs postgresql+asyncpg://
+    if _db_url.startswith("postgresql://"):
+        _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
