@@ -15,6 +15,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import (
     auth,
     connect,
+    dashboard,
     dj_profiles,
     health,
     onboarding,
@@ -69,6 +70,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(onboarding.router, prefix="/api/v1")
     application.include_router(dj_profiles.router, prefix="/api/v1")
     application.include_router(tenants.router, prefix="/api/v1")
+    application.include_router(dashboard.router, prefix="/api/v1")
 
     # -- Exception handlers ----------------------------------------------------
     @application.exception_handler(RateLimitExceeded)

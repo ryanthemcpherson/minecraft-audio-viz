@@ -337,3 +337,62 @@ class UpdateDJProfileRequest(BaseModel):
     dj_name: str | None = Field(None, min_length=1, max_length=100)
     bio: str | None = Field(None, max_length=500)
     genres: str | None = Field(None, max_length=500)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard schemas
+# ---------------------------------------------------------------------------
+
+
+class ServerOwnerChecklist(BaseModel):
+    org_created: bool
+    server_registered: bool
+    invite_created: bool
+    show_started: bool
+
+
+class OrgDashboardSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    role: str
+    server_count: int
+    member_count: int
+    active_show_count: int
+
+
+class RecentShowSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    server_name: str
+    connect_code: str | None
+    status: str
+    current_djs: int
+    created_at: datetime
+
+
+class ServerOwnerDashboard(BaseModel):
+    user_type: str = "server_owner"
+    checklist: ServerOwnerChecklist
+    organizations: list[OrgDashboardSummary]
+    recent_shows: list[RecentShowSummary]
+
+
+class TeamMemberDashboard(BaseModel):
+    user_type: str = "team_member"
+    organizations: list[OrgDashboardSummary]
+    active_shows: list[RecentShowSummary]
+
+
+class DJDashboardData(BaseModel):
+    user_type: str = "dj"
+    dj_name: str
+    bio: str | None
+    genres: str | None
+    session_count: int
+    recent_sessions: list[RecentShowSummary]
+
+
+class GenericDashboard(BaseModel):
+    user_type: str = "generic"
+    organizations: list[OrgDashboardSummary]

@@ -54,6 +54,70 @@ export interface AuthResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Dashboard types
+// ---------------------------------------------------------------------------
+
+export interface ServerOwnerChecklist {
+  org_created: boolean;
+  server_registered: boolean;
+  invite_created: boolean;
+  show_started: boolean;
+}
+
+export interface OrgDashboardSummary {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+  server_count: number;
+  member_count: number;
+  active_show_count: number;
+}
+
+export interface RecentShowSummary {
+  id: string;
+  name: string;
+  server_name: string;
+  connect_code: string | null;
+  status: string;
+  current_djs: number;
+  created_at: string;
+}
+
+export interface ServerOwnerDashboard {
+  user_type: "server_owner";
+  checklist: ServerOwnerChecklist;
+  organizations: OrgDashboardSummary[];
+  recent_shows: RecentShowSummary[];
+}
+
+export interface TeamMemberDashboard {
+  user_type: "team_member";
+  organizations: OrgDashboardSummary[];
+  active_shows: RecentShowSummary[];
+}
+
+export interface DJDashboardData {
+  user_type: "dj";
+  dj_name: string;
+  bio: string | null;
+  genres: string | null;
+  session_count: number;
+  recent_sessions: RecentShowSummary[];
+}
+
+export interface GenericDashboard {
+  user_type: "generic";
+  organizations: OrgDashboardSummary[];
+}
+
+export type DashboardSummary =
+  | ServerOwnerDashboard
+  | TeamMemberDashboard
+  | DJDashboardData
+  | GenericDashboard;
+
+// ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
 
@@ -212,6 +276,21 @@ export async function createDJProfile(
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(data),
+  });
+}
+
+export async function fetchDashboardSummary(
+  accessToken: string
+): Promise<DashboardSummary> {
+  return api<DashboardSummary>("/api/v1/dashboard/summary", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function resetOnboarding(accessToken: string): Promise<User> {
+  return api<User>("/api/v1/onboarding/reset", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
 }
 
