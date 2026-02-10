@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload pip-audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pip-audit-report
           path: pip-audit-report.json
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload OWASP report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: owasp-report
           path: minecraft_plugin/target/dependency-check-report.*
@@ -139,7 +139,7 @@ jobs:
 
       - name: Upload npm audit reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: npm-audit-reports
           path: |
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload cargo-audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cargo-audit-report
           path: dj_client/src-tauri/cargo-audit-report.json
