@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload Bandit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bandit-report-${{ github.sha }}
           path: bandit-report.json
@@ -148,7 +148,7 @@ jobs:
         run: mvn spotbugs:check
 
       - name: Upload plugin JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: audioviz-plugin-${{ github.sha }}
           path: minecraft_plugin/target/audioviz-plugin-*.jar
@@ -253,7 +253,7 @@ jobs:
 
       - name: Upload OWASP report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: owasp-report-${{ github.sha }}
           path: minecraft_plugin/target/dependency-check-report.*
@@ -341,7 +341,7 @@ jobs:
 
       - name: Upload license reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: license-reports-${{ github.sha }}
           path: |
@@ -405,7 +405,7 @@ jobs:
             -DoutputName=sbom-java
 
       - name: Upload SBOMs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sbom-${{ github.sha }}
           path: |
@@ -437,7 +437,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: checksums-${{ github.sha }}
           path: artifacts/SHA256SUMS.txt

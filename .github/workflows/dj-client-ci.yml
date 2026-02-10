@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload artifacts (Linux)
         if: matrix.platform == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-linux-x64
           path: |
@@ -134,7 +134,7 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-windows-x64
           path: |
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload artifacts (macOS x64)
         if: matrix.platform == 'macos-latest' && matrix.rust_target == 'x86_64-apple-darwin'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-macos-x64
           path: |
@@ -153,7 +153,7 @@ jobs:
 
       - name: Upload artifacts (macOS ARM64)
         if: matrix.platform == 'macos-latest' && matrix.rust_target == 'aarch64-apple-darwin'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-macos-arm64
           path: |

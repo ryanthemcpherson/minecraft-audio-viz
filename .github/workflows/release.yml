@@ -29,7 +29,7 @@ jobs:
         run: python -m build
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: python-dist
           path: dist/
@@ -52,7 +52,7 @@ jobs:
         run: mvn clean package -DskipTests
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: minecraft-plugin
           path: minecraft_plugin/target/audioviz-plugin-*.jar
@@ -139,7 +139,7 @@ jobs:
           cp dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg release-artifacts/ || true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: release-artifacts/

@@ -43,7 +43,7 @@ jobs:
         run: mvn clean package -DskipTests
 
       - name: Upload plugin JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: audioviz-plugin
           path: minecraft_plugin/target/audioviz-plugin-*.jar
