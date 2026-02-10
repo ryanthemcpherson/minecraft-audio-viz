@@ -88,7 +88,7 @@ jobs:
           clean: true
 
       - name: Download plugin JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: audioviz-plugin
           path: ./plugin-jar/

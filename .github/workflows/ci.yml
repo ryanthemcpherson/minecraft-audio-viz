@@ -422,7 +422,7 @@ jobs:
     needs: [java-build]
     steps:
       - name: Download plugin JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: audioviz-plugin-${{ github.sha }}
           path: ./artifacts/
