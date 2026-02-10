@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets as _secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -23,10 +24,13 @@ from app.models.schemas import (
     JoinOrgRequest,
     JoinOrgResponse,
     OrgDetailResponse,
-    OrgServerResponse,
+    OrgServerDetailResponse,
+    RegisterOrgServerRequest,
+    RegisterOrgServerResponse,
     UpdateOrgRequest,
 )
 from app.services.code_generator import SAFE_CHARS
+from app.services.password import hash_password
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
 
@@ -129,6 +133,53 @@ async def create_org(
         id=org.id,
         name=org.name,
         slug=org.slug,
+        owner_id=org.owner_id,
+        created_at=org.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /orgs/by-slug/{slug}
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/by-slug/{slug}",
+    response_model=OrgDetailResponse,
+    summary="Resolve organization by slug",
+)
+async def get_org_by_slug(
+    slug: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> OrgDetailResponse:
+    org = (
+        await session.execute(
+            select(Organization).where(
+                Organization.slug == slug.lower().strip(),
+                Organization.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    membership = (
+        await session.execute(
+            select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.org_id == org.id)
+        )
+    ).scalar_one_or_none()
+
+    if membership is None:
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+
+    return OrgDetailResponse(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        description=org.description,
+        avatar_url=org.avatar_url,
         owner_id=org.owner_id,
         created_at=org.created_at,
     )
@@ -261,17 +312,19 @@ async def assign_server(
 # GET /orgs/{org_id}/servers
 # ---------------------------------------------------------------------------
 
+HEARTBEAT_ONLINE_THRESHOLD = timedelta(minutes=5)
+
 
 @router.get(
     "/{org_id}/servers",
-    response_model=list[OrgServerResponse],
+    response_model=list[OrgServerDetailResponse],
     summary="List servers belonging to this organization",
 )
 async def list_org_servers(
     org_id: uuid.UUID,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> list[OrgServerResponse]:
+) -> list[OrgServerDetailResponse]:
     # Check membership
     membership = (
         await session.execute(
@@ -286,15 +339,98 @@ async def list_org_servers(
         (await session.execute(select(VJServer).where(VJServer.org_id == org_id))).scalars().all()
     )
 
-    return [
-        OrgServerResponse(
-            id=s.id,
-            name=s.name,
-            websocket_url=s.websocket_url,
-            is_active=s.is_active,
+    now = datetime.now(timezone.utc)
+    results: list[OrgServerDetailResponse] = []
+    for s in servers:
+        is_online = (
+            s.last_heartbeat is not None and (now - s.last_heartbeat) < HEARTBEAT_ONLINE_THRESHOLD
         )
-        for s in servers
-    ]
+        active_show_count = sum(1 for show in s.shows if show.status == "active")
+        results.append(
+            OrgServerDetailResponse(
+                id=s.id,
+                name=s.name,
+                websocket_url=s.websocket_url,
+                is_active=s.is_active,
+                is_online=is_online,
+                last_heartbeat=s.last_heartbeat,
+                active_show_count=active_show_count,
+                created_at=s.created_at,
+            )
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# POST /orgs/{org_id}/servers/register
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{org_id}/servers/register",
+    response_model=RegisterOrgServerResponse,
+    status_code=201,
+    summary="Register a new server for this organization",
+)
+async def register_org_server(
+    org_id: uuid.UUID,
+    body: RegisterOrgServerRequest,
+    user: User = Depends(require_org_owner),
+    session: AsyncSession = Depends(get_session),
+) -> RegisterOrgServerResponse:
+    api_key = f"mcav_{_secrets.token_urlsafe(32)}"
+    api_key_hash = hash_password(api_key)
+    jwt_secret = f"jws_{_secrets.token_urlsafe(32)}"
+
+    server = VJServer(
+        id=uuid.uuid4(),
+        name=body.name,
+        websocket_url=body.websocket_url,
+        api_key_hash=api_key_hash,
+        jwt_secret=jwt_secret,
+        org_id=org_id,
+    )
+    session.add(server)
+    await session.commit()
+    await session.refresh(server)
+
+    return RegisterOrgServerResponse(
+        server_id=server.id,
+        name=server.name,
+        websocket_url=server.websocket_url,
+        api_key=api_key,
+        jwt_secret=jwt_secret,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DELETE /orgs/{org_id}/servers/{server_id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/{org_id}/servers/{server_id}",
+    status_code=204,
+    summary="Remove a server from this organization",
+)
+async def remove_org_server(
+    org_id: uuid.UUID,
+    server_id: uuid.UUID,
+    user: User = Depends(require_org_owner),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    server = (
+        await session.execute(
+            select(VJServer).where(VJServer.id == server_id, VJServer.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+
+    if server is None:
+        raise HTTPException(status_code=404, detail="Server not found in this organization")
+
+    server.org_id = None
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -151,3 +151,145 @@ class TestAssignServer:
         )
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+
+# ---------------------------------------------------------------------------
+# Org server management (register, list details, remove)
+# ---------------------------------------------------------------------------
+
+
+class TestOrgServerManagement:
+    async def test_register_server_for_org(self, client: AsyncClient) -> None:
+        auth = await _register_and_auth(client)
+        org = await _create_org(client, auth["access_token"])
+
+        resp = await client.post(
+            f"/api/v1/orgs/{org['id']}/servers/register",
+            json={"name": "My VJ Server", "websocket_url": "wss://mc.example.com/ws"},
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == "My VJ Server"
+        assert data["websocket_url"] == "wss://mc.example.com/ws"
+        assert data["api_key"].startswith("mcav_")
+        assert data["jwt_secret"].startswith("jws_")
+        assert "server_id" in data
+
+        # Verify it appears in the list
+        list_resp = await client.get(
+            f"/api/v1/orgs/{org['id']}/servers",
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert list_resp.status_code == 200
+        servers = list_resp.json()
+        assert len(servers) == 1
+        assert servers[0]["name"] == "My VJ Server"
+
+    async def test_register_server_non_owner_forbidden(self, client: AsyncClient) -> None:
+        auth1 = await _register_and_auth(client, email="owner2@example.com")
+        org = await _create_org(client, auth1["access_token"], slug="owner-org")
+
+        auth2 = await _register_and_auth(client, email="nonowner@example.com")
+        resp = await client.post(
+            f"/api/v1/orgs/{org['id']}/servers/register",
+            json={"name": "Rogue Server", "websocket_url": "wss://rogue.com/ws"},
+            headers={"Authorization": f"Bearer {auth2['access_token']}"},
+        )
+        assert resp.status_code == 403
+
+    async def test_list_servers_with_details(self, client: AsyncClient) -> None:
+        auth = await _register_and_auth(client, email="detail@example.com")
+        org = await _create_org(client, auth["access_token"], slug="detail-org")
+
+        # Register a server
+        await client.post(
+            f"/api/v1/orgs/{org['id']}/servers/register",
+            json={"name": "Detail Server", "websocket_url": "wss://detail.com/ws"},
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+
+        resp = await client.get(
+            f"/api/v1/orgs/{org['id']}/servers",
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert resp.status_code == 200
+        servers = resp.json()
+        assert len(servers) == 1
+        s = servers[0]
+        assert "is_online" in s
+        assert s["is_online"] is False  # no heartbeat yet
+        assert "last_heartbeat" in s
+        assert "active_show_count" in s
+        assert s["active_show_count"] == 0
+        assert "created_at" in s
+
+    async def test_remove_server_from_org(self, client: AsyncClient) -> None:
+        auth = await _register_and_auth(client, email="remove@example.com")
+        org = await _create_org(client, auth["access_token"], slug="remove-org")
+
+        reg = await client.post(
+            f"/api/v1/orgs/{org['id']}/servers/register",
+            json={"name": "Temp Server", "websocket_url": "wss://temp.com/ws"},
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        server_id = reg.json()["server_id"]
+
+        # Remove it
+        del_resp = await client.delete(
+            f"/api/v1/orgs/{org['id']}/servers/{server_id}",
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert del_resp.status_code == 204
+
+        # Verify it's gone from the list
+        list_resp = await client.get(
+            f"/api/v1/orgs/{org['id']}/servers",
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert list_resp.status_code == 200
+        assert len(list_resp.json()) == 0
+
+    async def test_remove_server_non_owner_forbidden(self, client: AsyncClient) -> None:
+        auth1 = await _register_and_auth(client, email="rmowner@example.com")
+        org = await _create_org(client, auth1["access_token"], slug="rmowner-org")
+
+        reg = await client.post(
+            f"/api/v1/orgs/{org['id']}/servers/register",
+            json={"name": "Protected", "websocket_url": "wss://protected.com/ws"},
+            headers={"Authorization": f"Bearer {auth1['access_token']}"},
+        )
+        server_id = reg.json()["server_id"]
+
+        auth2 = await _register_and_auth(client, email="rmhacker@example.com")
+        resp = await client.delete(
+            f"/api/v1/orgs/{org['id']}/servers/{server_id}",
+            headers={"Authorization": f"Bearer {auth2['access_token']}"},
+        )
+        assert resp.status_code == 403
+
+    async def test_remove_server_not_in_org_404(self, client: AsyncClient) -> None:
+        auth = await _register_and_auth(client, email="rm404@example.com")
+        org = await _create_org(client, auth["access_token"], slug="rm404-org")
+
+        import uuid
+
+        fake_id = str(uuid.uuid4())
+        resp = await client.delete(
+            f"/api/v1/orgs/{org['id']}/servers/{fake_id}",
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert resp.status_code == 404
+
+    async def test_get_org_by_slug(self, client: AsyncClient) -> None:
+        auth = await _register_and_auth(client, email="slug@example.com")
+        org = await _create_org(client, auth["access_token"], slug="slug-test")
+
+        resp = await client.get(
+            "/api/v1/orgs/by-slug/slug-test",
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["slug"] == "slug-test"
+        assert data["id"] == org["id"]

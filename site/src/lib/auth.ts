@@ -118,6 +118,39 @@ export type DashboardSummary =
   | GenericDashboard;
 
 // ---------------------------------------------------------------------------
+// Org server management types
+// ---------------------------------------------------------------------------
+
+export interface OrgDetail {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  avatar_url: string | null;
+  owner_id: string;
+  created_at: string;
+}
+
+export interface OrgServerDetail {
+  id: string;
+  name: string;
+  websocket_url: string;
+  is_active: boolean;
+  is_online: boolean;
+  last_heartbeat: string | null;
+  active_show_count: number;
+  created_at: string;
+}
+
+export interface RegisterServerResponse {
+  server_id: string;
+  name: string;
+  websocket_url: string;
+  api_key: string;
+  jwt_secret: string;
+}
+
+// ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
 
@@ -337,4 +370,50 @@ export function storeRefreshToken(token: string): void {
 export function clearStoredRefreshToken(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// Org server management endpoints
+// ---------------------------------------------------------------------------
+
+export async function getOrgBySlug(
+  accessToken: string,
+  slug: string
+): Promise<OrgDetail> {
+  return api<OrgDetail>(`/api/v1/orgs/by-slug/${slug}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function listOrgServers(
+  accessToken: string,
+  orgId: string
+): Promise<OrgServerDetail[]> {
+  return api<OrgServerDetail[]>(`/api/v1/orgs/${orgId}/servers`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function registerOrgServer(
+  accessToken: string,
+  orgId: string,
+  name: string,
+  websocketUrl: string
+): Promise<RegisterServerResponse> {
+  return api<RegisterServerResponse>(`/api/v1/orgs/${orgId}/servers/register`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ name, websocket_url: websocketUrl }),
+  });
+}
+
+export async function removeOrgServer(
+  accessToken: string,
+  orgId: string,
+  serverId: string
+): Promise<void> {
+  return api<void>(`/api/v1/orgs/${orgId}/servers/${serverId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 }

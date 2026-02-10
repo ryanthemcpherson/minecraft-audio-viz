@@ -236,6 +236,30 @@ class OrgServerResponse(BaseModel):
     is_active: bool
 
 
+class RegisterOrgServerRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    websocket_url: str = Field(..., min_length=1, max_length=500, pattern=r"^wss?://.+")
+
+
+class RegisterOrgServerResponse(BaseModel):
+    server_id: uuid.UUID
+    name: str
+    websocket_url: str
+    api_key: str
+    jwt_secret: str
+
+
+class OrgServerDetailResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    websocket_url: str
+    is_active: bool
+    is_online: bool
+    last_heartbeat: datetime | None
+    active_show_count: int
+    created_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # Tenant resolution schemas
 # ---------------------------------------------------------------------------

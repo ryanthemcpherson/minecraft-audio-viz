@@ -106,10 +106,22 @@ function OrgCard({
         <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-text-secondary">{org.role}</span>
       </div>
       <div className="mt-3 flex gap-4 text-xs text-text-secondary">
-        <span>{org.server_count} server{org.server_count !== 1 ? "s" : ""}</span>
+        <Link href={`/org/${org.slug}/servers`} className="transition-colors hover:text-electric-blue">
+          {org.server_count} server{org.server_count !== 1 ? "s" : ""}
+        </Link>
         <span>{org.member_count} member{org.member_count !== 1 ? "s" : ""}</span>
         <span>{org.active_show_count} active show{org.active_show_count !== 1 ? "s" : ""}</span>
       </div>
+      {org.role === "owner" && (
+        <div className="mt-2">
+          <Link
+            href={`/org/${org.slug}/servers`}
+            className="text-xs text-electric-blue/70 transition-colors hover:text-electric-blue"
+          >
+            Manage Servers
+          </Link>
+        </div>
+      )}
       {showInvite && org.role === "owner" && (
         <div className="mt-3 border-t border-white/5 pt-3">
           {inviteCode ? (
