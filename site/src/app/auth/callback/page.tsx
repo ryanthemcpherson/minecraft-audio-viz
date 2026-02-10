@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth";
 import Link from "next/link";
 
-export default function AuthCallbackPage() {
+function CallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setAuth } = useAuth();
@@ -56,38 +56,50 @@ export default function AuthCallbackPage() {
 
   if (error) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
-        <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-red-500/5 rounded-full blur-[120px]" />
-
-        <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
-          <div className="mb-4 text-4xl">!</div>
-          <h1 className="mb-2 text-xl font-semibold text-white">
-            Sign-in failed
-          </h1>
-          <p className="mb-6 text-sm text-text-secondary">{error}</p>
-          <Link
-            href="/login"
-            className="inline-block rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          >
-            Back to login
-          </Link>
-        </div>
+      <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
+        <div className="mb-4 text-4xl">!</div>
+        <h1 className="mb-2 text-xl font-semibold text-white">
+          Sign-in failed
+        </h1>
+        <p className="mb-6 text-sm text-text-secondary">{error}</p>
+        <Link
+          href="/login"
+          className="inline-block rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+        >
+          Back to login
+        </Link>
       </div>
     );
   }
 
   return (
+    <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
+      <div className="mb-4 flex justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+      </div>
+      <p className="text-sm text-text-secondary">
+        Completing sign-in...
+      </p>
+    </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
     <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
       <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-electric-blue/5 rounded-full blur-[120px]" />
-
-      <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
-        <div className="mb-4 flex justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
-        </div>
-        <p className="text-sm text-text-secondary">
-          Completing sign-in...
-        </p>
-      </div>
+      <Suspense
+        fallback={
+          <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
+            <div className="mb-4 flex justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+            </div>
+            <p className="text-sm text-text-secondary">Loading...</p>
+          </div>
+        }
+      >
+        <CallbackHandler />
+      </Suspense>
     </div>
   );
 }
