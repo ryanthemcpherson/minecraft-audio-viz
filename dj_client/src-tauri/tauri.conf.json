@@ -30,7 +30,7 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "../../mcav.png",
+      "../../mcav-large.png",
       "../../mcav.ico"
     ],
     "windows": {
