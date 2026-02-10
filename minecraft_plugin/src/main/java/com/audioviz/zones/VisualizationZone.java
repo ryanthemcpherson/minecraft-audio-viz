@@ -17,6 +17,8 @@ public class VisualizationZone {
     private Location origin;
     private Vector size;
     private float rotation; // Y-axis rotation in degrees
+    private boolean glowOnBeat; // Flash glow effect on beat detection
+    private boolean dynamicBrightness; // Scale brightness with audio amplitude
 
     public VisualizationZone(String name, Location origin) {
         this.name = name;
@@ -24,6 +26,8 @@ public class VisualizationZone {
         this.origin = origin.clone();
         this.size = new Vector(10, 10, 10); // Default 10x10x10 zone
         this.rotation = 0f;
+        this.glowOnBeat = false;
+        this.dynamicBrightness = false;
     }
 
     public VisualizationZone(String name, UUID id, Location origin, Vector size, float rotation) {
@@ -32,6 +36,8 @@ public class VisualizationZone {
         this.origin = origin.clone();
         this.size = size.clone();
         this.rotation = rotation;
+        this.glowOnBeat = false;
+        this.dynamicBrightness = false;
     }
 
     public String getName() {
@@ -72,6 +78,22 @@ public class VisualizationZone {
 
     public World getWorld() {
         return origin.getWorld();
+    }
+
+    public boolean isGlowOnBeat() {
+        return glowOnBeat;
+    }
+
+    public void setGlowOnBeat(boolean glowOnBeat) {
+        this.glowOnBeat = glowOnBeat;
+    }
+
+    public boolean isDynamicBrightness() {
+        return dynamicBrightness;
+    }
+
+    public void setDynamicBrightness(boolean dynamicBrightness) {
+        this.dynamicBrightness = dynamicBrightness;
     }
 
     /**

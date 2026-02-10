@@ -423,8 +423,16 @@ def run_http_server(port: int, directory: str):
 
     os.chdir(str(project_root))
 
-    with socketserver.TCPServer(("", port), MultiDirectoryHandler) as httpd:
-        httpd.serve_forever()
+    # Allow port reuse so restarts don't fail with "Address already in use"
+    class ReusableTCPServer(socketserver.TCPServer):
+        allow_reuse_address = True
+
+    try:
+        with ReusableTCPServer(("", port), MultiDirectoryHandler) as httpd:
+            httpd.serve_forever()
+    except OSError as e:
+        logger.error(f"HTTP server failed to start on port {port}: {e}")
+        logger.error("Another instance may be running. Kill it or use a different port.")
 
 
 class VJServer:
@@ -491,6 +499,7 @@ class VJServer:
         self.viz_client: Optional[VizClient] = None
         self._mc_reconnect_task: Optional[asyncio.Task] = None
         self._mc_reconnect_backoff: float = 5.0  # Initial backoff (seconds)
+        self._skip_minecraft: bool = False  # Set True for --no-minecraft mode
 
         # Pattern system
         self._pattern_config = PatternConfig(entity_count=entity_count)
@@ -766,7 +775,9 @@ class VJServer:
                     except json.JSONDecodeError:
                         logger.debug(f"Invalid JSON from DJ {dj_name}")
                     except Exception as e:
-                        logger.error(f"Error processing DJ frame: {e}")
+                        logger.error(
+                            f"Error processing DJ frame from {dj_name}: {e}", exc_info=True
+                        )
                 return
 
             elif msg_type == "dj_auth":
@@ -840,6 +851,10 @@ class VJServer:
                 auth_response["minecraft_port"] = self.minecraft_port
                 auth_response["zone"] = self.zone
                 auth_response["entity_count"] = self.entity_count
+            # Initial route hint for newer clients (legacy clients ignore unknown fields)
+            auth_response["route_mode"] = (
+                "dual" if (direct_mode and self._active_dj_id == dj_id) else "relay"
+            )
 
             await websocket.send(json.dumps(auth_response))
             logger.info(f"[DJ AUTH SUCCESS] {dj_name} ({dj_id}) authenticated, priority={priority}")
@@ -899,6 +914,12 @@ class VJServer:
             except Exception as e:
                 logger.warning(f"[DJ CLOCK SYNC] {dj_name}: sync failed: {e}")
 
+            # Send explicit routing policy after handshake.
+            try:
+                await websocket.send(json.dumps(self._build_stream_route_message(dj_id, dj)))
+            except Exception as e:
+                logger.debug(f"Failed to send initial stream route to DJ {dj_id}: {e}")
+
             # If no active DJ, make this one active
             if self._active_dj_id is None:
                 await self._set_active_dj(dj_id)
@@ -944,7 +965,7 @@ class VJServer:
                 f"DJ {dj_name} ({dj_id}) connection closed: code={e.code}, reason={e.reason}"
             )
         except Exception as e:
-            logger.error(f"DJ connection error: {e}")
+            logger.error(f"DJ connection error: {e}", exc_info=True)
         finally:
             # Clean up pending DJs
             if dj_id and dj_id in self._pending_djs:
@@ -1038,11 +1059,54 @@ class VJServer:
                 )
             except Exception as e:
                 logger.debug(f"Failed to send status to DJ {did}: {e}")
+            # Push per-DJ stream routing policy after every active switch.
+            try:
+                await dj.websocket.send(json.dumps(self._build_stream_route_message(did, dj)))
+            except Exception as e:
+                logger.debug(f"Failed to send stream route to DJ {did}: {e}")
 
         await self._broadcast_dj_roster()
 
         # Send dj_info to Minecraft for stage decorators (billboard, transitions)
         await self._send_dj_info_to_minecraft(dj_id)
+
+    def _build_stream_route_message(self, dj_id: str, dj: DJConnection) -> dict:
+        """Build stream routing policy for a DJ client.
+
+        route_mode:
+        - relay: DJ sends audio to VJ only (default / standby DJs)
+        - dual: DJ sends audio to VJ and publishes visualization directly to Minecraft
+        """
+        is_active = self._active_dj_id == dj_id
+        route_mode = "dual" if (dj.direct_mode and is_active) else "relay"
+
+        return {
+            "type": "stream_route",
+            "route_mode": route_mode,
+            "is_active": is_active,
+            "minecraft_host": self.minecraft_host,
+            "minecraft_port": self.minecraft_port,
+            "zone": self.zone,
+            "entity_count": self.entity_count,
+            "current_pattern": self._pattern_name,
+            "pattern_config": {
+                "entity_count": self.entity_count,
+                "zone_size": self._pattern_config.zone_size,
+                "beat_boost": self._pattern_config.beat_boost,
+                "base_scale": self._pattern_config.base_scale,
+                "max_scale": self._pattern_config.max_scale,
+            },
+            "relay_fallback": True,
+            "reason": "active_direct_dj" if route_mode == "dual" else "standby_or_relay_mode",
+        }
+
+    async def _broadcast_stream_routes(self):
+        """Broadcast routing policy to all connected DJs."""
+        for did, dj in list(self._djs.items()):
+            try:
+                await dj.websocket.send(json.dumps(self._build_stream_route_message(did, dj)))
+            except Exception as e:
+                logger.debug(f"Failed to broadcast stream route to DJ {did}: {e}")
 
     async def _send_dj_info_to_minecraft(self, dj_id: Optional[str]):
         """Send DJ info to Minecraft plugin for stage decorator effects."""
@@ -1707,6 +1771,34 @@ class VJServer:
 
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
+                        # Sync local state when zone config changes entity count,
+                        # block type, or scale so patterns generate correct data
+                        if msg_type == "set_zone_config":
+                            try:
+                                config = data.get("config", {})
+                                new_count = config.get("entity_count")
+                                if (
+                                    new_count
+                                    and 1 <= new_count <= 1000
+                                    and new_count != self.entity_count
+                                ):
+                                    old_count = self.entity_count
+                                    self.entity_count = new_count
+                                    self._pattern_config.entity_count = new_count
+                                    self._current_pattern = get_pattern(
+                                        self._pattern_name, self._pattern_config
+                                    )
+                                    logger.info(
+                                        f"Entity count synced from zone config: {old_count} -> {new_count}"
+                                    )
+                                # Sync scale settings to pattern config
+                                if "base_scale" in config:
+                                    self._pattern_config.base_scale = float(config["base_scale"])
+                                if "max_scale" in config:
+                                    self._pattern_config.max_scale = float(config["max_scale"])
+                            except Exception as e:
+                                logger.warning(f"Failed to sync zone config locally: {e}")
+
                         if self.viz_client and self.viz_client.connected:
                             try:
                                 response = await self.viz_client.send(data)
@@ -1840,6 +1932,7 @@ class VJServer:
 
         # Broadcast roster update
         await self._broadcast_dj_roster()
+        await self._broadcast_stream_routes()
         await self._broadcast_to_browsers(
             json.dumps(
                 {
@@ -2178,6 +2271,8 @@ class VJServer:
                 if self.viz_client is None or not self.viz_client.connected:
                     # Broadcast disconnection status to browsers
                     await self._broadcast_minecraft_status()
+                    # Notify DJs so they can adapt direct/relay routing policy.
+                    await self._broadcast_stream_routes()
                     logger.info(
                         f"[MC RECONNECT] Minecraft disconnected, attempting reconnection (backoff={self._mc_reconnect_backoff:.1f}s)"
                     )
@@ -2195,6 +2290,8 @@ class VJServer:
                             self._mc_reconnect_backoff = 5.0
                             # Broadcast MC status change to browsers
                             await self._broadcast_minecraft_status()
+                            # Notify DJs so direct publishers can re-initialize MC path.
+                            await self._broadcast_stream_routes()
                         else:
                             logger.warning(
                                 f"[MC RECONNECT] Reconnection failed, will retry in {self._mc_reconnect_backoff:.1f}s"
@@ -2416,113 +2513,131 @@ class VJServer:
     async def _main_loop(self):
         """Main visualization loop."""
         frame_interval = 0.016  # 60 FPS
+        consecutive_errors = 0
+        max_consecutive_errors = 50  # After 50 errors in a row, slow down
 
         while self._running:
-            self._frame_count += 1
+            try:
+                self._frame_count += 1
 
-            # Get audio from active DJ or use fallback
-            dj = self.active_dj
-            if dj:
-                bands = dj.bands
-                peak = dj.peak
-                is_beat = dj.is_beat
-                beat_intensity = dj.beat_intensity
-                instant_bass = dj.instant_bass
-                instant_kick = dj.instant_kick
-            else:
-                # No active DJ - fade to silence
-                bands = self._fallback_bands
-                peak = self._fallback_peak
-                is_beat = False
-                beat_intensity = 0.0
-                instant_bass = 0.0
-                instant_kick = False
-
-                # Decay fallback values
-                for i in range(5):
-                    self._fallback_bands[i] *= 0.95
-                self._fallback_peak *= 0.95
-
-            # Apply band sensitivity
-            adjusted_bands = [
-                bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
-            ]
-
-            # Clean up expired effects
-            now = time.time()
-            expired = [k for k, v in self._active_effects.items() if now >= v["end_time"]]
-            for k in expired:
-                if k == "blackout":
-                    self._blackout = False
-                    if self.viz_client and self.viz_client.connected:
-                        try:
-                            asyncio.ensure_future(self.viz_client.set_visible(self.zone, True))
-                        except Exception:
-                            pass
-                elif k == "freeze":
-                    self._freeze = False
-                del self._active_effects[k]
-
-            # Calculate visualization
-            if self._freeze and self._last_entities:
-                entities = self._last_entities
-            elif self._blackout:
-                entities = []
-            else:
-                entities = self._calculate_entities(adjusted_bands, peak, is_beat, beat_intensity)
-                # Apply timed effects (flash, strobe, pulse, wave, etc.)
-                entities = self._apply_effects(entities, adjusted_bands)
-                self._last_entities = entities
-
-            # Update spectrograph
-            if self.spectrograph:
-                mode_str = "VJ"
+                # Get audio from active DJ or use fallback
+                dj = self.active_dj
                 if dj:
-                    if dj.direct_mode:
-                        mc_status = "MC:OK" if dj.mc_connected else "MC:?"
-                        mode_str = f"VJ:DIRECT ({mc_status})"
-                    else:
-                        mode_str = "VJ:RELAY"
-                self.spectrograph.set_stats(
-                    preset=mode_str,
-                    bpm=dj.bpm if dj else 0,
-                    clients=len(self._broadcast_clients),
-                    using_fft=True,
-                )
-                self.spectrograph.display(
-                    bands=bands, amplitude=peak, is_beat=is_beat, beat_intensity=beat_intensity
-                )
+                    bands = dj.bands
+                    peak = dj.peak
+                    is_beat = dj.is_beat
+                    beat_intensity = dj.beat_intensity
+                    instant_bass = dj.instant_bass
+                    instant_kick = dj.instant_kick
+                else:
+                    # No active DJ - fade to silence
+                    bands = self._fallback_bands
+                    peak = self._fallback_peak
+                    is_beat = False
+                    beat_intensity = 0.0
+                    instant_bass = 0.0
+                    instant_kick = False
 
-            # Send to Minecraft - skip if active DJ is using direct mode and connected
-            # In direct mode, the DJ sends visualization directly to Minecraft
-            should_send_to_mc = True
-            if dj and dj.direct_mode and dj.mc_connected:
-                # DJ is sending directly, VJ server doesn't need to
-                should_send_to_mc = False
-            elif dj and dj.direct_mode and not dj.mc_connected:
-                # DJ is in direct mode but lost MC connection - VJ server takes over (fallback)
+                    # Decay fallback values
+                    for i in range(5):
+                        self._fallback_bands[i] *= 0.95
+                    self._fallback_peak *= 0.95
+
+                # Apply band sensitivity
+                adjusted_bands = [
+                    bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
+                ]
+
+                # Clean up expired effects
+                now = time.time()
+                expired = [k for k, v in self._active_effects.items() if now >= v["end_time"]]
+                for k in expired:
+                    if k == "blackout":
+                        self._blackout = False
+                        if self.viz_client and self.viz_client.connected:
+                            try:
+                                asyncio.ensure_future(self.viz_client.set_visible(self.zone, True))
+                            except Exception:
+                                pass
+                    elif k == "freeze":
+                        self._freeze = False
+                    del self._active_effects[k]
+
+                # Calculate visualization
+                if self._freeze and self._last_entities:
+                    entities = self._last_entities
+                elif self._blackout:
+                    entities = []
+                else:
+                    entities = self._calculate_entities(
+                        adjusted_bands, peak, is_beat, beat_intensity
+                    )
+                    # Apply timed effects (flash, strobe, pulse, wave, etc.)
+                    entities = self._apply_effects(entities, adjusted_bands)
+                    self._last_entities = entities
+
+                # Update spectrograph
+                if self.spectrograph:
+                    mode_str = "VJ"
+                    if dj:
+                        if dj.direct_mode:
+                            mc_status = "MC:OK" if dj.mc_connected else "MC:?"
+                            mode_str = f"VJ:DIRECT ({mc_status})"
+                        else:
+                            mode_str = "VJ:RELAY"
+                    self.spectrograph.set_stats(
+                        preset=mode_str,
+                        bpm=dj.bpm if dj else 0,
+                        clients=len(self._broadcast_clients),
+                        using_fft=True,
+                    )
+                    self.spectrograph.display(
+                        bands=bands, amplitude=peak, is_beat=is_beat, beat_intensity=beat_intensity
+                    )
+
+                # Send to Minecraft - skip if active DJ is using direct mode and connected
+                # In direct mode, the DJ sends visualization directly to Minecraft
                 should_send_to_mc = True
+                if dj and dj.direct_mode and dj.mc_connected:
+                    # DJ is sending directly, VJ server doesn't need to
+                    should_send_to_mc = False
+                elif dj and dj.direct_mode and not dj.mc_connected:
+                    # DJ is in direct mode but lost MC connection - VJ server takes over (fallback)
+                    should_send_to_mc = True
 
-            if should_send_to_mc:
-                await self._update_minecraft(entities, bands, peak, is_beat, beat_intensity)
+                if should_send_to_mc:
+                    await self._update_minecraft(entities, bands, peak, is_beat, beat_intensity)
 
-            # Send to browser clients (always, for preview)
-            await self._broadcast_viz_state(
-                entities, bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
-            )
-
-            # Log health summary every 60 seconds
-            current_time = time.time()
-            if current_time - self._last_health_log >= 60.0:
-                stats = self.get_health_stats()
-                logger.info(
-                    f"[HEALTH] DJs: {stats['current_djs']} (conn={stats['dj_connects']}, disc={stats['dj_disconnects']}) | "
-                    f"Browsers: {stats['current_browsers']} (conn={stats['browser_connects']}, disc={stats['browser_disconnects']}) | "
-                    f"MC: {'connected' if stats['mc_connected'] else 'disconnected'} (reconn={stats['mc_reconnect_count']})"
+                # Send to browser clients (always, for preview)
+                await self._broadcast_viz_state(
+                    entities, bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
                 )
-                self._last_health_log = current_time
 
-            await asyncio.sleep(frame_interval)
+                # Log health summary every 60 seconds
+                current_time = time.time()
+                if current_time - self._last_health_log >= 60.0:
+                    stats = self.get_health_stats()
+                    logger.info(
+                        f"[HEALTH] DJs: {stats['current_djs']} (conn={stats['dj_connects']}, disc={stats['dj_disconnects']}) | "
+                        f"Browsers: {stats['current_browsers']} (conn={stats['browser_connects']}, disc={stats['browser_disconnects']}) | "
+                        f"MC: {'connected' if stats['mc_connected'] else 'disconnected'} (reconn={stats['mc_reconnect_count']})"
+                    )
+                    self._last_health_log = current_time
+
+                consecutive_errors = 0  # Reset on successful frame
+                await asyncio.sleep(frame_interval)
+
+            except asyncio.CancelledError:
+                raise  # Let cancellation propagate
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors <= 3 or consecutive_errors % 100 == 0:
+                    logger.error(f"Main loop error (#{consecutive_errors}): {e}", exc_info=True)
+                if consecutive_errors >= max_consecutive_errors:
+                    # Slow down to avoid log spam on persistent errors
+                    await asyncio.sleep(1.0)
+                else:
+                    await asyncio.sleep(frame_interval)
 
     async def run(self):
         """Start the VJ server."""
@@ -2565,8 +2680,12 @@ class VJServer:
         logger.info("VJ Server ready. Waiting for DJ connections...")
 
         # Start Minecraft reconnection loop (runs in background)
-        self._mc_reconnect_task = asyncio.create_task(self._minecraft_reconnect_loop())
-        logger.debug("Started Minecraft reconnection monitor")
+        # Skip when --no-minecraft is set to avoid spamming connection attempts
+        if not self._skip_minecraft:
+            self._mc_reconnect_task = asyncio.create_task(self._minecraft_reconnect_loop())
+            logger.debug("Started Minecraft reconnection monitor")
+        else:
+            logger.info("Minecraft reconnection disabled (--no-minecraft mode)")
 
         # Start browser heartbeat loop (runs in background)
         self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
@@ -2720,7 +2839,10 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Connect to Minecraft
-    if not args.no_minecraft:
+    if args.no_minecraft:
+        server._skip_minecraft = True
+        logger.info("Running without Minecraft (--no-minecraft)")
+    else:
         if not await server.connect_minecraft():
             logger.warning("Continuing without Minecraft...")
 

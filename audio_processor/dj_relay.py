@@ -86,6 +86,10 @@ class DJRelay:
         self._mc_connected: bool = False  # Track Minecraft connection status
         self._zone: str = config.zone
         self._entity_count: int = config.entity_count
+        # Runtime routing policy controlled by VJ server.
+        # relay: send only to VJ
+        # dual: send to VJ + direct publish to Minecraft
+        self._route_mode: str = "dual" if config.direct_mode else "relay"
 
         # Callbacks
         self._on_status_change: Optional[Callable[[bool], None]] = None
@@ -99,6 +103,20 @@ class DJRelay:
     @property
     def is_active(self) -> bool:
         return self._is_active
+
+    @property
+    def route_mode(self) -> str:
+        return self._route_mode
+
+    def should_publish_direct(self) -> bool:
+        """Whether this DJ should publish visualization directly to Minecraft."""
+        return (
+            self._route_mode == "dual"
+            and self._is_active
+            and self.viz_client is not None
+            and self._mc_connected
+            and self.pattern is not None
+        )
 
     def set_callbacks(
         self,
@@ -150,6 +168,8 @@ class DJRelay:
                 if data.get("type") == "auth_success":
                     self._authenticated = True
                     self._is_active = data.get("is_active", False)
+                    if data.get("route_mode") in ("relay", "dual"):
+                        self._route_mode = data.get("route_mode")
                     logger.info(f"Authenticated as {self.config.dj_name}")
                     if self._is_active:
                         logger.info("You are now LIVE!")
@@ -179,8 +199,9 @@ class DJRelay:
                     except Exception as e:
                         logger.debug(f"Clock sync failed: {e}")
 
-                    # Handle direct mode - connect to Minecraft
-                    if self.config.direct_mode:
+                    # Handle direct mode - connect to Minecraft.
+                    # Legacy servers don't send stream_route, so keep config-driven behavior.
+                    if self._route_mode == "dual" or self.config.direct_mode:
                         await self._setup_direct_mode(data)
 
                     return True
@@ -225,6 +246,14 @@ class DJRelay:
         # Initialize pattern from VJ server's current pattern
         pattern_name = auth_data.get("current_pattern", "spectrum")
         self._init_pattern(pattern_name)
+
+        # If already connected directly, just refresh zone/pool config.
+        if self.viz_client and self._mc_connected and self.viz_client.connected:
+            try:
+                await self.viz_client.init_pool(self._zone, self._entity_count, "SEA_LANTERN")
+            except Exception as e:
+                logger.debug(f"Direct mode: pool refresh failed: {e}")
+            return
 
         # Connect to Minecraft
         logger.info(f"Direct mode: Connecting to Minecraft at {mc_host}:{mc_port}")
@@ -313,6 +342,39 @@ class DJRelay:
         if new_entity_count and self.pattern_config:
             self._init_pattern(self._pattern_name)
 
+    async def _handle_stream_route(self, data: dict):
+        """Handle runtime stream routing policy from VJ server."""
+        new_mode = data.get("route_mode")
+        if new_mode not in ("relay", "dual"):
+            return
+
+        previous = self._route_mode
+        self._route_mode = new_mode
+        if previous != new_mode:
+            logger.info(f"Stream route updated: {previous} -> {new_mode}")
+
+        # Keep active state in sync if provided in the same message
+        if "is_active" in data:
+            self._is_active = bool(data.get("is_active"))
+
+        # In dual mode, ensure direct MC path is ready.
+        if new_mode == "dual":
+            await self._setup_direct_mode(data)
+        else:
+            # Relay mode: close direct path to reduce resource usage.
+            if self.viz_client:
+                try:
+                    if self._mc_connected:
+                        await self.viz_client.set_visible(self._zone, False)
+                except Exception:
+                    pass
+                try:
+                    await self.viz_client.disconnect()
+                except Exception:
+                    pass
+                self.viz_client = None
+            self._mc_connected = False
+
     async def disconnect(self):
         """Gracefully disconnect from VJ server."""
         if self._websocket and self._connected:
@@ -393,13 +455,13 @@ class DJRelay:
         self._last_heartbeat = now
 
         # Update Minecraft connection status
-        if self.config.direct_mode and self.viz_client:
+        if self.viz_client:
             self._mc_connected = self.viz_client.connected
 
         try:
             heartbeat = {"type": "dj_heartbeat", "ts": now}
-            # Include Minecraft connection status in direct mode
-            if self.config.direct_mode:
+            # Include Minecraft connection status when dual routing is enabled
+            if self._route_mode == "dual":
                 heartbeat["mc_connected"] = self._mc_connected
 
             await self._websocket.send(json.dumps(heartbeat))
@@ -454,6 +516,9 @@ class DJRelay:
                     elif msg_type == "config_sync":
                         # VJ server is updating configuration (entity count, zone, etc.)
                         await self._handle_config_sync(data)
+                    elif msg_type == "stream_route":
+                        # VJ server controls relay vs dual-publish behavior.
+                        await self._handle_stream_route(data)
 
                 except json.JSONDecodeError:
                     pass
@@ -545,8 +610,7 @@ class DJRelayAgent:
         receiver_task = asyncio.create_task(self.relay.receive_messages())
 
         self._running = True
-        direct_mode = self.relay.config.direct_mode
-        mode_str = "DIRECT" if direct_mode else "RELAY"
+        mode_str = "DIRECT" if self.relay.route_mode == "dual" else "RELAY"
         logger.info(f"DJ Relay started ({mode_str} mode). Sending audio to VJ server...")
 
         try:
@@ -618,12 +682,7 @@ class DJRelayAgent:
                     continue
 
                 # Direct mode: Send visualization directly to Minecraft (if active DJ)
-                if (
-                    direct_mode
-                    and self.relay.is_active
-                    and self.relay.viz_client
-                    and self.relay.pattern
-                ):
+                if self.relay.should_publish_direct():
                     await self._send_to_minecraft(
                         bands, frame.peak, frame.is_beat, frame.beat_intensity
                     )
@@ -631,7 +690,7 @@ class DJRelayAgent:
                 # Update spectrograph
                 if self.spectrograph:
                     status = "LIVE" if self.relay.is_active else "STANDBY"
-                    if direct_mode:
+                    if self.relay.route_mode == "dual":
                         status = f"DIRECT:{status}"
                     # Get latency from FFT analyzer
                     latency_ms = 0.0
@@ -660,7 +719,7 @@ class DJRelayAgent:
             receiver_task.cancel()
             await self.relay.disconnect()
             # Clean up Minecraft connection in direct mode
-            if direct_mode and self.relay.viz_client:
+            if self.relay.viz_client:
                 try:
                     await self.relay.viz_client.set_visible(self.relay._zone, False)
                     await self.relay.viz_client.disconnect()

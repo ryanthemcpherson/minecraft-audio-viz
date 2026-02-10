@@ -181,7 +181,21 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onError(WebSocket conn, Exception ex) {
-        String address = conn != null ? conn.getRemoteSocketAddress().toString() : "server";
+        // Guard against null address during shutdown/reload
+        String address = "server";
+        try {
+            if (conn != null && conn.getRemoteSocketAddress() != null) {
+                address = conn.getRemoteSocketAddress().toString();
+            }
+        } catch (Exception ignored) {}
+
+        // Suppress "zip file closed" errors during plugin reload - these are expected
+        if (ex instanceof IllegalStateException && ex.getMessage() != null
+                && ex.getMessage().contains("zip file closed")) {
+            plugin.getLogger().warning("WebSocket closed during plugin reload (expected)");
+            return;
+        }
+
         plugin.getLogger().log(Level.SEVERE, "WebSocket error from " + address + ": " + ex.getMessage(), ex);
     }
 
@@ -322,8 +336,16 @@ public class VizWebSocketServer extends WebSocketServer {
         }
 
         messageQueue.stop();
+
+        // Close all active connections before stopping the server
+        for (org.java_websocket.WebSocket conn : new java.util.ArrayList<>(getConnections())) {
+            try {
+                conn.close(1001, "Server shutting down");
+            } catch (Exception ignored) {}
+        }
+
         try {
-            stop(1000);  // Stop with 1 second timeout
+            stop(3000);  // Stop with 3 second timeout for clean thread shutdown
         } catch (InterruptedException e) {
             plugin.getLogger().warning("WebSocket server shutdown interrupted");
         }

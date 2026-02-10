@@ -2,6 +2,8 @@ interface ConnectionStatus {
   connected: boolean;
   is_active: boolean;
   latency_ms: number;
+  route_mode: string;
+  mc_connected: boolean;
   queue_position: number;
   total_djs: number;
   active_dj_name: string | null;
@@ -27,6 +29,20 @@ function StatusPanel({ status }: StatusPanelProps) {
           <span className="status-label">Latency:</span>
           <span className={`status-value ${status.latency_ms > 100 ? 'warning' : ''}`}>
             {status.latency_ms.toFixed(0)}ms
+          </span>
+        </div>
+
+        <div className="status-row">
+          <span className="status-label">Route:</span>
+          <span className="status-value">
+            {(status.route_mode || 'relay').toUpperCase()}
+          </span>
+        </div>
+
+        <div className="status-row">
+          <span className="status-label">Direct MC:</span>
+          <span className={`status-value ${status.mc_connected ? '' : 'warning'}`}>
+            {status.mc_connected ? 'CONNECTED' : 'DISCONNECTED'}
           </span>
         </div>
 

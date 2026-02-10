@@ -11,6 +11,8 @@ pub struct ConnectionStatus {
     pub connected: bool,
     pub is_active: bool,
     pub latency_ms: f32,
+    pub route_mode: String,
+    pub mc_connected: bool,
     pub queue_position: usize,
     pub total_djs: usize,
     pub active_dj_name: Option<String>,
@@ -94,6 +96,8 @@ mod tests {
         assert!(!status.connected);
         assert!(!status.is_active);
         assert_eq!(status.latency_ms, 0.0);
+        assert_eq!(status.route_mode, "");
+        assert!(!status.mc_connected);
         assert_eq!(status.queue_position, 0);
         assert_eq!(status.total_djs, 0);
         assert!(status.active_dj_name.is_none());

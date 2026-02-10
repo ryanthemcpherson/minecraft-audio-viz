@@ -191,6 +191,9 @@ pub enum ServerMessage {
 
     #[serde(rename = "effect_triggered")]
     EffectTriggered(EffectTriggeredMessage),
+
+    #[serde(rename = "stream_route")]
+    StreamRoute(StreamRouteMessage),
 }
 
 /// Auth success response
@@ -203,6 +206,8 @@ pub struct AuthSuccessMessage {
     pub current_pattern: Option<String>,
     #[serde(default)]
     pub pattern_config: Option<PatternConfigInfo>,
+    #[serde(default)]
+    pub route_mode: Option<String>,
 }
 
 /// Auth error response
@@ -264,6 +269,24 @@ pub struct PresetSyncMessage {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EffectTriggeredMessage {
     pub effect: String,
+}
+
+/// Stream routing policy from VJ server.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamRouteMessage {
+    pub route_mode: String, // relay | dual
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub minecraft_host: Option<String>,
+    #[serde(default)]
+    pub minecraft_port: Option<u16>,
+    #[serde(default)]
+    pub zone: Option<String>,
+    #[serde(default)]
+    pub entity_count: Option<u32>,
+    #[serde(default)]
+    pub pattern_config: Option<PatternConfigInfo>,
 }
 
 #[cfg(test)]
@@ -334,6 +357,41 @@ mod tests {
                 assert!(msg.is_active);
             }
             _ => panic!("expected auth_success variant"),
+        }
+    }
+
+    #[test]
+    fn server_message_deserializes_stream_route_variant() {
+        let input = r#"{
+          "type": "stream_route",
+          "route_mode": "dual",
+          "is_active": true,
+          "minecraft_host": "127.0.0.1",
+          "minecraft_port": 8765,
+          "zone": "main",
+          "entity_count": 24,
+          "pattern_config": {
+            "entity_count": 24
+          }
+        }"#;
+
+        let parsed: ServerMessage =
+            serde_json::from_str(input).expect("stream_route payload should deserialize");
+
+        match parsed {
+            ServerMessage::StreamRoute(msg) => {
+                assert_eq!(msg.route_mode, "dual");
+                assert_eq!(msg.is_active, Some(true));
+                assert_eq!(msg.minecraft_host.as_deref(), Some("127.0.0.1"));
+                assert_eq!(msg.minecraft_port, Some(8765));
+                assert_eq!(msg.zone.as_deref(), Some("main"));
+                assert_eq!(msg.entity_count, Some(24));
+                assert_eq!(
+                    msg.pattern_config.as_ref().and_then(|cfg| cfg.entity_count),
+                    Some(24)
+                );
+            }
+            _ => panic!("expected stream_route variant"),
         }
     }
 }

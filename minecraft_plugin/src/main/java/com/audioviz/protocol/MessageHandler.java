@@ -412,6 +412,8 @@ public class MessageHandler {
         json.add("size", size);
 
         json.addProperty("rotation", zone.getRotation());
+        json.addProperty("glow_on_beat", zone.isGlowOnBeat());
+        json.addProperty("dynamic_brightness", zone.isDynamicBrightness());
 
         return json;
     }
@@ -469,6 +471,16 @@ public class MessageHandler {
         if (config.has("interpolation")) {
             int interpolation = config.get("interpolation").getAsInt();
             plugin.getEntityPoolManager().setZoneInterpolation(zoneName, interpolation);
+        }
+
+        // Update glow_on_beat setting
+        if (config.has("glow_on_beat")) {
+            zone.setGlowOnBeat(config.get("glow_on_beat").getAsBoolean());
+        }
+
+        // Update dynamic_brightness setting
+        if (config.has("dynamic_brightness")) {
+            zone.setDynamicBrightness(config.get("dynamic_brightness").getAsBoolean());
         }
 
         // Store config for reference

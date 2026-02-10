@@ -247,7 +247,7 @@ public class MessageQueue {
 
     /**
      * Process audio/beat information from a batch_update message.
-     * Triggers beat effects and updates particle visualization.
+     * Triggers beat effects, glow_on_beat, dynamic_brightness, and updates particle visualization.
      */
     private void processAudioInfo(JsonObject msg, String zoneName) {
         boolean isBeat = msg.has("is_beat") && msg.get("is_beat").getAsBoolean();
@@ -257,6 +257,29 @@ public class MessageQueue {
         // Trigger beat effects if this is a beat with sufficient intensity
         if (isBeat && beatIntensity > 0.2) {
             plugin.getBeatEventManager().processBeat(zoneName, BeatType.BEAT, beatIntensity);
+        }
+
+        // Apply zone-level glow_on_beat and dynamic_brightness settings
+        var zone = plugin.getZoneManager().getZone(zoneName);
+        if (zone != null) {
+            // Glow on beat: flash glow for all entities when beat detected
+            if (zone.isGlowOnBeat() && isBeat && beatIntensity > 0.3) {
+                plugin.getEntityPoolManager().setZoneGlow(zoneName, true);
+                // Schedule glow off after 3 ticks (150ms)
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    plugin.getEntityPoolManager().setZoneGlow(zoneName, false);
+                }, 3L);
+            }
+
+            // Dynamic brightness: scale brightness with audio amplitude
+            if (zone.isDynamicBrightness()) {
+                double amplitude = InputSanitizer.sanitizeAmplitude(
+                    msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0);
+                // Map amplitude (0-1) to brightness (3-15)
+                int brightness = (int) Math.round(3 + amplitude * 12);
+                brightness = Math.max(3, Math.min(15, brightness));
+                plugin.getEntityPoolManager().setZoneBrightness(zoneName, brightness);
+            }
         }
 
         // Update particle visualization audio state

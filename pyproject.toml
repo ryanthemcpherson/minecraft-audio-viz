@@ -97,8 +97,11 @@ ignore = ["E501"]  # Line length handled separately
 exclude_dirs = ["audio_processor/tests", "python_client/tests"]
 # Skip low-confidence findings
 confidence = ["MEDIUM", "HIGH"]
-# Skip assert checks (common in non-production code)
-skips = ["B101"]
+# B101: assert usage (common in non-production code)
+# B104: bind 0.0.0.0 (intentional for LAN servers)
+# B110: try/except/pass (cleanup code in audio processing)
+# B311: random for non-crypto (jitter in reconnection backoff)
+skips = ["B101", "B104", "B110", "B311"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

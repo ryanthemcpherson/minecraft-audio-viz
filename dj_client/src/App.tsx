@@ -16,6 +16,8 @@ interface ConnectionStatus {
   connected: boolean;
   is_active: boolean;
   latency_ms: number;
+  route_mode: string;
+  mc_connected: boolean;
   queue_position: number;
   total_djs: number;
   active_dj_name: string | null;
@@ -51,6 +53,8 @@ function App() {
     connected: false,
     is_active: false,
     latency_ms: 0,
+    route_mode: '',
+    mc_connected: false,
     queue_position: 0,
     total_djs: 0,
     active_dj_name: null,
@@ -207,6 +211,8 @@ function App() {
         connected: false,
         is_active: false,
         latency_ms: 0,
+        route_mode: '',
+        mc_connected: false,
         queue_position: 0,
         total_djs: 0,
         active_dj_name: null,

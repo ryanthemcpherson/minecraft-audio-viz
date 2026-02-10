@@ -98,6 +98,7 @@ class AdminApp {
         this._previewBlocks = [];
         this._previewParticleSystem = null;
         this._previewBlockIndicators = null;
+        this._previewFailed = false;
         this._previewAutoRotate = true;
         this._previewShowGrid = true;
         this._previewAnimationId = null;
@@ -1246,35 +1247,40 @@ class AdminApp {
         if (!this._meterUpdatePending) {
             this._meterUpdatePending = true;
             requestAnimationFrame(() => {
-                this._updateMeters();
-                this._updateBeatIndicator();
-                this._updateFrameCount();
+                try {
+                    this._updateMeters();
+                    this._updateBeatIndicator();
+                    this._updateFrameCount();
 
-                // Update latency display with warning if > 500ms
-                if (this.state.latencyMs !== undefined && this.elements.latencyDisplay) {
-                    this.elements.latencyDisplay.textContent = `Latency: ${this.state.latencyMs.toFixed(1)}ms`;
-                    this.elements.latencyDisplay.classList.toggle('warning', this.state.latencyMs > 500);
+                    // Update latency display with warning if > 500ms
+                    if (this.state.latencyMs !== undefined && this.elements.latencyDisplay) {
+                        this.elements.latencyDisplay.textContent = `Latency: ${this.state.latencyMs.toFixed(1)}ms`;
+                        this.elements.latencyDisplay.classList.toggle('warning', this.state.latencyMs > 500);
+                    }
+
+                    // Update queue depth display (only show when > 0)
+                    this._updateQueueDepthDisplay();
+
+                    // Update BPM if available
+                    if (this.state.bpmEstimate && this.elements.bpmEstimate) {
+                        this.elements.bpmEstimate.textContent = Math.round(this.state.bpmEstimate);
+                    }
+
+                    // Update FPS if available
+                    if (this.state.fps !== undefined && this.elements.fpsDisplay) {
+                        this.elements.fpsDisplay.textContent = `${Math.round(this.state.fps)} FPS`;
+                    }
+
+                    // Update 3D preview if initialized
+                    if (this._previewInitialized && !this._previewFailed) {
+                        this._updatePreviewFromAudioState();
+                    }
+                } catch (error) {
+                    console.error('[UI] Audio state update failed', error);
+                    this._showToast('Live UI update error (recovered)', 'warning', 2500);
+                } finally {
+                    this._meterUpdatePending = false;
                 }
-
-                // Update queue depth display (only show when > 0)
-                this._updateQueueDepthDisplay();
-
-                // Update BPM if available
-                if (this.state.bpmEstimate && this.elements.bpmEstimate) {
-                    this.elements.bpmEstimate.textContent = Math.round(this.state.bpmEstimate);
-                }
-
-                // Update FPS if available
-                if (this.state.fps !== undefined && this.elements.fpsDisplay) {
-                    this.elements.fpsDisplay.textContent = `${Math.round(this.state.fps)} FPS`;
-                }
-
-                // Update 3D preview if initialized
-                if (this._previewInitialized) {
-                    this._updatePreviewFromAudioState();
-                }
-
-                this._meterUpdatePending = false;
             });
         }
     }
@@ -1534,7 +1540,11 @@ class AdminApp {
 
         // Handle preview animation based on tab visibility
         if (tabName === 'preview') {
-            this._startPreviewAnimation();
+            if (!this._previewFailed) {
+                this._startPreviewAnimation();
+            } else {
+                this._showToast('3D Preview unavailable on this browser/GPU', 'warning');
+            }
             // Show preview stats in header
             const statsEl = document.getElementById('preview-stats');
             if (statsEl) statsEl.classList.remove('hidden');
@@ -2222,7 +2232,7 @@ class AdminApp {
     // === 3D Preview Methods ===
 
     _initPreview() {
-        if (this._previewInitialized) return;
+        if (this._previewInitialized || this._previewFailed) return;
 
         const canvas = document.getElementById('preview-canvas');
         const wrapper = canvas?.parentElement;
@@ -2234,82 +2244,96 @@ class AdminApp {
         // Check if THREE is loaded
         if (typeof THREE === 'undefined') {
             console.warn('[Preview] Three.js not loaded');
+            this._previewFailed = true;
+            this._showToast('Three.js failed to load; 3D Preview disabled', 'warning');
             return;
         }
 
-        console.log('[Preview] Initializing 3D preview');
+        try {
+            console.log('[Preview] Initializing 3D preview');
 
-        // Scene
-        this._previewScene = new THREE.Scene();
-        this._previewScene.background = new THREE.Color(0x0a0a0f);
-        this._previewScene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
+            // Scene
+            this._previewScene = new THREE.Scene();
+            this._previewScene.background = new THREE.Color(0x0a0a0f);
+            this._previewScene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
 
-        // Camera
-        const aspect = wrapper.clientWidth / wrapper.clientHeight;
-        this._previewCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
-        this._previewCamera.position.set(12, 10, 12);
-        this._previewCamera.lookAt(0, 2, 0);
+            // Camera
+            const width = Math.max(1, wrapper.clientWidth);
+            const height = Math.max(1, wrapper.clientHeight);
+            const aspect = width / height;
+            this._previewCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
+            this._previewCamera.position.set(12, 10, 12);
+            this._previewCamera.lookAt(0, 2, 0);
 
-        // Renderer
-        this._previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-        this._previewRenderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
-        this._previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        this._previewRenderer.shadowMap.enabled = true;
+            // Renderer
+            this._previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            this._previewRenderer.setSize(width, height);
+            this._previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            this._previewRenderer.shadowMap.enabled = true;
 
-        // Lights
-        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
-        this._previewScene.add(ambientLight);
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            this._previewScene.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(10, 20, 10);
-        directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 2048;
-        directionalLight.shadow.mapSize.height = 2048;
-        this._previewScene.add(directionalLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            this._previewScene.add(directionalLight);
 
-        const pointLight = new THREE.PointLight(0x6366f1, 0.5, 20);
-        pointLight.position.set(0, 5, 0);
-        this._previewScene.add(pointLight);
+            const pointLight = new THREE.PointLight(0x6366f1, 0.5, 20);
+            pointLight.position.set(0, 5, 0);
+            this._previewScene.add(pointLight);
 
-        // Ground plane
-        const groundGeometry = new THREE.PlaneGeometry(30, 30);
-        const groundMaterial = new THREE.MeshStandardMaterial({
-            color: 0x12121a,
-            roughness: 0.9
-        });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        this._previewScene.add(ground);
+            // Ground plane
+            const groundGeometry = new THREE.PlaneGeometry(30, 30);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x12121a,
+                roughness: 0.9
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            this._previewScene.add(ground);
 
-        // Grid helper
-        const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-        gridHelper.position.y = 0.01;
-        this._previewScene.add(gridHelper);
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
+            gridHelper.position.y = 0.01;
+            this._previewScene.add(gridHelper);
 
-        // Create initial blocks
-        this._createPreviewBlocks(16);
+            // Create initial blocks
+            this._createPreviewBlocks(16);
 
-        // Initialize particle system
-        if (typeof ParticleSystem !== 'undefined') {
-            this._previewParticleSystem = new ParticleSystem(this._previewScene, 500);
+            // Initialize particle system
+            if (typeof ParticleSystem !== 'undefined') {
+                this._previewParticleSystem = new ParticleSystem(this._previewScene, 500);
+            }
+
+            // Initialize block indicators
+            if (typeof BlockIndicatorSystem !== 'undefined') {
+                this._previewBlockIndicators = new BlockIndicatorSystem(this._previewScene, 8);
+            }
+
+            // Setup preview controls
+            this._setupPreviewControls();
+            this._setupPreviewMouseControls();
+
+            // Handle window resize
+            window.addEventListener('resize', () => this._onPreviewResize());
+
+            this._previewInitialized = true;
+            this._previewLastFrameTime = performance.now();
+            console.log('[Preview] 3D preview initialized');
+        } catch (error) {
+            this._previewFailed = true;
+            this._previewInitialized = false;
+            this._previewRenderer = null;
+            this._previewScene = null;
+            this._previewCamera = null;
+            console.error('[Preview] Initialization failed', error);
+            this._showToast('3D Preview initialization failed; disabled for this session', 'warning');
         }
-
-        // Initialize block indicators
-        if (typeof BlockIndicatorSystem !== 'undefined') {
-            this._previewBlockIndicators = new BlockIndicatorSystem(this._previewScene, 8);
-        }
-
-        // Setup preview controls
-        this._setupPreviewControls();
-        this._setupPreviewMouseControls();
-
-        // Handle window resize
-        window.addEventListener('resize', () => this._onPreviewResize());
-
-        this._previewInitialized = true;
-        this._previewLastFrameTime = performance.now();
-        console.log('[Preview] 3D preview initialized');
     }
 
     _createPreviewBlock(index) {
@@ -2478,6 +2502,7 @@ class AdminApp {
     }
 
     _startPreviewAnimation() {
+        if (!this._previewInitialized || this._previewFailed) return;
         if (this._previewAnimationId) return;
         this._previewLastFrameTime = performance.now();
         this._animatePreview();
@@ -2495,110 +2520,130 @@ class AdminApp {
 
         if (!this._previewRenderer || !this._previewScene || !this._previewCamera) return;
 
-        const now = performance.now();
-        const dt = (now - this._previewLastFrameTime) / 1000;
-        this._previewLastFrameTime = now;
+        try {
+            const now = performance.now();
+            const dt = (now - this._previewLastFrameTime) / 1000;
+            this._previewLastFrameTime = now;
 
-        // FPS calculation
-        this._previewFrameCount++;
-        if (now - this._previewLastFpsUpdate >= 1000) {
-            this._previewFps = this._previewFrameCount;
-            this._previewFrameCount = 0;
-            this._previewLastFpsUpdate = now;
-            const fpsEl = document.getElementById('preview-stat-fps');
-            if (fpsEl) fpsEl.textContent = this._previewFps;
+            // FPS calculation
+            this._previewFrameCount++;
+            if (now - this._previewLastFpsUpdate >= 1000) {
+                this._previewFps = this._previewFrameCount;
+                this._previewFrameCount = 0;
+                this._previewLastFpsUpdate = now;
+                const fpsEl = document.getElementById('preview-stat-fps');
+                if (fpsEl) fpsEl.textContent = this._previewFps;
+            }
+
+            // Smooth block animations
+            const lerpSpeed = 0.25;
+            this._previewBlocks.forEach((block) => {
+                block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
+                block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
+                block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
+
+                const targetScale = block.userData.targetScale || 1;
+                block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
+                block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
+                block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
+            });
+
+            // Update particle system
+            if (this._previewParticleSystem) {
+                this._previewParticleSystem.update(dt);
+            }
+
+            // Auto rotate camera
+            if (this._previewAutoRotate && this._previewCamera) {
+                const spherical = new THREE.Spherical();
+                spherical.setFromVector3(this._previewCamera.position);
+                spherical.theta += 0.002;
+                this._previewCamera.position.setFromSpherical(spherical);
+                this._previewCamera.lookAt(0, 3, 0);
+            }
+
+            this._previewRenderer.render(this._previewScene, this._previewCamera);
+        } catch (error) {
+            console.error('[Preview] Render loop failed', error);
+            this._previewFailed = true;
+            this._stopPreviewAnimation();
+            this._showToast('3D Preview render error; disabled for this session', 'warning');
         }
-
-        // Smooth block animations
-        const lerpSpeed = 0.25;
-        this._previewBlocks.forEach((block) => {
-            block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
-            block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
-            block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
-
-            const targetScale = block.userData.targetScale || 1;
-            block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
-            block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
-            block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
-        });
-
-        // Update particle system
-        if (this._previewParticleSystem) {
-            this._previewParticleSystem.update(dt);
-        }
-
-        // Auto rotate camera
-        if (this._previewAutoRotate && this._previewCamera) {
-            const spherical = new THREE.Spherical();
-            spherical.setFromVector3(this._previewCamera.position);
-            spherical.theta += 0.002;
-            this._previewCamera.position.setFromSpherical(spherical);
-            this._previewCamera.lookAt(0, 3, 0);
-        }
-
-        this._previewRenderer.render(this._previewScene, this._previewCamera);
     }
 
     _updatePreviewFromAudioState() {
-        if (!this._previewInitialized) return;
+        if (!this._previewInitialized || this._previewFailed) return;
 
-        const entities = this.state.entities;
-        const bands = this.state.bands;
-        const isBeat = this.state.isBeat;
-        const beatIntensity = this.state.beatIntensity;
+        try {
+            const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
+            const bands = Array.isArray(this.state.bands) ? this.state.bands : [0, 0, 0, 0, 0];
+            const isBeat = !!this.state.isBeat;
+            const beatIntensity = Number.isFinite(this.state.beatIntensity) ? this.state.beatIntensity : 0;
 
-        // Update preview meters overlay
-        this._updatePreviewMeters();
+            // Update preview meters overlay
+            this._updatePreviewMeters();
 
-        // Update block positions from entities
-        if (entities && entities.length > 0) {
-            this._ensurePreviewBlockCount(entities.length);
+            // Update block positions from entities
+            if (entities.length > 0) {
+                this._ensurePreviewBlockCount(entities.length);
 
-            const config = this._previewConfig;
-            this._previewBlocks.forEach((block, i) => {
-                const entity = entities[i];
-                if (!entity) return;
+                const config = this._previewConfig;
+                this._previewBlocks.forEach((block, i) => {
+                    const entity = entities[i];
+                    if (!entity || typeof entity !== 'object') return;
 
-                block.userData.targetX = (entity.x * config.zoneSize) - config.centerOffset;
-                block.userData.targetY = entity.y * config.zoneSize;
-                block.userData.targetZ = (entity.z * config.zoneSize) - config.centerOffset;
-                block.userData.targetScale = entity.scale * 1.5;
+                    const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+                    const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+                    const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+                    const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
 
-                const bandIndex = entity.band || 0;
-                if (block.userData.bandIndex !== bandIndex) {
-                    block.userData.bandIndex = bandIndex;
-                    block.material.color.setHex(config.colors[bandIndex]);
-                    block.material.emissive.setHex(config.colors[bandIndex]);
-                }
+                    block.userData.targetX = (x * config.zoneSize) - config.centerOffset;
+                    block.userData.targetY = y * config.zoneSize;
+                    block.userData.targetZ = (z * config.zoneSize) - config.centerOffset;
+                    block.userData.targetScale = scale * 1.5;
 
-                const bandValue = bands[bandIndex] || 0;
-                block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
-            });
+                    const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
+                    const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
+                    if (block.userData.bandIndex !== bandIndex) {
+                        block.userData.bandIndex = bandIndex;
+                        block.material.color.setHex(config.colors[bandIndex]);
+                        block.material.emissive.setHex(config.colors[bandIndex]);
+                    }
+
+                    const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
+                    block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+                });
+            }
+
+            // Update block indicators
+            if (this._previewBlockIndicators && this._previewShowGrid) {
+                this._previewBlockIndicators.updateFromAudio(bands, isBeat, beatIntensity);
+            }
+
+            // Beat flash
+            const beatFlash = document.getElementById('preview-beat-flash');
+            if (beatFlash) {
+                beatFlash.classList.toggle('active', isBeat);
+            }
+
+            // Spawn particles on beat
+            if (isBeat && this._previewParticleEffects.enabled) {
+                this._spawnPreviewBeatParticles();
+            }
+
+            // Spawn ambient particles
+            if (this._previewParticleEffects.enabled) {
+                this._spawnPreviewAmbientParticles();
+            }
+
+            // Update stats
+            this._updatePreviewStats();
+        } catch (error) {
+            console.error('[Preview] Update failed', error);
+            this._previewFailed = true;
+            this._stopPreviewAnimation();
+            this._showToast('3D Preview update failed; disabled for this session', 'warning');
         }
-
-        // Update block indicators
-        if (this._previewBlockIndicators && this._previewShowGrid) {
-            this._previewBlockIndicators.updateFromAudio(bands, isBeat, beatIntensity);
-        }
-
-        // Beat flash
-        const beatFlash = document.getElementById('preview-beat-flash');
-        if (beatFlash) {
-            beatFlash.classList.toggle('active', isBeat);
-        }
-
-        // Spawn particles on beat
-        if (isBeat && this._previewParticleEffects.enabled) {
-            this._spawnPreviewBeatParticles();
-        }
-
-        // Spawn ambient particles
-        if (this._previewParticleEffects.enabled) {
-            this._spawnPreviewAmbientParticles();
-        }
-
-        // Update stats
-        this._updatePreviewStats();
     }
 
     _updatePreviewMeters() {

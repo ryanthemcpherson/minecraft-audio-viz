@@ -246,6 +246,66 @@ class TestDJRelayHeartbeatFailure:
         assert relay._heartbeat_failures == 0, "Failure counter should reset on success"
 
 
+class TestDJRelayStreamRoute:
+    """Test runtime stream route updates from VJ server."""
+
+    @pytest.fixture
+    def relay_config(self):
+        from audio_processor.dj_relay import DJRelayConfig
+
+        return DJRelayConfig(
+            vj_server_url="ws://localhost:9000",
+            dj_id="route_test_dj",
+            dj_name="Route Test DJ",
+            direct_mode=True,
+        )
+
+    async def test_stream_route_relay_disables_direct_publish(self, relay_config):
+        """Relay route should disconnect direct MC socket and disable direct publish."""
+        from audio_processor.dj_relay import DJRelay
+
+        relay = DJRelay(relay_config)
+        relay._route_mode = "dual"
+        relay._is_active = True
+        relay._mc_connected = True
+
+        mock_viz = MagicMock()
+        mock_viz.connected = True
+        mock_viz.set_visible = AsyncMock(return_value=True)
+        mock_viz.disconnect = AsyncMock(return_value=None)
+        relay.viz_client = mock_viz
+
+        await relay._handle_stream_route({"type": "stream_route", "route_mode": "relay"})
+
+        assert relay.route_mode == "relay"
+        assert relay._mc_connected is False
+        assert relay.viz_client is None
+        assert relay.should_publish_direct() is False
+        mock_viz.disconnect.assert_awaited()
+
+    async def test_stream_route_dual_calls_setup_direct_mode(self, relay_config):
+        """Dual route should trigger direct MC setup."""
+        from audio_processor.dj_relay import DJRelay
+
+        relay = DJRelay(relay_config)
+        relay._route_mode = "relay"
+        relay._setup_direct_mode = AsyncMock(return_value=None)
+
+        await relay._handle_stream_route(
+            {
+                "type": "stream_route",
+                "route_mode": "dual",
+                "minecraft_host": "localhost",
+                "minecraft_port": 8765,
+                "zone": "main",
+                "entity_count": 16,
+            }
+        )
+
+        assert relay.route_mode == "dual"
+        relay._setup_direct_mode.assert_awaited()
+
+
 class TestVizClientConnectionTimeout:
     """Test VizClient connection timeout handling."""
 

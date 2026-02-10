@@ -116,9 +116,17 @@ public class AudioVizPlugin extends JavaPlugin {
             decoratorManager.stop();
         }
 
-        // Cleanup entity pools
-        if (entityPoolManager != null) {
-            entityPoolManager.cleanupAll();
+        // Stop WebSocket server - must complete BEFORE classloader closes the JAR
+        // otherwise background threads (WebSocketWorker, WebSocketSelector) crash
+        // with "zip file closed" when they try to load classes from the old JAR
+        if (webSocketServer != null) {
+            try {
+                // Full shutdown stops heartbeat tasks, message queue, and socket threads.
+                webSocketServer.shutdown();
+                getLogger().info("WebSocket server stopped");
+            } catch (Exception e) {
+                getLogger().warning("Error stopping WebSocket server: " + e.getMessage());
+            }
         }
 
         // Stop particle visualization manager
@@ -130,14 +138,10 @@ public class AudioVizPlugin extends JavaPlugin {
             rendererRegistry.clearAll();
         }
 
-        // Stop WebSocket server
-        if (webSocketServer != null) {
-            try {
-                webSocketServer.stop(1000);
-                getLogger().info("WebSocket server stopped");
-            } catch (InterruptedException e) {
-                getLogger().warning("Error stopping WebSocket server: " + e.getMessage());
-            }
+        // Cleanup entity pools synchronously - scheduling new tasks while disabled
+        // can throw IllegalPluginAccessException during reload.
+        if (entityPoolManager != null) {
+            entityPoolManager.cleanupAllSync();
         }
 
         getLogger().info("AudioViz plugin disabled!");

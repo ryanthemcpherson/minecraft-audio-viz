@@ -87,6 +87,11 @@ pub struct ConnectionState {
     pub dj_id: Option<String>,
     pub latency_ms: f32,
     pub reconnect_attempts: u32,
+    pub route_mode: String, // relay | dual
+    pub mc_host: Option<String>,
+    pub mc_port: Option<u16>,
+    pub mc_zone: Option<String>,
+    pub mc_entity_count: Option<u32>,
 }
 
 /// DJ Client for VJ server communication
@@ -191,6 +196,12 @@ impl DjClient {
                                     s.authenticated = true;
                                     s.is_active = auth.is_active;
                                     s.dj_id = Some(auth.dj_id.clone());
+                                    if let Some(route_mode) = auth.route_mode {
+                                        s.route_mode = route_mode;
+                                    }
+                                    if let Some(pattern_cfg) = auth.pattern_config.as_ref() {
+                                        s.mc_entity_count = pattern_cfg.entity_count;
+                                    }
                                     log::info!(
                                         "Authenticated as {} (active: {})",
                                         auth.dj_name,
@@ -392,6 +403,12 @@ async fn handle_server_message(
             s.authenticated = true;
             s.is_active = auth.is_active;
             s.dj_id = Some(auth.dj_id);
+            if let Some(route_mode) = auth.route_mode {
+                s.route_mode = route_mode;
+            }
+            if let Some(pattern_cfg) = auth.pattern_config.as_ref() {
+                s.mc_entity_count = pattern_cfg.entity_count;
+            }
             log::info!(
                 "Authenticated as {} (active: {})",
                 auth.dj_name,
@@ -435,6 +452,19 @@ async fn handle_server_message(
         | ServerMessage::EffectTriggered(_) => {
             // These are informational, no action needed for basic client
         }
+        ServerMessage::StreamRoute(route) => {
+            let mut s = state.lock();
+            s.route_mode = route.route_mode;
+            if let Some(active) = route.is_active {
+                s.is_active = active;
+            }
+            s.mc_host = route.minecraft_host;
+            s.mc_port = route.minecraft_port;
+            s.mc_zone = route.zone;
+            s.mc_entity_count = route
+                .entity_count
+                .or_else(|| route.pattern_config.and_then(|cfg| cfg.entity_count));
+        }
     }
 }
 
@@ -466,6 +496,11 @@ mod tests {
         assert!(!state.authenticated);
         assert!(!state.is_active);
         assert!(state.dj_id.is_none());
+        assert_eq!(state.route_mode, "");
+        assert!(state.mc_host.is_none());
+        assert!(state.mc_port.is_none());
+        assert!(state.mc_zone.is_none());
+        assert!(state.mc_entity_count.is_none());
         assert!(client.get_tx_clone().is_none());
         assert!(!client.is_connected());
         assert!(!client.is_active());
