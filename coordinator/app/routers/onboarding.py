@@ -56,3 +56,19 @@ async def skip_onboarding(
     await session.commit()
     await session.refresh(user)
     return _user_response(user)
+
+
+@router.post(
+    "/reset",
+    response_model=UserResponse,
+    summary="Reset onboarding status so user can redo the flow",
+)
+async def reset_onboarding(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserResponse:
+    user.onboarding_completed_at = None
+    user.user_type = None
+    await session.commit()
+    await session.refresh(user)
+    return _user_response(user)
