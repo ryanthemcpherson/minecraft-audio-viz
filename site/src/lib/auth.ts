@@ -125,14 +125,22 @@ async function api<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const { headers: optHeaders, ...rest } = options;
   const res = await fetch(`${COORDINATOR_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
-    ...options,
+    ...rest,
+    headers: { "Content-Type": "application/json", ...(optHeaders as Record<string, string>) },
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `Request failed: ${res.status}`);
+    const detail = body.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((e: { msg?: string }) => e.msg || String(e)).join("; ")
+          : `Request failed: ${res.status}`;
+    throw new Error(message);
   }
 
   // 204 No Content
