@@ -92,7 +92,23 @@ export async function getDiscordAuthUrl(): Promise<string> {
   const data = await api<{ authorize_url: string }>(
     "/api/v1/auth/discord"
   );
+  // Store the state param for CSRF validation on callback
+  try {
+    const url = new URL(data.authorize_url);
+    const state = url.searchParams.get("state");
+    if (state) storeOAuthState(state);
+  } catch {
+    // If URL parsing fails, proceed without state storage
+  }
   return data.authorize_url;
+}
+
+export async function exchangeDiscordCode(
+  code: string,
+  state: string
+): Promise<AuthResponse> {
+  const params = new URLSearchParams({ code, state });
+  return api<AuthResponse>(`/api/v1/auth/discord/callback?${params}`);
 }
 
 export async function refreshToken(
@@ -122,6 +138,22 @@ export async function logout(refreshTokenValue: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const REFRESH_TOKEN_KEY = "mcav_refresh_token";
+const OAUTH_STATE_KEY = "mcav_oauth_state";
+
+export function storeOAuthState(state: string): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(OAUTH_STATE_KEY, state);
+}
+
+export function getStoredOAuthState(): string | null {
+  if (typeof window === "undefined") return null;
+  return sessionStorage.getItem(OAUTH_STATE_KEY);
+}
+
+export function clearStoredOAuthState(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
+}
 
 export function getStoredRefreshToken(): string | null {
   if (typeof window === "undefined") return null;

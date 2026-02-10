@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # Discord OAuth
     discord_client_id: str = ""
     discord_client_secret: str = ""
-    discord_redirect_uri: str = "https://mcav.live/api/auth/discord/callback"
+    discord_redirect_uri: str = "https://mcav.live/auth/callback"
 
     # URLs
     base_url: str = "https://mcav.live"
