@@ -12,7 +12,17 @@ from fastapi.responses import JSONResponse
 from app.config import Settings, get_settings
 from app.database import init_engine, shutdown_engine
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.routers import auth, connect, health, orgs, servers, shows, tenants
+from app.routers import (
+    auth,
+    connect,
+    dj_profiles,
+    health,
+    onboarding,
+    orgs,
+    servers,
+    shows,
+    tenants,
+)
 from app.services.rate_limiter import RateLimitExceeded
 
 
@@ -56,6 +66,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(connect.router, prefix="/api/v1")
     application.include_router(auth.router, prefix="/api/v1")
     application.include_router(orgs.router, prefix="/api/v1")
+    application.include_router(onboarding.router, prefix="/api/v1")
+    application.include_router(dj_profiles.router, prefix="/api/v1")
     application.include_router(tenants.router, prefix="/api/v1")
 
     # -- Exception handlers ----------------------------------------------------

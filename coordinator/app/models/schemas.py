@@ -19,10 +19,16 @@ CODE_PATTERN = re.compile(r"^[A-Z]{4}-[A-Z2-9]{4}$")
 # Server schemas
 # ---------------------------------------------------------------------------
 
+
 class RegisterServerRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     websocket_url: str = Field(..., min_length=1, max_length=500, pattern=r"^wss?://.+")
-    api_key: str = Field(..., min_length=1, max_length=200, description="Plaintext API key chosen by the server operator")
+    api_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Plaintext API key chosen by the server operator",
+    )
 
 
 class RegisterServerResponse(BaseModel):
@@ -39,6 +45,7 @@ class HeartbeatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Show schemas
 # ---------------------------------------------------------------------------
+
 
 class CreateShowRequest(BaseModel):
     server_id: uuid.UUID
@@ -76,6 +83,7 @@ class EndShowResponse(BaseModel):
 # Connect (public) schemas
 # ---------------------------------------------------------------------------
 
+
 class ConnectCodeResponse(BaseModel):
     websocket_url: str
     token: str
@@ -86,6 +94,7 @@ class ConnectCodeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Health schema
 # ---------------------------------------------------------------------------
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -123,6 +132,7 @@ class UserResponse(BaseModel):
     email: str | None
     discord_username: str | None
     avatar_url: str | None
+    onboarding_completed: bool
 
 
 class AuthResponse(BaseModel):
@@ -152,12 +162,26 @@ class OrgSummary(BaseModel):
     role: str
 
 
+class DJProfileResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    dj_name: str
+    bio: str | None
+    genres: str | None
+    avatar_url: str | None
+    is_public: bool
+    created_at: datetime
+
+
 class UserProfileResponse(BaseModel):
     id: uuid.UUID
     display_name: str
     email: str | None
     discord_username: str | None
     avatar_url: str | None
+    onboarding_completed: bool
+    user_type: str | None
+    dj_profile: DJProfileResponse | None
     organizations: list[OrgSummary]
 
 
@@ -245,3 +269,71 @@ class TenantResolveResponse(BaseModel):
     org: TenantOrgInfo
     servers: list[TenantServerInfo]
     active_shows: list[TenantShowInfo]
+
+
+# ---------------------------------------------------------------------------
+# Onboarding schemas
+# ---------------------------------------------------------------------------
+
+
+VALID_USER_TYPES = {"server_owner", "team_member", "dj"}
+
+
+class CompleteOnboardingRequest(BaseModel):
+    user_type: str = Field(..., min_length=1, max_length=20)
+
+    @field_validator("user_type")
+    @classmethod
+    def validate_user_type(cls, v: str) -> str:
+        if v not in VALID_USER_TYPES:
+            raise ValueError(f"user_type must be one of: {', '.join(sorted(VALID_USER_TYPES))}")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Invite schemas
+# ---------------------------------------------------------------------------
+
+
+class CreateInviteRequest(BaseModel):
+    max_uses: int = Field(default=0, ge=0, description="0 = unlimited")
+    expires_in_hours: int | None = Field(None, ge=1, le=720)
+
+
+class InviteResponse(BaseModel):
+    id: uuid.UUID
+    org_id: uuid.UUID
+    code: str
+    max_uses: int
+    use_count: int
+    is_active: bool
+    expires_at: datetime | None
+    created_at: datetime
+
+
+class JoinOrgRequest(BaseModel):
+    invite_code: str = Field(..., min_length=1, max_length=8)
+
+
+class JoinOrgResponse(BaseModel):
+    org_id: uuid.UUID
+    org_name: str
+    org_slug: str
+    role: str
+
+
+# ---------------------------------------------------------------------------
+# DJ profile schemas
+# ---------------------------------------------------------------------------
+
+
+class CreateDJProfileRequest(BaseModel):
+    dj_name: str = Field(..., min_length=1, max_length=100)
+    bio: str | None = Field(None, max_length=500)
+    genres: str | None = Field(None, max_length=500)
+
+
+class UpdateDJProfileRequest(BaseModel):
+    dj_name: str | None = Field(None, min_length=1, max_length=100)
+    bio: str | None = Field(None, max_length=500)
+    genres: str | None = Field(None, max_length=500)

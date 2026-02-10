@@ -45,7 +45,7 @@ function CallbackHandler() {
     exchangeDiscordCode(code, state)
       .then((res) => {
         setAuth(res.access_token, res.refresh_token, res.user);
-        router.replace("/dashboard");
+        router.replace(res.user.onboarding_completed ? "/dashboard" : "/onboarding");
       })
       .catch((err) => {
         setError(

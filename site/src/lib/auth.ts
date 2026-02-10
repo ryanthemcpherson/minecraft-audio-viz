@@ -18,6 +18,7 @@ export interface User {
   email: string | null;
   discord_username: string | null;
   avatar_url: string | null;
+  onboarding_completed: boolean;
 }
 
 export interface OrgSummary {
@@ -27,7 +28,20 @@ export interface OrgSummary {
   role: string;
 }
 
+export interface DJProfile {
+  id: string;
+  user_id: string;
+  dj_name: string;
+  bio: string | null;
+  genres: string | null;
+  avatar_url: string | null;
+  is_public: boolean;
+  created_at: string;
+}
+
 export interface UserProfile extends User {
+  user_type: string | null;
+  dj_profile: DJProfile | null;
   organizations: OrgSummary[];
 }
 
@@ -130,6 +144,74 @@ export async function logout(refreshTokenValue: string): Promise<void> {
   await api<void>("/api/v1/auth/logout", {
     method: "POST",
     body: JSON.stringify({ refresh_token: refreshTokenValue }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding & org endpoints
+// ---------------------------------------------------------------------------
+
+export async function completeOnboarding(
+  accessToken: string,
+  userType: string
+): Promise<User> {
+  return api<User>("/api/v1/onboarding/complete", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ user_type: userType }),
+  });
+}
+
+export async function skipOnboarding(accessToken: string): Promise<User> {
+  return api<User>("/api/v1/onboarding/skip", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function createOrg(
+  accessToken: string,
+  name: string,
+  slug: string,
+  description?: string
+): Promise<{ id: string; name: string; slug: string }> {
+  return api("/api/v1/orgs", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ name, slug, description }),
+  });
+}
+
+export async function joinOrg(
+  accessToken: string,
+  inviteCode: string
+): Promise<{ org_id: string; org_name: string; org_slug: string; role: string }> {
+  return api("/api/v1/orgs/join", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ invite_code: inviteCode }),
+  });
+}
+
+export async function createInvite(
+  accessToken: string,
+  orgId: string
+): Promise<{ id: string; code: string }> {
+  return api(`/api/v1/orgs/${orgId}/invites`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({}),
+  });
+}
+
+export async function createDJProfile(
+  accessToken: string,
+  data: { dj_name: string; bio?: string; genres?: string }
+): Promise<DJProfile> {
+  return api<DJProfile>("/api/v1/dj/profile", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(data),
   });
 }
 

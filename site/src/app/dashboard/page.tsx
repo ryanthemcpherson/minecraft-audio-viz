@@ -4,13 +4,18 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import type { UserProfile, OrgSummary } from "@/lib/auth";
-import { fetchMe } from "@/lib/auth";
+import { fetchMe, createInvite } from "@/lib/auth";
 
 export default function DashboardPage() {
   const router = useRouter();
   const { user, accessToken, loading: authLoading, logout } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Invite management state: map of orgId -> generated code
+  const [inviteCodes, setInviteCodes] = useState<Record<string, string>>({});
+  const [inviteLoading, setInviteLoading] = useState<Record<string, boolean>>({});
+  const [copiedOrg, setCopiedOrg] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -20,13 +25,38 @@ export default function DashboardPage() {
     }
 
     fetchMe(accessToken)
-      .then(setProfile)
+      .then((p) => {
+        if (!p.onboarding_completed) {
+          router.replace("/onboarding");
+          return;
+        }
+        setProfile(p);
+      })
       .catch(() => {
         // Token may have expired
         router.push("/login");
       })
       .finally(() => setLoading(false));
   }, [user, accessToken, authLoading, router]);
+
+  async function handleCreateInvite(orgId: string) {
+    if (!accessToken) return;
+    setInviteLoading((prev) => ({ ...prev, [orgId]: true }));
+    try {
+      const res = await createInvite(accessToken, orgId);
+      setInviteCodes((prev) => ({ ...prev, [orgId]: res.code }));
+    } catch {
+      // silently fail
+    } finally {
+      setInviteLoading((prev) => ({ ...prev, [orgId]: false }));
+    }
+  }
+
+  function handleCopyCode(orgId: string, code: string) {
+    navigator.clipboard.writeText(code);
+    setCopiedOrg(orgId);
+    setTimeout(() => setCopiedOrg(null), 2000);
+  }
 
   if (authLoading || loading) {
     return (
@@ -119,9 +149,34 @@ export default function DashboardPage() {
                         {org.slug}.mcav.live
                       </p>
                     </div>
-                    <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-text-secondary">
-                      {org.role}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      {org.role === "owner" && (
+                        <>
+                          {inviteCodes[org.id] ? (
+                            <button
+                              onClick={() => handleCopyCode(org.id, inviteCodes[org.id])}
+                              className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-mono transition-colors hover:bg-white/5"
+                            >
+                              <span className="tracking-widest">{inviteCodes[org.id]}</span>
+                              <span className="text-text-secondary">
+                                {copiedOrg === org.id ? "Copied!" : "Copy"}
+                              </span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleCreateInvite(org.id)}
+                              disabled={inviteLoading[org.id]}
+                              className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50"
+                            >
+                              {inviteLoading[org.id] ? "..." : "Create Invite"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                      <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-text-secondary">
+                        {org.role}
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}

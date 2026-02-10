@@ -14,6 +14,7 @@ from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
     DiscordAuthorizeResponse,
+    DJProfileResponse,
     LoginRequest,
     LogoutRequest,
     OrgSummary,
@@ -39,6 +40,7 @@ def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
             email=user.email,
             discord_username=user.discord_username,
             avatar_url=user.avatar_url,
+            onboarding_completed=user.onboarding_completed_at is not None,
         ),
     )
 
@@ -76,6 +78,7 @@ async def register(
 
     # Re-fetch user for response
     from sqlalchemy import select
+
     from app.models.db import User as UserModel
 
     user = (
@@ -115,6 +118,7 @@ async def login(
     await session.commit()
 
     from sqlalchemy import select
+
     from app.models.db import User as UserModel
 
     user = (
@@ -193,6 +197,7 @@ async def discord_callback(
     await session.commit()
 
     from sqlalchemy import select
+
     from app.models.db import User as UserModel
 
     user = (
@@ -231,6 +236,7 @@ async def refresh(
     await session.commit()
 
     from sqlalchemy import select
+
     from app.models.db import User as UserModel
 
     user = (
@@ -262,12 +268,29 @@ async def me(
         )
         for m in user.org_memberships
     ]
+
+    dj_profile = None
+    if user.dj_profile is not None:
+        dj_profile = DJProfileResponse(
+            id=user.dj_profile.id,
+            user_id=user.dj_profile.user_id,
+            dj_name=user.dj_profile.dj_name,
+            bio=user.dj_profile.bio,
+            genres=user.dj_profile.genres,
+            avatar_url=user.dj_profile.avatar_url,
+            is_public=user.dj_profile.is_public,
+            created_at=user.dj_profile.created_at,
+        )
+
     return UserProfileResponse(
         id=user.id,
         display_name=user.display_name,
         email=user.email,
         discord_username=user.discord_username,
         avatar_url=user.avatar_url,
+        onboarding_completed=user.onboarding_completed_at is not None,
+        user_type=user.user_type,
+        dj_profile=dj_profile,
         organizations=orgs,
     )
 

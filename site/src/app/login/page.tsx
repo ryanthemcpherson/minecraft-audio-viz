@@ -34,7 +34,7 @@ export default function LoginPage() {
           : await register(email, password, displayName);
 
       setAuth(res.access_token, res.refresh_token, res.user);
-      router.push("/dashboard");
+      router.push(res.user.onboarding_completed ? "/dashboard" : "/onboarding");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
