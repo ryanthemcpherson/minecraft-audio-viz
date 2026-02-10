@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useMemo, useCallback, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import type { RootState } from "@react-three/fiber";
-import type * as THREE from "three";
+import * as THREE from "three";
 import PatternScene from "./PatternScene";
 import type { VisualizationPattern } from "@/lib/patterns/base";
 
@@ -82,6 +82,8 @@ export default function PatternCard({
   // Capture WebGL renderer on canvas creation for proper cleanup
   const handleCreated = useCallback((state: RootState) => {
     glRef.current = state.gl;
+    state.gl.toneMapping = THREE.ACESFilmicToneMapping;
+    state.gl.toneMappingExposure = 1.4;
   }, []);
 
   // IntersectionObserver to track viewport visibility
@@ -181,9 +183,9 @@ export default function PatternCard({
             }
           >
             <Canvas
-              dpr={1}
+              dpr={typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 1.5) : 1}
               gl={{
-                antialias: false,
+                antialias: true,
                 alpha: true,
                 powerPreference: "low-power",
               }}
@@ -231,9 +233,9 @@ export default function PatternCard({
       </div>
 
       {/* Info */}
-      <div className="px-4 py-3">
-        <h3 className="text-sm font-semibold text-text-primary">{name}</h3>
-        <p className="mt-0.5 text-xs text-text-secondary line-clamp-2">
+      <div className="px-5 py-4">
+        <h3 className="text-base font-semibold text-text-primary">{name}</h3>
+        <p className="mt-1 text-sm text-text-secondary line-clamp-2">
           {description}
         </p>
       </div>

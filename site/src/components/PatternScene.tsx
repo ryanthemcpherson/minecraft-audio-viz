@@ -12,11 +12,11 @@ const TEMP_COLOR = new THREE.Color();
 
 // Band colors: orange, yellow, green, blue, magenta (matching the main visualizer)
 const BAND_COLORS = [
-  new THREE.Color(0xff9100),
-  new THREE.Color(0xffea00),
+  new THREE.Color(0xff6d00),
+  new THREE.Color(0xffd600),
   new THREE.Color(0x00e676),
   new THREE.Color(0x00b0ff),
-  new THREE.Color(0xd500f9),
+  new THREE.Color(0xe040fb),
 ];
 
 interface PatternSceneProps {
@@ -108,7 +108,7 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
         const py = prev[pi + 1] || targetY;
         const pz = prev[pi + 2] || targetZ;
 
-        const lerpFactor = 0.15;
+        const lerpFactor = 0.22;
         const x = px + (targetX - px) * lerpFactor;
         const y = py + (targetY - py) * lerpFactor;
         const z = pz + (targetZ - pz) * lerpFactor;
@@ -125,7 +125,7 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
 
         // Color by band
         const bandColor = BAND_COLORS[Math.min(e.band, 4)];
-        const brightness = 0.5 + e.scale * 1.5;
+        const brightness = 0.6 + e.scale * 2.5;
         TEMP_COLOR.copy(bandColor).multiplyScalar(brightness);
         mesh.setColorAt(i, TEMP_COLOR);
       } else {
@@ -145,17 +145,17 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
 
     // Slow auto-rotate (skip for static camera patterns)
     if (groupRef.current && !staticCamera) {
-      groupRef.current.rotation.y = time * 0.15;
+      groupRef.current.rotation.y = time * 0.15 + Math.sin(time * 0.3) * 0.1;
     }
   });
 
   return (
     <>
-      <ambientLight intensity={0.4} />
-      <pointLight position={[3, 4, 3]} intensity={0.5} color="#00D4FF" />
-      <pointLight position={[-3, 3, -2]} intensity={0.3} color="#8B5CF6" />
-      <pointLight position={[0, -2, 3]} intensity={0.2} color="#FF006E" />
-      <fog attach="fog" args={["#050505", 5, 16]} />
+      <ambientLight intensity={0.15} />
+      <pointLight position={[3, 4, 3]} intensity={1.2} distance={12} color="#00D4FF" />
+      <pointLight position={[-3, 3, -2]} intensity={0.8} distance={12} color="#8B5CF6" />
+      <pointLight position={[0, -2, 3]} intensity={0.5} distance={10} color="#FF006E" />
+      <fog attach="fog" args={["#050505", 6, 20]} />
 
       <group ref={groupRef}>
         <instancedMesh ref={meshRef} args={[undefined, undefined, maxCount]}>
@@ -164,8 +164,8 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
             toneMapped={false}
             transparent
             opacity={0.9}
-            roughness={0.3}
-            metalness={0.1}
+            roughness={0.15}
+            metalness={0.4}
           />
         </instancedMesh>
       </group>

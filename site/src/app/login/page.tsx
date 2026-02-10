@@ -52,8 +52,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 pt-20">
-      <div className="w-full max-w-md rounded-2xl border border-white/5 bg-white/[0.02] p-8 backdrop-blur-xl">
+    <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
+      {/* Background glow */}
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-electric-blue/5 rounded-full blur-[120px]" />
+
+      <div className="relative w-full max-w-md glass-card rounded-2xl p-8">
         {/* Tabs */}
         <div className="mb-8 flex rounded-lg border border-white/5 bg-white/[0.02] p-1">
           <button
@@ -61,7 +64,7 @@ export default function LoginPage() {
             className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               tab === "login"
                 ? "bg-white/10 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+                : "text-text-secondary hover:text-text-primary"
             }`}
           >
             Log in
@@ -71,7 +74,7 @@ export default function LoginPage() {
             className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               tab === "signup"
                 ? "bg-white/10 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+                : "text-text-secondary hover:text-text-primary"
             }`}
           >
             Sign up
@@ -91,7 +94,7 @@ export default function LoginPage() {
 
         <div className="mb-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-white/10" />
-          <span className="text-xs text-zinc-500">or</span>
+          <span className="text-xs text-text-secondary">or</span>
           <div className="h-px flex-1 bg-white/10" />
         </div>
 
@@ -99,7 +102,7 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {tab === "signup" && (
             <div>
-              <label htmlFor="displayName" className="mb-1 block text-sm text-zinc-400">
+              <label htmlFor="displayName" className="mb-1 block text-sm text-text-secondary">
                 Display name
               </label>
               <input
@@ -108,14 +111,14 @@ export default function LoginPage() {
                 required
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#00D4FF]/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
                 placeholder="Your name"
               />
             </div>
           )}
 
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm text-zinc-400">
+            <label htmlFor="email" className="mb-1 block text-sm text-text-secondary">
               Email
             </label>
             <input
@@ -124,13 +127,13 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#00D4FF]/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm text-zinc-400">
+            <label htmlFor="password" className="mb-1 block text-sm text-text-secondary">
               Password
             </label>
             <input
@@ -140,7 +143,7 @@ export default function LoginPage() {
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#00D4FF]/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
               placeholder={tab === "signup" ? "Min 8 characters" : "Your password"}
             />
           </div>
@@ -154,7 +157,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 rounded-lg bg-gradient-to-r from-[#00D4FF] to-[#7B2FFF] px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {loading
               ? "..."

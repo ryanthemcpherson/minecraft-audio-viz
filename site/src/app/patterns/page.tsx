@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import PatternGallery from "@/components/PatternGallery";
-import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
@@ -12,8 +11,6 @@ export const metadata: Metadata = {
 export default function PatternsPage() {
   return (
     <>
-      <Navbar />
-
       {/* Hero */}
       <section className="relative overflow-hidden pt-32 pb-16">
         {/* Background glow */}

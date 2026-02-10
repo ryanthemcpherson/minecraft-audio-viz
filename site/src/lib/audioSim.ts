@@ -48,8 +48,8 @@ export function generateAudioState(
 
   // Beat detection - trigger on strong bass peaks
   const beatPhase = (t % BEAT_INTERVAL) / BEAT_INTERVAL;
-  const isBeat = beatPhase < 0.05 && bass > 0.5;
-  const beatIntensity = isBeat ? 0.6 + bass * 0.4 : 0;
+  const isBeat = beatPhase < 0.08 && bass > 0.5;
+  const beatIntensity = isBeat ? 0.5 + bass * 0.5 : 0;
 
   return {
     bands,

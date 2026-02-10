@@ -2,6 +2,7 @@
 
 import { useRef, useMemo } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
+import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 
 // --- Constants ---
@@ -40,7 +41,7 @@ function getSimulatedAudio(
   const value = bass * w[0] + mid * w[1] + treble * w[2];
 
   // Add a slow "beat" pulse
-  const beat = Math.pow(Math.max(0, Math.sin(time * 2.0)), 8) * 0.4;
+  const beat = Math.pow(Math.max(0, Math.sin(time * 2.0)), 5) * 0.55;
 
   return Math.min(1, value * 0.8 + beat);
 }
@@ -112,7 +113,7 @@ function BlockRing({
       mesh.setMatrixAt(i, TEMP_OBJECT.matrix);
 
       // Modulate color brightness based on audio intensity
-      const brightness = 0.3 + audio * 0.7;
+      const brightness = 0.4 + audio * 1.2;
       TEMP_COLOR.setRGB(
         colorArray[i * 3] * brightness,
         colorArray[i * 3 + 1] * brightness,
@@ -133,7 +134,7 @@ function BlockRing({
         transparent
         opacity={0.85}
         roughness={0.3}
-        metalness={0.1}
+        metalness={0.3}
       />
     </instancedMesh>
   );
@@ -203,7 +204,7 @@ function EqualizerGrid() {
         TEMP_OBJECT.updateMatrix();
         mesh.setMatrixAt(idx, TEMP_OBJECT.matrix);
 
-        const brightness = 0.2 + audio * 0.8;
+        const brightness = 0.3 + audio * 1.2;
         TEMP_COLOR.setRGB(
           colorArray[idx * 3] * brightness,
           colorArray[idx * 3 + 1] * brightness,
@@ -225,7 +226,7 @@ function EqualizerGrid() {
         transparent
         opacity={0.7}
         roughness={0.4}
-        metalness={0.1}
+        metalness={0.3}
       />
     </instancedMesh>
   );
@@ -237,7 +238,7 @@ function Scene() {
 
   useFrame(({ clock }) => {
     if (groupRef.current) {
-      groupRef.current.rotation.y = clock.getElapsedTime() * 0.08;
+      groupRef.current.rotation.y = clock.getElapsedTime() * 0.12;
     }
   });
 
@@ -301,6 +302,9 @@ function VisualizerCanvas() {
       <pointLight position={[0, 3, -5]} intensity={0.3} color="#FF006E" />
       <fog attach="fog" args={["#0a0a0a", 8, 24]} />
       <Scene />
+      <EffectComposer>
+        <Bloom intensity={0.8} luminanceThreshold={0.6} luminanceSmoothing={0.3} mipmapBlur />
+      </EffectComposer>
     </Canvas>
   );
 }

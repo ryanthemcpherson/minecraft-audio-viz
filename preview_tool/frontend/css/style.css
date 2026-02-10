@@ -12,9 +12,9 @@
     --bg-elevated: #22222e;
 
     /* Accent colors */
-    --accent: #6366f1;
-    --accent-hover: #818cf8;
-    --accent-dim: rgba(99, 102, 241, 0.2);
+    --accent: #00D4FF;
+    --accent-hover: #33DDFF;
+    --accent-dim: rgba(0, 212, 255, 0.2);
 
     /* Text colors */
     --text-primary: #f8fafc;
@@ -34,8 +34,8 @@
     --band-air: #d500f9;
 
     /* Preset accent colors */
-    --preset-auto: #6366f1;
-    --preset-auto-dim: rgba(99, 102, 241, 0.15);
+    --preset-auto: #00D4FF;
+    --preset-auto-dim: rgba(0, 212, 255, 0.15);
     --preset-edm: #ec4899;
     --preset-edm-dim: rgba(236, 72, 153, 0.15);
     --preset-chill: #14b8a6;
@@ -223,8 +223,8 @@ body {
     width: 100%;
     height: 100%;
     display: block;
-    box-shadow: inset 0 0 40px rgba(99, 102, 241, 0.06),
-                inset 0 0 80px rgba(99, 102, 241, 0.03);
+    box-shadow: inset 0 0 40px rgba(0, 212, 255, 0.06),
+                inset 0 0 80px rgba(0, 212, 255, 0.03);
 }
 
 /* Subtle canvas edge glow via pseudo-element on the section */
@@ -233,8 +233,8 @@ body {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    border: 1px solid rgba(99, 102, 241, 0.12);
-    box-shadow: inset 0 0 30px rgba(99, 102, 241, 0.04);
+    border: 1px solid rgba(0, 212, 255, 0.12);
+    box-shadow: inset 0 0 30px rgba(0, 212, 255, 0.04);
     z-index: 1;
 }
 
@@ -345,8 +345,8 @@ body {
 
 .beat-overlay.active {
     border-color: var(--accent);
-    box-shadow: inset 0 0 80px rgba(99, 102, 241, 0.15),
-                inset 0 0 160px rgba(99, 102, 241, 0.05);
+    box-shadow: inset 0 0 80px rgba(0, 212, 255, 0.15),
+                inset 0 0 160px rgba(0, 212, 255, 0.05);
 }
 
 /* ==========================================================================
@@ -378,19 +378,19 @@ body {
 }
 
 .control-sidebar::-webkit-scrollbar-thumb {
-    background: rgba(99, 102, 241, 0.2);
+    background: rgba(0, 212, 255, 0.2);
     border-radius: 10px;
     transition: background 0.2s ease;
 }
 
 .control-sidebar::-webkit-scrollbar-thumb:hover {
-    background: rgba(99, 102, 241, 0.4);
+    background: rgba(0, 212, 255, 0.4);
 }
 
 /* Firefox scrollbar */
 .control-sidebar {
     scrollbar-width: thin;
-    scrollbar-color: rgba(99, 102, 241, 0.2) transparent;
+    scrollbar-color: rgba(0, 212, 255, 0.2) transparent;
 }
 
 /* Panel */
@@ -613,11 +613,11 @@ body {
 
 .view-mode-option input:checked + .view-mode-label {
     background: var(--accent);
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.35);
 }
 
 .view-mode-option:hover:not(:has(input:checked)) .view-mode-label {
-    background: rgba(99, 102, 241, 0.1);
+    background: rgba(0, 212, 255, 0.1);
 }
 
 /* Hide icons in pill mode for cleaner look */
@@ -706,7 +706,7 @@ body {
     background: var(--preset-auto);
     border-color: var(--preset-auto);
     color: #fff;
-    box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
 }
 .preset-btn[data-preset="edm"].active {
     background: var(--preset-edm);
@@ -983,25 +983,25 @@ body {
 
 .beat-indicator.active {
     background: var(--accent);
-    border-color: rgba(99, 102, 241, 0.6);
-    box-shadow: 0 0 16px rgba(99, 102, 241, 0.5),
-                0 0 32px rgba(99, 102, 241, 0.25),
-                0 0 48px rgba(99, 102, 241, 0.1);
+    border-color: rgba(0, 212, 255, 0.6);
+    box-shadow: 0 0 16px rgba(0, 212, 255, 0.5),
+                0 0 32px rgba(0, 212, 255, 0.25),
+                0 0 48px rgba(0, 212, 255, 0.1);
     animation: beatPulse 0.2s ease-out;
 }
 
 @keyframes beatPulse {
     0% {
         transform: scale(1.15);
-        box-shadow: 0 0 24px rgba(99, 102, 241, 0.7),
-                    0 0 48px rgba(99, 102, 241, 0.4),
-                    0 0 64px rgba(99, 102, 241, 0.15);
+        box-shadow: 0 0 24px rgba(0, 212, 255, 0.7),
+                    0 0 48px rgba(0, 212, 255, 0.4),
+                    0 0 64px rgba(0, 212, 255, 0.15);
     }
     100% {
         transform: scale(1);
-        box-shadow: 0 0 16px rgba(99, 102, 241, 0.5),
-                    0 0 32px rgba(99, 102, 241, 0.25),
-                    0 0 48px rgba(99, 102, 241, 0.1);
+        box-shadow: 0 0 16px rgba(0, 212, 255, 0.5),
+                    0 0 32px rgba(0, 212, 255, 0.25),
+                    0 0 48px rgba(0, 212, 255, 0.1);
     }
 }
 
@@ -1098,7 +1098,7 @@ body {
 .beat-flash {
     position: fixed;
     inset: 0;
-    background: radial-gradient(circle at center, rgba(99, 102, 241, 0.25) 0%, transparent 55%);
+    background: radial-gradient(circle at center, rgba(0, 212, 255, 0.25) 0%, transparent 55%);
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.08s ease-out;

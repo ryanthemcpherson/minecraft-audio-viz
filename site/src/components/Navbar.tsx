@@ -88,7 +88,7 @@ export default function Navbar() {
                         {user.display_name.charAt(0).toUpperCase()}
                       </div>
                     )}
-                    <span className="text-sm text-zinc-300">
+                    <span className="text-sm text-text-primary">
                       {user.display_name}
                     </span>
                   </button>
@@ -98,7 +98,7 @@ export default function Navbar() {
                       <Link
                         href="/dashboard"
                         onClick={() => setUserMenuOpen(false)}
-                        className="block px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
+                        className="block px-4 py-2 text-sm text-text-primary transition-colors hover:bg-white/5 hover:text-white"
                       >
                         Dashboard
                       </Link>
@@ -107,7 +107,7 @@ export default function Navbar() {
                           setUserMenuOpen(false);
                           logout();
                         }}
-                        className="block w-full px-4 py-2 text-left text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
+                        className="block w-full px-4 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
                       >
                         Log out
                       </button>
@@ -117,7 +117,7 @@ export default function Navbar() {
               ) : (
                 <Link
                   href="/login"
-                  className="rounded-lg bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+                  className="rounded-lg bg-white/5 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-white/10 hover:text-white"
                 >
                   Log in
                 </Link>
@@ -192,7 +192,7 @@ export default function Navbar() {
                         setMobileOpen(false);
                         logout();
                       }}
-                      className="block w-full rounded-lg px-4 py-3 text-left text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
+                      className="block w-full rounded-lg px-4 py-3 text-left text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
                     >
                       Log out
                     </button>
@@ -201,7 +201,7 @@ export default function Navbar() {
                   <Link
                     href="/login"
                     onClick={() => setMobileOpen(false)}
-                    className="block rounded-lg px-4 py-3 text-sm font-medium text-[#00D4FF] transition-colors hover:bg-white/5"
+                    className="block rounded-lg px-4 py-3 text-sm font-medium text-electric-blue transition-colors hover:bg-white/5"
                   >
                     Log in
                   </Link>
