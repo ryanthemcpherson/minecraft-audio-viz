@@ -221,7 +221,9 @@ async def refresh_access_token(
 
     # Compare in a timezone-safe way (SQLite returns naive datetimes)
     now = datetime.now(timezone.utc)
-    expires = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    expires = (
+        row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    )
     if expires < now:
         row.revoked = True
         raise ValueError("Refresh token expired")

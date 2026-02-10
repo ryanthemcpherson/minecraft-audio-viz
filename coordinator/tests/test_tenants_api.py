@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-import pytest_asyncio
 from httpx import AsyncClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,7 +62,7 @@ async def _setup_tenant(client: AsyncClient) -> dict:
             "name": "Friday Night Show",
             "max_djs": 8,
         },
-        headers={"Authorization": f"Bearer tenant-test-key"},
+        headers={"Authorization": "Bearer tenant-test-key"},
     )
     assert show_resp.status_code == 201
     show = show_resp.json()
@@ -80,7 +77,7 @@ async def _setup_tenant(client: AsyncClient) -> dict:
 
 class TestResolveTenant:
     async def test_resolve_returns_org_and_shows(self, client: AsyncClient) -> None:
-        data = await _setup_tenant(client)
+        await _setup_tenant(client)
         resp = await client.get("/api/v1/tenants/resolve?slug=cool-server")
         assert resp.status_code == 200
         body = resp.json()

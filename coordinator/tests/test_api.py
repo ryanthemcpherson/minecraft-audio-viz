@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -187,7 +186,7 @@ async def test_heartbeat(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_heartbeat_wrong_server_returns_403(client: AsyncClient) -> None:
     # Register a server
-    reg_resp = await client.post(
+    await client.post(
         "/api/v1/servers/register",
         json={
             "name": "Server A",

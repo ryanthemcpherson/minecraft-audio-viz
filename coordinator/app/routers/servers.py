@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets as _secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -18,8 +19,6 @@ from app.models.schemas import (
 )
 from app.services.password import hash_password, verify_password
 
-import secrets as _secrets
-
 router = APIRouter(tags=["servers"])
 
 
@@ -31,7 +30,7 @@ async def _authenticate_server(
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid Authorization header format")
 
-    api_key = authorization[len("Bearer "):]
+    api_key = authorization[len("Bearer ") :]
     stmt = select(VJServer).where(VJServer.is_active.is_(True))
     result = await session.execute(stmt)
     servers = result.scalars().all()
@@ -46,6 +45,7 @@ async def _authenticate_server(
 # ---------------------------------------------------------------------------
 # POST /servers/register
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/servers/register",
@@ -91,6 +91,7 @@ async def register_server(
 # PUT /servers/{id}/heartbeat
 # ---------------------------------------------------------------------------
 
+
 @router.put(
     "/servers/{server_id}/heartbeat",
     response_model=HeartbeatResponse,
@@ -109,11 +110,7 @@ async def heartbeat(
         raise HTTPException(status_code=403, detail="Server ID mismatch")
 
     now = datetime.now(timezone.utc)
-    stmt = (
-        update(VJServer)
-        .where(VJServer.id == server_id)
-        .values(last_heartbeat=now)
-    )
+    stmt = update(VJServer).where(VJServer.id == server_id).values(last_heartbeat=now)
     await session.execute(stmt)
     await session.commit()
 

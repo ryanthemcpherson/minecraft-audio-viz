@@ -20,7 +20,7 @@ import jwt as pyjwt
 
 ISSUER = "mcav-coordinator"
 ALGORITHM = "HS256"
-TOKEN_TYPE = "user_session"
+TOKEN_TYPE = "user_session"  # nosec B105
 
 
 @dataclass(frozen=True)
@@ -57,9 +57,7 @@ def verify_user_token(token: str, *, jwt_secret: str) -> UserTokenPayload:
 
     Raises ``pyjwt.InvalidTokenError`` (or a subclass) on failure.
     """
-    decoded = pyjwt.decode(
-        token, jwt_secret, algorithms=[ALGORITHM], issuer=ISSUER
-    )
+    decoded = pyjwt.decode(token, jwt_secret, algorithms=[ALGORITHM], issuer=ISSUER)
 
     if decoded.get("token_type") != TOKEN_TYPE:
         raise pyjwt.InvalidTokenError("Not a user-session token")

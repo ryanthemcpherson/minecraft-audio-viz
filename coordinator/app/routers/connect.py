@@ -26,6 +26,7 @@ router = APIRouter(tags=["connect"])
 # GET /connect/{code}  --  PUBLIC, rate-limited via middleware
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/connect/{code}",
     response_model=ConnectCodeResponse,
@@ -45,10 +46,7 @@ async def resolve_connect_code(
     normalised = normalise_code(code)
 
     # Find active show with this code
-    stmt = (
-        select(Show)
-        .where(Show.connect_code == normalised, Show.status == "active")
-    )
+    stmt = select(Show).where(Show.connect_code == normalised, Show.status == "active")
     result = await session.execute(stmt)
     show = result.scalar_one_or_none()
 

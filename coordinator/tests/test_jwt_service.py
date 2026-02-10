@@ -7,7 +7,6 @@ import uuid
 
 import jwt as pyjwt
 import pytest
-
 from app.services.jwt_service import (
     ALGORITHM,
     ISSUER,
@@ -136,7 +135,7 @@ class TestVerifyToken:
             jwt_secret=jwt_secret,
         )
         with pytest.raises(pyjwt.InvalidSignatureError):
-            verify_token(token, jwt_secret="wrong-secret", server_id=server_id)
+            verify_token(token, jwt_secret="wrong-secret", server_id=server_id)  # nosec B106
 
     def test_wrong_server_id_raises(
         self,

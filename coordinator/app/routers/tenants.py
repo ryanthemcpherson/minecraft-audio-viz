@@ -46,10 +46,8 @@ async def resolve_tenant(
 
     # Servers belonging to this org
     servers = (
-        await session.execute(
-            select(VJServer).where(VJServer.org_id == org.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(VJServer).where(VJServer.org_id == org.id))).scalars().all()
+    )
 
     server_ids = [s.id for s in servers]
 
@@ -57,13 +55,17 @@ async def resolve_tenant(
     active_shows: list[TenantShowInfo] = []
     if server_ids:
         shows = (
-            await session.execute(
-                select(Show).where(
-                    Show.server_id.in_(server_ids),
-                    Show.status == "active",
+            (
+                await session.execute(
+                    select(Show).where(
+                        Show.server_id.in_(server_ids),
+                        Show.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         # Build a server name lookup
         server_name_map = {s.id: s.name for s in servers}

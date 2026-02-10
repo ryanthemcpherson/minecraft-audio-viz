@@ -17,9 +17,30 @@ from app.models.db import Show
 
 # 24 four-letter music-themed words
 MUSIC_WORDS: list[str] = [
-    "BASS", "BEAT", "DROP", "DRUM", "ECHO", "FADE", "FLOW", "FUNK",
-    "GLOW", "HYPE", "JAZZ", "KICK", "LOOP", "MIDI", "NOTE", "PEAK",
-    "RAVE", "RIFF", "SYNC", "TAPE", "TONE", "TUNE", "VIBE", "WAVE",
+    "BASS",
+    "BEAT",
+    "DROP",
+    "DRUM",
+    "ECHO",
+    "FADE",
+    "FLOW",
+    "FUNK",
+    "GLOW",
+    "HYPE",
+    "JAZZ",
+    "KICK",
+    "LOOP",
+    "MIDI",
+    "NOTE",
+    "PEAK",
+    "RAVE",
+    "RIFF",
+    "SYNC",
+    "TAPE",
+    "TONE",
+    "TUNE",
+    "VIBE",
+    "WAVE",
 ]
 
 # 30 unambiguous alphanumeric characters (no 0/O/1/I/L)
@@ -56,9 +77,7 @@ async def generate_unique_code(session: AsyncSession, max_attempts: int = 10) ->
         if existing is None:
             return code
 
-    raise RuntimeError(
-        f"Failed to generate a unique connect code after {max_attempts} attempts"
-    )
+    raise RuntimeError(f"Failed to generate a unique connect code after {max_attempts} attempts")
 
 
 def normalise_code(raw: str) -> str:

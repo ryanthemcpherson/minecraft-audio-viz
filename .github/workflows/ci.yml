@@ -27,7 +27,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install "ruff>=0.15,<1"
 
       - name: Ruff check
         run: ruff check audio_processor/ python_client/
@@ -197,7 +197,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install "ruff>=0.15,<1"
 
       - name: Ruff check coordinator
         run: ruff check coordinator/

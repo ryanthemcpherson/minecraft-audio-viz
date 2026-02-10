@@ -27,6 +27,7 @@ router = APIRouter(tags=["shows"])
 # POST /shows
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/shows",
     response_model=CreateShowResponse,
@@ -71,6 +72,7 @@ async def create_show(
 # DELETE /shows/{show_id}
 # ---------------------------------------------------------------------------
 
+
 @router.delete(
     "/shows/{show_id}",
     response_model=EndShowResponse,
@@ -112,6 +114,7 @@ async def end_show(
 # ---------------------------------------------------------------------------
 # GET /shows/{show_id}
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/shows/{show_id}",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,9 +29,7 @@ async def get_current_user(
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    stmt = select(User).where(
-        User.id == uuid.UUID(payload.sub), User.is_active.is_(True)
-    )
+    stmt = select(User).where(User.id == uuid.UUID(payload.sub), User.is_active.is_(True))
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
 
