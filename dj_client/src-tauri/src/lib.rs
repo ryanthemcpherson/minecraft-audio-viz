@@ -311,369 +311,374 @@ async fn run_bridge(
     let mut reconnect_count: u32 = 0;
 
     'reconnect: loop {
-    let mut interval = tokio::time::interval(Duration::from_millis(16));
-    FRAME_SEQ.store(0, Ordering::Relaxed);
-    let mut mc_tx: Option<mpsc::Sender<Message>> = None;
-    let mut mc_shutdown_tx: Option<mpsc::Sender<()>> = None;
-    let mut mc_target_key: Option<String> = None;
-    let mut mc_pool_key: Option<String> = None;
-    let mut next_mc_connect_attempt = Instant::now();
-    let mut last_phase_predicted_beat_at = 0.0_f64;
-    // Track whether this iteration exited due to explicit shutdown
-    let mut shutdown_requested = false;
+        let mut interval = tokio::time::interval(Duration::from_millis(16));
+        FRAME_SEQ.store(0, Ordering::Relaxed);
+        let mut mc_tx: Option<mpsc::Sender<Message>> = None;
+        let mut mc_shutdown_tx: Option<mpsc::Sender<()>> = None;
+        let mut mc_target_key: Option<String> = None;
+        let mut mc_pool_key: Option<String> = None;
+        let mut next_mc_connect_attempt = Instant::now();
+        let mut last_phase_predicted_beat_at = 0.0_f64;
+        // Track whether this iteration exited due to explicit shutdown
+        let mut shutdown_requested = false;
 
-    log::info!(
-        "Bridge task started (direct batch mode: {}, reconnect #{})",
-        if direct_batch_enabled { "enabled" } else { "disabled" },
-        reconnect_count
-    );
+        log::info!(
+            "Bridge task started (direct batch mode: {}, reconnect #{})",
+            if direct_batch_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            reconnect_count
+        );
 
-    loop {
-        tokio::select! {
-            _ = shutdown_rx.recv() => {
-                log::info!("Bridge task received shutdown signal");
-                shutdown_requested = true;
-                break;
-            }
-            _ = interval.tick() => {
-                // 1. Read audio analysis + VJ sender + connection state (brief lock)
-                let (analysis, tx, conn_state_opt) = {
-                    let app_state = state_arc.lock();
-                    let analysis = app_state.audio_capture.as_ref()
-                        .map(|c| c.get_analysis());
-                    let tx = app_state.client.as_ref()
-                        .and_then(|c| c.get_tx_clone());
-                    let conn_state = app_state.client.as_ref()
-                        .map(|c| c.get_state());
-                    (analysis, tx, conn_state)
-                };
-                // Lock dropped
-
-                // If no client tx, connection is lost
-                let tx = match tx {
-                    Some(tx) => tx,
-                    None => {
-                        // Client disconnected externally
-                        let mut app_state = state_arc.lock();
-                        app_state.status.connected = false;
-                        app_state.status.error = Some("Connection lost".to_string());
-                        break;
-                    }
-                };
-                let conn_state = match conn_state_opt {
-                    Some(s) => s,
-                    None => {
-                        let mut app_state = state_arc.lock();
-                        app_state.status.connected = false;
-                        app_state.status.error = Some("Connection lost".to_string());
-                        break;
-                    }
-                };
-
-                // 1.5 Manage direct MC route (dual publish) based on stream_route policy.
-                let desired_route = resolve_direct_mc_route(&conn_state);
-                let desired_target_key = desired_route
-                    .as_ref()
-                    .map(|r| format!("{}:{}:{}", r.host, r.port, r.zone));
-
-                if desired_route.is_none() {
-                    if let Some(shutdown) = mc_shutdown_tx.take() {
-                        let _ = shutdown.send(()).await;
-                    }
-                    mc_tx = None;
-                    mc_target_key = None;
-                    mc_pool_key = None;
-                } else if mc_target_key != desired_target_key || mc_tx.is_none() {
-                    if Instant::now() >= next_mc_connect_attempt {
-                        if let Some(route) = desired_route.as_ref() {
-                            match start_direct_mc_session(route).await {
-                                Ok((direct_tx, direct_shutdown)) => {
-                                    mc_tx = Some(direct_tx);
-                                    mc_shutdown_tx = Some(direct_shutdown);
-                                    mc_target_key = desired_target_key;
-                                    mc_pool_key = None;
-                                    log::info!(
-                                        "Direct MC dual-publish enabled -> {}:{} ({}, entities={})",
-                                        route.host, route.port, route.zone, route.entity_count
-                                    );
-                                }
-                                Err(e) => {
-                                    log::warn!("{}", e);
-                                    next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
-                                }
-                            }
-                        }
-                    }
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    log::info!("Bridge task received shutdown signal");
+                    shutdown_requested = true;
+                    break;
                 }
+                _ = interval.tick() => {
+                    // 1. Read audio analysis + VJ sender + connection state (brief lock)
+                    let (analysis, tx, conn_state_opt) = {
+                        let app_state = state_arc.lock();
+                        let analysis = app_state.audio_capture.as_ref()
+                            .map(|c| c.get_analysis());
+                        let tx = app_state.client.as_ref()
+                            .and_then(|c| c.get_tx_clone());
+                        let conn_state = app_state.client.as_ref()
+                            .map(|c| c.get_state());
+                        (analysis, tx, conn_state)
+                    };
+                    // Lock dropped
 
-                // 2. Send audio frame if we have analysis data
-                if let Some(ref analysis) = analysis {
-                    let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
-                    let now_secs = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f64();
-
-                    // Phase-aware beat assist: when tempo lock is strong and phase is near
-                    // the beat boundary, emit a conservative predicted beat so both VJ and
-                    // direct MC routes stay visually tight.
-                    let mut out_is_beat = analysis.is_beat;
-                    let mut out_beat_intensity = analysis.beat_intensity;
-                    if !out_is_beat && analysis.tempo_confidence >= 0.60 && analysis.bpm >= 60.0 {
-                        let beat_period = 60.0_f64 / analysis.bpm as f64;
-                        let phase = analysis.beat_phase.clamp(0.0, 1.0);
-                        let near_boundary = phase < 0.08 || phase > 0.92;
-                        let can_fire = last_phase_predicted_beat_at <= 0.0
-                            || (now_secs - last_phase_predicted_beat_at) >= (beat_period * 0.60);
-                        if near_boundary && can_fire {
-                            out_is_beat = true;
-                            out_beat_intensity =
-                                out_beat_intensity.max((0.50 + analysis.tempo_confidence * 0.25).clamp(0.0, 1.0));
-                            last_phase_predicted_beat_at = now_secs;
-                        }
-                    }
-
-                    let msg = AudioFrameMessage::new(
-                        seq,
-                        analysis.bands,
-                        analysis.peak,
-                        out_is_beat,
-                        out_beat_intensity,
-                        analysis.bpm,
-                        analysis.tempo_confidence,
-                        analysis.beat_phase,
-                    );
-
-                    if let Ok(json) = serde_json::to_string(&msg) {
-                        if tx.send(Message::Text(json.into())).await.is_err() {
-                            log::error!("Failed to send audio frame - channel closed");
+                    // If no client tx, connection is lost
+                    let tx = match tx {
+                        Some(tx) => tx,
+                        None => {
+                            // Client disconnected externally
                             let mut app_state = state_arc.lock();
                             app_state.status.connected = false;
                             app_state.status.error = Some("Connection lost".to_string());
                             break;
                         }
-                    }
-
-                    // Dual publish: route policy controls whether MC receives audio_state
-                    // (legacy) or full batch_update (feature flagged).
-                    if let (Some(direct_tx), Some(route)) = (mc_tx.as_ref(), desired_route.as_ref()) {
-                        let mc_msg = if direct_batch_enabled {
-                            let pool_key = format!(
-                                "{}:{}:{}:{}",
-                                route.host, route.port, route.zone, route.entity_count
-                            );
-                            if mc_pool_key.as_ref() != Some(&pool_key) {
-                                let init_msg = json!({
-                                    "type": "init_pool",
-                                    "zone": route.zone,
-                                    "count": route.entity_count,
-                                    "material": "SEA_LANTERN"
-                                })
-                                .to_string();
-                                if direct_tx.send(Message::Text(init_msg.into())).await.is_err() {
-                                    mc_tx = None;
-                                    if let Some(shutdown) = mc_shutdown_tx.take() {
-                                        let _ = shutdown.send(()).await;
-                                    }
-                                    next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
-                                    log::warn!("Direct MC init_pool failed; will retry");
-                                    continue;
-                                }
-                                mc_pool_key = Some(pool_key);
-                            }
-
-                            let entities =
-                                build_direct_entities(&analysis, route.entity_count as usize, seq);
-                            let particles = if out_is_beat && out_beat_intensity > 0.2 {
-                                vec![json!({
-                                    "particle": "NOTE",
-                                    "x": 0.5,
-                                    "y": 0.5,
-                                    "z": 0.5,
-                                    "count": ((out_beat_intensity * 24.0).round() as i32).clamp(1, 100)
-                                })]
-                            } else {
-                                Vec::new()
-                            };
-                            json!({
-                                "type": "batch_update",
-                                "zone": route.zone,
-                                "entities": entities,
-                                "particles": particles,
-                                "bands": analysis.bands,
-                                "amplitude": analysis.peak,
-                                "is_beat": out_is_beat,
-                                "beat_intensity": out_beat_intensity,
-                                "bpm": analysis.bpm,
-                                "tempo_confidence": analysis.tempo_confidence,
-                                "beat_phase": analysis.beat_phase,
-                                "frame": seq,
-                                "source_id": "dj_tauri_client",
-                                "stream_seq": seq
-                            })
-                            .to_string()
-                        } else {
-                            json!({
-                                "type": "audio_state",
-                                "zone": route.zone,
-                                "bands": analysis.bands,
-                                "amplitude": analysis.peak,
-                                "is_beat": out_is_beat,
-                                "beat_intensity": out_beat_intensity,
-                                "bpm": analysis.bpm,
-                                "tempo_confidence": analysis.tempo_confidence,
-                                "beat_phase": analysis.beat_phase,
-                                "frame": seq
-                            })
-                            .to_string()
-                        };
-
-                        if direct_tx.send(Message::Text(mc_msg.into())).await.is_err() {
-                            mc_tx = None;
-                            if let Some(shutdown) = mc_shutdown_tx.take() {
-                                let _ = shutdown.send(()).await;
-                            }
-                            mc_pool_key = None;
-                            next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
-                            log::warn!("Direct MC dual-publish channel closed; will retry");
-                        }
-                    }
-                }
-
-                // 3. Update connection state from DjClient and emit events
-                {
-                    let mut app_state = state_arc.lock();
-                    if let Some(ref client) = app_state.client {
-                        let latest = client.get_state();
-                        app_state.status.is_active = latest.is_active;
-                        app_state.status.latency_ms = latest.latency_ms;
-                        app_state.status.route_mode = latest.route_mode;
-                        app_state.status.mc_connected = mc_tx.is_some();
-                        if !latest.connected {
+                    };
+                    let conn_state = match conn_state_opt {
+                        Some(s) => s,
+                        None => {
+                            let mut app_state = state_arc.lock();
                             app_state.status.connected = false;
-                            app_state.status.error = Some("Server disconnected".to_string());
-                            app_state.status.mc_connected = false;
+                            app_state.status.error = Some("Connection lost".to_string());
+                            break;
+                        }
+                    };
+
+                    // 1.5 Manage direct MC route (dual publish) based on stream_route policy.
+                    let desired_route = resolve_direct_mc_route(&conn_state);
+                    let desired_target_key = desired_route
+                        .as_ref()
+                        .map(|r| format!("{}:{}:{}", r.host, r.port, r.zone));
+
+                    if desired_route.is_none() {
+                        if let Some(shutdown) = mc_shutdown_tx.take() {
+                            let _ = shutdown.send(()).await;
+                        }
+                        mc_tx = None;
+                        mc_target_key = None;
+                        mc_pool_key = None;
+                    } else if mc_target_key != desired_target_key || mc_tx.is_none() {
+                        if Instant::now() >= next_mc_connect_attempt {
+                            if let Some(route) = desired_route.as_ref() {
+                                match start_direct_mc_session(route).await {
+                                    Ok((direct_tx, direct_shutdown)) => {
+                                        mc_tx = Some(direct_tx);
+                                        mc_shutdown_tx = Some(direct_shutdown);
+                                        mc_target_key = desired_target_key;
+                                        mc_pool_key = None;
+                                        log::info!(
+                                            "Direct MC dual-publish enabled -> {}:{} ({}, entities={})",
+                                            route.host, route.port, route.zone, route.entity_count
+                                        );
+                                    }
+                                    Err(e) => {
+                                        log::warn!("{}", e);
+                                        next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    // Push audio levels and status to frontend via events
+                    // 2. Send audio frame if we have analysis data
                     if let Some(ref analysis) = analysis {
-                        let _ = app_handle.emit("audio-levels", AudioLevels {
-                            bands: analysis.bands,
-                            peak: analysis.peak,
-                            is_beat: analysis.is_beat,
-                            beat_intensity: analysis.beat_intensity,
-                            bpm: analysis.bpm,
-                        });
+                        let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
+                        let now_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs_f64();
+
+                        // Phase-aware beat assist: when tempo lock is strong and phase is near
+                        // the beat boundary, emit a conservative predicted beat so both VJ and
+                        // direct MC routes stay visually tight.
+                        let mut out_is_beat = analysis.is_beat;
+                        let mut out_beat_intensity = analysis.beat_intensity;
+                        if !out_is_beat && analysis.tempo_confidence >= 0.60 && analysis.bpm >= 60.0 {
+                            let beat_period = 60.0_f64 / analysis.bpm as f64;
+                            let phase = analysis.beat_phase.clamp(0.0, 1.0);
+                            let near_boundary = phase < 0.08 || phase > 0.92;
+                            let can_fire = last_phase_predicted_beat_at <= 0.0
+                                || (now_secs - last_phase_predicted_beat_at) >= (beat_period * 0.60);
+                            if near_boundary && can_fire {
+                                out_is_beat = true;
+                                out_beat_intensity =
+                                    out_beat_intensity.max((0.50 + analysis.tempo_confidence * 0.25).clamp(0.0, 1.0));
+                                last_phase_predicted_beat_at = now_secs;
+                            }
+                        }
+
+                        let msg = AudioFrameMessage::new(
+                            seq,
+                            analysis.bands,
+                            analysis.peak,
+                            out_is_beat,
+                            out_beat_intensity,
+                            analysis.bpm,
+                            analysis.tempo_confidence,
+                            analysis.beat_phase,
+                        );
+
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            if tx.send(Message::Text(json.into())).await.is_err() {
+                                log::error!("Failed to send audio frame - channel closed");
+                                let mut app_state = state_arc.lock();
+                                app_state.status.connected = false;
+                                app_state.status.error = Some("Connection lost".to_string());
+                                break;
+                            }
+                        }
+
+                        // Dual publish: route policy controls whether MC receives audio_state
+                        // (legacy) or full batch_update (feature flagged).
+                        if let (Some(direct_tx), Some(route)) = (mc_tx.as_ref(), desired_route.as_ref()) {
+                            let mc_msg = if direct_batch_enabled {
+                                let pool_key = format!(
+                                    "{}:{}:{}:{}",
+                                    route.host, route.port, route.zone, route.entity_count
+                                );
+                                if mc_pool_key.as_ref() != Some(&pool_key) {
+                                    let init_msg = json!({
+                                        "type": "init_pool",
+                                        "zone": route.zone,
+                                        "count": route.entity_count,
+                                        "material": "SEA_LANTERN"
+                                    })
+                                    .to_string();
+                                    if direct_tx.send(Message::Text(init_msg.into())).await.is_err() {
+                                        mc_tx = None;
+                                        if let Some(shutdown) = mc_shutdown_tx.take() {
+                                            let _ = shutdown.send(()).await;
+                                        }
+                                        next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
+                                        log::warn!("Direct MC init_pool failed; will retry");
+                                        continue;
+                                    }
+                                    mc_pool_key = Some(pool_key);
+                                }
+
+                                let entities =
+                                    build_direct_entities(&analysis, route.entity_count as usize, seq);
+                                let particles = if out_is_beat && out_beat_intensity > 0.2 {
+                                    vec![json!({
+                                        "particle": "NOTE",
+                                        "x": 0.5,
+                                        "y": 0.5,
+                                        "z": 0.5,
+                                        "count": ((out_beat_intensity * 24.0).round() as i32).clamp(1, 100)
+                                    })]
+                                } else {
+                                    Vec::new()
+                                };
+                                json!({
+                                    "type": "batch_update",
+                                    "zone": route.zone,
+                                    "entities": entities,
+                                    "particles": particles,
+                                    "bands": analysis.bands,
+                                    "amplitude": analysis.peak,
+                                    "is_beat": out_is_beat,
+                                    "beat_intensity": out_beat_intensity,
+                                    "bpm": analysis.bpm,
+                                    "tempo_confidence": analysis.tempo_confidence,
+                                    "beat_phase": analysis.beat_phase,
+                                    "frame": seq,
+                                    "source_id": "dj_tauri_client",
+                                    "stream_seq": seq
+                                })
+                                .to_string()
+                            } else {
+                                json!({
+                                    "type": "audio_state",
+                                    "zone": route.zone,
+                                    "bands": analysis.bands,
+                                    "amplitude": analysis.peak,
+                                    "is_beat": out_is_beat,
+                                    "beat_intensity": out_beat_intensity,
+                                    "bpm": analysis.bpm,
+                                    "tempo_confidence": analysis.tempo_confidence,
+                                    "beat_phase": analysis.beat_phase,
+                                    "frame": seq
+                                })
+                                .to_string()
+                            };
+
+                            if direct_tx.send(Message::Text(mc_msg.into())).await.is_err() {
+                                mc_tx = None;
+                                if let Some(shutdown) = mc_shutdown_tx.take() {
+                                    let _ = shutdown.send(()).await;
+                                }
+                                mc_pool_key = None;
+                                next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
+                                log::warn!("Direct MC dual-publish channel closed; will retry");
+                            }
+                        }
                     }
-                    let _ = app_handle.emit("dj-status", &app_state.status);
+
+                    // 3. Update connection state from DjClient and emit events
+                    {
+                        let mut app_state = state_arc.lock();
+                        if let Some(ref client) = app_state.client {
+                            let latest = client.get_state();
+                            app_state.status.is_active = latest.is_active;
+                            app_state.status.latency_ms = latest.latency_ms;
+                            app_state.status.route_mode = latest.route_mode;
+                            app_state.status.mc_connected = mc_tx.is_some();
+                            if !latest.connected {
+                                app_state.status.connected = false;
+                                app_state.status.error = Some("Server disconnected".to_string());
+                                app_state.status.mc_connected = false;
+                            }
+                        }
+
+                        // Push audio levels and status to frontend via events
+                        if let Some(ref analysis) = analysis {
+                            let _ = app_handle.emit("audio-levels", AudioLevels {
+                                bands: analysis.bands,
+                                peak: analysis.peak,
+                                is_beat: analysis.is_beat,
+                                beat_intensity: analysis.beat_intensity,
+                                bpm: analysis.bpm,
+                            });
+                        }
+                        let _ = app_handle.emit("dj-status", &app_state.status);
+                    }
                 }
             }
         }
-    }
 
-    // Cleanup current connection
-    log::info!("Bridge task cleaning up");
-    let client = {
-        let mut app_state = state_arc.lock();
-        app_state.client.take()
-    };
-    if let Some(client) = client {
-        let _ = client.disconnect().await;
-    }
-    if let Some(shutdown) = mc_shutdown_tx {
-        let _ = shutdown.send(()).await;
-    }
-    {
-        let mut app_state = state_arc.lock();
-        app_state.status.connected = false;
-        app_state.status.mc_connected = false;
-    }
+        // Cleanup current connection
+        log::info!("Bridge task cleaning up");
+        let client = {
+            let mut app_state = state_arc.lock();
+            app_state.client.take()
+        };
+        if let Some(client) = client {
+            let _ = client.disconnect().await;
+        }
+        if let Some(shutdown) = mc_shutdown_tx {
+            let _ = shutdown.send(()).await;
+        }
+        {
+            let mut app_state = state_arc.lock();
+            app_state.status.connected = false;
+            app_state.status.mc_connected = false;
+        }
 
-    // If shutdown was explicitly requested, do not reconnect
-    if shutdown_requested {
-        let mut app_state = state_arc.lock();
-        app_state.bridge_shutdown_tx = None;
-        log::info!("Bridge task stopped (user disconnect)");
-        break 'reconnect;
-    }
-
-    // Auto-reconnect with exponential backoff
-    reconnect_count += 1;
-    if reconnect_count > MAX_RECONNECT_ATTEMPTS {
-        let mut app_state = state_arc.lock();
-        app_state.bridge_shutdown_tx = None;
-        app_state.status.error = Some("Connection lost (max retries reached)".to_string());
-        let _ = app_handle.emit("dj-status", &app_state.status);
-        log::error!("Bridge task gave up after {} reconnect attempts", MAX_RECONNECT_ATTEMPTS);
-        break 'reconnect;
-    }
-
-    let delay_secs = std::cmp::min(
-        1u64 << (reconnect_count - 1),
-        MAX_RECONNECT_DELAY_SECS,
-    );
-    log::info!(
-        "Reconnecting in {}s (attempt {}/{})",
-        delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
-    );
-    {
-        let mut app_state = state_arc.lock();
-        app_state.status.error = Some(format!(
-            "Reconnecting in {}s ({}/{})",
-            delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
-        ));
-        let _ = app_handle.emit("dj-status", &app_state.status);
-    }
-
-    // Wait for backoff delay or shutdown signal
-    tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(delay_secs)) => {}
-        _ = shutdown_rx.recv() => {
+        // If shutdown was explicitly requested, do not reconnect
+        if shutdown_requested {
             let mut app_state = state_arc.lock();
             app_state.bridge_shutdown_tx = None;
-            log::info!("Bridge task stopped during reconnect backoff (user disconnect)");
+            log::info!("Bridge task stopped (user disconnect)");
             break 'reconnect;
         }
-    }
 
-    // Attempt to reconnect using stored config
-    let reconnect_result = {
-        let app_state = state_arc.lock();
-        let config = DjClientConfig {
-            server_host: app_state.server_host.clone(),
-            server_port: app_state.server_port,
-            dj_name: app_state.dj_name.clone(),
-            connect_code: app_state.connect_code.clone(),
-            dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
-            dj_key: if app_state.connect_code.is_none() {
-                Some(String::new())
-            } else {
-                None
-            },
-            ..Default::default()
-        };
-        config
-    };
-
-    let mut client = DjClient::new(reconnect_result);
-    match client.connect().await {
-        Ok(()) => {
+        // Auto-reconnect with exponential backoff
+        reconnect_count += 1;
+        if reconnect_count > MAX_RECONNECT_ATTEMPTS {
             let mut app_state = state_arc.lock();
-            app_state.client = Some(client);
-            app_state.status.connected = true;
-            app_state.status.error = None;
+            app_state.bridge_shutdown_tx = None;
+            app_state.status.error = Some("Connection lost (max retries reached)".to_string());
             let _ = app_handle.emit("dj-status", &app_state.status);
-            log::info!("Reconnected successfully");
-            reconnect_count = 0;
-            continue 'reconnect;
+            log::error!(
+                "Bridge task gave up after {} reconnect attempts",
+                MAX_RECONNECT_ATTEMPTS
+            );
+            break 'reconnect;
         }
-        Err(e) => {
-            log::warn!("Reconnect failed: {}", e);
-            continue 'reconnect;
-        }
-    }
 
+        let delay_secs = std::cmp::min(1u64 << (reconnect_count - 1), MAX_RECONNECT_DELAY_SECS);
+        log::info!(
+            "Reconnecting in {}s (attempt {}/{})",
+            delay_secs,
+            reconnect_count,
+            MAX_RECONNECT_ATTEMPTS
+        );
+        {
+            let mut app_state = state_arc.lock();
+            app_state.status.error = Some(format!(
+                "Reconnecting in {}s ({}/{})",
+                delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
+            ));
+            let _ = app_handle.emit("dj-status", &app_state.status);
+        }
+
+        // Wait for backoff delay or shutdown signal
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(delay_secs)) => {}
+            _ = shutdown_rx.recv() => {
+                let mut app_state = state_arc.lock();
+                app_state.bridge_shutdown_tx = None;
+                log::info!("Bridge task stopped during reconnect backoff (user disconnect)");
+                break 'reconnect;
+            }
+        }
+
+        // Attempt to reconnect using stored config
+        let reconnect_result = {
+            let app_state = state_arc.lock();
+            let config = DjClientConfig {
+                server_host: app_state.server_host.clone(),
+                server_port: app_state.server_port,
+                dj_name: app_state.dj_name.clone(),
+                connect_code: app_state.connect_code.clone(),
+                dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
+                dj_key: if app_state.connect_code.is_none() {
+                    Some(String::new())
+                } else {
+                    None
+                },
+                ..Default::default()
+            };
+            config
+        };
+
+        let mut client = DjClient::new(reconnect_result);
+        match client.connect().await {
+            Ok(()) => {
+                let mut app_state = state_arc.lock();
+                app_state.client = Some(client);
+                app_state.status.connected = true;
+                app_state.status.error = None;
+                let _ = app_handle.emit("dj-status", &app_state.status);
+                log::info!("Reconnected successfully");
+                reconnect_count = 0;
+                continue 'reconnect;
+            }
+            Err(e) => {
+                log::warn!("Reconnect failed: {}", e);
+                continue 'reconnect;
+            }
+        }
     } // end 'reconnect loop
 }
 
