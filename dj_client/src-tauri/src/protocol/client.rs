@@ -92,6 +92,11 @@ pub struct ConnectionState {
     pub mc_port: Option<u16>,
     pub mc_zone: Option<String>,
     pub mc_entity_count: Option<u32>,
+    // Voice status fields (populated by server voice_status messages)
+    pub voice_available: bool,
+    pub voice_streaming: bool,
+    pub voice_channel_type: Option<String>,
+    pub voice_connected_players: Option<u32>,
 }
 
 /// DJ Client for VJ server communication
@@ -486,6 +491,22 @@ async fn handle_server_message(
                 .entity_count
                 .or_else(|| route.pattern_config.and_then(|cfg| cfg.entity_count));
         }
+        ServerMessage::VoiceStatus(vs) => {
+            log::info!(
+                "Voice status: available={}, streaming={}, players={}",
+                vs.available,
+                vs.streaming,
+                vs.connected_players.unwrap_or(0)
+            );
+            // Voice status is stored in AppState, not ConnectionState.
+            // The bridge task reads this from the ServerMessage via the reader task.
+            // We store in ConnectionState temporarily for the bridge to pick up.
+            let mut s = state.lock();
+            s.voice_available = vs.available;
+            s.voice_streaming = vs.streaming;
+            s.voice_channel_type = vs.channel_type;
+            s.voice_connected_players = vs.connected_players;
+        }
     }
 }
 
@@ -522,6 +543,8 @@ mod tests {
         assert!(state.mc_port.is_none());
         assert!(state.mc_zone.is_none());
         assert!(state.mc_entity_count.is_none());
+        assert!(!state.voice_available);
+        assert!(!state.voice_streaming);
         assert!(client.get_tx_clone().is_none());
         assert!(!client.is_connected());
         assert!(!client.is_active());

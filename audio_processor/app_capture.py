@@ -81,6 +81,15 @@ except ImportError:
     TimelineState = None
     Show = None
 
+# Voice audio streamer
+try:
+    from audio_processor.voice_streamer import VoiceStreamer
+
+    HAS_VOICE = True
+except ImportError:
+    HAS_VOICE = False
+    VoiceStreamer = None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("app_capture")
 
@@ -812,6 +821,7 @@ class AppCaptureAgent:
         use_beat_prediction: bool = False,
         prediction_lookahead_ms: float = 80.0,
         tick_aligned: bool = False,
+        voice_stream: bool = False,
     ):
         self.app_name = app_name
         self.minecraft_host = minecraft_host
@@ -829,6 +839,7 @@ class AppCaptureAgent:
         self.use_beat_prediction = use_beat_prediction
         self.prediction_lookahead_ms = prediction_lookahead_ms
         self.tick_aligned = tick_aligned
+        self.voice_stream = voice_stream
 
         # Minecraft tick alignment (20 TPS = 50ms per tick)
         self._mc_tick_interval = 0.050  # 50ms
@@ -1000,6 +1011,19 @@ class AppCaptureAgent:
             )
 
             logger.info("Timeline engine initialized")
+
+        # === VOICE STREAMER ===
+        self.voice_streamer: Optional["VoiceStreamer"] = None
+        if voice_stream and HAS_VOICE and VoiceStreamer is not None:
+            # Default source rate; updated when FFT analyzer detects actual device rate
+            self.voice_streamer = VoiceStreamer(source_rate=44100, source_channels=2)
+            self.voice_streamer.enabled = True
+            logger.info("Voice streaming enabled (48kHz mono int16, 20ms frames)")
+        elif voice_stream and not HAS_VOICE:
+            logger.warning("Voice streaming requested but VoiceStreamer module not available")
+
+        # Track last voice frame send time for pacing
+        self._last_voice_send_time = 0.0
 
     def _set_pattern_from_cue(self, pattern_name: str):
         """Set pattern from a cue action."""
@@ -1578,6 +1602,21 @@ class AppCaptureAgent:
                                     )
                                     break
 
+                    elif msg_type == "voice_config":
+                        # Apply voice config and forward to Minecraft plugin
+                        if self.voice_streamer:
+                            self.voice_streamer.apply_voice_config(data)
+                        if self.viz_client and self.viz_client.connected:
+                            response = await self.viz_client.send_voice_config(data)
+                            if response and response.get("type") == "voice_status":
+                                # Relay voice_status to all browser clients
+                                status_msg = json.dumps(response)
+                                for client in list(self._broadcast_clients):
+                                    try:
+                                        await client.send(status_msg)
+                                    except Exception:
+                                        self._broadcast_clients.discard(client)
+
                 except json.JSONDecodeError:
                     pass
         except websockets.exceptions.ConnectionClosed:
@@ -1928,6 +1967,19 @@ class AppCaptureAgent:
         # Start broadcast server for browser previews
         await self._start_broadcast_server()
 
+        # Register voice streamer audio hook on FFT analyzer
+        if self.voice_streamer and self.fft_analyzer and self.fft_analyzer.fft_analyzer:
+            fft_inner = self.fft_analyzer.fft_analyzer
+            # Update VoiceStreamer source rate to match actual device rate
+            self.voice_streamer.source_rate = fft_inner.sample_rate
+            self.voice_streamer.source_channels = 2  # WASAPI loopback is always stereo
+            # Register hook - called from audio callback thread
+            fft_inner.audio_hook = self.voice_streamer.feed_audio
+            logger.info(
+                f"Voice streamer hooked to FFT audio capture "
+                f"({fft_inner.sample_rate}Hz, backend={fft_inner.backend})"
+            )
+
         # Find the app's audio session
         logger.info(f"Looking for '{self.app_name}' audio session...")
 
@@ -2080,6 +2132,15 @@ class AppCaptureAgent:
                     else:
                         await self._update_minecraft(entities, bands, frame)
 
+                # Send voice audio frames to Minecraft (if enabled)
+                if (
+                    self.voice_streamer
+                    and self.voice_streamer.enabled
+                    and self.viz_client
+                    and self.viz_client.connected
+                ):
+                    await self._send_voice_frames()
+
                 # Send same entities to browser previews
                 await self._broadcast_state(entities, bands, frame)
 
@@ -2192,6 +2253,21 @@ class AppCaptureAgent:
         except Exception as e:
             logger.error(f"Minecraft update error: {e}")
 
+    async def _send_voice_frames(self):
+        """Send pending voice audio frames to Minecraft via WebSocket."""
+        if not self.voice_streamer or not self.viz_client:
+            return
+
+        messages = self.voice_streamer.get_frames_base64()
+        if not messages:
+            return
+
+        for msg in messages:
+            try:
+                await self.viz_client.send_voice_frame(msg["data"], msg["seq"])
+            except Exception:
+                break  # Stop sending if connection fails
+
     def stop(self):
         """Stop the capture agent."""
         self._running = False
@@ -2282,6 +2358,11 @@ async def main():
     parser.add_argument(
         "--list-audio", action="store_true", help="List available audio devices and exit"
     )
+    parser.add_argument(
+        "--voice-stream",
+        action="store_true",
+        help="Enable raw PCM audio streaming for Simple Voice Chat",
+    )
 
     args = parser.parse_args()
 
@@ -2336,6 +2417,7 @@ async def main():
         low_latency=args.low_latency,
         ultra_low_latency=getattr(args, "ultra_low_latency", False),
         tick_aligned=args.tick_aligned,
+        voice_stream=getattr(args, "voice_stream", False),
     )
 
     # Signal handler

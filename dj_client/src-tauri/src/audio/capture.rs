@@ -1,6 +1,7 @@
 //! Audio capture implementation using a dedicated thread
 
 use super::{AudioConfig, FftAnalyzer};
+use crate::voice::VoiceStreamer;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, StreamConfig};
 use parking_lot::Mutex;
@@ -89,6 +90,14 @@ unsafe impl Sync for AudioCaptureHandle {}
 impl AudioCaptureHandle {
     /// Create new audio capture from source ID
     pub fn new(source_id: Option<String>) -> Result<Self, CaptureError> {
+        Self::new_with_voice(source_id, None)
+    }
+
+    /// Create new audio capture from source ID with optional voice streamer.
+    pub fn new_with_voice(
+        source_id: Option<String>,
+        voice_streamer: Option<Arc<VoiceStreamer>>,
+    ) -> Result<Self, CaptureError> {
         let (command_tx, command_rx) = mpsc::channel();
         let latest_result = Arc::new(Mutex::new(AnalysisResult::default()));
         let result_clone = latest_result.clone();
@@ -97,7 +106,9 @@ impl AudioCaptureHandle {
         let thread_handle = thread::Builder::new()
             .name("audio-capture".to_string())
             .spawn(move || {
-                if let Err(e) = run_audio_thread(source_id, command_rx, result_clone) {
+                if let Err(e) =
+                    run_audio_thread(source_id, command_rx, result_clone, voice_streamer)
+                {
                     log::error!("Audio thread error: {}", e);
                 }
             })
@@ -177,6 +188,7 @@ fn run_audio_thread(
     source_id: Option<String>,
     command_rx: mpsc::Receiver<AudioCommand>,
     result_out: Arc<Mutex<AnalysisResult>>,
+    voice_streamer: Option<Arc<VoiceStreamer>>,
 ) -> Result<(), CaptureError> {
     let host = cpal::default_host();
 
@@ -256,9 +268,27 @@ fn run_audio_thread(
 
     // Build stream based on sample format
     let stream = match config.sample_format() {
-        SampleFormat::F32 => build_stream::<f32>(&device, &config.into(), buffer_clone, channels),
-        SampleFormat::I16 => build_stream::<i16>(&device, &config.into(), buffer_clone, channels),
-        SampleFormat::U16 => build_stream::<u16>(&device, &config.into(), buffer_clone, channels),
+        SampleFormat::F32 => build_stream::<f32>(
+            &device,
+            &config.into(),
+            buffer_clone,
+            channels,
+            voice_streamer,
+        ),
+        SampleFormat::I16 => build_stream::<i16>(
+            &device,
+            &config.into(),
+            buffer_clone,
+            channels,
+            voice_streamer,
+        ),
+        SampleFormat::U16 => build_stream::<u16>(
+            &device,
+            &config.into(),
+            buffer_clone,
+            channels,
+            voice_streamer,
+        ),
         _ => {
             return Err(CaptureError::ConfigError(
                 "Unsupported sample format".to_string(),
@@ -314,6 +344,7 @@ fn build_stream<T: cpal::Sample + cpal::SizedSample>(
     config: &StreamConfig,
     buffer: Arc<Mutex<AudioBuffer>>,
     channels: usize,
+    voice_streamer: Option<Arc<VoiceStreamer>>,
 ) -> Result<cpal::Stream, cpal::BuildStreamError>
 where
     f32: cpal::FromSample<T>,
@@ -321,17 +352,22 @@ where
     device.build_input_stream(
         config,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
-            // Convert to mono f32 using cpal's Sample trait
-            let mono: Vec<f32> = data
+            // Convert all samples to f32 (interleaved)
+            let f32_data: Vec<f32> = data
+                .iter()
+                .map(|s| cpal::Sample::from_sample(*s))
+                .collect();
+
+            // Feed raw interleaved f32 samples to voice streamer (before downmix)
+            if let Some(ref streamer) = voice_streamer {
+                streamer.push_samples(&f32_data, channels);
+            }
+
+            // Convert to mono f32 for FFT analysis
+            let mono: Vec<f32> = f32_data
                 .chunks(channels)
                 .map(|frame| {
-                    let sum: f32 = frame
-                        .iter()
-                        .map(|s| {
-                            let sample: f32 = cpal::Sample::from_sample(*s);
-                            sample
-                        })
-                        .sum();
+                    let sum: f32 = frame.iter().sum();
                     sum / channels as f32
                 })
                 .collect();

@@ -6,10 +6,12 @@
 pub mod audio;
 pub mod protocol;
 pub mod state;
+pub mod voice;
 
 use audio::{AudioCaptureHandle, AudioSource};
 use protocol::{AudioFrameMessage, DjClient, DjClientConfig};
 use state::AppState;
+use voice::{VoiceStatus, VoiceStreamer};
 
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
@@ -564,6 +566,31 @@ async fn run_bridge(
                         }
                     }
 
+                    // 2.5 Send voice audio frames if streaming is enabled
+                    {
+                        let voice_streamer = {
+                            let app_state = state_arc.lock();
+                            app_state.voice_streamer.clone()
+                        };
+
+                        if let Some(ref streamer) = voice_streamer {
+                            if streamer.is_enabled() {
+                                let frames = streamer.drain_frames();
+                                // Send at most 3 frames per tick (~48ms at 16ms ticks)
+                                // to avoid flooding the WebSocket
+                                for (data, seq, codec) in frames.into_iter().take(3) {
+                                    let voice_msg = protocol::VoiceAudioMessage::new(data, seq, codec);
+                                    if let Ok(json) = serde_json::to_string(&voice_msg) {
+                                        if tx.send(Message::Text(json.into())).await.is_err() {
+                                            log::error!("Failed to send voice frame - channel closed");
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // 3. Update connection state from DjClient and emit events
                     {
                         let mut app_state = state_arc.lock();
@@ -578,6 +605,16 @@ async fn run_bridge(
                                 app_state.status.error = Some("Server disconnected".to_string());
                                 app_state.status.mc_connected = false;
                             }
+
+                            // Sync voice status from server messages
+                            app_state.voice_status.available = latest.voice_available;
+                            app_state.voice_status.streaming = latest.voice_streaming;
+                            if let Some(ref ct) = latest.voice_channel_type {
+                                app_state.voice_status.channel_type = ct.clone();
+                            }
+                            if let Some(players) = latest.voice_connected_players {
+                                app_state.voice_status.connected_players = players;
+                            }
                         }
 
                         // Push audio levels and status to frontend via events
@@ -591,6 +628,7 @@ async fn run_bridge(
                             });
                         }
                         let _ = app_handle.emit("dj-status", &app_state.status);
+                        let _ = app_handle.emit("voice-status", &app_state.voice_status);
                     }
                 }
             }
@@ -708,10 +746,21 @@ async fn start_capture(
     state: State<'_, AppStateWrapper>,
     source_id: Option<String>,
 ) -> Result<(), String> {
-    let capture = AudioCaptureHandle::new(source_id).map_err(|e| e.to_string())?;
+    // Create voice streamer (48kHz, stereo assumed; resampling handles mismatches)
+    let voice_streamer = Arc::new(VoiceStreamer::new(48000, 2));
+
+    // Propagate current voice config
+    {
+        let app_state = state.0.lock();
+        voice_streamer.set_enabled(app_state.voice_config.enabled);
+    }
+
+    let capture = AudioCaptureHandle::new_with_voice(source_id, Some(voice_streamer.clone()))
+        .map_err(|e| e.to_string())?;
 
     let mut app_state = state.0.lock();
     app_state.audio_capture = Some(capture);
+    app_state.voice_streamer = Some(voice_streamer);
 
     Ok(())
 }
@@ -730,13 +779,19 @@ async fn stop_capture(state: State<'_, AppStateWrapper>) -> Result<(), String> {
 #[tauri::command]
 async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     // Signal bridge task to stop (it handles client disconnect)
-    let (shutdown_tx, capture) = {
+    let (shutdown_tx, capture, voice_streamer) = {
         let mut app_state = state.0.lock();
         (
             app_state.bridge_shutdown_tx.take(),
             app_state.audio_capture.take(),
+            app_state.voice_streamer.take(),
         )
     };
+
+    // Disable voice streaming
+    if let Some(ref streamer) = voice_streamer {
+        streamer.set_enabled(false);
+    }
 
     if let Some(tx) = shutdown_tx {
         let _ = tx.send(()).await;
@@ -767,6 +822,100 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
         app_state.status.route_mode = String::new();
         app_state.status.mc_connected = false;
         app_state.status.error = None;
+        app_state.voice_config.enabled = false;
+        app_state.voice_status = VoiceStatus::default();
+    }
+
+    Ok(())
+}
+
+/// Enable or disable voice audio streaming
+#[tauri::command]
+async fn set_voice_streaming(
+    app_handle: AppHandle,
+    state: State<'_, AppStateWrapper>,
+    enabled: bool,
+) -> Result<(), String> {
+    let (voice_streamer, tx, voice_config) = {
+        let mut app_state = state.0.lock();
+        app_state.voice_config.enabled = enabled;
+
+        let streamer = app_state.voice_streamer.clone();
+        let tx = app_state
+            .client
+            .as_ref()
+            .and_then(|c| c.get_tx_clone());
+        let config = app_state.voice_config.clone();
+        (streamer, tx, config)
+    };
+
+    // Update streamer state
+    if let Some(ref streamer) = voice_streamer {
+        streamer.set_enabled(enabled);
+    }
+
+    // Send voice_config message to VJ server
+    if let Some(tx) = tx {
+        let msg = protocol::VoiceConfigMessage::new(
+            enabled,
+            voice_config.channel_type.clone(),
+            voice_config.distance,
+            voice_config.zone.clone(),
+        );
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = tx.send(Message::Text(json.into())).await;
+        }
+    }
+
+    // Emit updated voice status
+    {
+        let app_state = state.0.lock();
+        let _ = app_handle.emit("voice-status", &app_state.voice_status);
+    }
+
+    Ok(())
+}
+
+/// Get current voice streaming status
+#[tauri::command]
+fn get_voice_status(state: State<'_, AppStateWrapper>) -> VoiceStatus {
+    let app_state = state.0.lock();
+    app_state.voice_status.clone()
+}
+
+/// Update voice streaming configuration
+#[tauri::command]
+async fn set_voice_config(
+    state: State<'_, AppStateWrapper>,
+    channel_type: String,
+    distance: f64,
+) -> Result<(), String> {
+    let tx = {
+        let mut app_state = state.0.lock();
+        app_state.voice_config.channel_type = channel_type.clone();
+        app_state.voice_config.distance = distance;
+
+        app_state
+            .client
+            .as_ref()
+            .and_then(|c| c.get_tx_clone())
+    };
+
+    // Send updated voice_config to server if connected
+    if let Some(tx) = tx {
+        let config = {
+            let app_state = state.0.lock();
+            app_state.voice_config.clone()
+        };
+        let msg = protocol::VoiceConfigMessage::new(
+            config.enabled,
+            config.channel_type,
+            config.distance,
+            config.zone,
+        );
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = tx.send(Message::Text(json.into())).await;
+        }
     }
 
     Ok(())
@@ -831,6 +980,9 @@ pub fn run() {
             disconnect,
             get_status,
             get_audio_levels,
+            set_voice_streaming,
+            get_voice_status,
+            set_voice_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

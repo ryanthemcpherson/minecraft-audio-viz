@@ -285,6 +285,9 @@ class DJConnection:
     mc_connected: bool = False  # Whether DJ's direct Minecraft connection is alive
     phase_assist_last_time: float = 0.0  # Last phase-assisted beat fire time
 
+    # Voice streaming state
+    voice_streaming: bool = False  # Whether this DJ is sending voice audio
+
     # Rate limiting (token bucket: 120 tokens/sec, 2x expected 60fps)
     _rate_tokens: float = 120.0
     _rate_last_refill: float = field(default_factory=time.time)
@@ -837,6 +840,11 @@ class VJServer:
                                     }
                                 )
                             )
+                        elif frame_type == "voice_audio":
+                            # Relay voice audio from active DJ to Minecraft
+                            dj.voice_streaming = True
+                            if dj.dj_id == self._active_dj_id:
+                                await self._relay_voice_audio(frame_data)
                         elif frame_type == "going_offline":
                             logger.info(
                                 f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully"
@@ -1030,6 +1038,12 @@ class VJServer:
                                 }
                             )
                         )
+
+                    elif msg_type == "voice_audio":
+                        # Relay voice audio from active DJ to Minecraft
+                        dj.voice_streaming = True
+                        if dj.dj_id == self._active_dj_id:
+                            await self._relay_voice_audio(data)
 
                     elif msg_type == "going_offline":
                         logger.info(
@@ -1909,6 +1923,14 @@ class VJServer:
                                     )
                                 )
 
+                    elif msg_type == "voice_config":
+                        # Forward voice config to Minecraft plugin
+                        await self._forward_voice_config(data)
+                        logger.info(
+                            f"Voice config forwarded: enabled={data.get('enabled')}, "
+                            f"type={data.get('channel_type')}"
+                        )
+
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
                         # Sync local state when zone config changes entity count,
@@ -2667,6 +2689,36 @@ class VJServer:
             await self.viz_client.batch_update_fast(self.zone, entities, particles, audio)
         except Exception as e:
             logger.error(f"Minecraft update error: {e}")
+
+    async def _relay_voice_audio(self, data: dict):
+        """Relay a voice_audio message from the active DJ to Minecraft."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+
+        # Validate required fields
+        pcm_data = data.get("data")
+        seq = data.get("seq", 0)
+        if not isinstance(pcm_data, str):
+            return
+
+        try:
+            await self.viz_client.send_voice_frame(pcm_data, seq)
+        except Exception:
+            pass  # Fire and forget
+
+    async def _forward_voice_config(self, config: dict):
+        """Forward voice_config to the Minecraft plugin and relay voice_status response."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+
+        response = await self.viz_client.send_voice_config(config)
+        if response and response.get("type") == "voice_status":
+            # Broadcast voice_status to all connected browser clients
+            await self._broadcast_voice_status(response)
+
+    async def _broadcast_voice_status(self, status: dict):
+        """Broadcast voice_status to all connected browser clients."""
+        await self._broadcast_to_browsers(json.dumps(status))
 
     async def _main_loop(self):
         """Main visualization loop."""

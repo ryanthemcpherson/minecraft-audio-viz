@@ -413,6 +413,11 @@ class FFTAnalyzer:
         self._pyaudio_available = self._check_pyaudiowpatch()
         self._sd_available = self._check_sounddevice()
 
+        # Optional raw audio hook - called from audio callback with (audio_ndarray, sample_rate)
+        # Used by VoiceStreamer to tap into raw audio for voice chat streaming.
+        # Set externally; must be thread-safe (called from audio callback thread).
+        self.audio_hook: Optional[callable] = None
+
         # BPM estimation state
         self._onset_times: deque = deque(maxlen=64)  # Recent kick onset timestamps
         self._ioi_history: deque = deque(maxlen=32)  # Inter-onset intervals in seconds
@@ -772,6 +777,13 @@ class FFTAnalyzer:
                 if device["maxInputChannels"] >= 2:
                     audio = audio.reshape(-1, 2)
 
+                # Call raw audio hook if registered (for voice streaming)
+                if self.audio_hook is not None:
+                    try:
+                        self.audio_hook(audio)
+                    except Exception:
+                        pass  # Don't let hook errors break audio capture
+
                 # Use ring buffer if available
                 if self._use_ringbuffer and self._ring_buffer is not None:
                     self._ring_buffer.try_write(capture_time, audio)
@@ -844,6 +856,13 @@ class FFTAnalyzer:
                 capture_time = time.time()
                 if status:
                     logger.debug(f"Audio status: {status}")
+
+                # Call raw audio hook if registered (for voice streaming)
+                if self.audio_hook is not None:
+                    try:
+                        self.audio_hook(indata)
+                    except Exception:
+                        pass  # Don't let hook errors break audio capture
 
                 # Use ring buffer if available
                 if self._use_ringbuffer and self._ring_buffer is not None:

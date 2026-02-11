@@ -34,6 +34,13 @@ interface AudioLevels {
   bpm: number;
 }
 
+interface VoiceStatus {
+  available: boolean;
+  streaming: boolean;
+  channel_type: string;
+  connected_players: number;
+}
+
 const MCAV_LOGO_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAKCAYAAABrGwT5AAAA3ElEQVR4AWyRvQ3CMBCFLx4jBQ0FyhppaNiAggFgAApKCgaAASjYgIYma0QUNBQZA3PfiTOOlUgv9+79OJYSZOJpmiaWmIhJKufhtm2lRO77QVbGyMOYqjGECXJf94gZIBgs73CyMPzx3MhldZTdfC193yPZDiFf13W0LyNQnH32FoSjbe8HRiqxc6CJ+kplil6Cqye+U9Ib2iFwPGBlv5aXCC4XV2E/v27k7EZe9HxQUnVdZ6by0aSF5hMOyA/DUNmX1bQDEAGBEugO8or/f9alcngon+79pg6RLwAAAP//ucby7wAAAAZJREFUAwBHiZkQ43EK0gAAAABJRU5ErkJggg==';
 
@@ -49,6 +56,17 @@ function App() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [bands, setBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const [isBeat, setIsBeat] = useState(false);
+
+  // Voice streaming state
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>({
+    available: false,
+    streaming: false,
+    channel_type: 'static',
+    connected_players: 0,
+  });
+  const [voiceChannelType, setVoiceChannelType] = useState('static');
+  const [voiceDistance, setVoiceDistance] = useState(100);
 
   // Status
   const [status, setStatus] = useState<ConnectionStatus>({
@@ -140,6 +158,12 @@ function App() {
       })
     );
 
+    unlisteners.push(
+      listen<VoiceStatus>('voice-status', (event) => {
+        setVoiceStatus(event.payload);
+      })
+    );
+
     return () => {
       unlisteners.forEach((p) => p.then((unlisten) => unlisten()).catch(() => {}));
     };
@@ -194,13 +218,14 @@ function App() {
         setUpdateMessage(null);
       }
     } catch (e) {
-      const message = `Update check failed: ${String(e)}`;
+      const errStr = String(e);
+      const isAcl = errStr.includes('not allowed by ACL');
+      console.error(`[updater] Update check failed: ${errStr}`);
       if (manual) {
-        setUpdateError(message);
+        setUpdateError(isAcl ? 'Updates are not available in this build.' : `Update check failed: ${errStr}`);
       } else {
         setUpdateMessage(null);
       }
-      console.error(`[updater] ${message}`);
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -282,30 +307,6 @@ function App() {
     }
   };
 
-  const handleQuickConnect = async () => {
-    if (!djName.trim()) return;
-
-    setIsConnecting(true);
-    try {
-      await invoke('connect_direct', {
-        djName: djName.trim(),
-        serverHost,
-        serverPort,
-      });
-
-      // Start audio capture
-      if (selectedSource) {
-        await invoke('start_capture', { sourceId: selectedSource });
-      }
-
-      setStatus(prev => ({ ...prev, connected: true }));
-    } catch (e) {
-      setStatus(prev => ({ ...prev, error: String(e) }));
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
   const handleDisconnect = async () => {
     try {
       await invoke('disconnect');
@@ -322,8 +323,38 @@ function App() {
       });
       setBands([0, 0, 0, 0, 0]);
       setIsBeat(false);
+      setVoiceEnabled(false);
+      setVoiceStatus({ available: false, streaming: false, channel_type: 'static', connected_players: 0 });
     } catch (e) {
       console.error('Disconnect error:', e);
+    }
+  };
+
+  const handleToggleVoice = async () => {
+    try {
+      const newEnabled = !voiceEnabled;
+      await invoke('set_voice_streaming', { enabled: newEnabled });
+      setVoiceEnabled(newEnabled);
+    } catch (e) {
+      console.error('Voice toggle error:', e);
+    }
+  };
+
+  const handleVoiceChannelType = async (type_: string) => {
+    setVoiceChannelType(type_);
+    try {
+      await invoke('set_voice_config', { channelType: type_, distance: voiceDistance });
+    } catch (e) {
+      console.error('Voice config error:', e);
+    }
+  };
+
+  const handleVoiceDistance = async (distance: number) => {
+    setVoiceDistance(distance);
+    try {
+      await invoke('set_voice_config', { channelType: voiceChannelType, distance });
+    } catch (e) {
+      console.error('Voice config error:', e);
     }
   };
 
@@ -398,7 +429,6 @@ function App() {
         {!status.connected ? (
           <>
             <section className="section hero-section">
-              <h2>Go live in under 10 seconds</h2>
               <p>Enter your DJ name, paste your connect code, pick audio, then connect.</p>
               <button
                 className="btn btn-link"
@@ -481,14 +511,7 @@ function App() {
                 onClick={handleConnect}
                 disabled={isConnecting || connectCode.join('').length !== 8 || !djName.trim()}
               >
-                {isConnecting ? 'Connecting...' : 'Connect With Code'}
-              </button>
-              <button
-                className="btn btn-quick-connect"
-                onClick={handleQuickConnect}
-                disabled={isConnecting || !djName.trim()}
-              >
-                {isConnecting ? 'Connecting...' : 'Quick Connect (No Code)'}
+                {isConnecting ? 'Connecting...' : 'Connect'}
               </button>
             </div>
           </>
@@ -500,6 +523,73 @@ function App() {
 
             <section className="section">
               <StatusPanel status={status} />
+            </section>
+
+            <section className="section voice-section">
+              <div className="voice-header">
+                <div className="voice-title">
+                  <span className="input-label" style={{ marginBottom: 0 }}>Voice Streaming</span>
+                  {voiceStatus.streaming && (
+                    <span className="voice-live-badge">STREAMING</span>
+                  )}
+                </div>
+                <button
+                  className={`btn voice-toggle ${voiceEnabled ? 'voice-on' : 'voice-off'}`}
+                  onClick={handleToggleVoice}
+                  type="button"
+                >
+                  {voiceEnabled ? 'Stop' : 'Stream Audio'}
+                </button>
+              </div>
+
+              {voiceEnabled && (
+                <div className="voice-controls">
+                  <div className="voice-row">
+                    <span className="status-label">Channel:</span>
+                    <div className="voice-channel-buttons">
+                      <button
+                        className={`btn btn-channel ${voiceChannelType === 'static' ? 'active' : ''}`}
+                        onClick={() => handleVoiceChannelType('static')}
+                        type="button"
+                      >
+                        Static
+                      </button>
+                      <button
+                        className={`btn btn-channel ${voiceChannelType === 'locational' ? 'active' : ''}`}
+                        onClick={() => handleVoiceChannelType('locational')}
+                        type="button"
+                      >
+                        Locational
+                      </button>
+                    </div>
+                  </div>
+
+                  {voiceChannelType === 'locational' && (
+                    <div className="voice-row">
+                      <span className="status-label">Distance:</span>
+                      <div className="voice-distance">
+                        <input
+                          type="range"
+                          min={10}
+                          max={500}
+                          step={10}
+                          value={voiceDistance}
+                          onChange={e => handleVoiceDistance(Number(e.target.value))}
+                          className="voice-slider"
+                        />
+                        <span className="status-value">{voiceDistance}m</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {voiceStatus.connected_players > 0 && (
+                    <div className="voice-row">
+                      <span className="status-label">Players:</span>
+                      <span className="status-value">{voiceStatus.connected_players}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
 
             <button

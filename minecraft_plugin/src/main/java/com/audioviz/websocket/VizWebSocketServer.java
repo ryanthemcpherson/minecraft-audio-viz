@@ -177,7 +177,9 @@ public class VizWebSocketServer extends WebSocketServer {
         return prefix.contains("\"type\":\"batch_update\"") ||
                prefix.contains("\"type\": \"batch_update\"") ||
                prefix.contains("\"type\":\"audio_state\"") ||
-               prefix.contains("\"type\": \"audio_state\"");
+               prefix.contains("\"type\": \"audio_state\"") ||
+               prefix.contains("\"type\":\"voice_audio\"") ||
+               prefix.contains("\"type\": \"voice_audio\"");
     }
 
     @Override

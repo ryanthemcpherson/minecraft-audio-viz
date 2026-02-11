@@ -24,3 +24,19 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml]
         additional_dependencies: ["bandit[toml]"]
+
+  - repo: local
+    hooks:
+      - id: site-eslint
+        name: ESLint (site)
+        entry: npx --prefix site eslint
+        language: system
+        files: ^site/src/.*\.(ts|tsx|js|jsx)$
+        types: [file]
+      - id: site-typecheck
+        name: TypeScript (site)
+        entry: npx --prefix site tsc --noEmit
+        language: system
+        files: ^site/src/.*\.(ts|tsx)$
+        types: [file]
+        pass_filenames: false

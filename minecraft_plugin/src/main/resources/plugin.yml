@@ -10,6 +10,7 @@ authors:
 softdepend:
   - Geyser-Spigot
   - floodgate
+  - voicechat
 
 commands:
   audioviz:

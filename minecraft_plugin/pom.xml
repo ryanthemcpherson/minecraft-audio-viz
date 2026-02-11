@@ -23,6 +23,10 @@
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
+        <repository>
+            <id>henkelmax.public</id>
+            <url>https://maven.maxhenkel.de/repository/public</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -46,6 +50,14 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.13.2</version>
+        </dependency>
+
+        <!-- Simple Voice Chat API (optional - server must have the mod installed) -->
+        <dependency>
+            <groupId>de.maxhenkel.voicechat</groupId>
+            <artifactId>voicechat-api</artifactId>
+            <version>2.5.0</version>
+            <scope>provided</scope>
         </dependency>
 
         <!-- Testing dependencies -->

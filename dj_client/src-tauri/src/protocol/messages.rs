@@ -166,6 +166,50 @@ impl ClockSyncResponse {
     }
 }
 
+/// Voice audio frame message sent to VJ server
+#[derive(Debug, Clone, Serialize)]
+pub struct VoiceAudioMessage {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub data: String,
+    pub seq: u64,
+    pub codec: String,
+}
+
+impl VoiceAudioMessage {
+    pub fn new(data: String, seq: u64, codec: String) -> Self {
+        Self {
+            msg_type: "voice_audio".to_string(),
+            data,
+            seq,
+            codec,
+        }
+    }
+}
+
+/// Voice config message sent to VJ server
+#[derive(Debug, Clone, Serialize)]
+pub struct VoiceConfigMessage {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub enabled: bool,
+    pub channel_type: String,
+    pub distance: f64,
+    pub zone: String,
+}
+
+impl VoiceConfigMessage {
+    pub fn new(enabled: bool, channel_type: String, distance: f64, zone: String) -> Self {
+        Self {
+            msg_type: "voice_config".to_string(),
+            enabled,
+            channel_type,
+            distance,
+            zone,
+        }
+    }
+}
+
 // === Incoming Messages ===
 
 /// Server message types (incoming)
@@ -201,6 +245,9 @@ pub enum ServerMessage {
 
     #[serde(rename = "stream_route")]
     StreamRoute(StreamRouteMessage),
+
+    #[serde(rename = "voice_status")]
+    VoiceStatus(VoiceStatusMessage),
 }
 
 /// Auth success response
@@ -296,6 +343,19 @@ pub struct StreamRouteMessage {
     pub entity_count: Option<u32>,
     #[serde(default)]
     pub pattern_config: Option<PatternConfigInfo>,
+}
+
+/// Voice status update from server
+#[derive(Debug, Clone, Deserialize)]
+pub struct VoiceStatusMessage {
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub streaming: bool,
+    #[serde(default)]
+    pub channel_type: Option<String>,
+    #[serde(default)]
+    pub connected_players: Option<u32>,
 }
 
 #[cfg(test)]

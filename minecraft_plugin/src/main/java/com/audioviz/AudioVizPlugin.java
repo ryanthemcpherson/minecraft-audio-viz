@@ -12,6 +12,7 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererRegistry;
 import com.audioviz.stages.StageManager;
+import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
@@ -39,6 +40,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private StageManager stageManager;
     private StageDecoratorManager decoratorManager;
     private BedrockSupport bedrockSupport;
+    private VoicechatIntegration voicechatIntegration;
 
     @Override
     public void onEnable() {
@@ -92,6 +94,25 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         getCommand("audioviz").setExecutor(commandExecutor);
         getCommand("audioviz").setTabCompleter(commandExecutor);
 
+        // Detect Simple Voice Chat for audio streaming support
+        try {
+            var voicechatService = getServer().getServicesManager().load(
+                    Class.forName("de.maxhenkel.voicechat.api.BukkitVoicechatService"));
+            if (voicechatService != null) {
+                voicechatIntegration = new VoicechatIntegration(this);
+                var registerMethod = voicechatService.getClass().getMethod("registerPlugin",
+                        Class.forName("de.maxhenkel.voicechat.api.VoicechatPlugin"));
+                registerMethod.invoke(voicechatService, voicechatIntegration);
+                getLogger().info("Simple Voice Chat detected - audio streaming enabled");
+            } else {
+                getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
+            }
+        } catch (ClassNotFoundException e) {
+            getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
+        } catch (Exception e) {
+            getLogger().log(Level.WARNING, "Failed to initialize Simple Voice Chat integration", e);
+        }
+
         // Start WebSocket server
         int wsPort = getConfig().getInt("websocket.port", 8765);
         try {
@@ -126,6 +147,15 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Stop decorator manager before entity cleanup
         if (decoratorManager != null) {
             decoratorManager.stop();
+        }
+
+        // Shutdown voice chat integration before WebSocket server
+        if (voicechatIntegration != null) {
+            try {
+                voicechatIntegration.shutdown();
+            } catch (Exception e) {
+                getLogger().warning("Error shutting down voice chat integration: " + e.getMessage());
+            }
         }
 
         // Stop WebSocket server - must complete BEFORE classloader closes the JAR
@@ -228,5 +258,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public BedrockSupport getBedrockSupport() {
         return bedrockSupport;
+    }
+
+    public VoicechatIntegration getVoicechatIntegration() {
+        return voicechatIntegration;
     }
 }

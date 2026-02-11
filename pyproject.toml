@@ -48,9 +48,13 @@ beat = [
 auth = [
     "bcrypt>=4.0.0",
 ]
+# Opus encoding for voice streaming (~12x bandwidth reduction)
+voice = [
+    "opuslib>=3.0.1",
+]
 # Full installation with all features
 full = [
-    "audioviz[fft,beat,auth]",
+    "audioviz[fft,beat,auth,voice]",
 ]
 # Development dependencies
 dev = [

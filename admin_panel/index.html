@@ -330,6 +330,44 @@
                                 </div>
                             </div>
                         </section>
+
+                        <!-- Voice Chat -->
+                        <section class="mixer-section" id="voice-chat-section">
+                            <h3 class="section-title">Voice Chat</h3>
+                            <div class="voice-status-bar" id="voice-status-bar">
+                                <div class="voice-status-indicator" id="voice-status-indicator">
+                                    <span class="voice-dot" id="voice-dot"></span>
+                                    <span class="voice-status-text" id="voice-status-text">Checking...</span>
+                                </div>
+                                <div class="voice-status-stats" id="voice-status-stats">
+                                    <span class="voice-stat" id="voice-players-stat"></span>
+                                </div>
+                            </div>
+                            <div class="voice-unavailable-msg hidden" id="voice-unavailable-msg">
+                                Simple Voice Chat not installed on server
+                            </div>
+                            <div class="voice-controls" id="voice-controls">
+                                <div class="control-row toggle-row">
+                                    <label>Stream to Voice</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="voice-stream-toggle">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row">
+                                    <label>Channel Type</label>
+                                    <select id="voice-channel-type" class="control-select">
+                                        <option value="static">Static (Everywhere)</option>
+                                        <option value="locational">Locational (3D Spatial)</option>
+                                    </select>
+                                </div>
+                                <div class="control-row" id="voice-distance-row" style="display: none;">
+                                    <label>Hearing Distance</label>
+                                    <input type="range" id="voice-distance" min="10" max="200" value="100">
+                                    <span class="control-value" id="val-voice-distance">100</span>
+                                </div>
+                            </div>
+                        </section>
                     </div>
 
                     <!-- Zone Settings Panel -->

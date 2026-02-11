@@ -79,6 +79,15 @@ class AdminApp {
                     trail: false
                 }
             },
+            // Voice chat state
+            voiceChat: {
+                available: false,
+                streaming: false,
+                enabled: false,
+                channelType: 'static',
+                distance: 100,
+                connectedPlayers: 0
+            },
             // 3D Preview state
             entities: []
         };
@@ -275,6 +284,20 @@ class AdminApp {
         this.elements.fixedColorRow = document.getElementById('fixed-color-row');
         this.elements.particleVizSize = document.getElementById('particle-viz-size');
         this.elements.particleVizTrail = document.getElementById('particle-viz-trail');
+
+        // Voice chat elements
+        this.elements.voiceChatSection = document.getElementById('voice-chat-section');
+        this.elements.voiceStatusBar = document.getElementById('voice-status-bar');
+        this.elements.voiceStatusIndicator = document.getElementById('voice-status-indicator');
+        this.elements.voiceDot = document.getElementById('voice-dot');
+        this.elements.voiceStatusText = document.getElementById('voice-status-text');
+        this.elements.voicePlayersStat = document.getElementById('voice-players-stat');
+        this.elements.voiceUnavailableMsg = document.getElementById('voice-unavailable-msg');
+        this.elements.voiceControls = document.getElementById('voice-controls');
+        this.elements.voiceStreamToggle = document.getElementById('voice-stream-toggle');
+        this.elements.voiceChannelType = document.getElementById('voice-channel-type');
+        this.elements.voiceDistance = document.getElementById('voice-distance');
+        this.elements.voiceDistanceRow = document.getElementById('voice-distance-row');
     }
 
     _setupEventListeners() {
@@ -394,6 +417,9 @@ class AdminApp {
 
         // Connect code event listeners
         this._setupConnectCodeListeners();
+
+        // Voice chat event listeners
+        this._setupVoiceChatListeners();
     }
 
     _setupConnectCodeListeners() {
@@ -886,6 +912,10 @@ class AdminApp {
 
             case 'banner_config_received':
                 this._showToast('Banner applied to Minecraft', 'success');
+                break;
+
+            case 'voice_status':
+                this._handleVoiceStatus(data);
                 break;
 
             case 'error':
@@ -1993,6 +2023,176 @@ class AdminApp {
         });
     }
 
+    // === Voice Chat ===
+
+    _setupVoiceChatListeners() {
+        // Stream toggle
+        if (this.elements.voiceStreamToggle) {
+            this.elements.voiceStreamToggle.addEventListener('change', () => {
+                this._toggleVoiceStream();
+            });
+        }
+
+        // Channel type selector
+        if (this.elements.voiceChannelType) {
+            this.elements.voiceChannelType.addEventListener('change', () => {
+                this._setVoiceChannelType(this.elements.voiceChannelType.value);
+            });
+        }
+
+        // Distance slider - debounced
+        if (this.elements.voiceDistance) {
+            const sendVoiceDistance = debounce((val) => {
+                this._setVoiceDistance(val);
+            }, 50);
+
+            this.elements.voiceDistance.addEventListener('input', () => {
+                const val = parseInt(this.elements.voiceDistance.value);
+                const display = document.getElementById('val-voice-distance');
+                if (display) display.textContent = `${val}`;
+                this.state.voiceChat.distance = val;
+                sendVoiceDistance(val);
+            });
+        }
+
+        // Initialize UI as unavailable until we hear from server
+        this._updateVoiceChatUI();
+    }
+
+    _toggleVoiceStream() {
+        this.state.voiceChat.enabled = !this.state.voiceChat.enabled;
+        this._sendVoiceConfig();
+    }
+
+    _setVoiceChannelType(type) {
+        this.state.voiceChat.channelType = type;
+
+        // Show/hide distance slider based on channel type
+        if (this.elements.voiceDistanceRow) {
+            this.elements.voiceDistanceRow.style.display = type === 'locational' ? 'flex' : 'none';
+        }
+
+        this._sendVoiceConfig();
+    }
+
+    _setVoiceDistance(distance) {
+        this.state.voiceChat.distance = distance;
+        this._sendVoiceConfig();
+    }
+
+    _sendVoiceConfig() {
+        this.ws.send({
+            type: 'voice_config',
+            enabled: this.state.voiceChat.enabled,
+            channel_type: this.state.voiceChat.channelType,
+            distance: this.state.voiceChat.distance,
+            zone: this.state.zone.name || 'main'
+        });
+    }
+
+    _handleVoiceStatus(data) {
+        const wasStreaming = this.state.voiceChat.streaming;
+
+        this.state.voiceChat.available = data.available || false;
+        this.state.voiceChat.streaming = data.streaming || false;
+        this.state.voiceChat.connectedPlayers = data.connected_players || 0;
+
+        if (data.channel_type) {
+            this.state.voiceChat.channelType = data.channel_type;
+        }
+
+        // Sync enabled state from streaming status
+        if (data.streaming !== undefined) {
+            this.state.voiceChat.enabled = data.streaming;
+        }
+
+        this._updateVoiceChatUI();
+
+        // Notify on streaming state changes
+        if (data.streaming && !wasStreaming) {
+            this._showToast('Voice chat streaming started', 'success');
+        } else if (!data.streaming && wasStreaming) {
+            this._showToast('Voice chat streaming stopped', 'info');
+        }
+    }
+
+    _updateVoiceChatUI() {
+        const vc = this.state.voiceChat;
+        const dot = this.elements.voiceDot;
+        const statusText = this.elements.voiceStatusText;
+        const playersStat = this.elements.voicePlayersStat;
+        const unavailableMsg = this.elements.voiceUnavailableMsg;
+        const controls = this.elements.voiceControls;
+        const streamToggle = this.elements.voiceStreamToggle;
+        const channelType = this.elements.voiceChannelType;
+        const distanceSlider = this.elements.voiceDistance;
+        const distanceRow = this.elements.voiceDistanceRow;
+
+        // Update status dot and text
+        if (dot) {
+            dot.classList.remove('voice-dot-streaming', 'voice-dot-available', 'voice-dot-unavailable');
+            if (!vc.available) {
+                dot.classList.add('voice-dot-unavailable');
+            } else if (vc.streaming) {
+                dot.classList.add('voice-dot-streaming');
+            } else {
+                dot.classList.add('voice-dot-available');
+            }
+        }
+
+        if (statusText) {
+            if (!vc.available) {
+                statusText.textContent = 'Unavailable';
+            } else if (vc.streaming) {
+                statusText.textContent = 'Streaming';
+            } else {
+                statusText.textContent = 'Ready';
+            }
+        }
+
+        // Players stat
+        if (playersStat) {
+            if (vc.available && vc.connectedPlayers > 0) {
+                playersStat.textContent = `${vc.connectedPlayers} player${vc.connectedPlayers !== 1 ? 's' : ''}`;
+                playersStat.style.display = '';
+            } else {
+                playersStat.style.display = 'none';
+            }
+        }
+
+        // Show/hide unavailable message
+        if (unavailableMsg) {
+            unavailableMsg.classList.toggle('hidden', vc.available);
+        }
+
+        // Enable/disable controls based on availability
+        if (controls) {
+            controls.classList.toggle('voice-controls-disabled', !vc.available);
+        }
+
+        if (streamToggle) {
+            streamToggle.checked = vc.enabled;
+            streamToggle.disabled = !vc.available;
+        }
+
+        if (channelType) {
+            channelType.value = vc.channelType;
+            channelType.disabled = !vc.available;
+        }
+
+        if (distanceSlider) {
+            distanceSlider.value = vc.distance;
+            distanceSlider.disabled = !vc.available;
+            const display = document.getElementById('val-voice-distance');
+            if (display) display.textContent = `${vc.distance}`;
+        }
+
+        // Show/hide distance row based on channel type
+        if (distanceRow) {
+            distanceRow.style.display = vc.channelType === 'locational' ? 'flex' : 'none';
+        }
+    }
+
     // === Toast Notification System ===
 
     _showToast(message, type = 'info', duration = 4000) {
@@ -2027,17 +2227,17 @@ class AdminApp {
     // === Service Status Indicators ===
 
     _updateServiceIndicators() {
-        const pythonDot = this.elements.svcPython?.querySelector('.svc-dot');
-        const mcDot = this.elements.svcMinecraft?.querySelector('.svc-dot');
+        const pythonEl = this.elements.svcPython;
+        const mcEl = this.elements.svcMinecraft;
 
-        if (pythonDot) {
-            pythonDot.classList.toggle('connected', this.state.connected);
-            pythonDot.classList.toggle('disconnected', !this.state.connected);
+        if (pythonEl) {
+            pythonEl.classList.toggle('connected', this.state.connected);
+            pythonEl.classList.toggle('disconnected', !this.state.connected);
         }
 
-        if (mcDot) {
-            mcDot.classList.toggle('connected', this.state.minecraftConnected);
-            mcDot.classList.toggle('disconnected', !this.state.minecraftConnected);
+        if (mcEl) {
+            mcEl.classList.toggle('connected', this.state.minecraftConnected);
+            mcEl.classList.toggle('disconnected', !this.state.minecraftConnected);
         }
     }
 

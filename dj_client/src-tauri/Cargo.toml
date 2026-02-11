@@ -28,6 +28,8 @@ env_logger = "0.11"
 thiserror = "2"
 rand = "0.10"
 parking_lot = "0.12"
+base64 = "0.22"
+opus = { version = "0.3", optional = true }
 tauri-plugin-updater = "2"
 
 # Windows-specific dependencies for WASAPI per-app audio capture
@@ -54,6 +56,7 @@ windows = { version = "0.62", features = [
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+voice-opus = ["opus"]
 
 [profile.release]
 panic = "abort"

@@ -537,6 +537,8 @@ function connectWebSocket() {
                     updatePatternList(data.patterns, data.current || data.pattern);
                 } else if (data.type === 'preset_changed') {
                     updateUIFromPreset(data.preset, data.settings);
+                } else if (data.type === 'voice_status') {
+                    updateVoiceStatus(data);
                 }
             } catch (e) {
                 console.error('Parse error:', e);
@@ -997,6 +999,27 @@ function updateUIFromPreset(presetName, settings) {
             const slider = document.getElementById(`sens-${i}`);
             if (slider) slider.value = val;
         }
+    }
+}
+
+function updateVoiceStatus(data) {
+    const dot = document.getElementById('voice-header-dot');
+    const text = document.getElementById('voice-header-text');
+
+    if (!dot || !text) return;
+
+    // Remove all state classes
+    dot.classList.remove('voice-streaming', 'voice-available', 'voice-na');
+
+    if (!data.available) {
+        dot.classList.add('voice-na');
+        text.textContent = 'Voice: N/A';
+    } else if (data.streaming) {
+        dot.classList.add('voice-streaming');
+        text.textContent = 'Voice: Streaming';
+    } else {
+        dot.classList.add('voice-available');
+        text.textContent = 'Voice: Off';
     }
 }
 

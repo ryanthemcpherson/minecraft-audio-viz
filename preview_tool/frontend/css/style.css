@@ -1204,3 +1204,40 @@ body {
         display: none;
     }
 }
+
+/* ============================================
+   Voice Chat Status Indicator
+   ============================================ */
+.voice-status-header {
+    flex-direction: row !important;
+    gap: 6px;
+}
+
+.voice-header-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.voice-header-dot.voice-streaming {
+    background: var(--success);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+    animation: voice-header-pulse 1.5s ease-in-out infinite;
+}
+
+.voice-header-dot.voice-available {
+    background: var(--text-secondary);
+}
+
+.voice-header-dot.voice-na {
+    background: var(--text-muted);
+    opacity: 0.5;
+}
+
+@keyframes voice-header-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}

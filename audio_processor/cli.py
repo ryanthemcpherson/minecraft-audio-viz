@@ -213,6 +213,14 @@ Examples:
         help="List available audio backends (WASAPI, ASIO) and exit",
     )
 
+    # Voice streaming
+    voice_group = parser.add_argument_group("Voice Streaming")
+    voice_group.add_argument(
+        "--voice-stream",
+        action="store_true",
+        help="Enable raw PCM audio streaming for Simple Voice Chat (48kHz mono int16)",
+    )
+
     # Testing
     test_group = parser.add_argument_group("Testing")
     test_group.add_argument(
@@ -306,6 +314,7 @@ Examples:
         use_beat_prediction=getattr(args, "beat_prediction", False),
         prediction_lookahead_ms=float(getattr(args, "prediction_lookahead", 80)),
         tick_aligned=args.tick_aligned,
+        voice_stream=getattr(args, "voice_stream", False),
     )
 
     # Signal handlers
