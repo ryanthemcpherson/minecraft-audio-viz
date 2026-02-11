@@ -42,7 +42,10 @@ fn resolve_direct_mc_route(conn_state: &protocol::ConnectionState) -> Option<Dir
     }
     let host = conn_state.mc_host.clone()?;
     let port = conn_state.mc_port?;
-    let zone = conn_state.mc_zone.clone().unwrap_or_else(|| "main".to_string());
+    let zone = conn_state
+        .mc_zone
+        .clone()
+        .unwrap_or_else(|| "main".to_string());
     let entity_count = conn_state.mc_entity_count.unwrap_or(16).max(1);
     Some(DirectMcRoute {
         host,
@@ -54,7 +57,12 @@ fn resolve_direct_mc_route(conn_state: &protocol::ConnectionState) -> Option<Dir
 
 fn env_flag_enabled(name: &str) -> bool {
     std::env::var(name)
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -98,20 +106,6 @@ fn build_direct_entities(
             })
         })
         .collect()
-}
-
-fn build_direct_particles(analysis: &audio::AnalysisResult) -> Vec<serde_json::Value> {
-    if analysis.is_beat && analysis.beat_intensity > 0.2 {
-        vec![json!({
-            "particle": "NOTE",
-            "x": 0.5,
-            "y": 0.5,
-            "z": 0.5,
-            "count": ((analysis.beat_intensity * 24.0).round() as i32).clamp(1, 100)
-        })]
-    } else {
-        Vec::new()
-    }
 }
 
 async fn start_direct_mc_session(
@@ -309,10 +303,15 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
     let mut mc_target_key: Option<String> = None;
     let mut mc_pool_key: Option<String> = None;
     let mut next_mc_connect_attempt = Instant::now();
+    let mut last_phase_predicted_beat_at = 0.0_f64;
 
     log::info!(
         "Bridge task started (direct batch mode: {})",
-        if direct_batch_enabled { "enabled" } else { "disabled" }
+        if direct_batch_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
 
     loop {
@@ -395,14 +394,39 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
                 // 2. Send audio frame if we have analysis data
                 if let Some(analysis) = analysis {
                     let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs_f64();
+
+                    // Phase-aware beat assist: when tempo lock is strong and phase is near
+                    // the beat boundary, emit a conservative predicted beat so both VJ and
+                    // direct MC routes stay visually tight.
+                    let mut out_is_beat = analysis.is_beat;
+                    let mut out_beat_intensity = analysis.beat_intensity;
+                    if !out_is_beat && analysis.tempo_confidence >= 0.60 && analysis.bpm >= 60.0 {
+                        let beat_period = 60.0_f64 / analysis.bpm as f64;
+                        let phase = analysis.beat_phase.clamp(0.0, 1.0);
+                        let near_boundary = phase < 0.08 || phase > 0.92;
+                        let can_fire = last_phase_predicted_beat_at <= 0.0
+                            || (now_secs - last_phase_predicted_beat_at) >= (beat_period * 0.60);
+                        if near_boundary && can_fire {
+                            out_is_beat = true;
+                            out_beat_intensity =
+                                out_beat_intensity.max((0.50 + analysis.tempo_confidence * 0.25).clamp(0.0, 1.0));
+                            last_phase_predicted_beat_at = now_secs;
+                        }
+                    }
 
                     let msg = AudioFrameMessage::new(
                         seq,
                         analysis.bands,
                         analysis.peak,
-                        analysis.is_beat,
-                        analysis.beat_intensity,
+                        out_is_beat,
+                        out_beat_intensity,
                         analysis.bpm,
+                        analysis.tempo_confidence,
+                        analysis.beat_phase,
                     );
 
                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -445,7 +469,17 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
 
                             let entities =
                                 build_direct_entities(&analysis, route.entity_count as usize, seq);
-                            let particles = build_direct_particles(&analysis);
+                            let particles = if out_is_beat && out_beat_intensity > 0.2 {
+                                vec![json!({
+                                    "particle": "NOTE",
+                                    "x": 0.5,
+                                    "y": 0.5,
+                                    "z": 0.5,
+                                    "count": ((out_beat_intensity * 24.0).round() as i32).clamp(1, 100)
+                                })]
+                            } else {
+                                Vec::new()
+                            };
                             json!({
                                 "type": "batch_update",
                                 "zone": route.zone,
@@ -453,9 +487,11 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
                                 "particles": particles,
                                 "bands": analysis.bands,
                                 "amplitude": analysis.peak,
-                                "is_beat": analysis.is_beat,
-                                "beat_intensity": analysis.beat_intensity,
+                                "is_beat": out_is_beat,
+                                "beat_intensity": out_beat_intensity,
                                 "bpm": analysis.bpm,
+                                "tempo_confidence": analysis.tempo_confidence,
+                                "beat_phase": analysis.beat_phase,
                                 "frame": seq,
                                 "source_id": "dj_tauri_client",
                                 "stream_seq": seq
@@ -467,8 +503,11 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
                                 "zone": route.zone,
                                 "bands": analysis.bands,
                                 "amplitude": analysis.peak,
-                                "is_beat": analysis.is_beat,
-                                "beat_intensity": analysis.beat_intensity,
+                                "is_beat": out_is_beat,
+                                "beat_intensity": out_beat_intensity,
+                                "bpm": analysis.bpm,
+                                "tempo_confidence": analysis.tempo_confidence,
+                                "beat_phase": analysis.beat_phase,
                                 "frame": seq
                             })
                             .to_string()

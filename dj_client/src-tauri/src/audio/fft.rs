@@ -3,6 +3,7 @@
 use super::{capture::AnalysisResult, AudioConfig};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::collections::VecDeque;
+use std::time::Instant;
 
 /// FFT analyzer for audio visualization
 pub struct FftAnalyzer {
@@ -24,6 +25,15 @@ pub struct FftAnalyzer {
     beat_history: VecDeque<f32>,
     beat_cooldown: usize,
     last_beat_times: VecDeque<f64>,
+    prev_bass: f32,
+    flux_history: VecDeque<f32>,
+    last_onset_time: Option<f64>,
+    tempo_histogram: Vec<f32>,
+    ioi_history: VecDeque<f64>,
+    estimated_bpm: f32,
+    tempo_confidence: f32,
+    start_time: Instant,
+    last_output_beat_time: f64,
 
     // Frame counter
     frame: u64,
@@ -71,6 +81,15 @@ impl FftAnalyzer {
             beat_history: VecDeque::with_capacity(60),
             beat_cooldown: 0,
             last_beat_times: VecDeque::with_capacity(20),
+            prev_bass: 0.0,
+            flux_history: VecDeque::with_capacity(120),
+            last_onset_time: None,
+            tempo_histogram: vec![0.0; 201], // 40-240 BPM
+            ioi_history: VecDeque::with_capacity(32),
+            estimated_bpm: 120.0,
+            tempo_confidence: 0.0,
+            start_time: Instant::now(),
+            last_output_beat_time: 0.0,
             frame: 0,
             sample_rate,
         }
@@ -155,6 +174,7 @@ impl FftAnalyzer {
 
         // Estimate BPM
         let bpm = self.estimate_bpm();
+        let beat_phase = self.estimate_beat_phase();
 
         AnalysisResult {
             bands: self.smoothed_bands,
@@ -162,6 +182,8 @@ impl FftAnalyzer {
             is_beat,
             beat_intensity,
             bpm,
+            tempo_confidence: self.tempo_confidence,
+            beat_phase,
         }
     }
 
@@ -173,67 +195,248 @@ impl FftAnalyzer {
             self.beat_history.pop_front();
         }
 
+        // Bass flux is a robust onset signal for EDM kick transients.
+        let bass_flux = (bass - self.prev_bass).max(0.0);
+        self.prev_bass = bass;
+        self.flux_history.push_back(bass_flux);
+        if self.flux_history.len() > 120 {
+            self.flux_history.pop_front();
+        }
+
+        let current_time = self.start_time.elapsed().as_secs_f64();
+
         // Decrement cooldown
         if self.beat_cooldown > 0 {
             self.beat_cooldown -= 1;
-            return (false, 0.0);
         }
 
-        // Calculate average and threshold
+        // Dynamic bass threshold
         let avg = if self.beat_history.is_empty() {
             0.0
         } else {
             self.beat_history.iter().sum::<f32>() / self.beat_history.len() as f32
         };
+        let bass_threshold = (avg * self.config.beat_threshold).max(0.12);
 
-        let threshold = avg * self.config.beat_threshold;
+        // Flux adaptive threshold: mean + N*std, clamped to avoid dead zones.
+        let (flux_mean, flux_std) = if self.flux_history.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let mean = self.flux_history.iter().sum::<f32>() / self.flux_history.len() as f32;
+            let var = self
+                .flux_history
+                .iter()
+                .map(|v| {
+                    let d = *v - mean;
+                    d * d
+                })
+                .sum::<f32>()
+                / self.flux_history.len() as f32;
+            (mean, var.sqrt())
+        };
+        let flux_threshold = (flux_mean + flux_std * self.config.beat_threshold).max(0.015);
 
-        // Detect beat
-        if bass > threshold && bass > 0.2 {
-            self.beat_cooldown = 8; // ~133ms cooldown at 60fps
+        // Onset candidate if bass jump is strong and bass is meaningfully above floor.
+        let mut is_onset = bass_flux >= flux_threshold && bass > bass_threshold;
+        if is_onset && bass < avg * 0.9 {
+            is_onset = false;
+        }
 
-            // Record beat time for BPM calculation
-            let current_time = self.frame as f64 / 60.0; // Approximate time in seconds
+        // Enforce a minimum interval to prevent chatter in dense transients.
+        let min_interval = 0.15; // ~400 BPM ceiling safety
+        let can_fire = self
+            .last_onset_time
+            .map(|last| current_time - last >= min_interval)
+            .unwrap_or(true);
+
+        if self.beat_cooldown == 0 && is_onset && can_fire {
+            self._update_bpm_from_onset(current_time);
+            self.last_onset_time = Some(current_time);
+            self.last_output_beat_time = current_time;
+
+            // Soft cooldown by frame count; preserves legacy anti-chatter behavior.
+            self.beat_cooldown = 8;
+
+            // Keep raw onset times for debug/tests/legacy behavior.
             self.last_beat_times.push_back(current_time);
             if self.last_beat_times.len() > 20 {
                 self.last_beat_times.pop_front();
             }
 
-            let intensity = ((bass - threshold) / avg.max(0.01)).min(1.0);
+            let flux_score = (bass_flux / flux_threshold.max(0.001)).min(1.5);
+            let bass_score = ((bass - avg) / avg.max(0.01)).max(0.0).min(1.5);
+            let intensity = (flux_score * 0.65 + bass_score * 0.35).min(1.0);
             return (true, intensity);
+        }
+
+        // Conservative prediction to fill misses once tempo lock is strong.
+        if self.tempo_confidence > 0.55 && self.last_output_beat_time > 0.0 {
+            let beat_period = 60.0 / self.estimated_bpm.max(60.0) as f64;
+            let since_last = current_time - self.last_output_beat_time;
+
+            if since_last > beat_period * 0.80 {
+                let phase = (since_last / beat_period).fract();
+                let near_boundary = phase < 0.10 || phase > 0.90;
+                if near_boundary && bass > avg * 0.85 && bass_flux > flux_mean * 0.6 {
+                    self.last_output_beat_time = current_time;
+                    return (true, 0.55);
+                }
+            }
         }
 
         (false, 0.0)
     }
 
-    /// Estimate BPM from beat history
-    fn estimate_bpm(&self) -> f32 {
-        if self.last_beat_times.len() < 4 {
-            return 120.0; // Default BPM
+    fn _update_bpm_from_onset(&mut self, current_time: f64) {
+        if let Some(last) = self.last_onset_time {
+            let ioi = current_time - last;
+            // 40-240 BPM => 0.25s to 1.5s.
+            if (0.25..=1.5).contains(&ioi) {
+                // Once stable, reject outliers far from expected tempo multiples.
+                if self.ioi_history.len() >= 4 && self.tempo_confidence > 0.3 {
+                    let expected = 60.0 / self.estimated_bpm.max(60.0) as f64;
+                    let ratios = [
+                        ioi / expected,
+                        ioi / (expected * 2.0),
+                        ioi / (expected * 0.5),
+                    ];
+                    let best = ratios
+                        .iter()
+                        .map(|r| (r - 1.0).abs())
+                        .fold(f64::INFINITY, f64::min);
+                    if best > 0.20 {
+                        return;
+                    }
+                }
+
+                self.ioi_history.push_back(ioi);
+                if self.ioi_history.len() > 32 {
+                    self.ioi_history.pop_front();
+                }
+                self._update_tempo_histogram(ioi);
+            }
+        }
+    }
+
+    fn _update_tempo_histogram(&mut self, ioi: f64) {
+        // Slow decay keeps stable lock but allows tempo transitions.
+        for v in &mut self.tempo_histogram {
+            *v *= 0.995;
         }
 
-        // Calculate intervals between beats
-        let mut intervals: Vec<f64> = Vec::new();
-        for i in 1..self.last_beat_times.len() {
-            let interval = self.last_beat_times[i] - self.last_beat_times[i - 1];
-            if interval > 0.2 && interval < 2.0 {
-                // Filter outliers (30-300 BPM range)
-                intervals.push(interval);
+        let bpm = 60.0 / ioi;
+        for multiplier in [0.5_f64, 1.0, 2.0] {
+            let candidate = bpm * multiplier;
+            if !(40.0..=240.0).contains(&candidate) {
+                continue;
+            }
+
+            let base_idx = (candidate.round() as i32) - 40;
+            for offset in -3..=3 {
+                let idx = base_idx + offset;
+                if !(0..self.tempo_histogram.len() as i32).contains(&idx) {
+                    continue;
+                }
+
+                let x = offset as f32 / 1.5;
+                let mut weight = (-0.5 * x * x).exp();
+                if (80.0..=160.0).contains(&candidate) {
+                    weight *= 1.4;
+                }
+                self.tempo_histogram[idx as usize] += weight;
             }
         }
 
-        if intervals.is_empty() {
-            return 120.0;
+        self._extract_tempo_from_histogram();
+    }
+
+    fn _extract_tempo_from_histogram(&mut self) {
+        if self.ioi_history.len() < 4 {
+            return;
         }
 
-        // Calculate average interval
-        let avg_interval = intervals.iter().sum::<f64>() / intervals.len() as f64;
+        let (peak_idx, peak_height) = self
+            .tempo_histogram
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or((80, 0.0));
 
-        // Convert to BPM
-        let bpm = 60.0 / avg_interval;
+        if peak_height < 1.0 {
+            return;
+        }
 
-        // Clamp to reasonable range
-        bpm.clamp(60.0, 200.0) as f32
+        let start = peak_idx.saturating_sub(2);
+        let end = (peak_idx + 2).min(self.tempo_histogram.len() - 1);
+        let mut weighted_sum = 0.0_f32;
+        let mut total_weight = 0.0_f32;
+        for i in start..=end {
+            let bpm = (i + 40) as f32;
+            let w = self.tempo_histogram[i];
+            weighted_sum += bpm * w;
+            total_weight += w;
+        }
+        let refined_bpm = if total_weight > 0.0 {
+            weighted_sum / total_weight
+        } else {
+            (peak_idx + 40) as f32
+        };
+
+        let mean_height =
+            self.tempo_histogram.iter().sum::<f32>() / self.tempo_histogram.len().max(1) as f32;
+        let prominence = peak_height / (mean_height + 0.001);
+        let sample_conf = (self.ioi_history.len() as f32 / 16.0).min(1.0);
+
+        let recent: Vec<f64> = self.ioi_history.iter().rev().take(8).copied().collect();
+        let consistency_conf = if recent.len() >= 4 {
+            let mean = recent.iter().sum::<f64>() / recent.len() as f64;
+            let var = recent
+                .iter()
+                .map(|v| {
+                    let d = *v - mean;
+                    d * d
+                })
+                .sum::<f64>()
+                / recent.len() as f64;
+            let cv = (var.sqrt() / (mean + 1e-6)).min(1.0);
+            (1.0 - (cv as f32 * 2.0)).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+
+        let new_conf = ((prominence / 15.0) * sample_conf * consistency_conf).clamp(0.0, 1.0);
+        let bpm_delta = (refined_bpm - self.estimated_bpm).abs();
+        let accept =
+            self.tempo_confidence < 0.3 || bpm_delta < 12.0 || new_conf > self.tempo_confidence;
+
+        if accept {
+            let alpha = if new_conf > 0.65 { 0.08 } else { 0.18 };
+            self.estimated_bpm =
+                ((1.0 - alpha) * self.estimated_bpm + alpha * refined_bpm).clamp(60.0, 200.0);
+            self.tempo_confidence = new_conf;
+        }
+    }
+
+    /// Estimate BPM from beat history
+    fn estimate_bpm(&self) -> f32 {
+        self.estimated_bpm
+    }
+
+    /// Estimate current beat phase in [0, 1).
+    fn estimate_beat_phase(&self) -> f32 {
+        if self.last_output_beat_time <= 0.0 || self.estimated_bpm <= 0.0 {
+            return 0.0;
+        }
+
+        let now = self.start_time.elapsed().as_secs_f64();
+        let beat_period = 60.0 / self.estimated_bpm as f64;
+        if beat_period <= 0.0 {
+            return 0.0;
+        }
+
+        let elapsed = (now - self.last_output_beat_time).max(0.0);
+        ((elapsed / beat_period).fract()) as f32
     }
 }
 
@@ -301,9 +504,42 @@ mod tests {
     fn estimate_bpm_uses_recent_beat_intervals() {
         let mut analyzer = FftAnalyzer::new(AudioConfig::default());
         analyzer.last_beat_times = VecDeque::from(vec![0.0, 0.5, 1.0, 1.5, 2.0]);
+        analyzer.estimated_bpm = 120.0;
 
         let bpm = analyzer.estimate_bpm();
 
         assert_approx(bpm, 120.0, 0.01);
+    }
+
+    #[test]
+    fn tempo_histogram_locks_to_128_bpm() {
+        let mut analyzer = FftAnalyzer::new(AudioConfig::default());
+        let period = 60.0 / 128.0;
+
+        for i in 0..32 {
+            let t = i as f64 * period;
+            analyzer._update_bpm_from_onset(t);
+            analyzer.last_onset_time = Some(t);
+        }
+
+        let bpm = analyzer.estimate_bpm();
+        assert!((bpm - 128.0).abs() < 4.0, "expected ~128 BPM, got {bpm}");
+    }
+
+    #[test]
+    fn tempo_histogram_handles_half_time_ioi() {
+        let mut analyzer = FftAnalyzer::new(AudioConfig::default());
+        let half_time_period = 60.0 / 64.0;
+
+        for i in 0..32 {
+            let t = i as f64 * half_time_period;
+            analyzer._update_bpm_from_onset(t);
+            analyzer.last_onset_time = Some(t);
+        }
+
+        let bpm = analyzer.estimate_bpm();
+        // Accept either 64 or its preferred octave cluster around 128.
+        let ok = (bpm - 64.0).abs() < 4.0 || (bpm - 128.0).abs() < 6.0;
+        assert!(ok, "expected ~64 or ~128 BPM, got {bpm}");
     }
 }

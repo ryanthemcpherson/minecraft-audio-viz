@@ -342,10 +342,21 @@ impl DjClient {
         beat: bool,
         beat_intensity: f32,
         bpm: f32,
+        tempo_confidence: f32,
+        beat_phase: f32,
     ) -> Result<(), ClientError> {
         let tx = self.tx.as_ref().ok_or(ClientError::NotConnected)?;
 
-        let msg = AudioFrameMessage::new(seq, bands, peak, beat, beat_intensity, bpm);
+        let msg = AudioFrameMessage::new(
+            seq,
+            bands,
+            peak,
+            beat,
+            beat_intensity,
+            bpm,
+            tempo_confidence,
+            beat_phase,
+        );
         let json =
             serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
 
@@ -437,13 +448,17 @@ async fn handle_server_message(
             let _ = tx.send(Message::Text(json.into())).await;
         }
         ServerMessage::HeartbeatAck(ack) => {
-            // Calculate latency
+            // Calculate latency: prefer RTT from echoed heartbeat timestamp.
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64();
 
-            let latency = ((now - ack.server_time) * 1000.0) as f32;
+            let latency = if let Some(echo_ts) = ack.echo_ts {
+                ((now - echo_ts) * 1000.0) as f32
+            } else {
+                ((now - ack.server_time) * 1000.0) as f32
+            };
             state.lock().latency_ms = latency.max(0.0);
         }
         ServerMessage::PatternSync(_)

@@ -76,6 +76,8 @@ class TestSanitizeAudioFrame:
             "beat": True,
             "beat_i": 0.6,
             "bpm": 128.0,
+            "tempo_conf": 0.85,
+            "beat_phase": 0.25,
             "i_bass": 0.3,
             "i_kick": False,
             "ts": 1700000000.0,
@@ -86,6 +88,8 @@ class TestSanitizeAudioFrame:
         assert safe["beat"] is True
         assert safe["beat_i"] == 0.6
         assert safe["bpm"] == 128.0
+        assert safe["tempo_conf"] == 0.85
+        assert safe["beat_phase"] == 0.25
         assert safe["seq"] == 42
         assert safe["i_bass"] == 0.3
         assert safe["i_kick"] is False
@@ -97,6 +101,8 @@ class TestSanitizeAudioFrame:
         assert safe["beat"] is False
         assert safe["beat_i"] == 0.0
         assert safe["bpm"] == 120.0
+        assert safe["tempo_conf"] == 0.0
+        assert safe["beat_phase"] == 0.0
         assert safe["seq"] == 0
         assert safe["i_bass"] == 0.0
         assert safe["i_kick"] is False
@@ -156,6 +162,16 @@ class TestSanitizeAudioFrame:
         data = {"bpm": float("nan")}
         safe = _sanitize_audio_frame(data)
         assert safe["bpm"] == 120.0  # default
+
+    def test_tempo_conf_clamped(self):
+        data = {"tempo_conf": 5.0}
+        safe = _sanitize_audio_frame(data)
+        assert safe["tempo_conf"] == 1.0
+
+    def test_beat_phase_clamped(self):
+        data = {"beat_phase": -0.5}
+        safe = _sanitize_audio_frame(data)
+        assert safe["beat_phase"] == 0.0
 
     def test_seq_negative(self):
         data = {"seq": -5}

@@ -56,6 +56,8 @@ pub struct AudioFrameMessage {
     pub beat: bool,
     pub beat_i: f32,
     pub bpm: f32,
+    pub tempo_conf: f32,
+    pub beat_phase: f32,
     pub ts: f64,
 }
 
@@ -67,6 +69,8 @@ impl AudioFrameMessage {
         beat: bool,
         beat_intensity: f32,
         bpm: f32,
+        tempo_confidence: f32,
+        beat_phase: f32,
     ) -> Self {
         Self {
             msg_type: "dj_audio_frame".to_string(),
@@ -76,6 +80,8 @@ impl AudioFrameMessage {
             beat,
             beat_i: beat_intensity,
             bpm,
+            tempo_conf: tempo_confidence,
+            beat_phase,
             ts: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -232,6 +238,8 @@ pub struct ClockSyncRequest {
 #[derive(Debug, Clone, Deserialize)]
 pub struct HeartbeatAckMessage {
     pub server_time: f64,
+    #[serde(default)]
+    pub echo_ts: Option<f64>,
 }
 
 /// Pattern sync from server
@@ -317,7 +325,16 @@ mod tests {
 
     #[test]
     fn audio_frame_message_uses_expected_type_and_payload() {
-        let msg = AudioFrameMessage::new(42, [0.1, 0.2, 0.3, 0.4, 0.5], 0.5, true, 0.8, 128.0);
+        let msg = AudioFrameMessage::new(
+            42,
+            [0.1, 0.2, 0.3, 0.4, 0.5],
+            0.5,
+            true,
+            0.8,
+            128.0,
+            0.75,
+            0.2,
+        );
         let json = serde_json::to_value(&msg).expect("audio frame should serialize");
 
         assert_eq!(json["type"], "dj_audio_frame");
@@ -325,6 +342,8 @@ mod tests {
         assert_eq!(json["beat"], true);
         assert!((json["beat_i"].as_f64().unwrap_or_default() - 0.8).abs() < 1e-6);
         assert!((json["bpm"].as_f64().unwrap_or_default() - 128.0).abs() < 1e-6);
+        assert!((json["tempo_conf"].as_f64().unwrap_or_default() - 0.75).abs() < 1e-6);
+        assert!((json["beat_phase"].as_f64().unwrap_or_default() - 0.2).abs() < 1e-6);
         assert!(json["ts"].as_f64().unwrap_or(0.0) > 0.0);
     }
 

@@ -2060,7 +2060,9 @@ class AppCaptureAgent:
                     bands = fft_result.bands
 
                     # Enhance beat detection with FFT onset info
-                    if fft_result.kick_onset and not frame.is_beat:
+                    if (
+                        fft_result.kick_onset or fft_result.instant_kick_onset
+                    ) and not frame.is_beat:
                         # FFT detected a kick that pycaw missed
                         frame.is_beat = True
                         frame.beat_intensity = max(frame.beat_intensity, 0.8)
@@ -2178,16 +2180,13 @@ class AppCaptureAgent:
         if predict_beat and not frame.is_beat:
             # Create modified frame with predicted beat
             return AppAudioFrame(
+                timestamp=frame.timestamp,
                 peak=frame.peak,
-                bands=frame.bands,
+                channels=frame.channels,
                 is_beat=True,
                 beat_intensity=max(
                     0.7, frame.beat_intensity
                 ),  # Predicted beats get decent intensity
-                raw_amplitude=frame.raw_amplitude,
-                low_frequency=frame.low_frequency,
-                high_frequency=frame.high_frequency,
-                spectral_flux=frame.spectral_flux,
             )
 
         return frame

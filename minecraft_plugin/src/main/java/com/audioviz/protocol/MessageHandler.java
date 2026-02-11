@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Handles WebSocket protocol messages and dispatches to appropriate handlers.
@@ -38,6 +39,14 @@ import java.util.Map;
 public class MessageHandler {
 
     private final AudioVizPlugin plugin;
+    private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
+
+    private static final double MIN_PHASE_ASSIST_CONFIDENCE = 0.60;
+    private static final double MIN_PHASE_ASSIST_BPM = 60.0;
+    private static final double PHASE_EDGE_WINDOW = 0.12;
+    private static final double SYNTH_BEAT_MIN_INTENSITY = 0.25;
+    private static final double SYNTH_BEAT_COOLDOWN_FRACTION = 0.60;
+    private static final long SYNTH_BEAT_COOLDOWN_MIN_MS = 120L;
 
     public MessageHandler(AudioVizPlugin plugin) {
         this.plugin = plugin;
@@ -890,9 +899,25 @@ public class MessageHandler {
         }
         String zoneName = message.get("zone").getAsString();
 
-        boolean isBeat = message.has("is_beat") && message.get("is_beat").getAsBoolean();
-        double beatIntensity = InputSanitizer.sanitizeAmplitude(
-            message.has("beat_intensity") ? message.get("beat_intensity").getAsDouble() : 0.0);
+        boolean explicitBeat = message.has("is_beat") && message.get("is_beat").getAsBoolean();
+        double explicitBeatIntensity = InputSanitizer.sanitizeDouble(
+            message.has("beat_intensity") ? message.get("beat_intensity").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+        double bpm = InputSanitizer.sanitizeDouble(
+            message.has("bpm") ? message.get("bpm").getAsDouble() : 0.0,
+            0.0, 300.0, 0.0);
+        double tempoConfidence = InputSanitizer.sanitizeDouble(
+            message.has("tempo_confidence") ? message.get("tempo_confidence").getAsDouble()
+                : (message.has("tempo_conf") ? message.get("tempo_conf").getAsDouble() : 0.0),
+            0.0, 1.0, 0.0);
+        double beatPhase = InputSanitizer.sanitizeDouble(
+            message.has("beat_phase") ? message.get("beat_phase").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+
+        BeatProjection projection = projectBeat(
+            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase);
+        boolean isBeat = projection.isBeat;
+        double beatIntensity = projection.beatIntensity;
 
         // Trigger beat effects if this is a beat
         if (isBeat && beatIntensity > 0) {
@@ -912,7 +937,8 @@ public class MessageHandler {
                 message.has("amplitude") ? message.get("amplitude").getAsDouble() : 0.0);
             long frame = message.has("frame") ? message.get("frame").getAsLong() : 0;
 
-            AudioState audioState = new AudioState(bands, amplitude, isBeat, beatIntensity, frame);
+            AudioState audioState = new AudioState(
+                bands, amplitude, isBeat, beatIntensity, tempoConfidence, beatPhase, frame);
             plugin.getParticleVisualizationManager().updateAudioState(audioState);
 
             // Forward audio state to decorator manager
@@ -925,6 +951,57 @@ public class MessageHandler {
         JsonObject response = new JsonObject();
         response.addProperty("type", "ok");
         return response;
+    }
+
+    private BeatProjection projectBeat(
+        String zoneName,
+        boolean explicitBeat,
+        double explicitBeatIntensity,
+        double bpm,
+        double tempoConfidence,
+        double beatPhase
+    ) {
+        long nowMs = System.currentTimeMillis();
+        double clampedExplicitIntensity = InputSanitizer.sanitizeDouble(explicitBeatIntensity, 0.0, 1.0, 0.0);
+
+        if (explicitBeat) {
+            lastBeatTimestampByZone.put(zoneName, nowMs);
+            return new BeatProjection(true, clampedExplicitIntensity);
+        }
+
+        if (tempoConfidence < MIN_PHASE_ASSIST_CONFIDENCE || bpm < MIN_PHASE_ASSIST_BPM) {
+            return new BeatProjection(false, 0.0);
+        }
+
+        boolean nearTickEdge = beatPhase <= PHASE_EDGE_WINDOW || beatPhase >= (1.0 - PHASE_EDGE_WINDOW);
+        if (!nearTickEdge) {
+            return new BeatProjection(false, 0.0);
+        }
+
+        double beatPeriodMs = 60000.0 / bpm;
+        long minIntervalMs = (long) Math.max(
+            SYNTH_BEAT_COOLDOWN_MIN_MS,
+            beatPeriodMs * SYNTH_BEAT_COOLDOWN_FRACTION
+        );
+        long lastBeatMs = lastBeatTimestampByZone.getOrDefault(zoneName, 0L);
+        if (nowMs - lastBeatMs < minIntervalMs) {
+            return new BeatProjection(false, 0.0);
+        }
+
+        double projectedIntensity = Math.max(SYNTH_BEAT_MIN_INTENSITY, tempoConfidence * 0.65);
+        projectedIntensity = InputSanitizer.sanitizeDouble(projectedIntensity, 0.0, 1.0, SYNTH_BEAT_MIN_INTENSITY);
+        lastBeatTimestampByZone.put(zoneName, nowMs);
+        return new BeatProjection(true, projectedIntensity);
+    }
+
+    private static final class BeatProjection {
+        private final boolean isBeat;
+        private final double beatIntensity;
+
+        private BeatProjection(boolean isBeat, double beatIntensity) {
+            this.isBeat = isBeat;
+            this.beatIntensity = beatIntensity;
+        }
     }
 
     // ========== DJ Info Handler ==========

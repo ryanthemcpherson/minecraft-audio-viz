@@ -43,6 +43,7 @@ class DJRelayConfig:
     dj_key: str = ""
     reconnect_interval: float = 5.0
     heartbeat_interval: float = 2.0
+    target_fps: float = 20.0
     max_connect_attempts: int = 3  # Number of retry attempts for initial connection
     # Direct mode - send visualization directly to Minecraft
     direct_mode: bool = False
@@ -77,6 +78,7 @@ class DJRelay:
         self._last_heartbeat = 0
         self._reconnect_attempts = 0
         self._heartbeat_failures = 0
+        self._last_heartbeat_rtt_ms = 0.0
 
         # Direct mode - Minecraft connection and pattern engine
         self.viz_client: Optional["VizClient"] = None
@@ -502,10 +504,17 @@ class DJRelay:
                                 self._on_status_change(self._is_active)
 
                     elif msg_type == "heartbeat_ack":
-                        # Calculate latency
-                        if "server_time" in data:
-                            (time.time() - data["server_time"]) * 1000
-                            # Could track this for display
+                        # RTT ping derived from echoed heartbeat timestamp.
+                        echo_ts = data.get("echo_ts")
+                        if isinstance(echo_ts, (int, float)):
+                            rtt_ms = (time.time() - float(echo_ts)) * 1000.0
+                            rtt_ms = max(0.0, min(rtt_ms, 60000.0))
+                            if self._last_heartbeat_rtt_ms > 0:
+                                self._last_heartbeat_rtt_ms = (
+                                    self._last_heartbeat_rtt_ms * 0.8 + rtt_ms * 0.2
+                                )
+                            else:
+                                self._last_heartbeat_rtt_ms = rtt_ms
 
                     elif msg_type == "pattern_sync":
                         # VJ server is broadcasting a pattern change
@@ -537,6 +546,7 @@ class DJRelay:
             frame_callback: Async function that returns (bands, peak, is_beat, beat_intensity, bpm)
         """
         self._running = True
+        frame_interval = 1.0 / max(1.0, float(self.config.target_fps))
 
         while self._running:
             # Connect
@@ -566,11 +576,11 @@ class DJRelay:
                 bands, peak, is_beat, beat_intensity, bpm = await frame_callback()
                 await self.send_frame(bands, peak, is_beat, beat_intensity, bpm)
                 await self.send_heartbeat()
-                await asyncio.sleep(0.016)  # ~60 FPS
+                await asyncio.sleep(frame_interval)
 
             except Exception as e:
                 logger.error(f"Frame callback error: {e}")
-                await asyncio.sleep(0.016)
+                await asyncio.sleep(frame_interval)
 
     def stop(self):
         """Stop the relay."""
@@ -599,6 +609,29 @@ class DJRelayAgent:
         self._smoothed_bands = [0.0] * 5
         self._smooth_attack = 0.35
         self._smooth_release = 0.08
+        self._stable_bpm = 120.0
+        self._dual_verify_vj_frames = 0
+        self._dual_verify_mc_frames = 0
+        self._dual_verify_last_log = time.time()
+
+    def _stabilize_bpm(self, raw_bpm: float, confidence: float) -> float:
+        """Apply octave correction + confidence-weighted smoothing."""
+        if not isinstance(raw_bpm, (int, float)) or raw_bpm <= 0:
+            return self._stable_bpm
+
+        raw = float(raw_bpm)
+        prev = self._stable_bpm if 40.0 <= self._stable_bpm <= 240.0 else 120.0
+        candidates = [raw, raw * 2.0, raw * 0.5]
+        valid = [c for c in candidates if 60.0 <= c <= 200.0]
+        if not valid:
+            valid = [max(60.0, min(200.0, raw))]
+        chosen = min(valid, key=lambda c: abs(c - prev))
+
+        conf = max(0.0, min(1.0, float(confidence)))
+        alpha = 0.10 + conf * 0.35
+        self._stable_bpm = (1.0 - alpha) * prev + alpha * chosen
+        self._stable_bpm = max(60.0, min(200.0, self._stable_bpm))
+        return self._stable_bpm
 
     async def run(self):
         """Run the DJ relay agent."""
@@ -610,6 +643,7 @@ class DJRelayAgent:
         receiver_task = asyncio.create_task(self.relay.receive_messages())
 
         self._running = True
+        frame_interval = 1.0 / max(1.0, float(self.relay.config.target_fps))
         mode_str = "DIRECT" if self.relay.route_mode == "dual" else "RELAY"
         logger.info(f"DJ Relay started ({mode_str} mode). Sending audio to VJ server...")
 
@@ -647,9 +681,9 @@ class DJRelayAgent:
                     bands = self._generate_bands(frame.peak, frame.is_beat)
 
                 # Get BPM from FFT analyzer if available
-                bpm = 120.0
+                bpm = self._stable_bpm
                 if self.fft_analyzer is not None and fft_result is not None:
-                    bpm = fft_result.estimated_bpm if fft_result.bpm_confidence > 0.2 else 120.0
+                    bpm = self._stabilize_bpm(fft_result.estimated_bpm, fft_result.bpm_confidence)
 
                 # Send to VJ server (always, for monitoring)
                 success = await self.relay.send_frame(
@@ -661,6 +695,8 @@ class DJRelayAgent:
                     instant_bass=instant_bass,
                     instant_kick=instant_kick,
                 )
+                if success and self.relay.route_mode == "dual" and self.relay.is_active:
+                    self._dual_verify_vj_frames += 1
 
                 if not success and not self.relay.connected:
                     # Connection lost, try to reconnect with exponential backoff
@@ -683,9 +719,27 @@ class DJRelayAgent:
 
                 # Direct mode: Send visualization directly to Minecraft (if active DJ)
                 if self.relay.should_publish_direct():
-                    await self._send_to_minecraft(
+                    direct_ok = await self._send_to_minecraft(
                         bands, frame.peak, frame.is_beat, frame.beat_intensity
                     )
+                    if direct_ok:
+                        self._dual_verify_mc_frames += 1
+
+                now = time.time()
+                if (
+                    self.relay.route_mode == "dual"
+                    and self.relay.is_active
+                    and now - self._dual_verify_last_log >= 5.0
+                ):
+                    logger.info(
+                        "[DUAL VERIFY] 5s window: vj_frames=%d mc_frames=%d ping=%.1fms",
+                        self._dual_verify_vj_frames,
+                        self._dual_verify_mc_frames,
+                        self.relay._last_heartbeat_rtt_ms,
+                    )
+                    self._dual_verify_vj_frames = 0
+                    self._dual_verify_mc_frames = 0
+                    self._dual_verify_last_log = now
 
                 # Update spectrograph
                 if self.spectrograph:
@@ -710,7 +764,7 @@ class DJRelayAgent:
                         beat_intensity=frame.beat_intensity,
                     )
 
-                await asyncio.sleep(0.016)
+                await asyncio.sleep(frame_interval)
 
         except Exception as e:
             logger.error(f"DJ Relay error: {e}")
@@ -728,7 +782,7 @@ class DJRelayAgent:
 
     async def _send_to_minecraft(
         self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float
-    ):
+    ) -> bool:
         """Send visualization directly to Minecraft (direct mode only)."""
         try:
             from audio_processor.patterns import AudioState
@@ -760,9 +814,11 @@ class DJRelayAgent:
 
             # Send directly to Minecraft
             await self.relay.viz_client.batch_update_fast(self.relay._zone, entities, particles)
+            return True
 
         except Exception as e:
             logger.debug(f"Failed to send to Minecraft: {e}")
+            return False
 
     def _generate_bands(self, peak: float, is_beat: bool) -> List[float]:
         """Generate simple synthetic bands when FFT unavailable."""

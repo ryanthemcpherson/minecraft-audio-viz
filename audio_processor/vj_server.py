@@ -71,6 +71,8 @@ def _sanitize_audio_frame(data: dict) -> dict:
     - bands: exactly 5 floats in [0.0, 1.0]
     - peak, beat_i, i_bass: floats >= 0 (capped at 5.0)
     - bpm: float in [0.0, 300.0]
+    - tempo_conf: float in [0.0, 1.0]
+    - beat_phase: float in [0.0, 1.0]
     - seq: int >= 0
     - beat, i_kick: booleans
     """
@@ -89,6 +91,8 @@ def _sanitize_audio_frame(data: dict) -> dict:
         "beat": bool(data.get("beat", False)),
         "beat_i": _clamp_finite(data.get("beat_i"), 0.0, 5.0, 0.0),
         "bpm": _clamp_finite(data.get("bpm"), 0.0, 300.0, 120.0),
+        "tempo_conf": _clamp_finite(data.get("tempo_conf"), 0.0, 1.0, 0.0),
+        "beat_phase": _clamp_finite(data.get("beat_phase"), 0.0, 1.0, 0.0),
         "seq": max(0, int(data.get("seq", 0))) if isinstance(data.get("seq"), (int, float)) else 0,
         "i_bass": _clamp_finite(data.get("i_bass"), 0.0, 5.0, 0.0),
         "i_kick": bool(data.get("i_kick", False)),
@@ -253,6 +257,8 @@ class DJConnection:
     is_beat: bool = False
     beat_intensity: float = 0.0
     bpm: float = 120.0
+    tempo_confidence: float = 0.0
+    beat_phase: float = 0.0
     seq: int = 0
 
     # Bass lane (instant kick detection, ~1ms latency vs ~15ms for FFT)
@@ -260,7 +266,12 @@ class DJConnection:
     instant_kick: bool = False
 
     # Connection health
+    # Display latency metric shown in admin (prefer heartbeat RTT "ping")
     latency_ms: float = 0.0
+    # Network RTT measured from heartbeat echo timestamps
+    network_rtt_ms: float = 0.0
+    # End-to-end pipeline latency inferred from dj_audio_frame timestamps
+    pipeline_latency_ms: float = 0.0
     frames_per_second: float = 0.0
     _fps_samples: List[float] = field(default_factory=list)
 
@@ -272,6 +283,7 @@ class DJConnection:
     # Direct mode support
     direct_mode: bool = False  # Whether this DJ is using direct Minecraft connection
     mc_connected: bool = False  # Whether DJ's direct Minecraft connection is alive
+    phase_assist_last_time: float = 0.0  # Last phase-assisted beat fire time
 
     # Rate limiting (token bucket: 120 tokens/sec, 2x expected 60fps)
     _rate_tokens: float = 120.0
@@ -577,7 +589,11 @@ class VJServer:
                     "connected_at": dj.connected_at,
                     "fps": round(dj.frames_per_second, 1),
                     "latency_ms": round(dj.latency_ms, 1),
+                    "ping_ms": round(dj.network_rtt_ms, 1),
+                    "pipeline_latency_ms": round(dj.pipeline_latency_ms, 1),
                     "bpm": round(dj.bpm, 1),
+                    "tempo_confidence": round(dj.tempo_confidence, 3),
+                    "beat_phase": round(dj.beat_phase, 3),
                     "priority": dj.priority,
                     "last_frame_age_ms": round((time.time() - dj.last_frame_at) * 1000, 0),
                     "direct_mode": dj.direct_mode,
@@ -761,11 +777,29 @@ class VJServer:
                         if frame_type == "dj_audio_frame":
                             await self._handle_dj_frame(dj, frame_data)
                         elif frame_type == "dj_heartbeat":
-                            dj.last_heartbeat = time.time()
+                            now = time.time()
+                            dj.last_heartbeat = now
+                            heartbeat_ts = frame_data.get("ts")
+                            if isinstance(heartbeat_ts, (int, float)) and math.isfinite(
+                                heartbeat_ts
+                            ):
+                                rtt_ms = (now - float(heartbeat_ts)) * 1000.0
+                                rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
+                                if dj.network_rtt_ms > 0:
+                                    dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
+                                else:
+                                    dj.network_rtt_ms = rtt_ms
+                                dj.latency_ms = dj.network_rtt_ms
                             if dj.direct_mode:
                                 dj.mc_connected = frame_data.get("mc_connected", False)
                             await websocket.send(
-                                json.dumps({"type": "heartbeat_ack", "server_time": time.time()})
+                                json.dumps(
+                                    {
+                                        "type": "heartbeat_ack",
+                                        "server_time": now,
+                                        "echo_ts": heartbeat_ts,
+                                    }
+                                )
                             )
                         elif frame_type == "going_offline":
                             logger.info(
@@ -937,12 +971,28 @@ class VJServer:
                         await self._handle_dj_frame(dj, data)
 
                     elif msg_type == "dj_heartbeat":
-                        dj.last_heartbeat = time.time()
+                        now = time.time()
+                        dj.last_heartbeat = now
+                        heartbeat_ts = data.get("ts")
+                        if isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
+                            rtt_ms = (now - float(heartbeat_ts)) * 1000.0
+                            rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
+                            if dj.network_rtt_ms > 0:
+                                dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
+                            else:
+                                dj.network_rtt_ms = rtt_ms
+                            dj.latency_ms = dj.network_rtt_ms
                         # Track Minecraft connection status for direct mode DJs
                         if dj.direct_mode:
                             dj.mc_connected = data.get("mc_connected", False)
                         await websocket.send(
-                            json.dumps({"type": "heartbeat_ack", "server_time": time.time()})
+                            json.dumps(
+                                {
+                                    "type": "heartbeat_ack",
+                                    "server_time": now,
+                                    "echo_ts": heartbeat_ts,
+                                }
+                            )
                         )
 
                     elif msg_type == "going_offline":
@@ -1003,7 +1053,9 @@ class VJServer:
         dj.peak = safe["peak"]
         dj.is_beat = safe["beat"]
         dj.beat_intensity = safe["beat_i"]
-        dj.bpm = safe["bpm"]
+        dj.bpm = self._stabilize_bpm(dj, safe["bpm"])
+        dj.tempo_confidence = safe["tempo_conf"]
+        dj.beat_phase = safe["beat_phase"]
         dj.instant_bass = safe["i_bass"]
         dj.instant_kick = safe["i_kick"]
         dj.last_frame_at = time.time()
@@ -1027,11 +1079,61 @@ class VJServer:
                 latency = (server_time - dj_timestamp) * 1000
 
             latency = max(0.0, min(latency, 60000.0))  # Clamp to [0, 60s]
-            # Smooth latency with EMA to prevent spikes from event loop stalls
-            if dj.latency_ms > 0:
-                dj.latency_ms = dj.latency_ms * 0.8 + latency * 0.2
+            # Smooth pipeline latency with EMA to prevent spikes from event loop stalls
+            if dj.pipeline_latency_ms > 0:
+                dj.pipeline_latency_ms = dj.pipeline_latency_ms * 0.8 + latency * 0.2
             else:
-                dj.latency_ms = latency
+                dj.pipeline_latency_ms = latency
+            # Backward-compatible display metric: prefer network RTT when available.
+            if dj.network_rtt_ms > 0:
+                dj.latency_ms = dj.network_rtt_ms
+            else:
+                dj.latency_ms = dj.pipeline_latency_ms
+
+    def _stabilize_bpm(self, dj: DJConnection, raw_bpm: float) -> float:
+        """Normalize octave errors and smooth BPM per-DJ."""
+        if not isinstance(raw_bpm, (int, float)) or not math.isfinite(raw_bpm):
+            return dj.bpm if dj.bpm > 0 else 120.0
+
+        raw = float(raw_bpm)
+        prev = dj.bpm if 40.0 <= dj.bpm <= 240.0 else 120.0
+
+        # Consider half/double-time candidates and choose closest to prior.
+        candidates = [raw, raw * 2.0, raw * 0.5]
+        valid = [c for c in candidates if 60.0 <= c <= 200.0]
+        if not valid:
+            valid = [max(60.0, min(200.0, raw))]
+        chosen = min(valid, key=lambda c: abs(c - prev))
+
+        # Apply bounded smoothing to avoid jumpy UI.
+        alpha = 0.25 if abs(chosen - prev) > 8.0 else 0.4
+        bpm = (1.0 - alpha) * prev + alpha * chosen
+        return max(60.0, min(200.0, bpm))
+
+    def _apply_phase_beat_assist(
+        self, dj: DJConnection, is_beat: bool, beat_intensity: float
+    ) -> tuple:
+        """Use explicit DJ phase/confidence to fill missed beats conservatively."""
+        if is_beat:
+            dj.phase_assist_last_time = time.time()
+            return is_beat, beat_intensity
+
+        if dj.tempo_confidence < 0.60 or dj.bpm < 60.0:
+            return is_beat, beat_intensity
+
+        beat_period = 60.0 / max(60.0, dj.bpm)
+        phase = max(0.0, min(1.0, dj.beat_phase))
+        near_boundary = phase < 0.08 or phase > 0.92
+        now = time.time()
+        can_fire = dj.phase_assist_last_time <= 0.0 or (now - dj.phase_assist_last_time) >= (
+            beat_period * 0.60
+        )
+        if near_boundary and can_fire:
+            dj.phase_assist_last_time = now
+            assisted_intensity = max(beat_intensity, min(1.0, 0.50 + dj.tempo_confidence * 0.25))
+            return True, assisted_intensity
+
+        return is_beat, beat_intensity
 
     async def _set_active_dj(self, dj_id: str):
         """Set the active DJ."""
@@ -2149,6 +2251,8 @@ class VJServer:
         beat_intensity: float,
         instant_bass: float = 0.0,
         instant_kick: bool = False,
+        tempo_confidence: float = 0.0,
+        beat_phase: float = 0.0,
     ):
         """Broadcast visualization state to browser clients."""
         if not self._broadcast_clients:
@@ -2156,11 +2260,15 @@ class VJServer:
 
         # Get stats from active DJ
         latency_ms = 0.0
+        ping_ms = 0.0
+        pipeline_latency_ms = 0.0
         bpm = 0.0
         fps = 0.0
         if self._active_dj_id and self._active_dj_id in self._djs:
             dj = self._djs[self._active_dj_id]
             latency_ms = dj.latency_ms
+            ping_ms = dj.network_rtt_ms
+            pipeline_latency_ms = dj.pipeline_latency_ms
             bpm = dj.bpm
             fps = dj.frames_per_second
 
@@ -2178,8 +2286,14 @@ class VJServer:
                 "pattern": self._pattern_name,
                 "active_dj": self._active_dj_id,
                 "latency_ms": round(latency_ms, 1),
+                "ping_ms": round(ping_ms, 1),
+                "pipeline_latency_ms": round(pipeline_latency_ms, 1),
                 "fps": round(fps, 1),
-                "zone_status": {"bpm_estimate": round(bpm, 1)},
+                "zone_status": {
+                    "bpm_estimate": round(bpm, 1),
+                    "tempo_confidence": round(tempo_confidence, 3),
+                    "beat_phase": round(beat_phase, 3),
+                },
             }
         )
 
@@ -2477,6 +2591,9 @@ class VJServer:
         peak: float,
         is_beat: bool,
         beat_intensity: float,
+        bpm: float = 0.0,
+        tempo_confidence: float = 0.0,
+        beat_phase: float = 0.0,
     ):
         """Send entities to Minecraft."""
         if not self.viz_client or not self.viz_client.connected:
@@ -2505,6 +2622,9 @@ class VJServer:
                 "amplitude": max(0.0, min(5.0, peak)),
                 "is_beat": bool(is_beat),
                 "beat_intensity": max(0.0, min(5.0, beat_intensity)),
+                "bpm": max(0.0, min(300.0, bpm)),
+                "tempo_confidence": max(0.0, min(1.0, tempo_confidence)),
+                "beat_phase": max(0.0, min(1.0, beat_phase)),
             }
             await self.viz_client.batch_update_fast(self.zone, entities, particles, audio)
         except Exception as e:
@@ -2529,6 +2649,11 @@ class VJServer:
                     beat_intensity = dj.beat_intensity
                     instant_bass = dj.instant_bass
                     instant_kick = dj.instant_kick
+                    tempo_confidence = dj.tempo_confidence
+                    beat_phase = dj.beat_phase
+                    is_beat, beat_intensity = self._apply_phase_beat_assist(
+                        dj, is_beat, beat_intensity
+                    )
                 else:
                     # No active DJ - fade to silence
                     bands = self._fallback_bands
@@ -2537,6 +2662,8 @@ class VJServer:
                     beat_intensity = 0.0
                     instant_bass = 0.0
                     instant_kick = False
+                    tempo_confidence = 0.0
+                    beat_phase = 0.0
 
                     # Decay fallback values
                     for i in range(5):
@@ -2547,6 +2674,14 @@ class VJServer:
                 adjusted_bands = [
                     bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
                 ]
+
+                # Send to Minecraft - skip if active DJ is using direct mode and connected.
+                # In direct mode, the DJ app publishes directly (dual output path).
+                should_send_to_mc = True
+                if dj and dj.direct_mode and dj.mc_connected:
+                    should_send_to_mc = False
+                elif dj and dj.direct_mode and not dj.mc_connected:
+                    should_send_to_mc = True
 
                 # Clean up expired effects
                 now = time.time()
@@ -2563,18 +2698,22 @@ class VJServer:
                         self._freeze = False
                     del self._active_effects[k]
 
-                # Calculate visualization
-                if self._freeze and self._last_entities:
-                    entities = self._last_entities
-                elif self._blackout:
-                    entities = []
+                # Calculate entities only when needed (MC relay path or active browser previews).
+                need_entities = should_send_to_mc or bool(self._broadcast_clients)
+                if need_entities:
+                    if self._freeze and self._last_entities:
+                        entities = self._last_entities
+                    elif self._blackout:
+                        entities = []
+                    else:
+                        entities = self._calculate_entities(
+                            adjusted_bands, peak, is_beat, beat_intensity
+                        )
+                        # Apply timed effects (flash, strobe, pulse, wave, etc.)
+                        entities = self._apply_effects(entities, adjusted_bands)
+                        self._last_entities = entities
                 else:
-                    entities = self._calculate_entities(
-                        adjusted_bands, peak, is_beat, beat_intensity
-                    )
-                    # Apply timed effects (flash, strobe, pulse, wave, etc.)
-                    entities = self._apply_effects(entities, adjusted_bands)
-                    self._last_entities = entities
+                    entities = []
 
                 # Update spectrograph
                 if self.spectrograph:
@@ -2595,22 +2734,29 @@ class VJServer:
                         bands=bands, amplitude=peak, is_beat=is_beat, beat_intensity=beat_intensity
                     )
 
-                # Send to Minecraft - skip if active DJ is using direct mode and connected
-                # In direct mode, the DJ sends visualization directly to Minecraft
-                should_send_to_mc = True
-                if dj and dj.direct_mode and dj.mc_connected:
-                    # DJ is sending directly, VJ server doesn't need to
-                    should_send_to_mc = False
-                elif dj and dj.direct_mode and not dj.mc_connected:
-                    # DJ is in direct mode but lost MC connection - VJ server takes over (fallback)
-                    should_send_to_mc = True
-
                 if should_send_to_mc:
-                    await self._update_minecraft(entities, bands, peak, is_beat, beat_intensity)
+                    await self._update_minecraft(
+                        entities,
+                        bands,
+                        peak,
+                        is_beat,
+                        beat_intensity,
+                        bpm=dj.bpm if dj else 0.0,
+                        tempo_confidence=tempo_confidence,
+                        beat_phase=beat_phase,
+                    )
 
                 # Send to browser clients (always, for preview)
                 await self._broadcast_viz_state(
-                    entities, bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
+                    entities,
+                    bands,
+                    peak,
+                    is_beat,
+                    beat_intensity,
+                    instant_bass,
+                    instant_kick,
+                    tempo_confidence,
+                    beat_phase,
                 )
 
                 # Log health summary every 60 seconds

@@ -43,6 +43,16 @@
       "type": "number",
       "minimum": 0
     },
+    "tempo_conf": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "beat_phase": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
     "i_bass": {
       "type": "number",
       "minimum": 0

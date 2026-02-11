@@ -130,4 +130,20 @@ class AudioStateTest {
         AudioState state = new AudioState(new double[5], 0.0, false, 0.0, 123456789L);
         assertEquals(123456789L, state.getFrame());
     }
+
+    @Test
+    @DisplayName("Legacy constructor defaults tempo confidence and beat phase to zero")
+    void legacyConstructorDefaultsTimingMetadata() {
+        AudioState state = new AudioState(new double[5], 0.4, true, 0.7, 5L);
+        assertEquals(0.0, state.getTempoConfidence(), 1e-10);
+        assertEquals(0.0, state.getBeatPhase(), 1e-10);
+    }
+
+    @Test
+    @DisplayName("Extended constructor stores tempo confidence and beat phase")
+    void extendedConstructorStoresTimingMetadata() {
+        AudioState state = new AudioState(new double[5], 0.4, false, 0.1, 0.88, 0.34, 9L);
+        assertEquals(0.88, state.getTempoConfidence(), 1e-10);
+        assertEquals(0.34, state.getBeatPhase(), 1e-10);
+    }
 }

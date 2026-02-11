@@ -255,6 +255,12 @@ Examples:
         default=8765,
         help="Minecraft WebSocket port for direct mode (default: 8765)",
     )
+    relay_group.add_argument(
+        "--dj-fps",
+        type=float,
+        default=20.0,
+        help="Target DJ relay frame rate (default: 20, aligns with Minecraft tick rate)",
+    )
 
     args = parser.parse_args()
 
@@ -353,6 +359,7 @@ def _run_dj_relay(args):
         dj_id=args.dj_id,
         dj_name=args.dj_name,
         dj_key=args.dj_key,
+        target_fps=args.dj_fps,
         direct_mode=args.direct,
         minecraft_host=args.relay_minecraft_host,
         minecraft_port=args.relay_minecraft_port,

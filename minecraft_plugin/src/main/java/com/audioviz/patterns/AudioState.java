@@ -16,13 +16,29 @@ public class AudioState {
     private final double amplitude;
     private final boolean isBeat;
     private final double beatIntensity;
+    private final double tempoConfidence;
+    private final double beatPhase;
     private final long frame;
 
     public AudioState(double[] bands, double amplitude, boolean isBeat, double beatIntensity, long frame) {
+        this(bands, amplitude, isBeat, beatIntensity, 0.0, 0.0, frame);
+    }
+
+    public AudioState(
+        double[] bands,
+        double amplitude,
+        boolean isBeat,
+        double beatIntensity,
+        double tempoConfidence,
+        double beatPhase,
+        long frame
+    ) {
         this.bands = bands != null ? bands : new double[5];
         this.amplitude = amplitude;
         this.isBeat = isBeat;
         this.beatIntensity = beatIntensity;
+        this.tempoConfidence = tempoConfidence;
+        this.beatPhase = beatPhase;
         this.frame = frame;
     }
 
@@ -49,6 +65,20 @@ public class AudioState {
 
     public long getFrame() {
         return frame;
+    }
+
+    /**
+     * Get confidence of tempo lock [0-1].
+     */
+    public double getTempoConfidence() {
+        return tempoConfidence;
+    }
+
+    /**
+     * Get beat phase in cycle [0-1].
+     */
+    public double getBeatPhase() {
+        return beatPhase;
     }
 
     /**

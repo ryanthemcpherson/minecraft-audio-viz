@@ -772,6 +772,66 @@ class TestBPMEstimation:
         )
 
 
+class TestTickAlignedBeatPrediction:
+    """Regression tests for tick-aligned beat prediction path."""
+
+    def setup_method(self):
+        """Set up minimal AppCaptureAgent state for prediction tests."""
+        import os
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+
+        from audio_processor.app_capture import AppCaptureAgent
+
+        self.agent = AppCaptureAgent.__new__(AppCaptureAgent)
+        self.agent._estimated_bpm = 128.0
+        self.agent._mc_tick_interval = 0.050
+        self.agent._next_predicted_beat = 0.0
+        self.agent._beat_phase = 0.0
+
+    def test_predict_state_returns_valid_app_audio_frame(self):
+        """Predicted beats must construct AppAudioFrame with the current dataclass fields."""
+        from audio_processor.app_capture import AppAudioFrame
+
+        now = time.time()
+        self.agent._next_predicted_beat = now + 0.03  # Within one MC tick
+        frame = AppAudioFrame(
+            timestamp=now,
+            peak=0.5,
+            channels=[0.4, 0.5],
+            is_beat=False,
+            beat_intensity=0.2,
+        )
+
+        predicted = self.agent._predict_beat_state(frame, [0.2, 0.3, 0.4, 0.3, 0.2])
+
+        assert predicted.is_beat
+        assert predicted.beat_intensity >= 0.7
+        assert predicted.timestamp == frame.timestamp
+        assert predicted.channels == frame.channels
+
+    def test_real_beat_updates_next_predicted_beat(self):
+        """A real beat should reset phase and seed next predicted beat time."""
+        from audio_processor.app_capture import AppAudioFrame
+
+        now = time.time()
+        frame = AppAudioFrame(
+            timestamp=now,
+            peak=0.6,
+            channels=[0.5, 0.6],
+            is_beat=True,
+            beat_intensity=0.9,
+        )
+
+        _ = self.agent._predict_beat_state(frame, [0.2, 0.3, 0.4, 0.3, 0.2])
+
+        assert self.agent._beat_phase == 0.0
+        assert self.agent._next_predicted_beat > now
+
+
 # Run with: python -m pytest audio_processor/tests/test_beat_detection.py -v
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

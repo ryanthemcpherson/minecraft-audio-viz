@@ -18,6 +18,7 @@ import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -51,6 +52,14 @@ public class MessageQueue {
     // Stats
     private long messagesProcessed = 0;
     private long batchesSent = 0;
+    private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
+
+    private static final double MIN_PHASE_ASSIST_CONFIDENCE = 0.60;
+    private static final double MIN_PHASE_ASSIST_BPM = 60.0;
+    private static final double PHASE_EDGE_WINDOW = 0.12;
+    private static final double SYNTH_BEAT_MIN_INTENSITY = 0.25;
+    private static final double SYNTH_BEAT_COOLDOWN_FRACTION = 0.60;
+    private static final long SYNTH_BEAT_COOLDOWN_MIN_MS = 120L;
 
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
@@ -250,9 +259,25 @@ public class MessageQueue {
      * Triggers beat effects, glow_on_beat, dynamic_brightness, and updates particle visualization.
      */
     private void processAudioInfo(JsonObject msg, String zoneName) {
-        boolean isBeat = msg.has("is_beat") && msg.get("is_beat").getAsBoolean();
-        double beatIntensity = InputSanitizer.sanitizeAmplitude(
-            msg.has("beat_intensity") ? msg.get("beat_intensity").getAsDouble() : 0.0);
+        boolean explicitBeat = msg.has("is_beat") && msg.get("is_beat").getAsBoolean();
+        double explicitBeatIntensity = InputSanitizer.sanitizeDouble(
+            msg.has("beat_intensity") ? msg.get("beat_intensity").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+        double bpm = InputSanitizer.sanitizeDouble(
+            msg.has("bpm") ? msg.get("bpm").getAsDouble() : 0.0,
+            0.0, 300.0, 0.0);
+        double tempoConfidence = InputSanitizer.sanitizeDouble(
+            msg.has("tempo_confidence") ? msg.get("tempo_confidence").getAsDouble()
+                : (msg.has("tempo_conf") ? msg.get("tempo_conf").getAsDouble() : 0.0),
+            0.0, 1.0, 0.0);
+        double beatPhase = InputSanitizer.sanitizeDouble(
+            msg.has("beat_phase") ? msg.get("beat_phase").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+
+        BeatProjection projection = projectBeat(
+            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase);
+        boolean isBeat = projection.isBeat;
+        double beatIntensity = projection.beatIntensity;
 
         // Trigger beat effects if this is a beat with sufficient intensity
         if (isBeat && beatIntensity > 0.2) {
@@ -294,8 +319,60 @@ public class MessageQueue {
                 msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0);
             long frame = msg.has("frame") ? msg.get("frame").getAsLong() : messagesProcessed;
 
-            AudioState audioState = new AudioState(bands, amplitude, isBeat, beatIntensity, frame);
+            AudioState audioState = new AudioState(
+                bands, amplitude, isBeat, beatIntensity, tempoConfidence, beatPhase, frame);
             plugin.getParticleVisualizationManager().updateAudioState(audioState);
+        }
+    }
+
+    private BeatProjection projectBeat(
+        String zoneName,
+        boolean explicitBeat,
+        double explicitBeatIntensity,
+        double bpm,
+        double tempoConfidence,
+        double beatPhase
+    ) {
+        long nowMs = System.currentTimeMillis();
+        double clampedExplicitIntensity = InputSanitizer.sanitizeDouble(explicitBeatIntensity, 0.0, 1.0, 0.0);
+
+        if (explicitBeat) {
+            lastBeatTimestampByZone.put(zoneName, nowMs);
+            return new BeatProjection(true, clampedExplicitIntensity);
+        }
+
+        if (tempoConfidence < MIN_PHASE_ASSIST_CONFIDENCE || bpm < MIN_PHASE_ASSIST_BPM) {
+            return new BeatProjection(false, 0.0);
+        }
+
+        boolean nearTickEdge = beatPhase <= PHASE_EDGE_WINDOW || beatPhase >= (1.0 - PHASE_EDGE_WINDOW);
+        if (!nearTickEdge) {
+            return new BeatProjection(false, 0.0);
+        }
+
+        double beatPeriodMs = 60000.0 / bpm;
+        long minIntervalMs = (long) Math.max(
+            SYNTH_BEAT_COOLDOWN_MIN_MS,
+            beatPeriodMs * SYNTH_BEAT_COOLDOWN_FRACTION
+        );
+        long lastBeatMs = lastBeatTimestampByZone.getOrDefault(zoneName, 0L);
+        if (nowMs - lastBeatMs < minIntervalMs) {
+            return new BeatProjection(false, 0.0);
+        }
+
+        double projectedIntensity = Math.max(SYNTH_BEAT_MIN_INTENSITY, tempoConfidence * 0.65);
+        projectedIntensity = InputSanitizer.sanitizeDouble(projectedIntensity, 0.0, 1.0, SYNTH_BEAT_MIN_INTENSITY);
+        lastBeatTimestampByZone.put(zoneName, nowMs);
+        return new BeatProjection(true, projectedIntensity);
+    }
+
+    private static final class BeatProjection {
+        private final boolean isBeat;
+        private final double beatIntensity;
+
+        private BeatProjection(boolean isBeat, double beatIntensity) {
+            this.isBeat = isBeat;
+            this.beatIntensity = beatIntensity;
         }
     }
 

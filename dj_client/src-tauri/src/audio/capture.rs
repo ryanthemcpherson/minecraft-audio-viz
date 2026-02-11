@@ -51,6 +51,12 @@ pub struct AnalysisResult {
 
     /// Estimated BPM
     pub bpm: f32,
+
+    /// Confidence in the BPM estimate (0-1)
+    pub tempo_confidence: f32,
+
+    /// Position within the beat cycle [0, 1)
+    pub beat_phase: f32,
 }
 
 /// Commands sent to the audio thread
