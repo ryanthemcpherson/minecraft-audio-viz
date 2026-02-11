@@ -164,15 +164,19 @@ jobs:
           fi
 
           echo "=== Verifying AudioViz plugin via RCON ==="
-          PLUGINS_OUTPUT="$(mcrcon -H 127.0.0.1 -P "${{ env.RCON_PORT }}" -p "${MCAV_RCON_PASSWORD}" "plugins" || true)"
-          echo "$PLUGINS_OUTPUT"
-          if echo "$PLUGINS_OUTPUT" | grep -qi "AudioViz"; then
-            echo "SUCCESS: AudioViz plugin is loaded"
-          else
-            echo "ERROR: AudioViz plugin not found in plugin list"
-            sudo journalctl -u minecraft.service --no-pager -n 50
-            exit 1
-          fi
+          for i in $(seq 1 12); do
+            PLUGINS_OUTPUT="$(mcrcon -H 127.0.0.1 -P "${{ env.RCON_PORT }}" -p "${MCAV_RCON_PASSWORD}" "plugins" 2>&1 || true)"
+            echo "Attempt $i: $PLUGINS_OUTPUT"
+            if echo "$PLUGINS_OUTPUT" | grep -qi "AudioViz"; then
+              echo "SUCCESS: AudioViz plugin is loaded"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "ERROR: AudioViz plugin not found in plugin list after retries"
+          sudo journalctl -u minecraft.service --no-pager -n 80
+          exit 1
 
       # --- Summary ---
       - name: Deploy summary
