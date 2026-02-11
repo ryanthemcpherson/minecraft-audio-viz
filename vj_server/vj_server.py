@@ -836,7 +836,13 @@ class VJServer:
                             if isinstance(heartbeat_ts, (int, float)) and math.isfinite(
                                 heartbeat_ts
                             ):
-                                rtt_ms = (now - float(heartbeat_ts)) * 1000.0
+                                # Correct for clock skew between DJ and server
+                                corrected_ts = (
+                                    float(heartbeat_ts) - dj.clock_offset
+                                    if dj.clock_sync_done
+                                    else float(heartbeat_ts)
+                                )
+                                rtt_ms = (now - corrected_ts) * 1000.0
                                 rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
                                 if dj.network_rtt_ms > 0:
                                     dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
@@ -1034,7 +1040,13 @@ class VJServer:
                         dj.last_heartbeat = now
                         heartbeat_ts = data.get("ts")
                         if isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
-                            rtt_ms = (now - float(heartbeat_ts)) * 1000.0
+                            # Correct for clock skew between DJ and server
+                            corrected_ts = (
+                                float(heartbeat_ts) - dj.clock_offset
+                                if dj.clock_sync_done
+                                else float(heartbeat_ts)
+                            )
+                            rtt_ms = (now - corrected_ts) * 1000.0
                             rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
                             if dj.network_rtt_ms > 0:
                                 dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
