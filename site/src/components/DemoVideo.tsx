@@ -1,4 +1,6 @@
 export default function DemoVideo() {
+  const demoVideoUrl = "/mcav-demo-thunderstruck-daftpunk.mp4";
+
   return (
     <section id="demo" className="relative px-6 py-32">
       <div className="mx-auto max-w-5xl">
@@ -21,53 +23,17 @@ export default function DemoVideo() {
           <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-electric-blue/20 via-deep-purple/20 to-hot-pink/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100" />
 
           <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-[#111]">
-            {/* Placeholder state -- replace src with actual YouTube embed */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
-              {/* Animated bars behind the play button */}
-              <div className="flex items-end gap-1">
-                {[...Array(7)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="eq-bar w-2 rounded-full"
-                    style={{
-                      height: "48px",
-                      background:
-                        "linear-gradient(to top, #00D4FF, #8B5CF6, #FF006E)",
-                      animationDelay: `${i * 0.1}s`,
-                      animationDuration: `${0.8 + (i * 0.09)}s`,
-                      opacity: 0.4,
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Play button */}
-              <button aria-label="Play demo video" className="flex h-20 w-20 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white backdrop-blur-sm transition-all hover:scale-110 hover:border-white/30 hover:bg-white/20">
-                <svg
-                  width="28"
-                  height="28"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <polygon points="6,3 20,12 6,21" />
-                </svg>
-              </button>
-
-              <p className="text-sm text-text-secondary">
-                Demo video coming soon
-              </p>
-            </div>
-
-            {/*
-              When ready, replace the placeholder above with:
-              <iframe
-                className="absolute inset-0 h-full w-full"
-                src="https://www.youtube.com/embed/YOUR_VIDEO_ID"
-                title="MCAV Demo"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
-            */}
+            <video className="h-full w-full" controls preload="metadata">
+              <source src={demoVideoUrl} type="video/mp4" />
+            </video>
+            <a
+              href={demoVideoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="absolute bottom-3 right-3 rounded-md border border-white/20 bg-black/60 px-3 py-1 text-xs text-white transition-colors hover:bg-black/80"
+            >
+              Open local demo video
+            </a>
           </div>
         </div>
 
