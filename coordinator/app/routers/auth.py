@@ -300,6 +300,7 @@ async def me(
             role=m.role,
         )
         for m in user.org_memberships
+        if m.organization is not None
     ]
 
     dj_profile = None

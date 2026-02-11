@@ -36,6 +36,8 @@ def _org_summaries(user: User) -> list[OrgDashboardSummary]:
     summaries: list[OrgDashboardSummary] = []
     for mem in user.org_memberships:
         org = mem.organization
+        if org is None:
+            continue
         active_shows = 0
         for srv in org.servers:
             active_shows += sum(1 for s in srv.shows if s.status == "active")
@@ -57,6 +59,8 @@ def _recent_shows(user: User, *, active_only: bool = False) -> list[RecentShowSu
     """Collect shows from user's orgs, optionally filtering to active only."""
     shows: list[RecentShowSummary] = []
     for mem in user.org_memberships:
+        if mem.organization is None:
+            continue
         for srv in mem.organization.servers:
             for show in srv.shows:
                 if active_only and show.status != "active":
@@ -148,20 +152,20 @@ async def dashboard_summary(
 
             # Recent sessions: join DJSession -> Show -> VJServer
             stmt = (
-                select(DJSession, Show)
+                select(DJSession, Show, VJServer)
                 .join(Show, DJSession.show_id == Show.id)
+                .join(VJServer, Show.server_id == VJServer.id)
                 .where(DJSession.dj_name == dj.dj_name)
                 .order_by(DJSession.connected_at.desc())
                 .limit(10)
             )
             rows = await session.execute(stmt)
-            for dj_sess, show in rows:
-                srv = show.server
+            for dj_sess, show, srv in rows:
                 recent.append(
                     RecentShowSummary(
                         id=show.id,
                         name=show.name,
-                        server_name=srv.name if srv else "Unknown",
+                        server_name=srv.name,
                         connect_code=show.connect_code,
                         status=show.status,
                         current_djs=show.current_djs,

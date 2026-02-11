@@ -30,9 +30,14 @@ async def get_current_user(
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    try:
+        user_id = uuid.UUID(payload.sub)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
     stmt = (
         select(User)
-        .where(User.id == uuid.UUID(payload.sub), User.is_active.is_(True))
+        .where(User.id == user_id, User.is_active.is_(True))
         .options(
             selectinload(User.org_memberships).selectinload(OrgMember.organization),
             selectinload(User.dj_profile),

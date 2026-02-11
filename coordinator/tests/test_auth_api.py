@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+
+import jwt as pyjwt
 from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
@@ -117,6 +120,26 @@ class TestMe:
         resp = await client.get(
             "/api/v1/auth/me",
             headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+
+    async def test_me_non_uuid_sub_token_returns_401(self, client: AsyncClient) -> None:
+        now = int(time.time())
+        token = pyjwt.encode(
+            {
+                "sub": "legacy-non-uuid-subject",
+                "token_type": "user_session",
+                "iss": "mcav-coordinator",
+                "iat": now,
+                "exp": now + 3600,
+            },
+            "test-user-jwt-secret",
+            algorithm="HS256",
+        )
+
+        resp = await client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 401
 

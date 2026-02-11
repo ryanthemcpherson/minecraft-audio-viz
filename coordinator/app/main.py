@@ -48,17 +48,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # -- Rate-limit middleware --------------------------------------------------
+    application.add_middleware(RateLimitMiddleware)
+
     # -- CORS ------------------------------------------------------------------
+    # Keep CORS as the outermost middleware so headers are present even when
+    # downstream handlers raise 5xx errors.
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_methods=["*"],
+        allow_headers=["*"],
         max_age=3600,
     )
-
-    # -- Rate-limit middleware --------------------------------------------------
-    application.add_middleware(RateLimitMiddleware)
 
     # -- Routers ---------------------------------------------------------------
     application.include_router(health.router)

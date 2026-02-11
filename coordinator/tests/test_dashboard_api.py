@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
+
+from app.models.db import DJSession, Show, VJServer
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -158,6 +163,64 @@ class TestDJDashboard:
         assert data["bio"] == "Test bio"
         assert data["genres"] == "House, Techno"
         assert data["session_count"] == 0
+
+    async def test_dj_recent_sessions_include_server_name(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        auth = await _register_and_auth(client, email="dj3@example.com")
+        token = auth["access_token"]
+        await _complete_onboarding(client, token, "dj")
+
+        # Create DJ profile
+        resp = await client.post(
+            "/api/v1/dj/profile",
+            json={"dj_name": "DJ Recent"},
+            headers=_auth_header(token),
+        )
+        assert resp.status_code == 201
+
+        server_id = uuid.uuid4()
+        show_id = uuid.uuid4()
+        db_session.add(
+            VJServer(
+                id=server_id,
+                name="Recent Server",
+                websocket_url="wss://example.com/ws",
+                api_key_hash="hash",
+                jwt_secret=uuid.uuid4().hex,
+                org_id=None,
+                is_active=True,
+            )
+        )
+        db_session.add(
+            Show(
+                id=show_id,
+                server_id=server_id,
+                name="Recent Show",
+                connect_code="ABCD-EFGH",
+                status="active",
+                max_djs=8,
+                current_djs=1,
+            )
+        )
+        db_session.add(
+            DJSession(
+                id=uuid.uuid4(),
+                show_id=show_id,
+                dj_name="DJ Recent",
+                connected_at=datetime.now(timezone.utc),
+                ip_address="127.0.0.1",
+            )
+        )
+        await db_session.commit()
+
+        dash = await client.get("/api/v1/dashboard/summary", headers=_auth_header(token))
+        assert dash.status_code == 200
+        data = dash.json()
+        assert data["user_type"] == "dj"
+        assert data["session_count"] == 1
+        assert len(data["recent_sessions"]) == 1
+        assert data["recent_sessions"][0]["server_name"] == "Recent Server"
 
 
 # ---------------------------------------------------------------------------
