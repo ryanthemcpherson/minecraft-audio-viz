@@ -165,6 +165,86 @@ class TestDJDashboard:
 # ---------------------------------------------------------------------------
 
 
+class TestFullAccountReset:
+    async def test_full_reset_clears_everything(self, client: AsyncClient) -> None:
+        """Full reset should wipe orgs, servers, DJ profile, and onboarding."""
+        auth = await _register_and_auth(client, email="reset@example.com")
+        token = auth["access_token"]
+        await _complete_onboarding(client, token, "server_owner")
+
+        # Create org + register server + create invite
+        org_resp = await client.post(
+            "/api/v1/orgs",
+            json={"name": "Reset Org", "slug": "reset-org"},
+            headers=_auth_header(token),
+        )
+        assert org_resp.status_code == 201
+        org_id = org_resp.json()["id"]
+
+        srv_resp = await client.post(
+            f"/api/v1/orgs/{org_id}/servers/register",
+            json={"name": "Reset Server", "websocket_url": "wss://reset.com/ws"},
+            headers=_auth_header(token),
+        )
+        assert srv_resp.status_code == 201
+
+        inv_resp = await client.post(
+            f"/api/v1/orgs/{org_id}/invites",
+            headers=_auth_header(token),
+        )
+        assert inv_resp.status_code == 201
+
+        # Verify dashboard shows the org
+        dash = await client.get("/api/v1/dashboard/summary", headers=_auth_header(token))
+        assert len(dash.json()["organizations"]) == 1
+
+        # Full reset
+        reset_resp = await client.post(
+            "/api/v1/onboarding/reset-full",
+            headers=_auth_header(token),
+        )
+        assert reset_resp.status_code == 200
+        assert reset_resp.json()["onboarding_completed"] is False
+
+        # Complete onboarding again to access dashboard
+        await _complete_onboarding(client, token, "server_owner")
+
+        # Dashboard should now be empty
+        dash2 = await client.get("/api/v1/dashboard/summary", headers=_auth_header(token))
+        assert dash2.status_code == 200
+        data = dash2.json()
+        assert len(data["organizations"]) == 0
+        assert data["checklist"]["org_created"] is False
+        assert data["checklist"]["server_registered"] is False
+        assert data["checklist"]["invite_created"] is False
+
+    async def test_full_reset_clears_dj_profile(self, client: AsyncClient) -> None:
+        auth = await _register_and_auth(client, email="resetdj@example.com")
+        token = auth["access_token"]
+        await _complete_onboarding(client, token, "dj")
+
+        # Create DJ profile
+        await client.post(
+            "/api/v1/dj/profile",
+            json={"dj_name": "DJ Resetter"},
+            headers=_auth_header(token),
+        )
+
+        # Full reset
+        resp = await client.post(
+            "/api/v1/onboarding/reset-full",
+            headers=_auth_header(token),
+        )
+        assert resp.status_code == 200
+
+        # DJ profile should be gone
+        profile_resp = await client.get(
+            "/api/v1/dj/profile",
+            headers=_auth_header(token),
+        )
+        assert profile_resp.status_code == 404
+
+
 class TestGenericDashboard:
     async def test_skipped_user_gets_generic_dashboard(self, client: AsyncClient) -> None:
         auth = await _register_and_auth(client, email="generic@example.com")

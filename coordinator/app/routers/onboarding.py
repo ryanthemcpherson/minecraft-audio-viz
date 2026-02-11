@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.dependencies.auth import get_current_user
-from app.models.db import User
+from app.models.db import DJProfile, Organization, OrgInvite, OrgMember, User, VJServer
 from app.models.schemas import CompleteOnboardingRequest, UserResponse
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
@@ -69,6 +70,53 @@ async def reset_onboarding(
 ) -> UserResponse:
     user.onboarding_completed_at = None
     user.user_type = None
+    await session.commit()
+    await session.refresh(user)
+    return _user_response(user)
+
+
+@router.post(
+    "/reset-full",
+    response_model=UserResponse,
+    summary="Full account reset: wipe orgs, memberships, DJ profile, and onboarding state",
+)
+async def reset_full(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserResponse:
+    """Nuclear reset for testing: deletes all orgs owned by the user (and their
+    invites/memberships/server assignments), removes memberships in other orgs,
+    deletes DJ profile, and resets onboarding state back to fresh."""
+
+    # 1. Find orgs owned by this user
+    owned_org_ids = (
+        (await session.execute(select(Organization.id).where(Organization.owner_id == user.id)))
+        .scalars()
+        .all()
+    )
+
+    if owned_org_ids:
+        # Unassign servers from owned orgs (set org_id = NULL, keep server)
+        await session.execute(
+            update(VJServer).where(VJServer.org_id.in_(owned_org_ids)).values(org_id=None)
+        )
+        # Delete invites for owned orgs
+        await session.execute(delete(OrgInvite).where(OrgInvite.org_id.in_(owned_org_ids)))
+        # Delete all memberships in owned orgs (including other users)
+        await session.execute(delete(OrgMember).where(OrgMember.org_id.in_(owned_org_ids)))
+        # Delete the owned orgs themselves
+        await session.execute(delete(Organization).where(Organization.id.in_(owned_org_ids)))
+
+    # 2. Remove user's remaining memberships (orgs they joined but don't own)
+    await session.execute(delete(OrgMember).where(OrgMember.user_id == user.id))
+
+    # 3. Delete DJ profile if exists
+    await session.execute(delete(DJProfile).where(DJProfile.user_id == user.id))
+
+    # 4. Reset onboarding state
+    user.onboarding_completed_at = None
+    user.user_type = None
+
     await session.commit()
     await session.refresh(user)
     return _user_response(user)

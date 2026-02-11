@@ -167,12 +167,20 @@ async function api<T>(
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     const detail = body.detail;
-    const message =
-      typeof detail === "string"
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((e: { msg?: string }) => e.msg || String(e)).join("; ")
-          : `Request failed: ${res.status}`;
+    let message: string;
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (Array.isArray(detail)) {
+      message = detail
+        .map((e: Record<string, unknown>) => {
+          if (typeof e === "string") return e;
+          if (typeof e?.msg === "string") return e.msg;
+          return JSON.stringify(e);
+        })
+        .join("; ");
+    } else {
+      message = `Request failed: ${res.status}`;
+    }
     throw new Error(message);
   }
 
@@ -330,6 +338,13 @@ export async function fetchDashboardSummary(
 
 export async function resetOnboarding(accessToken: string): Promise<User> {
   return api<User>("/api/v1/onboarding/reset", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function resetAccountFull(accessToken: string): Promise<User> {
+  return api<User>("/api/v1/onboarding/reset-full", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}` },
   });

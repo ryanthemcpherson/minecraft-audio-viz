@@ -11,7 +11,7 @@ import type {
   OrgDashboardSummary,
   RecentShowSummary,
 } from "@/lib/auth";
-import { fetchMe, createInvite, fetchDashboardSummary, resetOnboarding } from "@/lib/auth";
+import { fetchMe, createInvite, fetchDashboardSummary, resetOnboarding, resetAccountFull } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
 // Checklist component for server owners
@@ -219,6 +219,8 @@ export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [resettingOnboarding, setResettingOnboarding] = useState(false);
+  const [resettingFull, setResettingFull] = useState(false);
+  const [confirmFullReset, setConfirmFullReset] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -253,6 +255,18 @@ export default function DashboardPage() {
       router.push("/onboarding");
     } catch {
       setResettingOnboarding(false);
+    }
+  }
+
+  async function handleFullReset() {
+    if (!accessToken) return;
+    setResettingFull(true);
+    try {
+      await resetAccountFull(accessToken);
+      router.push("/onboarding");
+    } catch {
+      setResettingFull(false);
+      setConfirmFullReset(false);
     }
   }
 
@@ -490,6 +504,43 @@ export default function DashboardPage() {
                 </section>
               )}
             </>
+          )}
+
+          {/* Dev: Full account reset */}
+          {dashboard && (
+            <div className="glass-card rounded-xl p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-text-secondary">Developer Tools</h3>
+                  <p className="text-xs text-text-secondary/60">Reset account to re-test the new user experience</p>
+                </div>
+                {confirmFullReset ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-red-400">Delete all orgs, servers, and profile?</span>
+                    <button
+                      onClick={handleFullReset}
+                      disabled={resettingFull}
+                      className="rounded-lg bg-red-500/10 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                    >
+                      {resettingFull ? "Resetting..." : "Yes, reset everything"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmFullReset(false)}
+                      className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-white/5"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmFullReset(true)}
+                    className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400/60 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                  >
+                    Full Account Reset
+                  </button>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Fallback if dashboard didn't load */}
