@@ -33,11 +33,11 @@ export default function Navbar() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2">
           <Image
-            src="/mcav-medium.png"
+            src="/mcav.png"
             alt="MCAV"
             width={32}
             height={32}
-            className="h-8 w-8 rounded-lg"
+            className="h-8 w-8"
             style={{ imageRendering: "pixelated" }}
             priority
           />
