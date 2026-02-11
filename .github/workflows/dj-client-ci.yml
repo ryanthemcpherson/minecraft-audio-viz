@@ -115,12 +115,30 @@ jobs:
         working-directory: dj_client
         run: npm run build
 
+      - name: Disable updater artifacts when signing key is missing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            node - <<'NODE'
+            const fs = require('fs');
+            const path = 'dj_client/src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (conf.bundle && conf.bundle.createUpdaterArtifacts) {
+              conf.bundle.createUpdaterArtifacts = false;
+              fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
+              console.log('Disabled bundle.createUpdaterArtifacts for unsigned CI build');
+            }
+            NODE
+          fi
+
       - name: Build Tauri app
         working-directory: dj_client
         run: npm run tauri build -- --target ${{ matrix.rust_target }}
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload artifacts (Linux)
         if: matrix.platform == 'ubuntu-22.04'
