@@ -31,8 +31,8 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
-      "../../mcav-large.png",
-      "../../mcav.ico"
+      "icons/icon.png",
+      "icons/icon.ico"
     ],
     "windows": {
       "wix": {
