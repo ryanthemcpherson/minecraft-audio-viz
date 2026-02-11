@@ -64,7 +64,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stored = getStoredRefreshToken();
     if (!stored) {
-      setLoading(false);
+      queueMicrotask(() => setLoading(false));
       return;
     }
 

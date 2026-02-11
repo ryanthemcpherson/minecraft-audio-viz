@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo } from "react";
+import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { VisualizationPattern, EntityData } from "@/lib/patterns/base";
@@ -34,7 +34,7 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
   const frameCount = useRef(0);
 
   // Pre-allocate position tracking
-  useMemo(() => {
+  useEffect(() => {
     prevPositions.current = new Float32Array(maxCount * 3);
   }, [maxCount]);
 

@@ -26,7 +26,7 @@ function CallbackHandler() {
       const desc = searchParams.get("error_description") || "Permission denied";
       // Clean the URL before showing error
       window.history.replaceState({}, "", "/login");
-      setError(desc);
+      queueMicrotask(() => setError(desc));
       return;
     }
 
@@ -34,7 +34,7 @@ function CallbackHandler() {
     const state = searchParams.get("state");
 
     if (!code || !state) {
-      setError("Missing authorization code. Please try signing in again.");
+      queueMicrotask(() => setError("Missing authorization code. Please try signing in again."));
       return;
     }
 
@@ -51,7 +51,7 @@ function CallbackHandler() {
     clearStoredOAuthState();
 
     if (storedState && storedState !== state) {
-      setError("Security validation failed. Please try signing in again.");
+      queueMicrotask(() => setError("Security validation failed. Please try signing in again."));
       return;
     }
 

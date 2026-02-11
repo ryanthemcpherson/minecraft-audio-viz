@@ -112,7 +112,7 @@ export default function PatternCard({
       // Try to grab a slot immediately
       if (acquireSlot()) {
         slotHeld.current = true;
-        setHasSlot(true);
+        queueMicrotask(() => setHasSlot(true));
         return;
       }
       // Otherwise wait for one to free up
@@ -135,7 +135,7 @@ export default function PatternCard({
         glRef.current = null;
       }
       slotHeld.current = false;
-      setHasSlot(false);
+      queueMicrotask(() => setHasSlot(false));
       releaseSlot();
     }
   }, [isVisible]);
