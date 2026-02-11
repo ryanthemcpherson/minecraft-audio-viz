@@ -407,7 +407,7 @@ async fn run_bridge(
                 }
 
                 // 2. Send audio frame if we have analysis data
-                if let Some(analysis) = analysis {
+                if let Some(ref analysis) = analysis {
                     let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
