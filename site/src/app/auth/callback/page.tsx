@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -16,11 +16,16 @@ function CallbackHandler() {
   const { setAuth } = useAuth();
 
   const [error, setError] = useState<string | null>(null);
+  const handled = useRef(false);
 
   useEffect(() => {
+    if (handled.current) return;
+
     const errorParam = searchParams.get("error");
     if (errorParam) {
       const desc = searchParams.get("error_description") || "Permission denied";
+      // Clean the URL before showing error
+      window.history.replaceState({}, "", "/login");
       setError(desc);
       return;
     }
@@ -32,6 +37,14 @@ function CallbackHandler() {
       setError("Missing authorization code. Please try signing in again.");
       return;
     }
+
+    // Mark as handled so we don't re-process on re-render
+    handled.current = true;
+
+    // Strip OAuth params from the URL immediately so password managers
+    // (1Password, etc.) save a clean "https://mcav.live/login" entry
+    // instead of the full callback URL with code/state params.
+    window.history.replaceState({}, "", "/login");
 
     // Validate state against stored value (CSRF protection)
     const storedState = getStoredOAuthState();

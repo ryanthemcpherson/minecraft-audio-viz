@@ -109,6 +109,7 @@ export default function LoginPage() {
                 id="displayName"
                 type="text"
                 required
+                autoComplete="name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
@@ -125,6 +126,7 @@ export default function LoginPage() {
               id="email"
               type="email"
               required
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
@@ -140,6 +142,7 @@ export default function LoginPage() {
               id="password"
               type="password"
               required
+              autoComplete={tab === "signup" ? "new-password" : "current-password"}
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
