@@ -235,11 +235,19 @@ async fn connect_with_code(
         ..Default::default()
     };
 
-    // Brief lock: store metadata, check not already connected
+    // If a previous bridge task is still running (e.g. reconnecting after
+    // server restart), shut it down before starting a new connection.
     {
-        let app_state = state.0.lock();
-        if app_state.bridge_shutdown_tx.is_some() {
-            return Err("Already connected".to_string());
+        let old_tx = state.0.lock().bridge_shutdown_tx.take();
+        if let Some(tx) = old_tx {
+            log::info!("Shutting down existing bridge task before reconnecting");
+            let _ = tx.send(()).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            // Clean up old client
+            let old_client = state.0.lock().client.take();
+            if let Some(c) = old_client {
+                let _ = c.disconnect().await;
+            }
         }
     }
 
@@ -250,7 +258,6 @@ async fn connect_with_code(
         app_state.server_host = server_host;
         app_state.server_port = server_port;
     }
-    // Lock dropped
 
     // Create and connect client (async, no mutex held)
     let mut client = DjClient::new(config);
@@ -295,11 +302,17 @@ async fn connect_direct(
         ..Default::default()
     };
 
-    // Brief lock: check not already connected
+    // If a previous bridge task is still running, shut it down first.
     {
-        let app_state = state.0.lock();
-        if app_state.bridge_shutdown_tx.is_some() {
-            return Err("Already connected".to_string());
+        let old_tx = state.0.lock().bridge_shutdown_tx.take();
+        if let Some(tx) = old_tx {
+            log::info!("Shutting down existing bridge task before reconnecting");
+            let _ = tx.send(()).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let old_client = state.0.lock().client.take();
+            if let Some(c) = old_client {
+                let _ = c.disconnect().await;
+            }
         }
     }
 
