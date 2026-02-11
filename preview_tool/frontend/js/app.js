@@ -381,6 +381,57 @@ function setupMouseControls() {
         const newDistance = distance * (1 + e.deltaY * zoomSpeed);
         camera.position.normalize().multiplyScalar(Math.max(5, Math.min(30, newDistance)));
     });
+
+    // Touch event support for mobile
+    let lastTouchDistance = 0;
+
+    canvas.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            isDragging = true;
+            previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            isDragging = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            lastTouchDistance = Math.hypot(dx, dy);
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1 && isDragging) {
+            const deltaX = e.touches[0].clientX - previousMousePosition.x;
+            const deltaY = e.touches[0].clientY - previousMousePosition.y;
+
+            const spherical = new THREE.Spherical();
+            spherical.setFromVector3(camera.position);
+            spherical.theta -= deltaX * 0.01;
+            spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + deltaY * 0.01));
+            camera.position.setFromSpherical(spherical);
+            camera.lookAt(0, 2, 0);
+
+            previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const touchDistance = Math.hypot(dx, dy);
+
+            if (lastTouchDistance > 0) {
+                const scale = lastTouchDistance / touchDistance;
+                const distance = camera.position.length();
+                camera.position.normalize().multiplyScalar(Math.max(5, Math.min(30, distance * scale)));
+            }
+            lastTouchDistance = touchDistance;
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        isDragging = false;
+        if (e.touches.length < 2) {
+            lastTouchDistance = 0;
+        }
+    });
 }
 
 function setupParticleToggles() {
@@ -948,6 +999,13 @@ function updateUIFromPreset(presetName, settings) {
         }
     }
 }
+
+// Close WebSocket cleanly when leaving the page
+window.addEventListener('beforeunload', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+    }
+});
 
 // Start when DOM is ready
 document.addEventListener('DOMContentLoaded', init);

@@ -45,7 +45,7 @@ services:
     ports:
       - "8090:8090"
     environment:
-      - MCAV_DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/mcav
+      - MCAV_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcav}
       - MCAV_JWT_DEFAULT_EXPIRY_MINUTES=15
       - MCAV_CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
       - PORT=8090
@@ -57,15 +57,18 @@ services:
 
   # ---------------------------------------------------------------------------
   # PostgreSQL (for coordinator)
+  # WARNING: Default credentials are for local development only.
+  # For production, set POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB
+  # environment variables or use a .env file.
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: mcav-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=mcav
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-mcav}
     ports:
       - "5432:5432"
     volumes:

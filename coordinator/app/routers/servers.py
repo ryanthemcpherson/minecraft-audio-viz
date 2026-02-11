@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets as _secrets
 import uuid
 from datetime import datetime, timezone
@@ -20,6 +21,8 @@ from app.models.schemas import (
     RegisterServerResponse,
 )
 from app.services.password import hash_password, verify_password
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_key_prefix(raw_key: str) -> str:
@@ -107,6 +110,8 @@ async def register_server(
     await session.commit()
     await session.refresh(server)
 
+    logger.info("Server registered: id=%s name=%s", server.id, server.name)
+
     return RegisterServerResponse(
         server_id=server.id,
         jwt_secret=jwt_secret,
@@ -140,5 +145,7 @@ async def heartbeat(
     stmt = update(VJServer).where(VJServer.id == server_id).values(last_heartbeat=now)
     await session.execute(stmt)
     await session.commit()
+
+    logger.info("Heartbeat: server_id=%s", server_id)
 
     return HeartbeatResponse(server_id=server_id, last_heartbeat=now)

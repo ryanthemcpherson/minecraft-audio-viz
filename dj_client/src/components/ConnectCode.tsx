@@ -91,6 +91,7 @@ function ConnectCode({ value, onChange, label = 'Connect Code' }: ConnectCodePro
               autoCapitalize="characters"
               autoComplete="off"
               spellCheck={false}
+              aria-label={`Connect code character ${i + 1}`}
             />
           ))}
         </div>
@@ -110,6 +111,7 @@ function ConnectCode({ value, onChange, label = 'Connect Code' }: ConnectCodePro
               autoCapitalize="characters"
               autoComplete="off"
               spellCheck={false}
+              aria-label={`Connect code character ${i + 1}`}
             />
           ))}
         </div>

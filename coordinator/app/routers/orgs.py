@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets as _secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_session
 from app.dependencies.auth import get_current_user, require_org_owner
@@ -29,8 +31,11 @@ from app.models.schemas import (
     RegisterOrgServerResponse,
     UpdateOrgRequest,
 )
+from app.routers.servers import _compute_key_prefix
 from app.services.code_generator import SAFE_CHARS
 from app.services.password import hash_password
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
 
@@ -128,6 +133,8 @@ async def create_org(
 
     await session.commit()
     await session.refresh(org)
+
+    logger.info("Organization created: id=%s slug=%s owner=%s", org.id, org.slug, user.id)
 
     return CreateOrgResponse(
         id=org.id,
@@ -322,6 +329,8 @@ HEARTBEAT_ONLINE_THRESHOLD = timedelta(minutes=5)
 )
 async def list_org_servers(
     org_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[OrgServerDetailResponse]:
@@ -336,7 +345,17 @@ async def list_org_servers(
         raise HTTPException(status_code=403, detail="Not a member of this organization")
 
     servers = (
-        (await session.execute(select(VJServer).where(VJServer.org_id == org_id))).scalars().all()
+        (
+            await session.execute(
+                select(VJServer)
+                .where(VJServer.org_id == org_id)
+                .options(selectinload(VJServer.shows))
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
     )
 
     now = datetime.now(timezone.utc)
@@ -388,12 +407,15 @@ async def register_org_server(
         name=body.name,
         websocket_url=body.websocket_url,
         api_key_hash=api_key_hash,
+        key_prefix=_compute_key_prefix(api_key),
         jwt_secret=jwt_secret,
         org_id=org_id,
     )
     session.add(server)
     await session.commit()
     await session.refresh(server)
+
+    logger.info("Org server registered: id=%s org_id=%s name=%s", server.id, org_id, server.name)
 
     return RegisterOrgServerResponse(
         server_id=server.id,
@@ -497,13 +519,18 @@ async def create_invite(
 )
 async def list_invites(
     org_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> list[InviteResponse]:
     invites = (
         (
             await session.execute(
-                select(OrgInvite).where(OrgInvite.org_id == org_id, OrgInvite.is_active.is_(True))
+                select(OrgInvite)
+                .where(OrgInvite.org_id == org_id, OrgInvite.is_active.is_(True))
+                .limit(limit)
+                .offset(offset)
             )
         )
         .scalars()
@@ -608,8 +635,10 @@ async def join_org(
     )
     session.add(membership)
 
-    # Increment use count
-    invite.use_count += 1
+    # Atomically increment use count
+    await session.execute(
+        update(OrgInvite).where(OrgInvite.id == invite.id).values(use_count=OrgInvite.use_count + 1)
+    )
 
     await session.commit()
 

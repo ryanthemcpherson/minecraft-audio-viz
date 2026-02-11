@@ -34,7 +34,7 @@ export default function DemoVideo() {
                       background:
                         "linear-gradient(to top, #00D4FF, #8B5CF6, #FF006E)",
                       animationDelay: `${i * 0.1}s`,
-                      animationDuration: `${0.8 + Math.random() * 0.6}s`,
+                      animationDuration: `${0.8 + (i * 0.09)}s`,
                       opacity: 0.4,
                     }}
                   />
@@ -42,7 +42,7 @@ export default function DemoVideo() {
               </div>
 
               {/* Play button */}
-              <button className="flex h-20 w-20 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white backdrop-blur-sm transition-all hover:scale-110 hover:border-white/30 hover:bg-white/20">
+              <button aria-label="Play demo video" className="flex h-20 w-20 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white backdrop-blur-sm transition-all hover:scale-110 hover:border-white/30 hover:bg-white/20">
                 <svg
                   width="28"
                   height="28"

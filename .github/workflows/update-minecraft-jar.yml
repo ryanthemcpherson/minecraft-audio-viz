@@ -44,35 +44,45 @@ jobs:
       - name: Resolve inputs
         id: resolve
         shell: bash
+        env:
+          INPUT_PROVIDER: ${{ github.event.inputs.provider }}
+          INPUT_MC_VERSION: ${{ github.event.inputs.minecraft_version }}
+          INPUT_JAR_URL: ${{ github.event.inputs.jar_url }}
+          INPUT_JAR_SHA256: ${{ github.event.inputs.jar_sha256 }}
         run: |
-          PROVIDER="${{ github.event.inputs.provider }}"
+          PROVIDER="${INPUT_PROVIDER}"
           if [ -z "$PROVIDER" ]; then
             PROVIDER="paper"
           fi
           echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
-          echo "mc_version=${{ github.event.inputs.minecraft_version }}" >> "$GITHUB_OUTPUT"
-          echo "jar_url=${{ github.event.inputs.jar_url }}" >> "$GITHUB_OUTPUT"
-          echo "jar_sha256=${{ github.event.inputs.jar_sha256 }}" >> "$GITHUB_OUTPUT"
+          echo "mc_version=$INPUT_MC_VERSION" >> "$GITHUB_OUTPUT"
+          echo "jar_url=$INPUT_JAR_URL" >> "$GITHUB_OUTPUT"
+          echo "jar_sha256=$INPUT_JAR_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Update jar
         shell: bash
+        env:
+          RESOLVED_PROVIDER: ${{ steps.resolve.outputs.provider }}
+          RESOLVED_MC_VERSION: ${{ steps.resolve.outputs.mc_version }}
+          RESOLVED_JAR_URL: ${{ steps.resolve.outputs.jar_url }}
+          RESOLVED_JAR_SHA256: ${{ steps.resolve.outputs.jar_sha256 }}
         run: |
           set -euo pipefail
-          args=(--provider "${{ steps.resolve.outputs.provider }}")
+          args=(--provider "$RESOLVED_PROVIDER")
 
-          if [ -n "${{ steps.resolve.outputs.mc_version }}" ]; then
-            args+=(--mc-version "${{ steps.resolve.outputs.mc_version }}")
+          if [ -n "$RESOLVED_MC_VERSION" ]; then
+            args+=(--mc-version "$RESOLVED_MC_VERSION")
           fi
 
-          if [ "${{ steps.resolve.outputs.provider }}" = "url" ]; then
-            if [ -z "${{ steps.resolve.outputs.jar_url }}" ]; then
+          if [ "$RESOLVED_PROVIDER" = "url" ]; then
+            if [ -z "$RESOLVED_JAR_URL" ]; then
               echo "jar_url is required when provider=url" >&2
               exit 1
             fi
-            args+=(--jar-url "${{ steps.resolve.outputs.jar_url }}")
+            args+=(--jar-url "$RESOLVED_JAR_URL")
 
-            if [ -n "${{ steps.resolve.outputs.jar_sha256 }}" ]; then
-              args+=(--sha256 "${{ steps.resolve.outputs.jar_sha256 }}")
+            if [ -n "$RESOLVED_JAR_SHA256" ]; then
+              args+=(--sha256 "$RESOLVED_JAR_SHA256")
             fi
           fi
 
@@ -80,11 +90,14 @@ jobs:
 
       - name: Post-update status
         shell: bash
+        env:
+          RESOLVED_PROVIDER: ${{ steps.resolve.outputs.provider }}
+          RESOLVED_MC_VERSION: ${{ steps.resolve.outputs.mc_version }}
         run: |
           echo "### Server Jar Update" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Provider: \`${{ steps.resolve.outputs.provider }}\`" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "${{ steps.resolve.outputs.mc_version }}" ]; then
-            echo "- Minecraft version input: \`${{ steps.resolve.outputs.mc_version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Provider: \`${RESOLVED_PROVIDER}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$RESOLVED_MC_VERSION" ]; then
+            echo "- Minecraft version input: \`${RESOLVED_MC_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "- Service: \`minecraft.service\`" >> "$GITHUB_STEP_SUMMARY"

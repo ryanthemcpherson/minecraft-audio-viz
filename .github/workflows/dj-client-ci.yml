@@ -12,6 +12,10 @@ on:
       - 'dj_client/**'
       - '.github/workflows/dj-client-ci.yml'
 
+concurrency:
+  group: dj-client-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 

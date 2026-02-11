@@ -11,8 +11,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Verify CI passed on this commit before releasing
+  # ---------------------------------------------------------------------------
+  ci-gate:
+    name: Verify CI Status
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI status for commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${GITHUB_SHA}"
+          echo "Checking CI status for commit ${SHA}..."
+          CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name == "CI Passed")] | first | .conclusion // "not_found"')
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "ERROR: CI has not passed on this commit (status: ${CONCLUSION})."
+            echo "Push to main and wait for CI to pass before tagging a release."
+            exit 1
+          fi
+          echo "CI passed on commit ${SHA}."
+
   build-python:
     name: Build Python Package
+    needs: [ci-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -36,6 +59,7 @@ jobs:
 
   build-plugin:
     name: Build Minecraft Plugin
+    needs: [ci-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -59,6 +83,7 @@ jobs:
 
   build-dj-client:
     name: Build DJ Client (${{ matrix.platform }})
+    needs: [ci-gate]
     strategy:
       fail-fast: false
       matrix:

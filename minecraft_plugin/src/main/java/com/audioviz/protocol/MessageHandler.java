@@ -127,6 +127,9 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
         if (zone == null) {
@@ -215,6 +218,7 @@ public class MessageHandler {
 
             for (JsonElement elem : entities) {
                 JsonObject entity = elem.getAsJsonObject();
+                if (!entity.has("id")) continue;
                 String entityId = entity.get("id").getAsString();
 
                 // Get position (local coordinates 0-1, clamped for safety)
@@ -270,13 +274,18 @@ public class MessageHandler {
             }
 
             // Handle visibility separately (needs scale-to-zero, different from batch)
+            // Collect all visibility changes and apply in a single scheduler call
+            List<Map.Entry<String, Boolean>> visibilityChanges = new ArrayList<>();
             for (JsonElement elem : entities) {
                 JsonObject entity = elem.getAsJsonObject();
-                if (entity.has("visible")) {
-                    String entityId = entity.get("id").getAsString();
-                    boolean visible = entity.get("visible").getAsBoolean();
-                    pool.setEntityVisible(zoneName, entityId, visible);
+                if (entity.has("visible") && entity.has("id")) {
+                    visibilityChanges.add(Map.entry(
+                        entity.get("id").getAsString(),
+                        entity.get("visible").getAsBoolean()));
                 }
+            }
+            if (!visibilityChanges.isEmpty()) {
+                pool.batchSetVisible(zoneName, visibilityChanges);
             }
         }
 
@@ -303,6 +312,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or id");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         String entityId = message.get("id").getAsString();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -354,6 +366,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or visible");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         boolean visible = message.get("visible").getAsBoolean();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -535,6 +550,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or glow");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         boolean glow = message.get("glow").getAsBoolean();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -571,6 +589,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or brightness");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         int brightness = message.get("brightness").getAsInt();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -606,6 +627,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or mode");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         String mode = message.get("mode").getAsString();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -656,6 +680,9 @@ public class MessageHandler {
         }
 
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
             return createError("Zone not found: " + zoneName);
         }
@@ -857,9 +884,16 @@ public class MessageHandler {
         }
 
         // Enable/disable the effect for beat type
-        BeatType beatType = message.has("beat_type") ?
-            BeatType.valueOf(message.get("beat_type").getAsString().toUpperCase()) :
-            BeatType.BEAT;
+        BeatType beatType;
+        if (message.has("beat_type")) {
+            try {
+                beatType = BeatType.valueOf(message.get("beat_type").getAsString().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return createError("Unknown beat type: " + message.get("beat_type").getAsString());
+            }
+        } else {
+            beatType = BeatType.BEAT;
+        }
 
         if (enabled) {
             config.addEffect(beatType, effect);

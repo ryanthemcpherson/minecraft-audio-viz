@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import secrets
 import time
-from typing import Dict
 
+import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,28 +32,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# In-memory OAuth state store: state_token -> expiry_timestamp
-# States expire after 10 minutes. Cleaned up lazily on new state creation.
 _OAUTH_STATE_TTL = 600  # seconds
-_oauth_states: Dict[str, float] = {}
 
 
-def _store_oauth_state(state: str) -> None:
-    """Store an OAuth state token and clean up expired entries."""
-    now = time.time()
-    # Lazy cleanup of expired states
-    expired = [k for k, v in _oauth_states.items() if v < now]
-    for k in expired:
-        _oauth_states.pop(k, None)
-    _oauth_states[state] = now + _OAUTH_STATE_TTL
+def _create_oauth_state(jwt_secret: str) -> str:
+    """Create a self-validating OAuth state token as a signed JWT."""
+    now = int(time.time())
+    payload = {
+        "nonce": secrets.token_urlsafe(16),
+        "iat": now,
+        "exp": now + _OAUTH_STATE_TTL,
+    }
+    return pyjwt.encode(payload, jwt_secret, algorithm="HS256")
 
 
-def _validate_oauth_state(state: str) -> bool:
-    """Validate and consume an OAuth state token. Returns True if valid."""
-    expiry = _oauth_states.pop(state, None)
-    if expiry is None:
+def _validate_oauth_state(state: str, jwt_secret: str) -> bool:
+    """Validate an OAuth state JWT. Returns True if valid and not expired."""
+    try:
+        pyjwt.decode(state, jwt_secret, algorithms=["HS256"])
+        return True
+    except pyjwt.InvalidTokenError:
         return False
-    return time.time() < expiry
 
 
 def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
@@ -172,8 +171,7 @@ async def discord_authorize(
     if not settings.discord_client_id:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
-    state = secrets.token_urlsafe(32)
-    _store_oauth_state(state)
+    state = _create_oauth_state(settings.user_jwt_secret)
     url = discord_oauth.get_authorize_url(
         client_id=settings.discord_client_id,
         redirect_uri=settings.discord_redirect_uri,
@@ -201,7 +199,7 @@ async def discord_callback(
     if not settings.discord_client_id or not settings.discord_client_secret:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
-    if not state or not _validate_oauth_state(state):
+    if not state or not _validate_oauth_state(state, settings.user_jwt_secret):
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     try:
@@ -350,3 +348,21 @@ async def logout(
     )
     await session.commit()
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/admin/cleanup-tokens
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/admin/cleanup-tokens",
+    summary="Delete expired and revoked refresh tokens",
+)
+async def cleanup_tokens(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    deleted = await auth_service.cleanup_expired_tokens(session)
+    await session.commit()
+    return {"deleted": deleted}

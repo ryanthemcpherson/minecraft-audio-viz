@@ -180,6 +180,9 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
         if (pool == null) return;
 
+        // Record stats
+        plugin.getEntityUpdateStats().recordUpdates(updates.size());
+
         // Single scheduler call for ALL updates - major performance improvement
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (EntityUpdate update : updates) {
@@ -274,8 +277,37 @@ public class EntityPoolManager {
     }
 
     /**
+     * Batch update visibility for multiple entities in a single scheduler task.
+     *
+     * @param zoneName The zone containing the entities
+     * @param changes List of (entityId, visible) pairs
+     */
+    public void batchSetVisible(String zoneName, List<Map.Entry<String, Boolean>> changes) {
+        if (changes == null || changes.isEmpty()) return;
+
+        Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
+        if (pool == null) return;
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            for (Map.Entry<String, Boolean> change : changes) {
+                Entity entity = pool.get(change.getKey());
+                if (entity == null || !(entity instanceof Display display)) continue;
+
+                Transformation current = display.getTransformation();
+                float scale = change.getValue() ? 0.5f : 0f;
+                display.setTransformation(new Transformation(
+                    current.getTranslation(),
+                    current.getLeftRotation(),
+                    new Vector3f(scale, scale, scale),
+                    current.getRightRotation()
+                ));
+            }
+        });
+    }
+
+    /**
      * Set entity visibility by scaling to 0.
-     * Note: Creates an individual scheduler task. For bulk updates, prefer batchUpdateEntities().
+     * Note: Creates an individual scheduler task. For bulk updates, prefer batchSetVisible().
      */
     public void setEntityVisible(String zoneName, String entityId, boolean visible) {
         Entity entity = getEntity(zoneName, entityId);

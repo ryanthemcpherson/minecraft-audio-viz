@@ -52,13 +52,13 @@ if (-not $SkipBuild) {
     Push-Location $PluginDir
     try {
         # Try mvnw first, fall back to mvn
-        $mvnCmd = if (Test-Path "./mvnw.cmd") { "./mvnw.cmd" }
-                  elseif (Test-Path "./mvnw") { "bash ./mvnw" }
-                  elseif (Get-Command mvn -ErrorAction SilentlyContinue) { "mvn" }
-                  else { throw "Maven not found. Install Maven or use the wrapper." }
+        if (Test-Path "./mvnw.cmd") { $mvnCmd = "./mvnw.cmd" }
+        elseif (Get-Command mvn -ErrorAction SilentlyContinue) { $mvnCmd = "mvn" }
+        else { throw "Maven not found. Install Maven or use the wrapper." }
 
+        $mvnArgList = $mvnArgs -split '\s+'
         Write-Host "  Running: $mvnCmd $mvnArgs" -ForegroundColor Gray
-        Invoke-Expression "$mvnCmd $mvnArgs" 2>&1 | ForEach-Object {
+        & $mvnCmd @mvnArgList 2>&1 | ForEach-Object {
             if ($_ -match "BUILD (SUCCESS|FAILURE)") { Write-Host "  $_" -ForegroundColor $(if ($_ -match "SUCCESS") { "Green" } else { "Red" }) }
         }
 

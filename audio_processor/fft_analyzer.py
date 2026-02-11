@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
+from scipy.signal import lfilter
 
 # Try to import ring buffer
 try:
@@ -171,8 +172,6 @@ class BassLane:
         # Vectorized lowpass filter (IIR single-pole) using scipy.signal.lfilter
         # Filter: y[n] = alpha * x[n] + (1-alpha) * y[n-1]
         # In transfer function form: b = [alpha], a = [1, -(1-alpha)]
-        from scipy.signal import lfilter
-
         alpha = self._lp_alpha
         b_coef = np.array([alpha], dtype=np.float64)
         a_coef = np.array([1.0, -(1.0 - alpha)], dtype=np.float64)
@@ -192,7 +191,7 @@ class BassLane:
         attack_c = self._attack_coef
         release_c = self._release_coef
         for i in range(n_samples):
-            r = rectified[i]
+            r = float(rectified[i])
             if r > envelope:
                 envelope += attack_c * (r - envelope)
             else:
@@ -415,8 +414,8 @@ class FFTAnalyzer:
         self._sd_available = self._check_sounddevice()
 
         # BPM estimation state
-        self._onset_times: List[float] = []  # Recent kick onset timestamps
-        self._ioi_history: List[float] = []  # Inter-onset intervals in seconds
+        self._onset_times: deque = deque(maxlen=64)  # Recent kick onset timestamps
+        self._ioi_history: deque = deque(maxlen=32)  # Inter-onset intervals in seconds
         self._tempo_histogram = np.zeros(200, dtype=np.float32)  # Bins for 40-240 BPM
         self._histogram_decay = 0.995  # Slow decay for stability (~3 sec half-life)
         self._estimated_bpm = 120.0  # Current BPM estimate
@@ -557,20 +556,12 @@ class FFTAnalyzer:
                     if abs(best_ratio - 1.0) > 0.20:
                         # Still record the onset time but don't use this IOI
                         self._onset_times.append(current_time)
-                        if len(self._onset_times) > 64:
-                            self._onset_times.pop(0)
                         return
 
                 self._ioi_history.append(ioi)
-                # Keep last 32 IOIs (~16 seconds at 120 BPM)
-                if len(self._ioi_history) > 32:
-                    self._ioi_history.pop(0)
                 self._update_tempo_histogram(ioi)
 
         self._onset_times.append(current_time)
-        # Keep last 64 onset times
-        if len(self._onset_times) > 64:
-            self._onset_times.pop(0)
 
     def _update_tempo_histogram(self, ioi: float):
         """Update tempo histogram with new IOI measurement."""
@@ -1056,9 +1047,8 @@ class FFTAnalyzer:
 
                 # Compute band_max from history (95th percentile for stability)
                 if len(self._band_histories[i]) > 20:
-                    sorted_hist = sorted(self._band_histories[i])
-                    idx = int(len(sorted_hist) * 0.95)
-                    self._band_max[i] = sorted_hist[idx] * 1.1 + 0.001
+                    p95 = float(np.percentile(list(self._band_histories[i]), 95))
+                    self._band_max[i] = p95 * 1.1 + 0.001
                 elif len(self._band_histories[i]) > 5:
                     self._band_max[i] = max(self._band_histories[i]) * 1.2 + 0.001
 
@@ -1102,9 +1092,11 @@ class FFTAnalyzer:
             self._onsets[i] = False
             if len(self._flux_histories[i]) > 5:
                 # Compute average excluding current value
-                hist_list = list(self._flux_histories[i])
-                if len(hist_list) > 1:
-                    avg_flux = float(np.mean(hist_list[:-1]))
+                hist = self._flux_histories[i]
+                if len(hist) > 1:
+                    # Sum all elements minus last, divide by count-1
+                    total = sum(hist) - hist[-1]
+                    avg_flux = total / (len(hist) - 1)
                 else:
                     avg_flux = 0.0
                 threshold = avg_flux * self._onset_threshold + 0.001

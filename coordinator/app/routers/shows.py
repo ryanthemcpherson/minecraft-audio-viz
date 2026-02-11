@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -10,7 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models.db import Show, VJServer
+from app.models.db import DJSession, Show, VJServer
 from app.models.schemas import (
     CreateShowRequest,
     CreateShowResponse,
@@ -19,6 +20,8 @@ from app.models.schemas import (
 )
 from app.routers.servers import _authenticate_server
 from app.services.code_generator import generate_unique_code
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["shows"])
 
@@ -58,6 +61,8 @@ async def create_show(
     session.add(show)
     await session.commit()
     await session.refresh(show)
+
+    logger.info("Show created: id=%s name=%s code=%s", show.id, show.name, connect_code)
 
     return CreateShowResponse(
         show_id=show.id,
@@ -103,10 +108,19 @@ async def end_show(
     stmt_update = (
         update(Show)
         .where(Show.id == show_id)
-        .values(status="ended", ended_at=now, connect_code=None)
+        .values(status="ended", ended_at=now, connect_code=None, current_djs=0)
     )
     await session.execute(stmt_update)
+
+    # Disconnect all active DJ sessions in this show
+    await session.execute(
+        update(DJSession)
+        .where(DJSession.show_id == show_id, DJSession.disconnected_at.is_(None))
+        .values(disconnected_at=now)
+    )
     await session.commit()
+
+    logger.info("Show ended: id=%s", show_id)
 
     return EndShowResponse(show_id=show_id, status="ended", ended_at=now)
 

@@ -1,6 +1,7 @@
 package com.audioviz.effects;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Configuration for beat-triggered effects in a zone.
@@ -17,10 +18,10 @@ public class BeatEffectConfig {
      * Create an empty, mutable BeatEffectConfig.
      */
     public BeatEffectConfig() {
-        this.effects = new HashMap<>();
-        this.thresholds = new HashMap<>();
-        this.cooldowns = new HashMap<>();
-        this.lastTriggerTime = new HashMap<>();
+        this.effects = new ConcurrentHashMap<>();
+        this.thresholds = new ConcurrentHashMap<>();
+        this.cooldowns = new ConcurrentHashMap<>();
+        this.lastTriggerTime = new ConcurrentHashMap<>();
 
         // Set defaults
         thresholds.put(BeatType.BEAT, 0.4f);
@@ -28,10 +29,10 @@ public class BeatEffectConfig {
     }
 
     private BeatEffectConfig(Builder builder) {
-        this.effects = new HashMap<>(builder.effects);
-        this.thresholds = new HashMap<>(builder.thresholds);
-        this.cooldowns = new HashMap<>(builder.cooldowns);
-        this.lastTriggerTime = new HashMap<>();
+        this.effects = new ConcurrentHashMap<>(builder.effects);
+        this.thresholds = new ConcurrentHashMap<>(builder.thresholds);
+        this.cooldowns = new ConcurrentHashMap<>(builder.cooldowns);
+        this.lastTriggerTime = new ConcurrentHashMap<>();
     }
 
     /**

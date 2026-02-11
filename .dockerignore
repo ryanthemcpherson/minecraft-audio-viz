@@ -53,5 +53,9 @@ docs/
 .DS_Store
 Thumbs.db
 
+# Subprojects not needed for VJ server image
+site/
+dj_client/
+
 # Scratchpad
 scratchpad/

@@ -227,6 +227,37 @@ async def test_heartbeat_wrong_server_returns_403(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_max_djs_enforcement(client: AsyncClient) -> None:
+    """Creating a show with max_djs=1 should reject a second connect resolution."""
+    user_token = await _get_user_token(client, "maxdjs@example.com")
+    reg_data = await _register_server(
+        client,
+        user_token,
+        name="Max DJ Server",
+        websocket_url="ws://localhost:9010",
+        api_key="max-djs-key",
+    )
+    server_id = reg_data["server_id"]
+
+    show = await client.post(
+        "/api/v1/shows",
+        json={"server_id": server_id, "name": "Solo Show", "max_djs": 1},
+        headers={"Authorization": "Bearer max-djs-key"},
+    )
+    assert show.status_code == 201
+    connect_code = show.json()["connect_code"]
+
+    # First resolution should succeed (fills the show)
+    resp1 = await client.get(f"/api/v1/connect/{connect_code}")
+    assert resp1.status_code == 200
+    assert resp1.json()["dj_count"] == 1
+
+    # Second resolution should be rejected
+    resp2 = await client.get(f"/api/v1/connect/{connect_code}")
+    assert resp2.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_end_show_twice_returns_400(client: AsyncClient) -> None:
     # Register + create show
     user_token = await _get_user_token(client, "doubleend@example.com")

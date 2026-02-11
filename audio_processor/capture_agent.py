@@ -325,9 +325,9 @@ class CaptureAgent:
         logger.info("Stopping capture agent...")
         self._running = False
 
-        if self.viz_client:
-            # Schedule disconnect
-            asyncio.create_task(self._cleanup())
+        if self.viz_client and self._loop:
+            # Schedule cleanup from signal handler context safely
+            self._loop.call_soon_threadsafe(lambda: asyncio.create_task(self._cleanup()))
 
     async def _cleanup(self):
         """Clean up resources."""

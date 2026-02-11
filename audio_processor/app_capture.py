@@ -778,13 +778,11 @@ def run_http_server(port: int, directory: str):
     project_root = Path(directory).parent.parent
     admin_dir = project_root / "admin_panel"
 
-    # Configure directory mapping
+    # Configure directory mapping using absolute paths (no os.chdir)
     MultiDirectoryHandler.directory_map = {
         "/admin": str(admin_dir) if admin_dir.exists() else str(directory),
         "/": str(directory),
     }
-
-    os.chdir(str(project_root))
 
     with socketserver.TCPServer(("", port), MultiDirectoryHandler) as httpd:
         httpd.serve_forever()

@@ -209,16 +209,10 @@ public class BeatEventManager {
 
         @Override
         public void trigger(Location location, VisualizationZone zone, double intensity, Collection<Player> viewers) {
-            double shakeMagnitude = 0.1 * intensity;
-
-            for (Player player : viewers) {
-                // Apply small velocity nudge for shake effect
-                org.bukkit.util.Vector velocity = player.getVelocity();
-                double offsetX = (Math.random() - 0.5) * shakeMagnitude;
-                double offsetY = (Math.random() - 0.5) * shakeMagnitude * 0.5;
-                double offsetZ = (Math.random() - 0.5) * shakeMagnitude;
-                player.setVelocity(velocity.add(new org.bukkit.util.Vector(offsetX, offsetY, offsetZ)));
-            }
+            // TODO: Implement a less invasive camera shake effect.
+            // player.setVelocity() was removed because it conflicts with anti-cheat plugins
+            // and is too aggressive. Consider using title packets with short duration,
+            // world border warning effects, or subtle particle-based visual cues instead.
         }
     }
 
@@ -238,8 +232,21 @@ public class BeatEventManager {
 
         @Override
         public void trigger(Location location, VisualizationZone zone, double intensity, Collection<Player> viewers) {
-            // Spawn lightning effect (visual only, no damage)
-            location.getWorld().strikeLightningEffect(location);
+            // Only spawn lightning if at least one viewer is within zone bounds.
+            // strikeLightningEffect is visible server-wide but Minecraft's client
+            // only renders it within view distance, so this check prevents triggering
+            // lightning for zones with no nearby players.
+            double maxDistance = zone.getSize().length();
+            boolean hasNearbyPlayer = false;
+            for (Player player : viewers) {
+                if (player.getLocation().distance(zone.getOrigin()) < maxDistance) {
+                    hasNearbyPlayer = true;
+                    break;
+                }
+            }
+            if (hasNearbyPlayer) {
+                location.getWorld().strikeLightningEffect(location);
+            }
         }
     }
 

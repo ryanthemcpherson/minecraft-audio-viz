@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import RefreshToken, User
@@ -156,6 +156,33 @@ async def login_discord(
     user = (await session.execute(stmt)).scalar_one_or_none()
 
     if user is None:
+        # Check if a user with this email already exists (link Discord to existing account)
+        if discord_email:
+            existing_by_email = (
+                await session.execute(
+                    select(User).where(User.email == discord_email.lower().strip())
+                )
+            ).scalar_one_or_none()
+            if existing_by_email is not None:
+                # Link Discord ID to the existing account
+                existing_by_email.discord_id = discord_id
+                existing_by_email.discord_username = discord_username
+                existing_by_email.last_login_at = datetime.now(timezone.utc)
+                if discord_avatar:
+                    existing_by_email.avatar_url = (
+                        f"https://cdn.discordapp.com/avatars/{discord_id}/{discord_avatar}.png"
+                    )
+                user = existing_by_email
+                await session.flush()
+
+                return await _issue_tokens(
+                    user=user,
+                    session=session,
+                    jwt_secret=jwt_secret,
+                    expiry_minutes=expiry_minutes,
+                    refresh_expiry_days=refresh_expiry_days,
+                )
+
         # New user — create
         avatar_url = (
             f"https://cdn.discordapp.com/avatars/{discord_id}/{discord_avatar}.png"
@@ -257,3 +284,16 @@ async def revoke_refresh_token(
     row = (await session.execute(stmt)).scalar_one_or_none()
     if row is not None:
         row.revoked = True
+
+
+async def cleanup_expired_tokens(session: AsyncSession) -> int:
+    """Delete refresh tokens that are revoked or expired. Returns count deleted."""
+    now = datetime.now(timezone.utc)
+    stmt = delete(RefreshToken).where(
+        or_(
+            RefreshToken.revoked.is_(True),
+            RefreshToken.expires_at < now,
+        )
+    )
+    result = await session.execute(stmt)
+    return result.rowcount

@@ -40,6 +40,19 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [userMenuOpen]);
 
+  // Close mobile menu or user dropdown on Escape key
+  useEffect(() => {
+    if (!mobileOpen && !userMenuOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (userMenuOpen) setUserMenuOpen(false);
+        if (mobileOpen) setMobileOpen(false);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen, userMenuOpen]);
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
@@ -89,6 +102,8 @@ export default function Navbar() {
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
                     className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/5"
+                    aria-expanded={userMenuOpen}
+                    aria-haspopup="true"
                   >
                     {user.avatar_url ? (
                       <Image
@@ -147,6 +162,8 @@ export default function Navbar() {
           onClick={() => setMobileOpen(!mobileOpen)}
           className="flex h-10 w-10 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-white/5 hover:text-white md:hidden"
           aria-label="Toggle menu"
+          aria-expanded={mobileOpen}
+          aria-controls="mobile-menu"
         >
           {mobileOpen ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -165,7 +182,7 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       {mobileOpen && (
-        <div className="border-t border-white/5 bg-[#0a0a0a]/95 backdrop-blur-xl md:hidden">
+        <div id="mobile-menu" className="border-t border-white/5 bg-[#0a0a0a]/95 backdrop-blur-xl md:hidden">
           <div className="flex flex-col gap-1 px-6 py-4">
             {navLinks.map((link) =>
               link.external ? (

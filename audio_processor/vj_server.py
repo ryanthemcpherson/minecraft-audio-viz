@@ -392,8 +392,41 @@ class DJAuthConfig:
         return vj
 
 
+def _make_directory_handler(directory_map: dict):
+    """Create a handler class with its own directory_map to avoid shared mutable state."""
+
+    class _Handler(http.server.SimpleHTTPRequestHandler):
+        """HTTP handler that serves from multiple directories."""
+
+        _directory_map = directory_map
+
+        def _safe_join(self, base: str, path: str) -> str:
+            path = path.split("?", 1)[0].split("#", 1)[0]
+            path = posixpath.normpath(urllib.parse.unquote(path))
+            words = [word for word in path.split("/") if word not in ("", ".", "..")]
+            full_path = base
+            for word in words:
+                full_path = os.path.join(full_path, word)
+            return full_path
+
+        def translate_path(self, path):
+            path = path.split("?", 1)[0].split("#", 1)[0]
+            for url_prefix, fs_directory in self._directory_map.items():
+                if path == url_prefix or path.startswith(f"{url_prefix}/"):
+                    relative_path = path[len(url_prefix) :].lstrip("/")
+                    return self._safe_join(fs_directory, relative_path)
+            if "/" in self._directory_map:
+                return self._safe_join(self._directory_map["/"], path)
+            return super().translate_path(path)
+
+        def log_message(self, format, *args):
+            pass
+
+    return _Handler
+
+
 class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
-    """HTTP handler that serves from multiple directories."""
+    """HTTP handler that serves from multiple directories (legacy, prefer _make_directory_handler)."""
 
     directory_map = {}
 
@@ -427,20 +460,19 @@ def run_http_server(port: int, directory: str):
     admin_dir = project_root / "admin_panel"
     frontend_dir = project_root / "preview_tool" / "frontend"
 
-    # Admin panel at root, preview at /preview
-    MultiDirectoryHandler.directory_map = {
+    # Admin panel at root, preview at /preview (absolute paths, no os.chdir)
+    dir_map = {
         "/preview": str(frontend_dir) if frontend_dir.exists() else str(directory),
         "/": str(admin_dir) if admin_dir.exists() else str(directory),
     }
-
-    os.chdir(str(project_root))
+    handler_cls = _make_directory_handler(dir_map)
 
     # Allow port reuse so restarts don't fail with "Address already in use"
     class ReusableTCPServer(socketserver.TCPServer):
         allow_reuse_address = True
 
     try:
-        with ReusableTCPServer(("", port), MultiDirectoryHandler) as httpd:
+        with ReusableTCPServer(("", port), handler_cls) as httpd:
             httpd.serve_forever()
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")
@@ -553,10 +585,11 @@ class VJServer:
     @property
     def active_dj(self) -> Optional[DJConnection]:
         """Get the currently active DJ."""
-        # Note: For property access, we don't await the lock to avoid making this async
-        # The caller should use _dj_lock for any operations that modify the dict
-        if self._active_dj_id and self._active_dj_id in self._djs:
-            return self._djs[self._active_dj_id]
+        # Snapshot to avoid TOCTOU race on _djs dict
+        active_id = self._active_dj_id
+        djs = self._djs
+        if active_id:
+            return djs.get(active_id)
         return None
 
     async def _get_active_dj_safe(self) -> Optional[DJConnection]:
@@ -618,14 +651,17 @@ class VJServer:
         - current_browsers: Current number of connected browser clients
         - mc_connected: Whether Minecraft is currently connected
         """
+        # Snapshot mutable collections to avoid races with async DJ handlers
+        djs_count = len(self._djs)
+        browsers_count = len(self._broadcast_clients)
         return {
             "dj_connects": self._dj_connects,
             "dj_disconnects": self._dj_disconnects,
             "browser_connects": self._browser_connects,
             "browser_disconnects": self._browser_disconnects,
             "mc_reconnect_count": self._mc_reconnect_count,
-            "current_djs": len(self._djs),
-            "current_browsers": len(self._broadcast_clients),
+            "current_djs": djs_count,
+            "current_browsers": browsers_count,
             "mc_connected": self.viz_client is not None and self.viz_client.connected,
         }
 
@@ -1204,7 +1240,9 @@ class VJServer:
 
     async def _broadcast_stream_routes(self):
         """Broadcast routing policy to all connected DJs."""
-        for did, dj in list(self._djs.items()):
+        async with self._dj_lock:
+            djs_snapshot = list(self._djs.items())
+        for did, dj in djs_snapshot:
             try:
                 await dj.websocket.send(json.dumps(self._build_stream_route_message(did, dj)))
             except Exception as e:

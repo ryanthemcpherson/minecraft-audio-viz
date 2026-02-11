@@ -32,7 +32,11 @@ function ApiKeyReveal({ data, onDismiss }: { data: RegisterServerResponse; onDis
   const [copiedSecret, setCopiedSecret] = useState(false);
 
   function handleCopy(value: string, setter: (v: boolean) => void) {
-    navigator.clipboard.writeText(value);
+    try {
+      navigator.clipboard.writeText(value);
+    } catch {
+      // Clipboard API may be unavailable in some contexts
+    }
     setter(true);
     setTimeout(() => setter(false), 2000);
   }

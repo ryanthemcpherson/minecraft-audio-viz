@@ -61,10 +61,10 @@ class User(Base):
 
     # Relationships
     org_memberships: Mapped[list[OrgMember]] = relationship(
-        "OrgMember", back_populates="user", lazy="selectin"
+        "OrgMember", back_populates="user", lazy="raise"
     )
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(
-        "RefreshToken", back_populates="user", lazy="selectin"
+        "RefreshToken", back_populates="user", lazy="raise"
     )
     dj_profile: Mapped[DJProfile | None] = relationship(
         "DJProfile", back_populates="user", uselist=False, lazy="selectin"
@@ -86,7 +86,7 @@ class Organization(Base):
     # Relationships
     owner: Mapped[User] = relationship("User", foreign_keys=[owner_id])
     members: Mapped[list[OrgMember]] = relationship(
-        "OrgMember", back_populates="organization", lazy="selectin"
+        "OrgMember", back_populates="organization", lazy="raise"
     )
     servers: Mapped[list[VJServer]] = relationship(
         "VJServer", back_populates="organization", lazy="selectin"
@@ -148,7 +148,7 @@ class VJServer(Base):
     organization: Mapped[Organization | None] = relationship(
         "Organization", back_populates="servers"
     )
-    shows: Mapped[list[Show]] = relationship("Show", back_populates="server", lazy="selectin")
+    shows: Mapped[list[Show]] = relationship("Show", back_populates="server", lazy="raise")
 
 
 class Show(Base):

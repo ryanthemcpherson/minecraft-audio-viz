@@ -206,9 +206,6 @@ public class MessageQueue {
         var zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
 
-        Location origin = zone.getOrigin();
-        var size = zone.getSize();
-
         for (JsonElement elem : entities) {
             JsonObject entity = elem.getAsJsonObject();
 
@@ -223,12 +220,8 @@ public class MessageQueue {
             double nz = InputSanitizer.sanitizeCoordinate(
                 entity.has("z") ? entity.get("z").getAsDouble() : 0.5);
 
-            // Convert to world coordinates
-            double worldX = origin.getX() + (nx * size.getX());
-            double worldY = origin.getY() + (ny * size.getY());
-            double worldZ = origin.getZ() + (nz * size.getZ());
-
-            Location loc = new Location(origin.getWorld(), worldX, worldY, worldZ);
+            // Convert to world coordinates using zone's localToWorld (respects rotation)
+            Location loc = zone.localToWorld(nx, ny, nz);
 
             // Parse scale and rotation if present (clamped for safety)
             float scale = InputSanitizer.sanitizeScale(

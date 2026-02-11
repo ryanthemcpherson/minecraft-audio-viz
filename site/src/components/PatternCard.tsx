@@ -10,6 +10,8 @@ import type { VisualizationPattern } from "@/lib/patterns/base";
 // ── WebGL context slot manager ──────────────────────────────────
 // Browsers limit active WebGL contexts (~8-16). We use 14 to cover a full
 // 3-column grid viewport plus rootMargin pre-loading.
+// NOTE: Module-level mutable state is intentional and SSR-safe because this
+// module is marked "use client" and runs only in the browser.
 const MAX_WEBGL_CONTEXTS = 14;
 let activeSlots = 0;
 const waiters = new Set<() => void>();

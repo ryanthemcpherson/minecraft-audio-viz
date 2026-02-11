@@ -179,17 +179,17 @@
             <!-- Main Work Area -->
             <main id="work-area">
                 <!-- Tab Bar -->
-                <nav id="tab-bar">
-                    <button class="tab active" data-tab="mixer">Live Mixer</button>
-                    <button class="tab" data-tab="zone">Zone Settings</button>
-                    <button class="tab" data-tab="preview">3D Preview</button>
-                    <button class="tab" data-tab="banner">DJ Banner</button>
+                <nav id="tab-bar" role="tablist">
+                    <button id="tab-mixer" class="tab active" data-tab="mixer" role="tab" aria-selected="true" aria-controls="mixer-panel">Live Mixer</button>
+                    <button id="tab-zone" class="tab" data-tab="zone" role="tab" aria-selected="false" aria-controls="zone-panel">Zone Settings</button>
+                    <button id="tab-preview" class="tab" data-tab="preview" role="tab" aria-selected="false" aria-controls="preview-panel">3D Preview</button>
+                    <button id="tab-banner" class="tab" data-tab="banner" role="tab" aria-selected="false" aria-controls="banner-panel">DJ Banner</button>
                 </nav>
 
                 <!-- Tab Content -->
                 <div id="tab-content">
                     <!-- Live Mixer Panel -->
-                    <div id="mixer-panel" class="tab-panel active">
+                    <div id="mixer-panel" class="tab-panel active" role="tabpanel" aria-labelledby="tab-mixer">
                         <!-- Pattern Quick-Switch -->
                         <section class="mixer-section">
                             <h3 class="section-title">Patterns</h3>
@@ -333,7 +333,7 @@
                     </div>
 
                     <!-- Zone Settings Panel -->
-                    <div id="zone-panel" class="tab-panel">
+                    <div id="zone-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-zone">
                         <!-- Available Stages -->
                         <section class="mixer-section">
                             <div class="section-header">
@@ -557,7 +557,7 @@
                     </div>
 
                     <!-- 3D Preview Panel -->
-                    <div id="preview-panel" class="tab-panel">
+                    <div id="preview-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-preview">
                         <div class="preview-container">
                             <!-- Three.js Canvas -->
                             <div class="preview-canvas-wrapper">
@@ -659,7 +659,7 @@
                     </div>
 
                     <!-- DJ Banner Panel -->
-                    <div id="banner-panel" class="tab-panel">
+                    <div id="banner-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-banner">
                         <!-- DJ Selector -->
                         <section class="mixer-section">
                             <h3 class="section-title">DJ Banner Profile</h3>

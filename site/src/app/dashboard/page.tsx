@@ -91,7 +91,11 @@ function OrgCard({
   }
 
   function handleCopy(code: string) {
-    navigator.clipboard.writeText(code);
+    try {
+      navigator.clipboard.writeText(code);
+    } catch {
+      // Clipboard API may be unavailable in some contexts
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

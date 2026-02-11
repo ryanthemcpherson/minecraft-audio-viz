@@ -1,7 +1,7 @@
 name: AudioViz
 version: ${project.version}
 main: com.audioviz.AudioVizPlugin
-api-version: '1.20'
+api-version: '1.21'
 description: Discord audio visualization in Minecraft using Display Entities
 
 authors:

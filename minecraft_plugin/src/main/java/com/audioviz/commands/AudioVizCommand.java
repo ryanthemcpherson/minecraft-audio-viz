@@ -456,7 +456,13 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
 
         switch (action) {
             case "init" -> {
-                int count = args.length > 2 ? Integer.parseInt(args[2]) : 16;
+                int count;
+                try {
+                    count = args.length > 2 ? Integer.parseInt(args[2]) : 16;
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(ChatColor.RED + "Invalid count. Must be a number.");
+                    return;
+                }
                 Material material = args.length > 3 ? Material.matchMaterial(args[3]) : Material.GLOWSTONE;
                 if (material == null) material = Material.GLOWSTONE;
 

@@ -79,6 +79,7 @@ class DJRelay:
         self._reconnect_attempts = 0
         self._heartbeat_failures = 0
         self._last_heartbeat_rtt_ms = 0.0
+        self._receiver_task: Optional[asyncio.Task] = None  # Background receive task
 
         # Direct mode - Minecraft connection and pattern engine
         self.viz_client: Optional["VizClient"] = None
@@ -554,8 +555,12 @@ class DJRelay:
                 if await self.connect():
                     # Reset reconnect attempts on successful connection
                     self._reconnect_attempts = 0
-                    # Start receiving messages in background
-                    asyncio.create_task(self.receive_messages())
+                    # Cancel old receiver task before starting a new one
+                    if self._receiver_task and not self._receiver_task.done():
+                        self._receiver_task.cancel()
+                    # Start receiving messages in background with error logging
+                    self._receiver_task = asyncio.create_task(self.receive_messages())
+                    self._receiver_task.add_done_callback(self._on_receiver_done)
                 else:
                     # Calculate exponential backoff with jitter
                     backoff = min(
@@ -582,9 +587,20 @@ class DJRelay:
                 logger.error(f"Frame callback error: {e}")
                 await asyncio.sleep(frame_interval)
 
+    def _on_receiver_done(self, task: asyncio.Task):
+        """Callback for when the receiver task completes (error logging)."""
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            logger.error(f"Receiver task failed with error: {exc}")
+
     def stop(self):
         """Stop the relay."""
         self._running = False
+        if self._receiver_task and not self._receiver_task.done():
+            self._receiver_task.cancel()
 
 
 class DJRelayAgent:
@@ -639,8 +655,9 @@ class DJRelayAgent:
             logger.error("Failed to connect to VJ server")
             return
 
-        # Start message receiver
+        # Start message receiver with error logging
         receiver_task = asyncio.create_task(self.relay.receive_messages())
+        receiver_task.add_done_callback(self.relay._on_receiver_done)
 
         self._running = True
         frame_interval = 1.0 / max(1.0, float(self.relay.config.target_fps))
@@ -713,7 +730,11 @@ class DJRelayAgent:
                     await asyncio.sleep(backoff)
                     if await self.relay.connect():
                         self._agent_reconnect_attempts = 0  # Reset on success
+                        # Cancel old receiver task before creating new one
+                        if receiver_task and not receiver_task.done():
+                            receiver_task.cancel()
                         receiver_task = asyncio.create_task(self.relay.receive_messages())
+                        receiver_task.add_done_callback(self.relay._on_receiver_done)
                         logger.info("Reconnection successful")
                     continue
 
@@ -822,8 +843,6 @@ class DJRelayAgent:
 
     def _generate_bands(self, peak: float, is_beat: bool) -> List[float]:
         """Generate simple synthetic bands when FFT unavailable."""
-        import random
-
         # 5-band system: bass, low-mid, mid, high-mid, high
         targets = [
             peak * 0.9,  # Bass (includes kick)

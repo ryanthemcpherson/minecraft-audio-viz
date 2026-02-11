@@ -13,9 +13,9 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -28,7 +28,7 @@ public class ChatInputManager implements Listener {
 
     public ChatInputManager(AudioVizPlugin plugin) {
         this.plugin = plugin;
-        this.pendingInputs = new HashMap<>();
+        this.pendingInputs = new ConcurrentHashMap<>();
     }
 
     /**

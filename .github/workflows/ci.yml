@@ -85,7 +85,7 @@ jobs:
         run: pip install bandit[toml]
 
       - name: Run Bandit
-        run: bandit -r audio_processor/ python_client/ -c pyproject.toml -f json -o bandit-report.json || true
+        run: bandit -r audio_processor/ python_client/ -c pyproject.toml -f json -o bandit-report.json
 
       - name: Bandit (console output)
         continue-on-error: true

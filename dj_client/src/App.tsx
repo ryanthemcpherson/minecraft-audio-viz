@@ -141,7 +141,7 @@ function App() {
     );
 
     return () => {
-      unlisteners.forEach((p) => p.then((unlisten) => unlisten()));
+      unlisteners.forEach((p) => p.then((unlisten) => unlisten()).catch(() => {}));
     };
   }, [status.connected]);
 

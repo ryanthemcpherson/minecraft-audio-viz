@@ -6,10 +6,11 @@ receive back the VJ server's WebSocket URL along with a short-lived JWT.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -18,6 +19,8 @@ from app.models.db import DJSession, Show, VJServer
 from app.models.schemas import ConnectCodeResponse
 from app.services.code_generator import normalise_code
 from app.services.jwt_service import create_token
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["connect"])
 
@@ -61,8 +64,13 @@ async def resolve_connect_code(
     if server is None:
         raise HTTPException(status_code=503, detail="Server registered but currently offline")
 
-    # Enforce maximum DJ limit
-    if show.current_djs >= show.max_djs:
+    # Atomically increment current DJ count only if below max_djs
+    result_update = await session.execute(
+        update(Show)
+        .where(Show.id == show.id, Show.current_djs < Show.max_djs)
+        .values(current_djs=Show.current_djs + 1)
+    )
+    if result_update.rowcount == 0:
         raise HTTPException(status_code=409, detail="Show is full — maximum DJ limit reached")
 
     # Create a DJ session record
@@ -76,9 +84,10 @@ async def resolve_connect_code(
     )
     session.add(dj_session)
 
-    # Increment current DJ count
-    show.current_djs += 1
     await session.commit()
+
+    # Refresh to get the updated count
+    await session.refresh(show)
 
     # Mint JWT
     token = create_token(
@@ -87,6 +96,13 @@ async def resolve_connect_code(
         server_id=server.id,
         jwt_secret=server.jwt_secret,
         expiry_minutes=settings.jwt_default_expiry_minutes,
+    )
+
+    logger.info(
+        "Connect code resolved: code=%s show_id=%s dj_session=%s",
+        normalised,
+        show.id,
+        dj_session_id,
     )
 
     return ConnectCodeResponse(

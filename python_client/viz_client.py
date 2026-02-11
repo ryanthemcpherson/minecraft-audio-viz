@@ -53,6 +53,10 @@ class VizClient:
         self._pending_responses: asyncio.Queue = asyncio.Queue()
         self._use_receive_loop: bool = False  # Set to True when receive loop is started
 
+        # Logging flags for batch_update_fast
+        self._audio_logged: bool = False
+        self._last_fast_error: float = 0.0
+
     async def connect(self) -> bool:
         """Connect to the AudioViz WebSocket server."""
         try:
@@ -207,7 +211,10 @@ class VizClient:
     def start_heartbeat(self):
         """Start the heartbeat task manually."""
         if self._heartbeat_task is None or self._heartbeat_task.done():
+            self._use_receive_loop = True
             self._last_pong = time.time()
+            if self._receive_task is None or self._receive_task.done():
+                self._receive_task = asyncio.create_task(self._receive_loop())
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     def stop_heartbeat(self):
@@ -367,7 +374,7 @@ class VizClient:
             message["is_beat"] = audio.get("is_beat", False)
             message["beat_intensity"] = audio.get("beat_intensity", 0.0)
             # Debug: log first time we send audio
-            if not hasattr(self, "_audio_logged"):
+            if not self._audio_logged:
                 self._audio_logged = True
                 logger.info(f"Sending audio data: bands={message['bands'][:2]}...")
 
@@ -378,7 +385,7 @@ class VizClient:
             self._connected = False
         except Exception as e:
             # Log unexpected errors but don't spam
-            if not hasattr(self, "_last_fast_error") or (time.time() - self._last_fast_error) > 5:
+            if self._last_fast_error == 0.0 or (time.time() - self._last_fast_error) > 5:
                 logger.warning(f"Fast update error: {e}")
                 self._last_fast_error = time.time()
             self._connected = False

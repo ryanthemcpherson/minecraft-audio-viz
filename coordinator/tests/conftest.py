@@ -14,7 +14,7 @@ import pytest_asyncio
 from app.config import Settings
 from app.database import get_session
 from app.main import create_app
-from app.middleware.rate_limit import get_auth_limiter, get_connect_limiter
+from app.middleware.rate_limit import get_auth_limiter, get_connect_limiter, get_write_limiter
 from app.models.db import Base
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
@@ -97,6 +97,7 @@ async def client(settings: Settings, db_session: AsyncSession) -> AsyncIterator[
     # Reset rate limiters between tests so they don't bleed across test cases
     get_connect_limiter().reset()
     get_auth_limiter().reset()
+    get_write_limiter().reset()
 
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:

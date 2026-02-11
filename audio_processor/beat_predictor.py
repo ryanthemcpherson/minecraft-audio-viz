@@ -264,8 +264,8 @@ class BeatPredictor:
             phase_advance = elapsed / self._beat_period
             new_phase = (self._beat_phase + phase_advance) % 1.0
 
-            # Check if we crossed a beat boundary
-            if new_phase < self._beat_phase:
+            # Check if we crossed a beat boundary (epsilon avoids floating-point jitter)
+            if new_phase < self._beat_phase - 0.001:
                 self._beat_count = (self._beat_count + 1) % self._beats_per_bar
 
             self._beat_phase = new_phase

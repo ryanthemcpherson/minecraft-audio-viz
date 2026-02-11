@@ -1528,7 +1528,9 @@ class AdminApp {
     _switchTab(tabName) {
         // Update tab buttons
         this.elements.tabs.forEach(tab => {
-            tab.classList.toggle('active', tab.dataset.tab === tabName);
+            const isActive = tab.dataset.tab === tabName;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', String(isActive));
         });
 
         // Update panels

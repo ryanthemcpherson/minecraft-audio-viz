@@ -36,6 +36,20 @@ struct DirectMcRoute {
     entity_count: u32,
 }
 
+/// Returns true if the host is a private/local IP address that should use ws:// instead of wss://.
+pub(crate) fn is_local_host(host: &str) -> bool {
+    if host == "localhost" {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return ip.is_loopback()             // 127.*
+            || ip.octets()[0] == 10         // 10.*
+            || (ip.octets()[0] == 172 && (16..=31).contains(&ip.octets()[1]))  // 172.16-31.*
+            || (ip.octets()[0] == 192 && ip.octets()[1] == 168);               // 192.168.*
+    }
+    false
+}
+
 fn resolve_direct_mc_route(conn_state: &protocol::ConnectionState) -> Option<DirectMcRoute> {
     if conn_state.route_mode != "dual" || !conn_state.is_active {
         return None;
@@ -111,7 +125,8 @@ fn build_direct_entities(
 async fn start_direct_mc_session(
     route: &DirectMcRoute,
 ) -> Result<(mpsc::Sender<Message>, mpsc::Sender<()>), String> {
-    let uri = format!("ws://{}:{}", route.host, route.port);
+    let scheme = if is_local_host(&route.host) { "ws" } else { "wss" };
+    let uri = format!("{}://{}:{}", scheme, route.host, route.port);
     let ws_stream = tokio::time::timeout(Duration::from_secs(5), connect_async(&uri))
         .await
         .map_err(|_| format!("Direct MC connect timeout: {}", uri))?
