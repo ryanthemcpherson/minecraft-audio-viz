@@ -125,14 +125,17 @@ jobs:
         working-directory: ${{ env.DEPLOY_PATH }}
         run: |
           echo "=== Installing/updating Python dependencies ==="
-          python3 -m pip install -e ".[dev]" --quiet 2>&1 | tail -5
+          python3 -m venv .venv || true
+          source .venv/bin/activate
+          pip install -e ".[dev]" --quiet 2>&1 | tail -5
 
       # --- Run tests on server ---
       - name: Run tests on server
         working-directory: ${{ env.DEPLOY_PATH }}
         run: |
           echo "=== Running Python tests on server ==="
-          python3 -m pytest audio_processor/tests/ -v --tb=short
+          source .venv/bin/activate
+          pytest audio_processor/tests/ -v --tb=short
 
       # --- Restart Minecraft server ---
       - name: Restart Minecraft server
