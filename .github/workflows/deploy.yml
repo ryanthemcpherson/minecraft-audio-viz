@@ -132,7 +132,7 @@ jobs:
         working-directory: ${{ env.DEPLOY_PATH }}
         run: |
           echo "=== Running Python tests on server ==="
-          python -m pytest audio_processor/tests/ -v --tb=short
+          python3 -m pytest audio_processor/tests/ -v --tb=short
 
       # --- Restart Minecraft server ---
       - name: Restart Minecraft server
