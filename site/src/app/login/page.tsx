@@ -1,15 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import {
   register,
   loginWithEmail,
   getDiscordAuthUrl,
+  exchangeDiscordCode,
+  getStoredOAuthState,
+  clearStoredOAuthState,
 } from "@/lib/auth";
 
 type Tab = "login" | "signup";
+
+/** Read and delete a cookie by name. */
+function consumeCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  if (!match) return null;
+  // Delete it immediately
+  document.cookie = `${name}=; path=/; max-age=0`;
+  return decodeURIComponent(match[1]);
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,6 +34,56 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const oauthHandled = useRef(false);
+
+  // Check for OAuth callback cookie (set by middleware redirect)
+  useEffect(() => {
+    if (oauthHandled.current) return;
+
+    const oauthError = consumeCookie("mcav_oauth_error");
+    if (oauthError) {
+      oauthHandled.current = true;
+      setError(oauthError);
+      return;
+    }
+
+    const oauthCode = consumeCookie("mcav_oauth_code");
+    if (!oauthCode) return;
+
+    oauthHandled.current = true;
+    const separatorIdx = oauthCode.indexOf(":");
+    if (separatorIdx === -1) {
+      setError("Invalid OAuth response. Please try signing in again.");
+      return;
+    }
+
+    const code = oauthCode.slice(0, separatorIdx);
+    const state = oauthCode.slice(separatorIdx + 1);
+
+    // Validate CSRF state
+    const storedState = getStoredOAuthState();
+    clearStoredOAuthState();
+    if (storedState && storedState !== state) {
+      setError("Security validation failed. Please try signing in again.");
+      return;
+    }
+
+    setOauthLoading(true);
+    exchangeDiscordCode(code, state)
+      .then((res) => {
+        setAuth(res.access_token, res.refresh_token, res.user);
+        router.replace(
+          res.user.onboarding_completed ? "/dashboard" : "/onboarding"
+        );
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to complete sign-in"
+        );
+        setOauthLoading(false);
+      });
+  }, [setAuth, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,6 +112,23 @@ export default function LoginPage() {
     } catch {
       setError("Could not start Discord sign-in");
     }
+  }
+
+  // Show spinner while exchanging Discord OAuth code
+  if (oauthLoading) {
+    return (
+      <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
+        <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-electric-blue/5 rounded-full blur-[120px]" />
+        <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
+          <div className="mb-4 flex justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+          </div>
+          <p className="text-sm text-text-secondary">
+            Completing sign-in...
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
