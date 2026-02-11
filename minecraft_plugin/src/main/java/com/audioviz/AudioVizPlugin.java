@@ -100,7 +100,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         // Unregister all event listeners to prevent leaks on plugin reload
-        HandlerList.unregisterAll(this);
+        HandlerList.unregisterAll((org.bukkit.plugin.Plugin) this);
 
         // Clear menu manager sessions (prevent stale player references)
         if (menuManager != null) {
