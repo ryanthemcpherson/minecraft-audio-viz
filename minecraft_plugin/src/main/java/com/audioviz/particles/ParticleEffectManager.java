@@ -1,13 +1,17 @@
 package com.audioviz.particles;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.particles.impl.*;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.zones.VisualizationZone;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Particle;
+import org.bukkit.entity.Player;
 
 import java.util.*;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
@@ -242,9 +246,15 @@ public class ParticleEffectManager {
 
     /**
      * Spawn particles in a zone.
+     * When Bedrock fallback is active, particles are sent per-player to Bedrock players only.
      */
     private void spawnParticles(VisualizationZone zone, List<ParticleSpawn> spawns) {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
+            BedrockSupport bedrockSupport = plugin.getBedrockSupport();
+            boolean bedrockTargeted = bedrockSupport != null
+                && bedrockSupport.needsParticleFallback()
+                && bedrockSupport.hasBedrockPlayersOnline();
+
             for (ParticleSpawn spawn : spawns) {
                 // Check global limit
                 if (particlesThisTick >= globalConfig.getMaxParticlesPerTick()) {
@@ -255,7 +265,9 @@ public class ParticleEffectManager {
                 Location loc = zone.localToWorld(spawn.getX(), spawn.getY(), spawn.getZ());
 
                 try {
-                    if (spawn.getData() != null) {
+                    if (bedrockTargeted) {
+                        spawnForBedrockPlayers(bedrockSupport, loc, spawn);
+                    } else if (spawn.getData() != null) {
                         zone.getWorld().spawnParticle(
                             spawn.getType(), loc,
                             spawn.getCount(),
@@ -277,6 +289,35 @@ public class ParticleEffectManager {
                 }
             }
         });
+    }
+
+    /**
+     * Send particle effect only to Bedrock players (per-player targeting).
+     */
+    private void spawnForBedrockPlayers(BedrockSupport bedrockSupport, Location loc, ParticleSpawn spawn) {
+        int maxDist = bedrockSupport.getMaxRenderDistance();
+        double maxDistSq = (double) maxDist * maxDist;
+
+        for (UUID uuid : bedrockSupport.getBedrockPlayers()) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player == null || !player.isOnline()) continue;
+            if (!player.getWorld().equals(loc.getWorld())) continue;
+            if (player.getLocation().distanceSquared(loc) > maxDistSq) continue;
+
+            if (spawn.getData() != null) {
+                player.spawnParticle(
+                    spawn.getType(), loc, spawn.getCount(),
+                    spawn.getOffsetX(), spawn.getOffsetY(), spawn.getOffsetZ(),
+                    spawn.getSpeed(), spawn.getData()
+                );
+            } else {
+                player.spawnParticle(
+                    spawn.getType(), loc, spawn.getCount(),
+                    spawn.getOffsetX(), spawn.getOffsetY(), spawn.getOffsetZ(),
+                    spawn.getSpeed()
+                );
+            }
+        }
     }
 
     // ==================== Serialization for WebSocket ====================

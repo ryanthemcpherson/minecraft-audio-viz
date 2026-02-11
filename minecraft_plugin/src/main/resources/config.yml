@@ -25,3 +25,20 @@ performance:
 
   # Batch update interval (ticks) - entities will be updated at most this often
   min_update_interval: 1
+
+# Bedrock Edition support (Geyser/Floodgate)
+bedrock:
+  # Automatically detect Geyser and enable particle fallback
+  auto_detect: true
+
+  # Force particle fallback even without Geyser (for testing)
+  force_particle_fallback: false
+
+  # Particle quality for Bedrock players (1-5, higher = more particles)
+  particle_quality: 3
+
+  # Particle size multiplier for Bedrock (Bedrock renders particles smaller)
+  particle_size: 1.8
+
+  # Maximum distance (blocks) to send particles to Bedrock players
+  max_render_distance: 48

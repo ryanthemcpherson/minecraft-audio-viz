@@ -1,5 +1,7 @@
 package com.audioviz;
 
+import com.audioviz.bedrock.BedrockPlayerListener;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.commands.AudioVizCommand;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
@@ -36,6 +38,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private RendererRegistry rendererRegistry;
     private StageManager stageManager;
     private StageDecoratorManager decoratorManager;
+    private BedrockSupport bedrockSupport;
 
     @Override
     public void onEnable() {
@@ -55,8 +58,12 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.beatEventManager = new BeatEventManager(this);
         this.zoneEditor = new ZoneEditor(this);
 
+        // Detect Geyser/Floodgate for Bedrock player support
+        this.bedrockSupport = new BedrockSupport(getLogger(), getConfig());
+        this.bedrockSupport.detect();
+
         // Initialize particle visualization manager (for Bedrock compatibility)
-        this.particleVisualizationManager = new ParticleVisualizationManager(this);
+        this.particleVisualizationManager = new ParticleVisualizationManager(this, bedrockSupport);
         this.particleVisualizationManager.start();
 
         // Initialize renderer backend registry (backend selection + capability reporting)
@@ -67,6 +74,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(menuManager, this);
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
+        getServer().getPluginManager().registerEvents(new BedrockPlayerListener(bedrockSupport), this);
 
         // Initialize stage manager
         this.stageManager = new StageManager(this);
@@ -216,5 +224,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public StageDecoratorManager getDecoratorManager() {
         return decoratorManager;
+    }
+
+    public BedrockSupport getBedrockSupport() {
+        return bedrockSupport;
     }
 }

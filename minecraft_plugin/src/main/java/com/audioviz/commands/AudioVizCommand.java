@@ -1,6 +1,7 @@
 package com.audioviz.commands;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.gui.menus.MainMenu;
 import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageManager;
@@ -14,12 +15,14 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class AudioVizCommand implements CommandExecutor, TabCompleter {
@@ -45,6 +48,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             case "stage" -> handleStageCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "pool" -> handlePoolCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "status" -> handleStatusCommand(sender);
+            case "bedrock" -> handleBedrockCommand(sender);
             case "test" -> handleTestCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "help" -> sendHelp(sender);
             default -> {
@@ -510,6 +514,36 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleBedrockCommand(CommandSender sender) {
+        if (!sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to view Bedrock status.");
+            return;
+        }
+
+        BedrockSupport bedrock = plugin.getBedrockSupport();
+        sender.sendMessage(ChatColor.GOLD + "=== Bedrock Support ===");
+        sender.sendMessage(ChatColor.WHITE + "Geyser: " +
+            (bedrock.isGeyserPresent() ? ChatColor.GREEN + "Detected" : ChatColor.GRAY + "Not found"));
+        sender.sendMessage(ChatColor.WHITE + "Floodgate: " +
+            (bedrock.isFloodgatePresent() ? ChatColor.GREEN + "Detected" : ChatColor.GRAY + "Not found"));
+        sender.sendMessage(ChatColor.WHITE + "GeyserDisplayEntity: " +
+            (bedrock.isGeyserDisplayEntityPresent() ? ChatColor.GREEN + "Detected" : ChatColor.GRAY + "Not installed"));
+        sender.sendMessage(ChatColor.WHITE + "Particle Fallback: " +
+            (bedrock.needsParticleFallback() ? ChatColor.GREEN + "ACTIVE" : ChatColor.GRAY + "Inactive"));
+
+        if (bedrock.hasBedrockPlayersOnline()) {
+            sender.sendMessage(ChatColor.WHITE + "Bedrock Players Online:");
+            for (UUID uuid : bedrock.getBedrockPlayers()) {
+                Player player = Bukkit.getPlayer(uuid);
+                if (player != null) {
+                    sender.sendMessage(ChatColor.AQUA + "  - " + player.getName());
+                }
+            }
+        } else {
+            sender.sendMessage(ChatColor.GRAY + "No Bedrock players online");
+        }
+    }
+
     private void handleTestCommand(CommandSender sender, String[] args) {
         if (args.length < 2) {
             sender.sendMessage(ChatColor.RED + "Usage: /audioviz test <zone> <animation>");
@@ -609,6 +643,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/audioviz pool cleanup <zone>" + ChatColor.WHITE + " - Remove entities");
         sender.sendMessage(ChatColor.AQUA + "/audioviz test <zone> <animation>" + ChatColor.WHITE + " - Test animation");
         sender.sendMessage(ChatColor.AQUA + "/audioviz status" + ChatColor.WHITE + " - Show plugin status");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz bedrock" + ChatColor.WHITE + " - Show Bedrock/Geyser support status");
     }
 
     @Override
@@ -616,7 +651,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "test", "help"));
+            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "bedrock", "test", "help"));
         } else if (args.length == 2) {
             switch (args[0].toLowerCase()) {
                 case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info"));

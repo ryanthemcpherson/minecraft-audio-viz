@@ -1,6 +1,7 @@
 package com.audioviz.protocol;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.decorators.BannerConfig;
 import com.audioviz.decorators.DJInfo;
 import com.audioviz.effects.BeatEffectConfig;
@@ -764,6 +765,16 @@ public class MessageHandler {
         hologramProvider.addProperty("implemented", rendererRegistry.isHologramBackendImplemented());
         providers.add("hologram", hologramProvider);
         response.add("providers", providers);
+
+        // Bedrock support status
+        BedrockSupport bedrockSupport = plugin.getBedrockSupport();
+        JsonObject bedrock = new JsonObject();
+        bedrock.addProperty("geyser_present", bedrockSupport.isGeyserPresent());
+        bedrock.addProperty("floodgate_present", bedrockSupport.isFloodgatePresent());
+        bedrock.addProperty("geyser_display_entity", bedrockSupport.isGeyserDisplayEntityPresent());
+        bedrock.addProperty("particle_fallback_active", bedrockSupport.needsParticleFallback());
+        bedrock.addProperty("bedrock_players_online", bedrockSupport.getBedrockPlayers().size());
+        response.add("bedrock", bedrock);
 
         return response;
     }

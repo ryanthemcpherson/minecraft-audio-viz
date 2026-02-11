@@ -7,6 +7,10 @@ description: Discord audio visualization in Minecraft using Display Entities
 authors:
   - AudioViz Team
 
+softdepend:
+  - Geyser-Spigot
+  - floodgate
+
 commands:
   audioviz:
     description: Main AudioViz command
