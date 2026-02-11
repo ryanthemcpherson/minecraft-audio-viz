@@ -62,6 +62,7 @@ pub struct AudioFrameMessage {
 }
 
 impl AudioFrameMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         seq: u64,
         bands: [f32; 5],

@@ -264,7 +264,7 @@ impl FftAnalyzer {
             }
 
             let flux_score = (bass_flux / flux_threshold.max(0.001)).min(1.5);
-            let bass_score = ((bass - avg) / avg.max(0.01)).max(0.0).min(1.5);
+            let bass_score = ((bass - avg) / avg.max(0.01)).clamp(0.0, 1.5);
             let intensity = (flux_score * 0.65 + bass_score * 0.35).min(1.0);
             return (true, intensity);
         }
@@ -276,7 +276,7 @@ impl FftAnalyzer {
 
             if since_last > beat_period * 0.80 {
                 let phase = (since_last / beat_period).fract();
-                let near_boundary = phase < 0.10 || phase > 0.90;
+                let near_boundary = !(0.10..=0.90).contains(&phase);
                 if near_boundary && bass > avg * 0.85 && bass_flux > flux_mean * 0.6 {
                     self.last_output_beat_time = current_time;
                     return (true, 0.55);

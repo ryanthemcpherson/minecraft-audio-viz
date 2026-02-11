@@ -334,6 +334,7 @@ impl DjClient {
     }
 
     /// Send audio frame
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_audio_frame(
         &self,
         seq: u64,

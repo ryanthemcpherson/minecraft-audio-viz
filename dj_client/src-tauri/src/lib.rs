@@ -387,24 +387,25 @@ async fn run_bridge(
                         mc_tx = None;
                         mc_target_key = None;
                         mc_pool_key = None;
-                    } else if mc_target_key != desired_target_key || mc_tx.is_none() {
-                        if Instant::now() >= next_mc_connect_attempt {
-                            if let Some(route) = desired_route.as_ref() {
-                                match start_direct_mc_session(route).await {
-                                    Ok((direct_tx, direct_shutdown)) => {
-                                        mc_tx = Some(direct_tx);
-                                        mc_shutdown_tx = Some(direct_shutdown);
-                                        mc_target_key = desired_target_key;
-                                        mc_pool_key = None;
-                                        log::info!(
-                                            "Direct MC dual-publish enabled -> {}:{} ({}, entities={})",
-                                            route.host, route.port, route.zone, route.entity_count
-                                        );
-                                    }
-                                    Err(e) => {
-                                        log::warn!("{}", e);
-                                        next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
-                                    }
+                    } else if (mc_target_key != desired_target_key || mc_tx.is_none())
+                        && Instant::now() >= next_mc_connect_attempt
+                    {
+                        if let Some(route) = desired_route.as_ref() {
+                            match start_direct_mc_session(route).await {
+                                Ok((direct_tx, direct_shutdown)) => {
+                                    mc_tx = Some(direct_tx);
+                                    mc_shutdown_tx = Some(direct_shutdown);
+                                    mc_target_key = desired_target_key;
+                                    mc_pool_key = None;
+                                    log::info!(
+                                        "Direct MC dual-publish enabled -> {}:{} ({}, entities={})",
+                                        route.host, route.port, route.zone, route.entity_count
+                                    );
+                                }
+                                Err(e) => {
+                                    log::warn!("{}", e);
+                                    next_mc_connect_attempt =
+                                        Instant::now() + Duration::from_secs(2);
                                 }
                             }
                         }
@@ -426,7 +427,7 @@ async fn run_bridge(
                         if !out_is_beat && analysis.tempo_confidence >= 0.60 && analysis.bpm >= 60.0 {
                             let beat_period = 60.0_f64 / analysis.bpm as f64;
                             let phase = analysis.beat_phase.clamp(0.0, 1.0);
-                            let near_boundary = phase < 0.08 || phase > 0.92;
+                            let near_boundary = !(0.08..=0.92).contains(&phase);
                             let can_fire = last_phase_predicted_beat_at <= 0.0
                                 || (now_secs - last_phase_predicted_beat_at) >= (beat_period * 0.60);
                             if near_boundary && can_fire {
@@ -487,7 +488,7 @@ async fn run_bridge(
                                 }
 
                                 let entities =
-                                    build_direct_entities(&analysis, route.entity_count as usize, seq);
+                                    build_direct_entities(analysis, route.entity_count as usize, seq);
                                 let particles = if out_is_beat && out_beat_intensity > 0.2 {
                                     vec![json!({
                                         "particle": "NOTE",
