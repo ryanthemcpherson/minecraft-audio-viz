@@ -170,6 +170,9 @@ class DJProfileResponse(BaseModel):
     bio: str | None
     genres: str | None
     avatar_url: str | None
+    banner_url: str | None
+    color_palette: list[str] | None
+    slug: str | None
     is_public: bool
     created_at: datetime
 
@@ -352,16 +355,80 @@ class JoinOrgResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$")
+HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
 class CreateDJProfileRequest(BaseModel):
     dj_name: str = Field(..., min_length=1, max_length=100)
     bio: str | None = Field(None, max_length=500)
     genres: str | None = Field(None, max_length=500)
+    slug: str | None = Field(None, min_length=3, max_length=30)
+    color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: str | None) -> str | None:
+        if v is not None and not SLUG_PATTERN.match(v):
+            raise ValueError(
+                "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
+                "starting and ending with alphanumeric"
+            )
+        return v
+
+    @field_validator("color_palette")
+    @classmethod
+    def validate_color_palette(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for color in v:
+                if not HEX_COLOR_PATTERN.match(color):
+                    raise ValueError(f"Invalid hex color: {color}")
+        return v
 
 
 class UpdateDJProfileRequest(BaseModel):
     dj_name: str | None = Field(None, min_length=1, max_length=100)
     bio: str | None = Field(None, max_length=500)
     genres: str | None = Field(None, max_length=500)
+    slug: str | None = Field(None, min_length=3, max_length=30)
+    color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+    avatar_url: str | None = Field(None, max_length=500)
+    banner_url: str | None = Field(None, max_length=500)
+    is_public: bool | None = None
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: str | None) -> str | None:
+        if v is not None and not SLUG_PATTERN.match(v):
+            raise ValueError(
+                "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
+                "starting and ending with alphanumeric"
+            )
+        return v
+
+    @field_validator("color_palette")
+    @classmethod
+    def validate_color_palette(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for color in v:
+                if not HEX_COLOR_PATTERN.match(color):
+                    raise ValueError(f"Invalid hex color: {color}")
+        return v
+
+
+class UploadUrlRequest(BaseModel):
+    context: str = Field(..., pattern=r"^(avatar|banner)$")
+    content_type: str = Field(..., pattern=r"^image/(jpeg|png|webp)$")
+
+
+class UploadUrlResponse(BaseModel):
+    upload_url: str
+    public_url: str
+    expires_in: int
+
+
+class SlugCheckResponse(BaseModel):
+    available: bool
 
 
 # ---------------------------------------------------------------------------

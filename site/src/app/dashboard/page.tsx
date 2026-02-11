@@ -445,9 +445,17 @@ export default function DashboardPage() {
                       </div>
                     )}
                   </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold text-electric-blue">{dashboard.session_count}</div>
-                    <div className="text-xs text-text-secondary">session{dashboard.session_count !== 1 ? "s" : ""}</div>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-electric-blue">{dashboard.session_count}</div>
+                      <div className="text-xs text-text-secondary">session{dashboard.session_count !== 1 ? "s" : ""}</div>
+                    </div>
+                    <Link
+                      href="/settings/profile"
+                      className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
+                    >
+                      Edit Profile
+                    </Link>
                   </div>
                 </div>
               </div>

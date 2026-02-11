@@ -23,6 +23,7 @@ from app.routers import (
     servers,
     shows,
     tenants,
+    uploads,
 )
 from app.services.rate_limiter import RateLimitExceeded
 
@@ -72,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(onboarding.router, prefix="/api/v1")
     application.include_router(dj_profiles.router, prefix="/api/v1")
     application.include_router(tenants.router, prefix="/api/v1")
+    application.include_router(uploads.router, prefix="/api/v1")
     application.include_router(dashboard.router, prefix="/api/v1")
 
     # -- Exception handlers ----------------------------------------------------

@@ -133,6 +133,13 @@ export default function Navbar() {
                       >
                         Dashboard
                       </Link>
+                      <Link
+                        href="/settings/profile"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="block px-4 py-2 text-sm text-text-primary transition-colors hover:bg-white/5 hover:text-white"
+                      >
+                        DJ Profile
+                      </Link>
                       <button
                         onClick={() => {
                           setUserMenuOpen(false);
@@ -219,6 +226,13 @@ export default function Navbar() {
                       className="block rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
                     >
                       Dashboard
+                    </Link>
+                    <Link
+                      href="/settings/profile"
+                      onClick={() => setMobileOpen(false)}
+                      className="block rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
+                    >
+                      DJ Profile
                     </Link>
                     <button
                       onClick={() => {

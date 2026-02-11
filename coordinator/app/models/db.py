@@ -219,6 +219,9 @@ class DJProfile(Base):
     bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
     genres: Mapped[str | None] = mapped_column(String(500), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    banner_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    color_palette: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(60), unique=True, nullable=True, index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

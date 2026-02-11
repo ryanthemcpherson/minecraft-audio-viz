@@ -35,6 +35,9 @@ export interface DJProfile {
   bio: string | null;
   genres: string | null;
   avatar_url: string | null;
+  banner_url: string | null;
+  color_palette: string[] | null;
+  slug: string | null;
   is_public: boolean;
   created_at: string;
 }
@@ -370,13 +373,55 @@ export async function createInvite(
 
 export async function createDJProfile(
   accessToken: string,
-  data: { dj_name: string; bio?: string; genres?: string }
+  data: { dj_name: string; bio?: string; genres?: string; slug?: string; color_palette?: string[] }
 ): Promise<DJProfile> {
   return api<DJProfile>("/api/v1/dj/profile", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(data),
   });
+}
+
+export async function updateDJProfile(
+  accessToken: string,
+  data: {
+    dj_name?: string;
+    bio?: string;
+    genres?: string;
+    slug?: string;
+    color_palette?: string[];
+    avatar_url?: string;
+    banner_url?: string;
+    is_public?: boolean;
+  }
+): Promise<DJProfile> {
+  return api<DJProfile>("/api/v1/dj/profile", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function checkSlugAvailability(
+  slug: string
+): Promise<{ available: boolean }> {
+  return api<{ available: boolean }>(`/api/v1/dj/slug-check/${slug}`);
+}
+
+export async function getPresignedUploadUrl(
+  accessToken: string,
+  context: "avatar" | "banner",
+  contentType: string
+): Promise<{ upload_url: string; public_url: string; expires_in: number }> {
+  return api("/api/v1/uploads/presigned-url", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ context, content_type: contentType }),
+  });
+}
+
+export async function getDJProfileBySlug(slug: string): Promise<DJProfile> {
+  return api<DJProfile>(`/api/v1/dj/by-slug/${slug}`);
 }
 
 export async function fetchDashboardSummary(
