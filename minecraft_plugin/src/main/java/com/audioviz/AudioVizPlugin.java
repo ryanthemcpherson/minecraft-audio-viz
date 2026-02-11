@@ -95,23 +95,27 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         getCommand("audioviz").setTabCompleter(commandExecutor);
 
         // Detect Simple Voice Chat for audio streaming support
-        try {
-            var voicechatService = getServer().getServicesManager().load(
-                    Class.forName("de.maxhenkel.voicechat.api.BukkitVoicechatService"));
-            if (voicechatService != null) {
-                voicechatIntegration = new VoicechatIntegration(this);
-                var registerMethod = voicechatService.getClass().getMethod("registerPlugin",
-                        Class.forName("de.maxhenkel.voicechat.api.VoicechatPlugin"));
-                registerMethod.invoke(voicechatService, voicechatIntegration);
-                getLogger().info("Simple Voice Chat detected - audio streaming enabled");
-            } else {
+        // Delay by 1 tick so SVC has time to register its BukkitVoicechatService
+        // (softdepend doesn't guarantee load order on Paper)
+        getServer().getScheduler().runTask(this, () -> {
+            try {
+                var voicechatService = getServer().getServicesManager().load(
+                        Class.forName("de.maxhenkel.voicechat.api.BukkitVoicechatService"));
+                if (voicechatService != null) {
+                    voicechatIntegration = new VoicechatIntegration(this);
+                    var registerMethod = voicechatService.getClass().getMethod("registerPlugin",
+                            Class.forName("de.maxhenkel.voicechat.api.VoicechatPlugin"));
+                    registerMethod.invoke(voicechatService, voicechatIntegration);
+                    getLogger().info("Simple Voice Chat detected - audio streaming enabled");
+                } else {
+                    getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
+                }
+            } catch (ClassNotFoundException e) {
                 getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "Failed to initialize Simple Voice Chat integration", e);
             }
-        } catch (ClassNotFoundException e) {
-            getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
-        } catch (Exception e) {
-            getLogger().log(Level.WARNING, "Failed to initialize Simple Voice Chat integration", e);
-        }
+        });
 
         // Start WebSocket server
         int wsPort = getConfig().getInt("websocket.port", 8765);
