@@ -821,6 +821,73 @@ class VJServer:
                 # They were approved - run the frame handling loop
                 dj = self._djs[dj_id]
 
+                # Perform clock synchronization (same as dj_auth path).
+                # The DJ's heartbeat task may already be running, so we drain
+                # any non-sync messages while waiting for the sync response.
+                try:
+                    t1 = time.time()
+                    await websocket.send(
+                        json.dumps({"type": "clock_sync_request", "server_time": t1})
+                    )
+                    sync_deadline = asyncio.get_event_loop().time() + 5.0
+                    while True:
+                        remaining = sync_deadline - asyncio.get_event_loop().time()
+                        if remaining <= 0:
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: timeout waiting for sync response"
+                            )
+                            break
+                        raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+                        t4 = time.time()
+                        sync_data = json.loads(raw)
+
+                        if sync_data.get("type") != "clock_sync_response":
+                            # Interleaved heartbeat or other message — process and retry
+                            if sync_data.get("type") == "dj_heartbeat":
+                                dj.last_heartbeat = t4
+                            continue
+
+                        t2 = sync_data.get("dj_recv_time", t1)
+                        t3 = sync_data.get("dj_send_time", t4)
+
+                        if (
+                            not isinstance(t2, (int, float))
+                            or not isinstance(t3, (int, float))
+                            or not math.isfinite(t2)
+                            or not math.isfinite(t3)
+                        ):
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: non-finite timestamps, skipping"
+                            )
+                        elif abs(t2 - t1) > 3600 or abs(t3 - t4) > 3600:
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: timestamps too far, skipping"
+                            )
+                        else:
+                            clock_offset = ((t2 - t1) + (t3 - t4)) / 2
+                            rtt = (t4 - t1) - (t3 - t2)
+                            if rtt < 0 or rtt > 30:
+                                logger.warning(
+                                    f"[DJ CLOCK SYNC] {dj_name}: invalid RTT={rtt * 1000:.1f}ms"
+                                )
+                            else:
+                                dj.clock_offset = clock_offset
+                                dj.clock_sync_done = True
+                                logger.info(
+                                    f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
+                                )
+                        break
+                except asyncio.TimeoutError:
+                    logger.warning(f"[DJ CLOCK SYNC] {dj_name}: timeout waiting for sync response")
+                except Exception as e:
+                    logger.warning(f"[DJ CLOCK SYNC] {dj_name}: sync failed: {e}")
+
+                # Send explicit stream route (same as dj_auth path)
+                try:
+                    await websocket.send(json.dumps(self._build_stream_route_message(dj_id, dj)))
+                except Exception as e:
+                    logger.debug(f"Failed to send stream route to DJ {dj_id}: {e}")
+
                 # Handle incoming frames (same pattern as credentialed DJs)
                 async for message in websocket:
                     try:
@@ -2129,12 +2196,13 @@ class VJServer:
         self._dj_connects += 1
         logger.info(f"[DJ APPROVED] {info['dj_name']} ({dj_id})")
 
-        # Send auth_approved to the DJ
+        # Send auth_success to the DJ (same type as dj_auth path,
+        # so the Rust client handles it via the existing ServerMessage enum)
         try:
             await ws.send(
                 json.dumps(
                     {
-                        "type": "auth_approved",
+                        "type": "auth_success",
                         "dj_id": dj_id,
                         "dj_name": info["dj_name"],
                         "is_active": self._active_dj_id == dj_id,
@@ -2150,7 +2218,7 @@ class VJServer:
                 )
             )
         except Exception as e:
-            logger.warning(f"Failed to send auth_approved to DJ {dj_id}: {e}")
+            logger.warning(f"Failed to send auth_success to DJ {dj_id}: {e}")
 
         # If no active DJ, make this one active
         if self._active_dj_id is None:
