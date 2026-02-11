@@ -8,8 +8,9 @@ import PatternScene from "./PatternScene";
 import type { VisualizationPattern } from "@/lib/patterns/base";
 
 // ── WebGL context slot manager ──────────────────────────────────
-// Browsers limit active WebGL contexts (~8-16). We cap at 6 to stay safe.
-const MAX_WEBGL_CONTEXTS = 6;
+// Browsers limit active WebGL contexts (~8-16). We use 14 to cover a full
+// 3-column grid viewport plus rootMargin pre-loading.
+const MAX_WEBGL_CONTEXTS = 14;
 let activeSlots = 0;
 const waiters = new Set<() => void>();
 
@@ -25,6 +26,7 @@ function releaseSlot() {
   activeSlots--;
   // Notify one waiter that a slot opened up
   for (const fn of waiters) {
+    waiters.delete(fn);
     fn();
     break;
   }
@@ -128,8 +130,6 @@ export default function PatternCard({
       const gl = glRef.current;
       if (gl) {
         gl.dispose();
-        const ext = gl.getContext().getExtension("WEBGL_lose_context");
-        if (ext) ext.loseContext();
         glRef.current = null;
       }
       slotHeld.current = false;
@@ -145,8 +145,6 @@ export default function PatternCard({
         const gl = glRef.current;
         if (gl) {
           gl.dispose();
-          const ext = gl.getContext().getExtension("WEBGL_lose_context");
-          if (ext) ext.loseContext();
         }
         slotHeld.current = false;
         releaseSlot();
