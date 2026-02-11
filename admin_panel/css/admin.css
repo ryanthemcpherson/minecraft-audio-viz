@@ -3287,7 +3287,10 @@ input:disabled + .toggle-slider {
     border: 1px solid rgba(255, 71, 87, 0.15);
     border-radius: var(--border-radius);
     text-align: center;
-    margin-bottom: var(--spacing-md);
+}
+
+.voice-unavailable-msg.hidden {
+    display: none;
 }
 
 .voice-controls {
