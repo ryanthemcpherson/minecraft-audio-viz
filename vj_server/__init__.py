@@ -6,8 +6,8 @@ manages active DJ selection, and forwards visualization data
 to Minecraft and browser clients.
 """
 
-from .config import AudioConfig, PatternConfig, ServerConfig, get_preset, list_presets
-from .patterns import AudioState, VisualizationPattern, get_pattern, list_patterns
+from .config import AudioConfig, ServerConfig, get_preset, list_presets
+from .patterns import AudioState, PatternConfig, VisualizationPattern, get_pattern, list_patterns
 from .vj_server import DJAuthConfig, DJConnection, VJServer
 
 __all__ = [
