@@ -154,34 +154,85 @@ export interface RegisterServerResponse {
 // API helpers
 // ---------------------------------------------------------------------------
 
+/** Guard to prevent multiple refresh attempts at the same time. */
+let refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Attempt to refresh the access token using the stored refresh token.
+ * Returns the new access token, or null if refresh fails.
+ */
+async function tryRefreshAccessToken(): Promise<string | null> {
+  const stored = getStoredRefreshToken();
+  if (!stored) return null;
+
+  // De-duplicate concurrent refresh calls
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const res = await refreshToken(stored);
+      storeRefreshToken(res.refresh_token);
+      return res.access_token;
+    } catch {
+      clearStoredRefreshToken();
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
+function extractErrorMessage(body: Record<string, unknown>, status: number): string {
+  const detail = body.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((e: Record<string, unknown>) => {
+        if (typeof e === "string") return e;
+        if (typeof e?.msg === "string") return e.msg;
+        return JSON.stringify(e);
+      })
+      .join("; ");
+  }
+  return `Request failed: ${status}`;
+}
+
 async function api<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
   const { headers: optHeaders, ...rest } = options;
+  const mergedHeaders = { "Content-Type": "application/json", ...(optHeaders as Record<string, string>) };
+
   const res = await fetch(`${COORDINATOR_URL}${path}`, {
     ...rest,
-    headers: { "Content-Type": "application/json", ...(optHeaders as Record<string, string>) },
+    headers: mergedHeaders,
   });
+
+  // On 401 with a Bearer token, try to refresh and retry once
+  if (res.status === 401 && mergedHeaders.Authorization?.startsWith("Bearer ")) {
+    const newToken = await tryRefreshAccessToken();
+    if (newToken) {
+      const retryHeaders = { ...mergedHeaders, Authorization: `Bearer ${newToken}` };
+      const retryRes = await fetch(`${COORDINATOR_URL}${path}`, {
+        ...rest,
+        headers: retryHeaders,
+      });
+      if (retryRes.ok) {
+        if (retryRes.status === 204) return undefined as unknown as T;
+        return retryRes.json();
+      }
+      // Retry also failed — fall through to error handling with retryRes
+      const body = await retryRes.json().catch(() => ({ detail: retryRes.statusText }));
+      throw new Error(extractErrorMessage(body as Record<string, unknown>, retryRes.status));
+    }
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    const detail = body.detail;
-    let message: string;
-    if (typeof detail === "string") {
-      message = detail;
-    } else if (Array.isArray(detail)) {
-      message = detail
-        .map((e: Record<string, unknown>) => {
-          if (typeof e === "string") return e;
-          if (typeof e?.msg === "string") return e.msg;
-          return JSON.stringify(e);
-        })
-        .join("; ");
-    } else {
-      message = `Request failed: ${res.status}`;
-    }
-    throw new Error(message);
+    throw new Error(extractErrorMessage(body as Record<string, unknown>, res.status));
   }
 
   // 204 No Content

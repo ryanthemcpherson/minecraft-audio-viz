@@ -223,7 +223,13 @@ export default {
 
     // API subdomain → pass through (already routed by DNS)
     if (subdomain === "api") {
-      return fetch(request);
+      // Prevent forwarding loops: if our own header is present, bail out
+      if (request.headers.get("X-MCAV-Worker")) {
+        return new Response("Loop detected", { status: 508 });
+      }
+      const fwdRequest = new Request(request);
+      fwdRequest.headers.set("X-MCAV-Worker", "1");
+      return fetch(fwdRequest);
     }
 
     // Tenant resolution
@@ -249,6 +255,9 @@ export default {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "public, max-age=60, s-maxage=60",
+          "X-Frame-Options": "DENY",
+          "X-Content-Type-Options": "nosniff",
+          "Strict-Transport-Security": "max-age=31536000",
         },
       });
     } catch {

@@ -26,6 +26,7 @@ import math
 import socketserver
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -44,6 +45,7 @@ except ImportError:
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from audio_processor.config import PRESETS
 from audio_processor.patterns import PATTERNS, AudioState, PatternConfig, get_pattern, list_patterns
 from audio_processor.spectrograph import TerminalSpectrograph
 from python_client.viz_client import VizClient
@@ -81,52 +83,6 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("app_capture")
-
-
-# === AUDIO PRESETS ===
-# Pre-tuned settings for different music genres/styles
-PRESETS = {
-    "auto": {
-        "attack": 0.35,
-        "release": 0.08,
-        "beat_threshold": 1.3,
-        "agc_max_gain": 8.0,
-        "beat_sensitivity": 1.0,
-        "bass_weight": 0.7,  # Balanced bass weight
-        "band_sensitivity": [1.0, 1.0, 1.0, 1.0, 1.0],  # [bass, low_mid, mid, high_mid, high]
-        "auto_calibrate": True,  # Future: self-tuning
-    },
-    "edm": {
-        "attack": 0.7,  # Fast attack for punchy beats
-        "release": 0.15,  # Quick decay for fast BPM
-        "beat_threshold": 1.1,  # Lower threshold = more beats detected
-        "agc_max_gain": 10.0,  # Higher gain for dynamic range
-        "beat_sensitivity": 1.5,  # Stronger beat response
-        "bass_weight": 0.85,  # Heavy bass focus for EDM kicks
-        "band_sensitivity": [1.5, 0.8, 0.9, 1.2, 1.0],  # Boost bass
-        "auto_calibrate": False,
-    },
-    "chill": {
-        "attack": 0.25,  # Slower attack for smoother response
-        "release": 0.05,  # Smooth decay
-        "beat_threshold": 1.6,  # Higher threshold = fewer beats
-        "agc_max_gain": 6.0,
-        "beat_sensitivity": 0.7,
-        "bass_weight": 0.5,  # Less bass focus, more balanced
-        "band_sensitivity": [0.9, 1.0, 1.1, 1.2, 1.3],  # Boost highs
-        "auto_calibrate": False,
-    },
-    "rock": {
-        "attack": 0.5,
-        "release": 0.12,
-        "beat_threshold": 1.3,
-        "agc_max_gain": 8.0,
-        "beat_sensitivity": 1.2,
-        "bass_weight": 0.65,  # Drum-focused
-        "band_sensitivity": [1.2, 1.0, 1.0, 0.9, 0.8],  # Guitar/drums focus
-        "auto_calibrate": False,
-    },
-}
 
 
 @dataclass
@@ -959,7 +915,7 @@ class AppCaptureAgent:
 
         # Rolling energy history for AGC (Auto-Gain Control)
         self._agc_history_size = 90  # ~1.5 seconds at 60fps
-        self._energy_history = []  # Rolling peak values
+        self._energy_history = deque(maxlen=90)  # Rolling peak values
         self._agc_gain = 1.0  # Current gain multiplier
         self._agc_target = 0.85  # Target output level (85% of range)
         self._agc_attack = 0.15  # Fast attack - respond quickly to loud
@@ -969,7 +925,7 @@ class AppCaptureAgent:
 
         # Per-band rolling history for adaptive normalization
         self._band_history_size = 45  # ~0.75 seconds per band
-        self._band_histories = [[] for _ in range(5)]
+        self._band_histories = [deque(maxlen=45) for _ in range(5)]
         self._band_max_history = [[] for _ in range(5)]  # Track per-band peaks
 
         # Temporal smoothing (exponential moving average)
@@ -991,14 +947,14 @@ class AppCaptureAgent:
         # Transient detection
         self._last_peak = 0.0
         self._peak_delta = 0.0
-        self._transient_history = []
+        self._transient_history = deque(maxlen=10)
         self._transient_history_size = 10
 
         # Beat sensitivity multiplier (adjustable via UI)
         self._beat_sensitivity = 1.0
 
         # Per-band sensitivity multipliers (adjustable via UI)
-        self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]
 
         # Current preset
         self._current_preset = "auto"
@@ -1009,7 +965,7 @@ class AppCaptureAgent:
         self._calibration_warmup_frames = 180  # 3 seconds at 60fps
 
         # Statistics for auto-calibration
-        self._calibration_energy_history = []
+        self._calibration_energy_history = deque(maxlen=300)
         self._calibration_flux_history = []
         self._calibration_beat_times = []
         self._calibration_history_size = 300  # 5 seconds of history
@@ -1193,17 +1149,16 @@ class AppCaptureAgent:
         preset = PRESETS[preset_name]
         logger.info(f"Applying preset: {preset_name}")
 
-        # Apply all preset settings
-        self._smooth_attack = preset["attack"]
-        self._smooth_release = preset["release"]
-        self.capture._beat_threshold = preset["beat_threshold"]
-        self._agc_max_gain = preset["agc_max_gain"]
-        self._beat_sensitivity = preset["beat_sensitivity"]
-        self._band_sensitivity = preset["band_sensitivity"].copy()
+        # Apply all preset settings (AudioConfig uses attribute access)
+        self._smooth_attack = preset.attack
+        self._smooth_release = preset.release
+        self.capture._beat_threshold = preset.beat_threshold
+        self._agc_max_gain = preset.agc_max_gain
+        self._beat_sensitivity = preset.beat_sensitivity
+        self._band_sensitivity = list(preset.band_sensitivity)
 
         # Apply bass weight for beat detection
-        if "bass_weight" in preset:
-            self.capture._bass_weight = preset["bass_weight"]
+        self.capture._bass_weight = preset.bass_weight
 
         # Store current preset name
         self._current_preset = preset_name
@@ -1214,7 +1169,7 @@ class AppCaptureAgent:
         )
 
         # Enable/disable auto-calibration based on preset
-        self._auto_calibrate_enabled = preset.get("auto_calibrate", False)
+        self._auto_calibrate_enabled = preset.auto_calibrate
         if self._auto_calibrate_enabled:
             logger.info("  Auto-calibration: ENABLED")
 
@@ -1228,8 +1183,6 @@ class AppCaptureAgent:
 
         # Update calibration history
         self._calibration_energy_history.append(energy)
-        if len(self._calibration_energy_history) > self._calibration_history_size:
-            self._calibration_energy_history.pop(0)
 
         # Track beat times for tempo estimation
         if is_beat:
@@ -1770,8 +1723,6 @@ class AppCaptureAgent:
         """
         # Add to energy history
         self._energy_history.append(peak)
-        if len(self._energy_history) > self._agc_history_size:
-            self._energy_history.pop(0)
 
         if len(self._energy_history) < 10:
             # Not enough history yet - use moderate boost
@@ -1825,8 +1776,6 @@ class AppCaptureAgent:
 
         # Track transient history for variance-based response
         self._transient_history.append(abs(self._peak_delta))
-        if len(self._transient_history) > self._transient_history_size:
-            self._transient_history.pop(0)
 
         transient_energy = sum(self._transient_history) / max(1, len(self._transient_history))
 
@@ -1865,8 +1814,6 @@ class AppCaptureAgent:
 
             # === 7. PER-BAND HISTORY & ADAPTIVE NORMALIZATION ===
             self._band_histories[i].append(modulated_energy)
-            if len(self._band_histories[i]) > self._band_history_size:
-                self._band_histories[i].pop(0)
 
             # Normalize band based on its own recent history (NumPy optimized)
             if len(self._band_histories[i]) >= 5:
@@ -2023,7 +1970,10 @@ class AppCaptureAgent:
                 aubio_beat = False
                 aubio_bpm = 0.0
                 if self._use_aubio and self._aubio_detector and self._using_fft:
-                    # Get audio samples from FFT analyzer's buffer if available
+                    # Aubio requires raw audio samples from the FFT analyzer's internal buffer.
+                    # We reach into HybridAnalyzer -> FFTAnalyzer -> _sample_buffer because
+                    # aubio needs time-domain audio that is only available at this internal level;
+                    # the public FFTResult API only exposes frequency-domain data.
                     if (
                         hasattr(self.fft_analyzer, "fft_analyzer")
                         and self.fft_analyzer.fft_analyzer

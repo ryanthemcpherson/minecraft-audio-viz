@@ -28,10 +28,10 @@ import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Handles WebSocket protocol messages and dispatches to appropriate handlers.
@@ -41,15 +41,23 @@ public class MessageHandler {
     private final AudioVizPlugin plugin;
     private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
 
-    private static final double MIN_PHASE_ASSIST_CONFIDENCE = 0.60;
-    private static final double MIN_PHASE_ASSIST_BPM = 60.0;
-    private static final double PHASE_EDGE_WINDOW = 0.12;
-    private static final double SYNTH_BEAT_MIN_INTENSITY = 0.25;
-    private static final double SYNTH_BEAT_COOLDOWN_FRACTION = 0.60;
-    private static final long SYNTH_BEAT_COOLDOWN_MIN_MS = 120L;
+    /** Valid zone/stage name: 1-64 alphanumeric characters, underscores, and hyphens. */
+    private static final Pattern VALID_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
+    private static final int MAX_NAME_LENGTH = 64;
 
     public MessageHandler(AudioVizPlugin plugin) {
         this.plugin = plugin;
+    }
+
+    /**
+     * Validate a zone or stage name from WebSocket input.
+     * Must be non-null, non-empty, max 64 chars, and match [a-zA-Z0-9_-]+.
+     */
+    private static boolean isValidZoneName(String name) {
+        return name != null
+            && !name.isEmpty()
+            && name.length() <= MAX_NAME_LENGTH
+            && VALID_NAME_PATTERN.matcher(name).matches();
     }
 
     /**
@@ -138,7 +146,12 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
-        int count = message.has("count") ? message.get("count").getAsInt() : 16;
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in init_pool: " + zoneName);
+            return createError("Invalid zone name");
+        }
+        int count = message.has("count") ? message.get("count").getAsInt() :
+            plugin.getConfig().getInt("defaults.entity_count", 16);
         String materialName = message.has("material") ? message.get("material").getAsString() : "GLOWSTONE";
 
         Material material = Material.matchMaterial(materialName);
@@ -182,6 +195,10 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in batch_update: " + zoneName);
+            return createError("Invalid zone name");
+        }
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
         if (zone == null) {
@@ -370,6 +387,10 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in cleanup_zone: " + zoneName);
+            return createError("Invalid zone name");
+        }
         plugin.getEntityPoolManager().cleanupZone(zoneName);
         plugin.getParticleVisualizationManager().removeZoneConfig(zoneName);
         plugin.getRendererRegistry().removeZone(zoneName);
@@ -436,6 +457,10 @@ public class MessageHandler {
             return createError("Missing required field: zone or config");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in set_zone_config: " + zoneName);
+            return createError("Invalid zone name");
+        }
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
         if (zone == null) {
@@ -914,10 +939,11 @@ public class MessageHandler {
             message.has("beat_phase") ? message.get("beat_phase").getAsDouble() : 0.0,
             0.0, 1.0, 0.0);
 
-        BeatProjection projection = projectBeat(
-            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase);
-        boolean isBeat = projection.isBeat;
-        double beatIntensity = projection.beatIntensity;
+        BeatProjectionUtil.BeatProjection projection = BeatProjectionUtil.projectBeat(
+            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase,
+            lastBeatTimestampByZone);
+        boolean isBeat = projection.isBeat();
+        double beatIntensity = projection.beatIntensity();
 
         // Trigger beat effects if this is a beat
         if (isBeat && beatIntensity > 0) {
@@ -951,57 +977,6 @@ public class MessageHandler {
         JsonObject response = new JsonObject();
         response.addProperty("type", "ok");
         return response;
-    }
-
-    private BeatProjection projectBeat(
-        String zoneName,
-        boolean explicitBeat,
-        double explicitBeatIntensity,
-        double bpm,
-        double tempoConfidence,
-        double beatPhase
-    ) {
-        long nowMs = System.currentTimeMillis();
-        double clampedExplicitIntensity = InputSanitizer.sanitizeDouble(explicitBeatIntensity, 0.0, 1.0, 0.0);
-
-        if (explicitBeat) {
-            lastBeatTimestampByZone.put(zoneName, nowMs);
-            return new BeatProjection(true, clampedExplicitIntensity);
-        }
-
-        if (tempoConfidence < MIN_PHASE_ASSIST_CONFIDENCE || bpm < MIN_PHASE_ASSIST_BPM) {
-            return new BeatProjection(false, 0.0);
-        }
-
-        boolean nearTickEdge = beatPhase <= PHASE_EDGE_WINDOW || beatPhase >= (1.0 - PHASE_EDGE_WINDOW);
-        if (!nearTickEdge) {
-            return new BeatProjection(false, 0.0);
-        }
-
-        double beatPeriodMs = 60000.0 / bpm;
-        long minIntervalMs = (long) Math.max(
-            SYNTH_BEAT_COOLDOWN_MIN_MS,
-            beatPeriodMs * SYNTH_BEAT_COOLDOWN_FRACTION
-        );
-        long lastBeatMs = lastBeatTimestampByZone.getOrDefault(zoneName, 0L);
-        if (nowMs - lastBeatMs < minIntervalMs) {
-            return new BeatProjection(false, 0.0);
-        }
-
-        double projectedIntensity = Math.max(SYNTH_BEAT_MIN_INTENSITY, tempoConfidence * 0.65);
-        projectedIntensity = InputSanitizer.sanitizeDouble(projectedIntensity, 0.0, 1.0, SYNTH_BEAT_MIN_INTENSITY);
-        lastBeatTimestampByZone.put(zoneName, nowMs);
-        return new BeatProjection(true, projectedIntensity);
-    }
-
-    private static final class BeatProjection {
-        private final boolean isBeat;
-        private final double beatIntensity;
-
-        private BeatProjection(boolean isBeat, double beatIntensity) {
-            this.isBeat = isBeat;
-            this.beatIntensity = beatIntensity;
-        }
     }
 
     // ========== DJ Info Handler ==========
@@ -1082,7 +1057,15 @@ public class MessageHandler {
             return createError("Missing required field: name or template");
         }
         String name = message.get("name").getAsString();
+        if (!isValidZoneName(name)) {
+            plugin.getLogger().warning("Invalid stage name in create_stage: " + name);
+            return createError("Invalid stage name");
+        }
         String templateName = message.get("template").getAsString();
+        if (!isValidZoneName(templateName)) {
+            plugin.getLogger().warning("Invalid template name in create_stage: " + templateName);
+            return createError("Invalid template name");
+        }
 
         StageManager stageManager = plugin.getStageManager();
 
@@ -1130,6 +1113,10 @@ public class MessageHandler {
             return createError("Missing required field: name");
         }
         String name = message.get("name").getAsString();
+        if (!isValidZoneName(name)) {
+            plugin.getLogger().warning("Invalid stage name in delete_stage: " + name);
+            return createError("Invalid stage name");
+        }
 
         if (!plugin.getStageManager().deleteStage(name)) {
             return createError("Stage not found: " + name);
@@ -1250,6 +1237,10 @@ public class MessageHandler {
             return createError("Missing required field: stage, role, or config");
         }
         String stageName = message.get("stage").getAsString();
+        if (!isValidZoneName(stageName)) {
+            plugin.getLogger().warning("Invalid stage name in set_stage_zone_config: " + stageName);
+            return createError("Invalid stage name");
+        }
         String roleName = message.get("role").getAsString();
 
         Stage stage = plugin.getStageManager().getStage(stageName);

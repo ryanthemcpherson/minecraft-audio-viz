@@ -22,15 +22,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 /**
  * High-performance message queue for WebSocket messages.
  *
  * Features:
- * - Async JSON parsing on dedicated thread (off main thread)
+ * - Async JSON parsing on dedicated thread pool (off main thread)
  * - Tick-based batch processing (one scheduler call per tick)
  * - Entity update batching for efficient rendering
+ * - Backpressure: drops oldest messages when queue is full
  */
 public class MessageQueue {
 
@@ -43,30 +45,27 @@ public class MessageQueue {
     // Queue for batched entity updates (collected across messages)
     private final ConcurrentLinkedQueue<EntityUpdate> entityUpdateQueue;
 
-    // Dedicated thread for JSON parsing
+    // Dedicated thread pool for JSON parsing
     private final ExecutorService jsonExecutor;
 
     // Tick processor task
     private BukkitTask processorTask;
 
-    // Stats
-    private long messagesProcessed = 0;
-    private long batchesSent = 0;
+    // Stats (atomic for thread-safe access)
+    private final AtomicLong messagesProcessed = new AtomicLong(0);
+    private final AtomicLong batchesSent = new AtomicLong(0);
+    private final AtomicLong messagesDropped = new AtomicLong(0);
     private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
 
-    private static final double MIN_PHASE_ASSIST_CONFIDENCE = 0.60;
-    private static final double MIN_PHASE_ASSIST_BPM = 60.0;
-    private static final double PHASE_EDGE_WINDOW = 0.12;
-    private static final double SYNTH_BEAT_MIN_INTENSITY = 0.25;
-    private static final double SYNTH_BEAT_COOLDOWN_FRACTION = 0.60;
-    private static final long SYNTH_BEAT_COOLDOWN_MIN_MS = 120L;
+    // Backpressure limit
+    private static final int MAX_QUEUE_SIZE = 1000;
 
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
         this.messageHandler = messageHandler;
         this.messageQueue = new ConcurrentLinkedQueue<>();
         this.entityUpdateQueue = new ConcurrentLinkedQueue<>();
-        this.jsonExecutor = Executors.newSingleThreadExecutor(r -> {
+        this.jsonExecutor = Executors.newFixedThreadPool(2, r -> {
             Thread t = new Thread(r, "AudioViz-JSON-Parser");
             t.setDaemon(true);
             return t;
@@ -101,18 +100,29 @@ public class MessageQueue {
             jsonExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        plugin.getLogger().info("MessageQueue stopped. Processed " + messagesProcessed +
-                " messages in " + batchesSent + " batches");
+        long dropped = messagesDropped.get();
+        plugin.getLogger().info("MessageQueue stopped. Processed " + messagesProcessed.get() +
+                " messages in " + batchesSent.get() + " batches" +
+                (dropped > 0 ? " (" + dropped + " dropped)" : ""));
     }
 
     /**
      * Enqueue a raw JSON string for async parsing and processing.
      * Called from WebSocket thread - must be thread-safe and non-blocking.
+     *
+     * If the queue is full, the oldest message is dropped to apply backpressure.
      */
     public void enqueueRaw(String rawJson) {
         jsonExecutor.submit(() -> {
             try {
                 JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
+                if (messageQueue.size() >= MAX_QUEUE_SIZE) {
+                    messageQueue.poll(); // Drop oldest
+                    long dropped = messagesDropped.incrementAndGet();
+                    if (dropped % 100 == 1) {
+                        plugin.getLogger().warning("MessageQueue backpressure: dropped message (total dropped: " + dropped + ")");
+                    }
+                }
                 messageQueue.offer(json);
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Failed to parse JSON message", e);
@@ -124,6 +134,10 @@ public class MessageQueue {
      * Enqueue an already-parsed JSON object.
      */
     public void enqueue(JsonObject json) {
+        if (messageQueue.size() >= MAX_QUEUE_SIZE) {
+            messageQueue.poll(); // Drop oldest
+            messagesDropped.incrementAndGet();
+        }
         messageQueue.offer(json);
     }
 
@@ -138,7 +152,7 @@ public class MessageQueue {
         // Process all queued messages
         JsonObject msg;
         while ((msg = messageQueue.poll()) != null) {
-            messagesProcessed++;
+            messagesProcessed.incrementAndGet();
 
             String type = msg.has("type") ? msg.get("type").getAsString() : "unknown";
 
@@ -172,7 +186,7 @@ public class MessageQueue {
         for (Map.Entry<String, List<EntityUpdate>> entry : updatesByZone.entrySet()) {
             if (!entry.getValue().isEmpty()) {
                 plugin.getEntityPoolManager().batchUpdateEntities(entry.getKey(), entry.getValue());
-                batchesSent++;
+                batchesSent.incrementAndGet();
             }
         }
     }
@@ -274,10 +288,11 @@ public class MessageQueue {
             msg.has("beat_phase") ? msg.get("beat_phase").getAsDouble() : 0.0,
             0.0, 1.0, 0.0);
 
-        BeatProjection projection = projectBeat(
-            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase);
-        boolean isBeat = projection.isBeat;
-        double beatIntensity = projection.beatIntensity;
+        BeatProjectionUtil.BeatProjection projection = BeatProjectionUtil.projectBeat(
+            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase,
+            lastBeatTimestampByZone);
+        boolean isBeat = projection.isBeat();
+        double beatIntensity = projection.beatIntensity();
 
         // Trigger beat effects if this is a beat with sufficient intensity
         if (isBeat && beatIntensity > 0.2) {
@@ -317,7 +332,7 @@ public class MessageQueue {
             }
             double amplitude = InputSanitizer.sanitizeAmplitude(
                 msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0);
-            long frame = msg.has("frame") ? msg.get("frame").getAsLong() : messagesProcessed;
+            long frame = msg.has("frame") ? msg.get("frame").getAsLong() : messagesProcessed.get();
 
             AudioState audioState = new AudioState(
                 bands, amplitude, isBeat, beatIntensity, tempoConfidence, beatPhase, frame);
@@ -325,62 +340,13 @@ public class MessageQueue {
         }
     }
 
-    private BeatProjection projectBeat(
-        String zoneName,
-        boolean explicitBeat,
-        double explicitBeatIntensity,
-        double bpm,
-        double tempoConfidence,
-        double beatPhase
-    ) {
-        long nowMs = System.currentTimeMillis();
-        double clampedExplicitIntensity = InputSanitizer.sanitizeDouble(explicitBeatIntensity, 0.0, 1.0, 0.0);
-
-        if (explicitBeat) {
-            lastBeatTimestampByZone.put(zoneName, nowMs);
-            return new BeatProjection(true, clampedExplicitIntensity);
-        }
-
-        if (tempoConfidence < MIN_PHASE_ASSIST_CONFIDENCE || bpm < MIN_PHASE_ASSIST_BPM) {
-            return new BeatProjection(false, 0.0);
-        }
-
-        boolean nearTickEdge = beatPhase <= PHASE_EDGE_WINDOW || beatPhase >= (1.0 - PHASE_EDGE_WINDOW);
-        if (!nearTickEdge) {
-            return new BeatProjection(false, 0.0);
-        }
-
-        double beatPeriodMs = 60000.0 / bpm;
-        long minIntervalMs = (long) Math.max(
-            SYNTH_BEAT_COOLDOWN_MIN_MS,
-            beatPeriodMs * SYNTH_BEAT_COOLDOWN_FRACTION
-        );
-        long lastBeatMs = lastBeatTimestampByZone.getOrDefault(zoneName, 0L);
-        if (nowMs - lastBeatMs < minIntervalMs) {
-            return new BeatProjection(false, 0.0);
-        }
-
-        double projectedIntensity = Math.max(SYNTH_BEAT_MIN_INTENSITY, tempoConfidence * 0.65);
-        projectedIntensity = InputSanitizer.sanitizeDouble(projectedIntensity, 0.0, 1.0, SYNTH_BEAT_MIN_INTENSITY);
-        lastBeatTimestampByZone.put(zoneName, nowMs);
-        return new BeatProjection(true, projectedIntensity);
-    }
-
-    private static final class BeatProjection {
-        private final boolean isBeat;
-        private final double beatIntensity;
-
-        private BeatProjection(boolean isBeat, double beatIntensity) {
-            this.isBeat = isBeat;
-            this.beatIntensity = beatIntensity;
-        }
-    }
-
     /**
      * Get processing statistics.
      */
     public String getStats() {
-        return String.format("Messages: %d, Batches: %d, Queue: %d",
-                messagesProcessed, batchesSent, messageQueue.size());
+        long dropped = messagesDropped.get();
+        return String.format("Messages: %d, Batches: %d, Queue: %d%s",
+                messagesProcessed.get(), batchesSent.get(), messageQueue.size(),
+                dropped > 0 ? ", Dropped: " + dropped : "");
     }
 }

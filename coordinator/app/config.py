@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import os
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
+
+_INSECURE_DEFAULT_SECRET = "CHANGE-ME-in-production"  # nosec B105 — intentional; validated in model_post_init
 
 
 class Settings(BaseSettings):
@@ -15,17 +23,28 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mcav"
 
     def model_post_init(self, __context: object) -> None:
-        """Ensure the database URL uses the asyncpg driver."""
+        """Ensure the database URL uses the asyncpg driver and validate secrets."""
         if self.database_url.startswith("postgresql://"):
             self.database_url = self.database_url.replace(
                 "postgresql://", "postgresql+asyncpg://", 1
+            )
+        # Refuse to start with the default JWT secret in production
+        if self.user_jwt_secret == _INSECURE_DEFAULT_SECRET:
+            env = os.environ.get("MCAV_ENV", "development").lower()
+            if env in ("production", "prod", "staging"):
+                raise ValueError(
+                    "MCAV_USER_JWT_SECRET must be set to a secure value in production. "
+                    'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+                )
+            _logger.warning(
+                "Using insecure default JWT secret. Set MCAV_USER_JWT_SECRET for production."
             )
 
     # DJ-session JWT (per-server secrets – unchanged)
     jwt_default_expiry_minutes: int = 15
 
     # User-session JWT (global secret)
-    user_jwt_secret: str = "CHANGE-ME-in-production"
+    user_jwt_secret: str = _INSECURE_DEFAULT_SECRET
     user_jwt_expiry_minutes: int = 60
     refresh_token_expiry_days: int = 30
 
@@ -54,6 +73,7 @@ class Settings(BaseSettings):
     )
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return a cached ``Settings`` instance."""
     return Settings()

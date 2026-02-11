@@ -267,4 +267,4 @@ client = VizClient(connect_timeout=30.0, auto_reconnect=True, max_reconnect_atte
 - **Windows-only** audio capture (WASAPI via pycaw)
 - Requires **Paper/Spigot 1.21.1+** (Display Entities)
 - **Java 21** for Minecraft plugin
-- **Python 3.10+** for audio processor
+- **Python 3.11+** for audio processor

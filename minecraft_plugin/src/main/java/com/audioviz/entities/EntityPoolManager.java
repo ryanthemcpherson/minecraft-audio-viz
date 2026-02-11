@@ -36,7 +36,7 @@ public class EntityPoolManager {
 
     // Limits to prevent memory issues
     private static final int MAX_ZONES = 100;
-    private static final int MAX_ENTITIES_PER_ZONE = 1000;
+    private final int maxEntitiesPerZone;
 
     public enum EntityType {
         BLOCK_DISPLAY,
@@ -48,6 +48,7 @@ public class EntityPoolManager {
         this.plugin = plugin;
         this.entityPools = new ConcurrentHashMap<>();
         this.entityTypes = new ConcurrentHashMap<>();
+        this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
     }
 
     /**
@@ -67,9 +68,9 @@ public class EntityPoolManager {
             plugin.getLogger().warning("Cannot initialize pool: max zones limit reached (" + MAX_ZONES + ")");
             return;
         }
-        if (count > MAX_ENTITIES_PER_ZONE) {
-            plugin.getLogger().warning("Entity count capped from " + count + " to " + MAX_ENTITIES_PER_ZONE);
-            count = MAX_ENTITIES_PER_ZONE;
+        if (count > maxEntitiesPerZone) {
+            plugin.getLogger().warning("Entity count capped from " + count + " to " + maxEntitiesPerZone + " (performance.max_entities_per_zone)");
+            count = maxEntitiesPerZone;
         }
 
         final int finalCount = count;
@@ -222,6 +223,7 @@ public class EntityPoolManager {
 
     /**
      * Update entity position with interpolation.
+     * Note: Creates an individual scheduler task. For bulk updates, prefer batchUpdateEntities().
      */
     public void updateEntityPosition(String zoneName, String entityId, double x, double y, double z) {
         Entity entity = getEntity(zoneName, entityId);
@@ -273,6 +275,7 @@ public class EntityPoolManager {
 
     /**
      * Set entity visibility by scaling to 0.
+     * Note: Creates an individual scheduler task. For bulk updates, prefer batchUpdateEntities().
      */
     public void setEntityVisible(String zoneName, String entityId, boolean visible) {
         Entity entity = getEntity(zoneName, entityId);
@@ -310,8 +313,8 @@ public class EntityPoolManager {
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
 
-        if (count > MAX_ENTITIES_PER_ZONE) {
-            count = MAX_ENTITIES_PER_ZONE;
+        if (count > maxEntitiesPerZone) {
+            count = maxEntitiesPerZone;
         }
 
         Map<String, Entity> pool = entityPools.computeIfAbsent(zoneName.toLowerCase(), k -> new ConcurrentHashMap<>());

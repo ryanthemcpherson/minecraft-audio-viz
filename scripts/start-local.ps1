@@ -14,20 +14,20 @@ Write-Host "AudioViz - Local DJ Mode" -ForegroundColor Cyan
 Write-Host "========================" -ForegroundColor Cyan
 Write-Host ""
 
-# Build command
-$cmd = "audioviz --app $App --host $Host --port $Port"
+# Build argument list
+$arguments = @("--app", $App, "--host", $Host, "--port", $Port)
 
 if ($Preview) {
-    $cmd += " --preview"
+    $arguments += "--preview"
     Write-Host "Browser preview enabled at http://localhost:8080" -ForegroundColor Green
 }
 
 if ($Compact) {
-    $cmd += " --compact"
+    $arguments += "--compact"
 }
 
 if ($LowLatency) {
-    $cmd += " --low-latency"
+    $arguments += "--low-latency"
     Write-Host "Low-latency mode enabled (~20ms)" -ForegroundColor Yellow
 }
 
@@ -38,4 +38,4 @@ Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
 # Run
-Invoke-Expression $cmd
+& audioviz @arguments

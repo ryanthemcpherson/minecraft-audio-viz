@@ -336,7 +336,7 @@ class DNAHelix(VisualizationPattern):
 
         # Helix parameters
         radius = 0.15 + audio.amplitude * 0.1
-        0.08 * self._stretch
+        pitch = 0.08 * self._stretch
 
         for i in range(n):
             # Alternate between two helixes
@@ -350,7 +350,9 @@ class DNAHelix(VisualizationPattern):
             # Helix coordinates
             x = center + math.cos(angle) * radius
             z = center + math.sin(angle) * radius
-            y = 0.1 + (idx / (n / 2)) * 0.8  # Spread vertically
+            y = (
+                0.1 + (idx / (n / 2)) * 0.8 + pitch * math.sin(t)
+            )  # Vertical spread with pitch modulation
 
             # Pulse radius with band
             band_idx = idx % 5
@@ -1166,7 +1168,7 @@ class Mushroom(VisualizationPattern):
             z = center + math.sin(spot_angle) * spot_r + wobble_z + cap_offset_z
             y = spot_y
 
-            band_idx = 5  # Spots use high freq
+            band_idx = 4  # Spots use high freq
             scale = self.config.base_scale * 0.9 + self._glow * 0.4 + audio.bands[4] * 0.3
 
             entities.append(
@@ -1521,7 +1523,7 @@ class Skull(VisualizationPattern):
             elif part_type in ("teeth_upper", "teeth_lower"):
                 base_scale *= 0.7
                 base_scale += self._beat_intensity * 0.25
-                band_idx = 5
+                band_idx = 4
             elif part_type == "brow":
                 base_scale *= 1.05
                 base_scale += audio.bands[2] * 0.2
@@ -2165,7 +2167,7 @@ class WormholePortal(VisualizationPattern):
         center = 0.5
 
         # Rotation speed driven by energy
-        energy = sum(audio.bands) / 6.0
+        energy = sum(audio.bands) / len(audio.bands)
         self._rotation += (1.1 + energy * 2.2) * 0.016
 
         # Tunnel movement speed (flying through)
@@ -2492,7 +2494,7 @@ class Nebula(VisualizationPattern):
             # Flash effect for "star birth"
             if i in self._flash_particles:
                 scale *= 2.0
-                band_idx = 5  # Bright white/high freq
+                band_idx = 4  # Bright white/high freq
 
             if audio.is_beat:
                 scale *= 1.15
@@ -3379,7 +3381,7 @@ class CrystalGrowth(VisualizationPattern):
                     "y": clamp(y),
                     "z": clamp(z),
                     "scale": min(self.config.max_scale, max(0.03, scale)),
-                    "band": 5,
+                    "band": 4,
                     "visible": sparkle > 0.3,
                 }
             )

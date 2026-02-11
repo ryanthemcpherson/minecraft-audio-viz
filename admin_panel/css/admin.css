@@ -3043,3 +3043,165 @@ input:disabled + .toggle-slider {
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
+
+/* ============================================
+   Responsive Breakpoints
+   ============================================ */
+
+/* Tablet: collapse sidebar to compact width */
+@media (max-width: 1024px) {
+    #zone-overview {
+        width: 56px;
+        overflow: hidden;
+    }
+
+    #zone-overview .panel-title,
+    #zone-overview .section-title,
+    #zone-overview .status-label,
+    #zone-overview .status-value,
+    #zone-overview .dj-name,
+    #zone-overview .dj-actions,
+    #zone-overview .live-badge,
+    #zone-overview .dj-empty,
+    #zone-overview .bpm-display,
+    #zone-overview .tap-tempo,
+    #zone-overview .meter-label,
+    #zone-overview .meter-value,
+    #zone-overview #beat-text,
+    #zone-overview .perf-label {
+        display: none;
+    }
+
+    #zone-overview .panel {
+        padding: var(--spacing-sm);
+    }
+
+    #zone-overview #beat-indicator {
+        width: 36px;
+        height: 36px;
+    }
+
+    #zone-overview #beat-display {
+        padding: var(--spacing-sm);
+    }
+
+    #zone-overview .meter-bar {
+        height: 14px;
+    }
+
+    #zone-overview .meter {
+        margin-bottom: 4px;
+    }
+
+    .fader-bank {
+        gap: var(--spacing-sm);
+    }
+
+    .fader-track {
+        height: 80px;
+        width: 32px;
+    }
+
+    #tab-bar .tab {
+        padding: 10px var(--spacing-md);
+        font-size: var(--font-size-xs);
+    }
+}
+
+/* Mobile: stack layout vertically, sidebar becomes top bar */
+@media (max-width: 768px) {
+    body {
+        overflow: auto;
+        height: auto;
+    }
+
+    #app {
+        height: auto;
+        min-height: 100vh;
+    }
+
+    #main-content {
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    #zone-overview {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        overflow: visible;
+        flex-shrink: 0;
+    }
+
+    /* Restore hidden labels on mobile */
+    #zone-overview .panel-title,
+    #zone-overview .section-title,
+    #zone-overview .status-label,
+    #zone-overview .status-value,
+    #zone-overview .meter-label,
+    #zone-overview .meter-value,
+    #zone-overview #beat-text,
+    #zone-overview .perf-label,
+    #zone-overview .bpm-display,
+    #zone-overview .tap-tempo,
+    #zone-overview .dj-name,
+    #zone-overview .dj-actions,
+    #zone-overview .live-badge,
+    #zone-overview .dj-empty {
+        display: revert;
+    }
+
+    #zone-overview .panel {
+        padding: var(--spacing-md);
+    }
+
+    #zone-overview #beat-indicator {
+        width: 48px;
+        height: 48px;
+    }
+
+    #zone-overview #beat-display {
+        padding: var(--spacing-md);
+    }
+
+    .fader-bank {
+        flex-wrap: wrap;
+        gap: var(--spacing-md);
+    }
+
+    .fader-track {
+        height: 120px;
+        width: 40px;
+    }
+
+    #work-area {
+        overflow: visible;
+    }
+
+    #tab-content {
+        overflow: visible;
+    }
+
+    .pattern-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    }
+
+    .perf-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    #header {
+        flex-wrap: wrap;
+        height: auto;
+        padding: var(--spacing-sm) var(--spacing-md);
+        gap: var(--spacing-sm);
+    }
+
+    .header-brand {
+        gap: 8px;
+    }
+
+    .header-title-group h1 {
+        font-size: var(--font-size-lg);
+    }
+}

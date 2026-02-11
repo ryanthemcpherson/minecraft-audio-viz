@@ -26,7 +26,10 @@ export function middleware(request: NextRequest) {
     const response = NextResponse.redirect(url);
 
     if (error) {
-      // OAuth error — pass it via cookie so login page can display it
+      // OAuth error — pass it via cookie so login page can display it.
+      // httpOnly is false because client JS needs to read the value on
+      // the login page. This is mitigated by the 60-second TTL and the
+      // fact that the error string is not a secret.
       response.cookies.set("mcav_oauth_error", errorDesc || error, {
         path: "/",
         maxAge: 60,
@@ -34,7 +37,11 @@ export function middleware(request: NextRequest) {
         sameSite: "lax",
       });
     } else if (code && state) {
-      // Success — pass code and state via cookie
+      // Success — pass code and state via cookie.
+      // httpOnly is false because client JS on /login must read the
+      // code+state to exchange it for tokens. Mitigated by 60-second
+      // TTL and the code being single-use (consumed by the OAuth
+      // provider on first exchange).
       response.cookies.set("mcav_oauth_code", `${code}:${state}`, {
         path: "/",
         maxAge: 60,

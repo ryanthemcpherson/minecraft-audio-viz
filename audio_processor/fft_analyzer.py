@@ -168,29 +168,35 @@ class BassLane:
         if n_samples == 0:
             return 0.0, False, 0.0
 
-        # Vectorized lowpass filter (IIR single-pole)
-        # For efficiency, process in chunks using filter state
-        lp_out = np.zeros(n_samples, dtype=np.float32)
-        state = self._lp_state
+        # Vectorized lowpass filter (IIR single-pole) using scipy.signal.lfilter
+        # Filter: y[n] = alpha * x[n] + (1-alpha) * y[n-1]
+        # In transfer function form: b = [alpha], a = [1, -(1-alpha)]
+        from scipy.signal import lfilter
 
-        for i in range(n_samples):
-            state = self._lp_alpha * mono[i] + (1.0 - self._lp_alpha) * state
-            lp_out[i] = state
-
-        self._lp_state = state
+        alpha = self._lp_alpha
+        b_coef = np.array([alpha], dtype=np.float64)
+        a_coef = np.array([1.0, -(1.0 - alpha)], dtype=np.float64)
+        zi = np.array([self._lp_state * (1.0 - alpha)], dtype=np.float64)
+        lp_out, zf = lfilter(b_coef, a_coef, mono.astype(np.float64), zi=zi)
+        lp_out = lp_out.astype(np.float32)
+        self._lp_state = float(lp_out[-1])
 
         # Rectify (take absolute value for envelope)
         rectified = np.abs(lp_out)
 
-        # Envelope follower (attack/release)
+        # Envelope follower (attack/release) - vectorized
+        # Process in a single pass using numpy where possible
+        # The envelope follower is inherently sequential (each sample depends on previous),
+        # but we can still use a tight loop with scalar ops that avoids Python object overhead
         envelope = self._envelope
+        attack_c = self._attack_coef
+        release_c = self._release_coef
         for i in range(n_samples):
-            if rectified[i] > envelope:
-                # Attack - fast rise
-                envelope += self._attack_coef * (rectified[i] - envelope)
+            r = rectified[i]
+            if r > envelope:
+                envelope += attack_c * (r - envelope)
             else:
-                # Release - slow decay
-                envelope += self._release_coef * (rectified[i] - envelope)
+                envelope += release_c * (r - envelope)
 
         # Store previous envelope for slope detection
         prev_envelope = self._prev_envelope
@@ -309,22 +315,27 @@ class FFTAnalyzer:
             enable_bass_lane: If True, use parallel bass lane for instant kick detection
             bass_cutoff_hz: Lowpass cutoff for bass lane (default 120Hz)
         """
-        # Select latency preset - ultra is now default for lowest latency
-        if ultra_low_latency or (not low_latency):
-            # Default to ultra-low-latency mode
+        # Select latency preset based on explicit flags
+        if ultra_low_latency:
             preset = self.LATENCY_PRESETS["ultra"]
             self._latency_mode = "ultra"
         elif low_latency:
             preset = self.LATENCY_PRESETS["low"]
             self._latency_mode = "low"
         else:
-            preset = self.LATENCY_PRESETS["normal"]
+            # Default: respect constructor's fft_size/hop_size params
+            preset = None
             self._latency_mode = "normal"
 
-        fft_size = preset["fft_size"]
-        hop_size = preset["hop_size"]
-        self._buffer_frames = preset["buffer_frames"]
-        self._queue_size = preset["queue_size"]
+        if preset is not None:
+            fft_size = preset["fft_size"]
+            hop_size = preset["hop_size"]
+            self._buffer_frames = preset["buffer_frames"]
+            self._queue_size = preset["queue_size"]
+        else:
+            # Use caller-provided fft_size/hop_size (or constructor defaults)
+            self._buffer_frames = self.LATENCY_PRESETS["normal"]["buffer_frames"]
+            self._queue_size = self.LATENCY_PRESETS["normal"]["queue_size"]
 
         self.sample_rate = sample_rate
         self.fft_size = fft_size

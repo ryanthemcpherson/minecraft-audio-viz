@@ -1,1 +1,1 @@
-{}
+{"default-capability":{"identifier":"default-capability","description":"Default capability for the main DJ client window.","local":true,"windows":["main"],"permissions":["core:default","shell:default","updater:default"]}}

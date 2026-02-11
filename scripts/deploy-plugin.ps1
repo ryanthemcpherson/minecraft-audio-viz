@@ -15,12 +15,17 @@ param(
     [string]$PluginsDir = "/home/ryan/minecraft-server/plugins",
     [string]$ServerDir = "/home/ryan/minecraft-server",
     [string]$RconPort = "25575",
-    [string]$RconPass = "audioviz123",
+    [string]$RconPass = $env:MCAV_RCON_PASSWORD,
     [switch]$SkipBuild,
     [switch]$SkipTests,
     [switch]$Restart,
     [switch]$DryRun
 )
+
+if (-not $RconPass) {
+    Write-Host "  ERROR: RCON password required. Set MCAV_RCON_PASSWORD env var or pass -RconPass" -ForegroundColor Red
+    exit 1
+}
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)

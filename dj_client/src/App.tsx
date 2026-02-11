@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { check, type Update } from '@tauri-apps/plugin-updater';
 import ConnectCode from './components/ConnectCode';
 import AudioSourceSelect from './components/AudioSourceSelect';
 import FrequencyMeter from './components/FrequencyMeter';
@@ -62,6 +64,13 @@ function App() {
   });
   const [isConnecting, setIsConnecting] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
 
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
@@ -83,6 +92,15 @@ function App() {
     }
 
     loadAudioSources();
+    checkForUpdates(false);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void checkForUpdates(false);
+    }, 1000 * 60 * 60 * 6); // every 6 hours
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -103,24 +121,28 @@ function App() {
     }
   }, [selectedSource]);
 
-  // Poll audio levels when connected
+  // Listen for audio levels and status events pushed from the backend
   useEffect(() => {
     if (!status.connected) return;
 
-    const interval = setInterval(async () => {
-      try {
-        const levels = await invoke<AudioLevels>('get_audio_levels');
-        setBands(levels.bands);
-        setIsBeat(levels.is_beat);
+    const unlisteners: Promise<UnlistenFn>[] = [];
 
-        const newStatus = await invoke<ConnectionStatus>('get_status');
-        setStatus(newStatus);
-      } catch (e) {
-        console.error('Failed to get audio levels:', e);
-      }
-    }, 16); // ~60fps
+    unlisteners.push(
+      listen<AudioLevels>('audio-levels', (event) => {
+        setBands(event.payload.bands);
+        setIsBeat(event.payload.is_beat);
+      })
+    );
 
-    return () => clearInterval(interval);
+    unlisteners.push(
+      listen<ConnectionStatus>('dj-status', (event) => {
+        setStatus(event.payload);
+      })
+    );
+
+    return () => {
+      unlisteners.forEach((p) => p.then((unlisten) => unlisten()));
+    };
   }, [status.connected]);
 
   const loadAudioSources = async () => {
@@ -146,6 +168,86 @@ function App() {
       setSelectedSource(savedSourceExists ? savedSourceId : sources[0].id);
     } catch (e) {
       console.error('Failed to load audio sources:', e);
+    }
+  };
+
+  const checkForUpdates = async (manual: boolean) => {
+    setIsCheckingUpdate(true);
+    if (manual) {
+      setUpdateError(null);
+    }
+    if (manual) {
+      setUpdateMessage('Checking for updates...');
+    }
+
+    try {
+      const update = await check();
+      setAvailableUpdate(update);
+      setUpdateProgress(null);
+
+      if (update) {
+        setDismissUpdateBanner(false);
+        setUpdateMessage(`Update ${update.version} is available.`);
+      } else if (manual) {
+        setUpdateMessage('You are on the latest version.');
+      } else {
+        setUpdateMessage(null);
+      }
+    } catch (e) {
+      const message = `Update check failed: ${String(e)}`;
+      if (manual) {
+        setUpdateError(message);
+      } else {
+        setUpdateMessage(null);
+      }
+      console.error(`[updater] ${message}`);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const installAvailableUpdate = async () => {
+    if (!availableUpdate) return;
+
+    setIsInstallingUpdate(true);
+    setUpdateError(null);
+    setUpdateProgress(0);
+    setUpdateMessage(`Downloading v${availableUpdate.version}...`);
+
+    let downloadedBytes = 0;
+    let totalBytes = 0;
+    try {
+      await availableUpdate.downloadAndInstall(event => {
+        if (event.event === 'Started') {
+          totalBytes = event.data.contentLength ?? 0;
+          downloadedBytes = 0;
+          setUpdateProgress(0);
+          return;
+        }
+
+        if (event.event === 'Progress') {
+          downloadedBytes += event.data.chunkLength;
+          if (totalBytes > 0) {
+            const pct = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100));
+            setUpdateProgress(pct);
+          } else {
+            setUpdateProgress(null);
+          }
+          return;
+        }
+
+        if (event.event === 'Finished') {
+          setUpdateProgress(100);
+        }
+      });
+
+      setAvailableUpdate(null);
+      setUpdateMessage('Update installed. Please restart the DJ app.');
+      setDismissUpdateBanner(false);
+    } catch (e) {
+      setUpdateError(`Update install failed: ${String(e)}`);
+    } finally {
+      setIsInstallingUpdate(false);
     }
   };
 
@@ -245,6 +347,54 @@ function App() {
       </header>
 
       <main className="app-main">
+        {(availableUpdate && !dismissUpdateBanner) || isCheckingUpdate || updateMessage || updateError ? (
+          <section className="section update-section">
+            <div className="update-header">
+              <h2>App Updates</h2>
+              <button
+                className="btn btn-link"
+                onClick={() => checkForUpdates(true)}
+                type="button"
+                disabled={isCheckingUpdate || isInstallingUpdate}
+              >
+                {isCheckingUpdate ? 'Checking...' : 'Check now'}
+              </button>
+            </div>
+
+            {availableUpdate && !dismissUpdateBanner ? (
+              <>
+                <p className="update-text">
+                  Version {availableUpdate.version} is ready to install.
+                </p>
+                {updateProgress !== null ? (
+                  <p className="update-text">Download progress: {updateProgress}%</p>
+                ) : null}
+                <div className="update-actions">
+                  <button
+                    className="btn btn-connect"
+                    onClick={installAvailableUpdate}
+                    disabled={isInstallingUpdate || isCheckingUpdate}
+                    type="button"
+                  >
+                    {isInstallingUpdate ? 'Installing...' : 'Update now'}
+                  </button>
+                  <button
+                    className="btn btn-quick-connect"
+                    onClick={() => setDismissUpdateBanner(true)}
+                    disabled={isInstallingUpdate}
+                    type="button"
+                  >
+                    Later
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {updateMessage ? <p className="update-text">{updateMessage}</p> : null}
+            {updateError ? <div className="error-message">{updateError}</div> : null}
+          </section>
+        ) : null}
+
         {!status.connected ? (
           <>
             <section className="section hero-section">

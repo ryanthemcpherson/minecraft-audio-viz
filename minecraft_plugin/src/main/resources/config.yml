@@ -2,6 +2,8 @@
 
 # WebSocket server settings
 websocket:
+  # Bind address for the WebSocket server (0.0.0.0 = all interfaces)
+  address: "0.0.0.0"
   # Port for the WebSocket server
   port: 8765
 

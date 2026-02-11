@@ -312,7 +312,6 @@ class BeatPredictor:
         if self._tempo_confidence < 0.2:
             return False, 0.0
 
-        time.time()
         prediction = self.get_prediction()
 
         # Fire beat if we're within lookahead window of next beat

@@ -70,6 +70,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handleZoneCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("audioviz.zone") && !sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to manage zones.");
+            return;
+        }
         if (args.length == 0) {
             sender.sendMessage(ChatColor.RED + "Usage: /audioviz zone <create|delete|list|setsize|info>");
             return;
@@ -195,6 +199,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handleStageCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("audioviz.control") && !sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to manage stages.");
+            return;
+        }
         if (args.length == 0) {
             sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage <create|delete|list|info|activate|deactivate|move|rotate>");
             return;
@@ -434,6 +442,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handlePoolCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("audioviz.control") && !sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to manage entity pools.");
+            return;
+        }
         if (args.length < 2) {
             sender.sendMessage(ChatColor.RED + "Usage: /audioviz pool <init|cleanup> <zone> [count] [material]");
             return;

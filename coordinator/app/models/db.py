@@ -134,6 +134,8 @@ class VJServer(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     websocket_url: Mapped[str] = mapped_column(String(500), nullable=False)
     api_key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    # SHA-256 prefix of the raw API key for O(1) lookup (migration required)
+    key_prefix: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     jwt_secret: Mapped[str] = mapped_column(String(128), nullable=False)
     org_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("organizations.id"), nullable=True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets as _secrets
 import uuid
 from datetime import datetime, timezone
@@ -11,13 +12,20 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models.db import VJServer
+from app.dependencies.auth import get_current_user
+from app.models.db import User, VJServer
 from app.models.schemas import (
     HeartbeatResponse,
     RegisterServerRequest,
     RegisterServerResponse,
 )
 from app.services.password import hash_password, verify_password
+
+
+def _compute_key_prefix(raw_key: str) -> str:
+    """Return the first 16 hex chars of a SHA-256 hash of *raw_key*."""
+    return hashlib.sha256(raw_key.encode()).hexdigest()[:16]
+
 
 router = APIRouter(tags=["servers"])
 
@@ -31,11 +39,27 @@ async def _authenticate_server(
         raise HTTPException(status_code=401, detail="Invalid Authorization header format")
 
     api_key = authorization[len("Bearer ") :]
-    stmt = select(VJServer).where(VJServer.is_active.is_(True))
-    result = await session.execute(stmt)
-    servers = result.scalars().all()
+    prefix = _compute_key_prefix(api_key)
 
-    for server in servers:
+    # Filter by key_prefix first so we only bcrypt-verify the matching row(s)
+    stmt = select(VJServer).where(
+        VJServer.is_active.is_(True),
+        VJServer.key_prefix == prefix,
+    )
+    result = await session.execute(stmt)
+    candidates = result.scalars().all()
+
+    for server in candidates:
+        if verify_password(api_key, server.api_key_hash):
+            return server
+
+    # Fallback for legacy servers without key_prefix
+    stmt_legacy = select(VJServer).where(
+        VJServer.is_active.is_(True),
+        VJServer.key_prefix.is_(None),
+    )
+    result_legacy = await session.execute(stmt_legacy)
+    for server in result_legacy.scalars().all():
         if verify_password(api_key, server.api_key_hash):
             return server
 
@@ -55,6 +79,7 @@ async def _authenticate_server(
 )
 async def register_server(
     body: RegisterServerRequest,
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> RegisterServerResponse:
     """Register a VJ server. Returns ``server_id`` and a ``jwt_secret`` that
@@ -63,8 +88,9 @@ async def register_server(
     The ``api_key`` provided by the caller is bcrypt-hashed before storage
     and **never** returned again.
     """
-    # Hash the caller-supplied API key
+    # Hash the caller-supplied API key and store a prefix for fast lookup
     api_key_hash = hash_password(body.api_key)
+    key_prefix = _compute_key_prefix(body.api_key)
 
     # Generate a per-server JWT secret
     jwt_secret = f"jws_{_secrets.token_urlsafe(32)}"
@@ -74,6 +100,7 @@ async def register_server(
         name=body.name,
         websocket_url=body.websocket_url,
         api_key_hash=api_key_hash,
+        key_prefix=key_prefix,
         jwt_secret=jwt_secret,
     )
     session.add(server)

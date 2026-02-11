@@ -17,6 +17,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import logging
 import secrets
 import sys
 
@@ -95,15 +96,19 @@ def verify_password(password: str, hash_str: str) -> bool:
             return secrets.compare_digest(computed, stored_hash)
         elif len(parts) == 2:
             # Legacy format: sha256:hash (no salt)
+            logging.warning(
+                "Legacy unsalted SHA256 hash detected. "
+                "Rehash with: python -m audio_processor.auth hash <password>"
+            )
             stored_hash = parts[1]
             computed = hashlib.sha256(password.encode("utf-8")).hexdigest()
             return secrets.compare_digest(computed, stored_hash)
         return False
 
     else:
-        # Plaintext comparison (development only)
-        # Use constant-time comparison to prevent timing attacks
-        return secrets.compare_digest(password, hash_str)
+        # Reject plaintext passwords — all hashes must use a recognized prefix.
+        # Migrate legacy plaintext entries with: python -m audio_processor.auth hash "<password>"
+        return False
 
 
 def generate_api_key() -> str:

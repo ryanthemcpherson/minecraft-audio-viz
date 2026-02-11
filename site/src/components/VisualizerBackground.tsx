@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useMemo } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { useRef, useMemo, useEffect, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 
@@ -257,8 +257,17 @@ function Scene() {
   );
 }
 
+// --- Invalidate on each frame so "demand" mode keeps rendering while visible ---
+function FrameInvalidator({ isVisible }: { isVisible: boolean }) {
+  const { invalidate } = useThree();
+  useFrame(() => {
+    if (isVisible) invalidate();
+  });
+  return null;
+}
+
 // --- Canvas wrapper ---
-function VisualizerCanvas() {
+function VisualizerCanvas({ isVisible }: { isVisible: boolean }) {
   const dpr = useMemo(() => {
     if (typeof window === "undefined") return 1;
     return window.innerWidth < 768 ? 1 : Math.min(window.devicePixelRatio, 1.5);
@@ -290,7 +299,7 @@ function VisualizerCanvas() {
         width: "100%",
         height: "100%",
       }}
-      frameloop="always"
+      frameloop="demand"
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.toneMappingExposure = 1.2;
@@ -302,6 +311,7 @@ function VisualizerCanvas() {
       <pointLight position={[0, 3, -5]} intensity={0.3} color="#FF006E" />
       <fog attach="fog" args={["#0a0a0a", 8, 24]} />
       <Scene />
+      <FrameInvalidator isVisible={isVisible} />
       <EffectComposer>
         <Bloom intensity={0.8} luminanceThreshold={0.6} luminanceSmoothing={0.3} mipmapBlur />
       </EffectComposer>
@@ -311,9 +321,24 @@ function VisualizerCanvas() {
 
 // --- Exported component (rendered client-side only) ---
 export default function VisualizerBackground() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsVisible(entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="absolute inset-0 z-0" aria-hidden="true">
-      <VisualizerCanvas />
+    <div ref={containerRef} className="absolute inset-0 z-0" aria-hidden="true">
+      <VisualizerCanvas isVisible={isVisible} />
     </div>
   );
 }

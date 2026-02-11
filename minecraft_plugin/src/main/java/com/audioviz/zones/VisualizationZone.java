@@ -124,13 +124,17 @@ public class VisualizationZone {
 
     /**
      * Check if a world location is within this zone's bounds.
+     * Note: Uses axis-aligned bounding box only. When rotation != 0 the actual
+     * visualized area is rotated but this check is not, so results may be
+     * inaccurate for rotated zones. A proper check would inverse-rotate the
+     * query point before testing against the AABB.
      */
     public boolean contains(Location location) {
         if (!location.getWorld().equals(origin.getWorld())) {
             return false;
         }
 
-        // Simple AABB check (ignoring rotation for now)
+        // Simple AABB check (ignoring rotation)
         double dx = location.getX() - origin.getX();
         double dy = location.getY() - origin.getY();
         double dz = location.getZ() - origin.getZ();

@@ -9,11 +9,14 @@
     "test": "npm run test:rust",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
+    "tauri:build": "tauri build --no-sign",
+    "tauri:build:signed": "tauri build",
     "tauri": "tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-shell": "^2",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

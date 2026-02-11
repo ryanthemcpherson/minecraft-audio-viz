@@ -83,6 +83,18 @@ let lastFpsUpdate = 0;
 let currentFps = 60;
 let lastFrameTime = 0;
 
+// Debounce helper for slider WebSocket messages
+const WS_DEBOUNCE_MS = 50;
+const _debounceTimers = {};
+function debouncedWsSend(key, payload) {
+    if (_debounceTimers[key]) clearTimeout(_debounceTimers[key]);
+    _debounceTimers[key] = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(payload));
+        }
+    }, WS_DEBOUNCE_MS);
+}
+
 // Initialize
 function init() {
     // Scene
@@ -108,6 +120,22 @@ function init() {
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
+
+    // Handle WebGL context loss and restoration
+    canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        console.warn('[WebGL] Context lost');
+        const statusText = document.querySelector('#connection-status .status-text');
+        if (statusText) statusText.textContent = 'WebGL Lost';
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+        console.info('[WebGL] Context restored');
+        const statusText = document.querySelector('#connection-status .status-text');
+        if (statusText) statusText.textContent = 'Reconnecting...';
+        // Re-initialise renderer state after context restore
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+    });
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
@@ -856,21 +884,15 @@ function setPattern(patternId) {
 }
 
 function setBlockCount(count) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_block_count', count: count }));
-    }
+    debouncedWsSend('block_count', { type: 'set_block_count', count: count });
 }
 
 function setAudioSetting(setting, value) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_audio_setting', setting: setting, value: value }));
-    }
+    debouncedWsSend('audio_' + setting, { type: 'set_audio_setting', setting: setting, value: value });
 }
 
 function setBandSensitivity(bandIndex, sensitivity) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_band_sensitivity', band: bandIndex, sensitivity: sensitivity }));
-    }
+    debouncedWsSend('band_' + bandIndex, { type: 'set_band_sensitivity', band: bandIndex, sensitivity: sensitivity });
 }
 
 function setPreset(presetName) {

@@ -1,4 +1,7 @@
 """
+DEPRECATED: This module is superseded by fft_analyzer.py and app_capture.py.
+Use audio_processor.fft_analyzer.FFTAnalyzer or audio_processor.fft_analyzer.HybridAnalyzer instead.
+
 Real-time audio processor for visualization.
 Performs FFT analysis and extracts frequency bands for visualization.
 """

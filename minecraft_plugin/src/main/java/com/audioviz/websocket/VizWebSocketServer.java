@@ -56,7 +56,8 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final long METRICS_LOG_INTERVAL_TICKS = 6000L; // 5 minutes
 
     public VizWebSocketServer(AudioVizPlugin plugin, int port) {
-        super(new InetSocketAddress("0.0.0.0", port));  // Bind to all interfaces
+        super(new InetSocketAddress(
+            plugin.getConfig().getString("websocket.address", "0.0.0.0"), port));
         this.plugin = plugin;
         this.messageHandler = new MessageHandler(plugin);
         this.messageQueue = new MessageQueue(plugin, messageHandler);
@@ -193,6 +194,21 @@ public class VizWebSocketServer extends WebSocketServer {
         if (ex instanceof IllegalStateException && ex.getMessage() != null
                 && ex.getMessage().contains("zip file closed")) {
             plugin.getLogger().warning("WebSocket closed during plugin reload (expected)");
+            return;
+        }
+
+        // Downgrade common network errors to WARNING (connection reset, broken pipe, EOF)
+        String msg = ex.getMessage() != null ? ex.getMessage().toLowerCase() : "";
+        if (ex instanceof java.io.IOException && (
+                msg.contains("connection reset") ||
+                msg.contains("broken pipe") ||
+                msg.contains("end of stream") ||
+                msg.contains("socket closed"))) {
+            plugin.getLogger().warning("WebSocket network error from " + address + ": " + ex.getMessage());
+            return;
+        }
+        if (ex instanceof java.io.EOFException) {
+            plugin.getLogger().warning("WebSocket EOF from " + address + ": " + ex.getMessage());
             return;
         }
 

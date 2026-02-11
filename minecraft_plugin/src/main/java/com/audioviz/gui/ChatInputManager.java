@@ -122,6 +122,9 @@ public class ChatInputManager implements Listener {
         }
     }
 
+    // TODO: Migrate to Paper's modern AsyncChatEvent (io.papermc.paper.event.player.AsyncChatEvent)
+    //       when dropping support for older Paper builds.
+    @SuppressWarnings("deprecation")
     @EventHandler(priority = EventPriority.LOWEST)
     public void onChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();

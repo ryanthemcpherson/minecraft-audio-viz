@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
+import time
+from typing import Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +28,32 @@ from app.models.schemas import (
 )
 from app.services import auth_service, discord_oauth
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# In-memory OAuth state store: state_token -> expiry_timestamp
+# States expire after 10 minutes. Cleaned up lazily on new state creation.
+_OAUTH_STATE_TTL = 600  # seconds
+_oauth_states: Dict[str, float] = {}
+
+
+def _store_oauth_state(state: str) -> None:
+    """Store an OAuth state token and clean up expired entries."""
+    now = time.time()
+    # Lazy cleanup of expired states
+    expired = [k for k, v in _oauth_states.items() if v < now]
+    for k in expired:
+        _oauth_states.pop(k, None)
+    _oauth_states[state] = now + _OAUTH_STATE_TTL
+
+
+def _validate_oauth_state(state: str) -> bool:
+    """Validate and consume an OAuth state token. Returns True if valid."""
+    expiry = _oauth_states.pop(state, None)
+    if expiry is None:
+        return False
+    return time.time() < expiry
 
 
 def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
@@ -145,12 +173,13 @@ async def discord_authorize(
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
     state = secrets.token_urlsafe(32)
+    _store_oauth_state(state)
     url = discord_oauth.get_authorize_url(
         client_id=settings.discord_client_id,
         redirect_uri=settings.discord_redirect_uri,
         state=state,
     )
-    return DiscordAuthorizeResponse(authorize_url=url)
+    return DiscordAuthorizeResponse(authorize_url=url, state=state)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +201,9 @@ async def discord_callback(
     if not settings.discord_client_id or not settings.discord_client_secret:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
+    if not state or not _validate_oauth_state(state):
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
     try:
         access_token = await discord_oauth.exchange_code(
             code=code,
@@ -181,6 +213,7 @@ async def discord_callback(
         )
         discord_user = await discord_oauth.get_discord_user(access_token)
     except Exception:
+        logger.exception("Discord OAuth exchange failed")
         raise HTTPException(status_code=400, detail="Discord OAuth exchange failed")
 
     result = await auth_service.login_discord(

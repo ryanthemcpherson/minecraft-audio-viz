@@ -13,12 +13,15 @@ import com.audioviz.stages.StageManager;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.logging.Level;
 
-public class AudioVizPlugin extends JavaPlugin {
+public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     private static AudioVizPlugin instance;
     private ZoneManager zoneManager;
@@ -60,6 +63,7 @@ public class AudioVizPlugin extends JavaPlugin {
         this.rendererRegistry = new RendererRegistry(this);
 
         // Register event listeners
+        getServer().getPluginManager().registerEvents(this, this);
         getServer().getPluginManager().registerEvents(menuManager, this);
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
@@ -145,6 +149,21 @@ public class AudioVizPlugin extends JavaPlugin {
         }
 
         getLogger().info("AudioViz plugin disabled!");
+    }
+
+    /**
+     * Clean up entity pools in zones belonging to an unloaded world
+     * to prevent stale entity references.
+     */
+    @EventHandler
+    public void onWorldUnload(WorldUnloadEvent event) {
+        String worldName = event.getWorld().getName();
+        for (var zone : zoneManager.getAllZones()) {
+            if (zone.getWorld().getName().equals(worldName)) {
+                getLogger().info("World '" + worldName + "' unloading, cleaning up zone '" + zone.getName() + "'");
+                entityPoolManager.cleanupZoneSync(zone.getName());
+            }
+        }
     }
 
     public static AudioVizPlugin getInstance() {

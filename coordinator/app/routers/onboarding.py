@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,7 +87,16 @@ async def reset_full(
 ) -> UserResponse:
     """Nuclear reset for testing: deletes all orgs owned by the user (and their
     invites/memberships/server assignments), removes memberships in other orgs,
-    deletes DJ profile, and resets onboarding state back to fresh."""
+    deletes DJ profile, and resets onboarding state back to fresh.
+
+    Only available in development/testing environments.
+    """
+    env = os.environ.get("MCAV_ENV", "development").lower()
+    if env in ("production", "prod", "staging"):
+        raise HTTPException(
+            status_code=403,
+            detail="Full reset is disabled in production environments",
+        )
 
     # 1. Find orgs owned by this user
     owned_org_ids = (

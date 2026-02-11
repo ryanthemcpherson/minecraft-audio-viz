@@ -61,6 +61,10 @@ async def resolve_connect_code(
     if server is None:
         raise HTTPException(status_code=503, detail="Server registered but currently offline")
 
+    # Enforce maximum DJ limit
+    if show.current_djs >= show.max_djs:
+        raise HTTPException(status_code=409, detail="Show is full — maximum DJ limit reached")
+
     # Create a DJ session record
     dj_session_id = uuid.uuid4()
     client_ip = request.client.host if request.client else "unknown"

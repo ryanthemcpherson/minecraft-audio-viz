@@ -23,11 +23,12 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https:"
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "../../mcav-large.png",
@@ -42,6 +43,12 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/ryanthemcpherson/minecraft-audio-viz/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY3NTJCODE5M0MwQkM4MUUKUldRZXlBczhHYmhTOXpkQUcxWHpsSWxOUjM1T2tVZCt1ME13K2h4ZkVKTnU0amMwK1hwU21oL1IK"
     }
   }
 }

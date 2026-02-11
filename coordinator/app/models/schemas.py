@@ -153,6 +153,7 @@ class LogoutRequest(BaseModel):
 
 class DiscordAuthorizeResponse(BaseModel):
     authorize_url: str
+    state: str
 
 
 class OrgSummary(BaseModel):

@@ -27,7 +27,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install ruff
-        run: pip install "ruff>=0.15,<1"
+        run: pip install "ruff>=0.1.0,<1"
 
       - name: Ruff check
         run: ruff check audio_processor/ python_client/
@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13']
 
     steps:
       - uses: actions/checkout@v6
@@ -197,7 +197,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install ruff
-        run: pip install "ruff>=0.15,<1"
+        run: pip install "ruff>=0.1.0,<1"
 
       - name: Ruff check coordinator
         run: ruff check coordinator/

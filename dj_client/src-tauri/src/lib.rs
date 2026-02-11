@@ -18,7 +18,7 @@ use std::f32::consts::TAU;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -179,6 +179,7 @@ async fn list_audio_sources() -> Result<Vec<AudioSource>, String> {
 /// Connect to VJ server with connect code
 #[tauri::command]
 async fn connect_with_code(
+    app_handle: AppHandle,
     state: State<'_, AppStateWrapper>,
     code: String,
     dj_name: String,
@@ -229,7 +230,7 @@ async fn connect_with_code(
     // Spawn bridge task
     let state_arc = state.0.clone();
     tokio::spawn(async move {
-        run_bridge(state_arc, shutdown_rx).await;
+        run_bridge(state_arc, shutdown_rx, app_handle).await;
     });
 
     Ok(())
@@ -238,6 +239,7 @@ async fn connect_with_code(
 /// Connect to VJ server directly (no connect code needed, for testing)
 #[tauri::command]
 async fn connect_direct(
+    app_handle: AppHandle,
     state: State<'_, AppStateWrapper>,
     dj_name: String,
     server_host: String,
@@ -247,7 +249,7 @@ async fn connect_direct(
         server_host: server_host.clone(),
         server_port,
         dj_name: dj_name.clone(),
-        dj_id: Some("tauri_dj".to_string()),
+        dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
         dj_key: Some(String::new()),
         ..Default::default()
     };
@@ -287,16 +289,29 @@ async fn connect_direct(
     // Spawn bridge task
     let state_arc = state.0.clone();
     tokio::spawn(async move {
-        run_bridge(state_arc, shutdown_rx).await;
+        run_bridge(state_arc, shutdown_rx, app_handle).await;
     });
 
     Ok(())
 }
 
-/// Bridge task: reads audio analysis and sends frames to VJ server at ~60fps
-async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Receiver<()>) {
-    let mut interval = tokio::time::interval(Duration::from_millis(16));
+/// Maximum number of automatic reconnection attempts before giving up.
+const MAX_RECONNECT_ATTEMPTS: u32 = 10;
+/// Maximum backoff delay between reconnection attempts in seconds.
+const MAX_RECONNECT_DELAY_SECS: u64 = 30;
+
+/// Bridge task: reads audio analysis and sends frames to VJ server at ~60fps.
+/// Automatically reconnects with exponential backoff when the connection drops.
+async fn run_bridge(
+    state_arc: Arc<Mutex<AppState>>,
+    mut shutdown_rx: mpsc::Receiver<()>,
+    app_handle: AppHandle,
+) {
     let direct_batch_enabled = env_flag_enabled("MCAV_DIRECT_BATCH_UPDATE");
+    let mut reconnect_count: u32 = 0;
+
+    'reconnect: loop {
+    let mut interval = tokio::time::interval(Duration::from_millis(16));
     FRAME_SEQ.store(0, Ordering::Relaxed);
     let mut mc_tx: Option<mpsc::Sender<Message>> = None;
     let mut mc_shutdown_tx: Option<mpsc::Sender<()>> = None;
@@ -304,20 +319,20 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
     let mut mc_pool_key: Option<String> = None;
     let mut next_mc_connect_attempt = Instant::now();
     let mut last_phase_predicted_beat_at = 0.0_f64;
+    // Track whether this iteration exited due to explicit shutdown
+    let mut shutdown_requested = false;
 
     log::info!(
-        "Bridge task started (direct batch mode: {})",
-        if direct_batch_enabled {
-            "enabled"
-        } else {
-            "disabled"
-        }
+        "Bridge task started (direct batch mode: {}, reconnect #{})",
+        if direct_batch_enabled { "enabled" } else { "disabled" },
+        reconnect_count
     );
 
     loop {
         tokio::select! {
             _ = shutdown_rx.recv() => {
                 log::info!("Bridge task received shutdown signal");
+                shutdown_requested = true;
                 break;
             }
             _ = interval.tick() => {
@@ -525,7 +540,7 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
                     }
                 }
 
-                // 3. Update connection state from DjClient
+                // 3. Update connection state from DjClient and emit events
                 {
                     let mut app_state = state_arc.lock();
                     if let Some(ref client) = app_state.client {
@@ -540,16 +555,27 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
                             app_state.status.mc_connected = false;
                         }
                     }
+
+                    // Push audio levels and status to frontend via events
+                    if let Some(ref analysis) = analysis {
+                        let _ = app_handle.emit("audio-levels", AudioLevels {
+                            bands: analysis.bands,
+                            peak: analysis.peak,
+                            is_beat: analysis.is_beat,
+                            beat_intensity: analysis.beat_intensity,
+                            bpm: analysis.bpm,
+                        });
+                    }
+                    let _ = app_handle.emit("dj-status", &app_state.status);
                 }
             }
         }
     }
 
-    // Cleanup: disconnect client
+    // Cleanup current connection
     log::info!("Bridge task cleaning up");
     let client = {
         let mut app_state = state_arc.lock();
-        app_state.bridge_shutdown_tx = None;
         app_state.client.take()
     };
     if let Some(client) = client {
@@ -563,7 +589,92 @@ async fn run_bridge(state_arc: Arc<Mutex<AppState>>, mut shutdown_rx: mpsc::Rece
         app_state.status.connected = false;
         app_state.status.mc_connected = false;
     }
-    log::info!("Bridge task stopped");
+
+    // If shutdown was explicitly requested, do not reconnect
+    if shutdown_requested {
+        let mut app_state = state_arc.lock();
+        app_state.bridge_shutdown_tx = None;
+        log::info!("Bridge task stopped (user disconnect)");
+        break 'reconnect;
+    }
+
+    // Auto-reconnect with exponential backoff
+    reconnect_count += 1;
+    if reconnect_count > MAX_RECONNECT_ATTEMPTS {
+        let mut app_state = state_arc.lock();
+        app_state.bridge_shutdown_tx = None;
+        app_state.status.error = Some("Connection lost (max retries reached)".to_string());
+        let _ = app_handle.emit("dj-status", &app_state.status);
+        log::error!("Bridge task gave up after {} reconnect attempts", MAX_RECONNECT_ATTEMPTS);
+        break 'reconnect;
+    }
+
+    let delay_secs = std::cmp::min(
+        1u64 << (reconnect_count - 1),
+        MAX_RECONNECT_DELAY_SECS,
+    );
+    log::info!(
+        "Reconnecting in {}s (attempt {}/{})",
+        delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
+    );
+    {
+        let mut app_state = state_arc.lock();
+        app_state.status.error = Some(format!(
+            "Reconnecting in {}s ({}/{})",
+            delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
+        ));
+        let _ = app_handle.emit("dj-status", &app_state.status);
+    }
+
+    // Wait for backoff delay or shutdown signal
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_secs(delay_secs)) => {}
+        _ = shutdown_rx.recv() => {
+            let mut app_state = state_arc.lock();
+            app_state.bridge_shutdown_tx = None;
+            log::info!("Bridge task stopped during reconnect backoff (user disconnect)");
+            break 'reconnect;
+        }
+    }
+
+    // Attempt to reconnect using stored config
+    let reconnect_result = {
+        let app_state = state_arc.lock();
+        let config = DjClientConfig {
+            server_host: app_state.server_host.clone(),
+            server_port: app_state.server_port,
+            dj_name: app_state.dj_name.clone(),
+            connect_code: app_state.connect_code.clone(),
+            dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
+            dj_key: if app_state.connect_code.is_none() {
+                Some(String::new())
+            } else {
+                None
+            },
+            ..Default::default()
+        };
+        config
+    };
+
+    let mut client = DjClient::new(reconnect_result);
+    match client.connect().await {
+        Ok(()) => {
+            let mut app_state = state_arc.lock();
+            app_state.client = Some(client);
+            app_state.status.connected = true;
+            app_state.status.error = None;
+            let _ = app_handle.emit("dj-status", &app_state.status);
+            log::info!("Reconnected successfully");
+            reconnect_count = 0;
+            continue 'reconnect;
+        }
+        Err(e) => {
+            log::warn!("Reconnect failed: {}", e);
+            continue 'reconnect;
+        }
+    }
+
+    } // end 'reconnect loop
 }
 
 /// Start audio capture from selected source
@@ -668,7 +779,7 @@ fn get_audio_levels(state: State<'_, AppStateWrapper>) -> AudioLevels {
 }
 
 /// Audio levels response
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct AudioLevels {
     pub bands: [f32; 5],
     pub peak: f32,
@@ -684,6 +795,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
         .invoke_handler(tauri::generate_handler![
             list_audio_sources,

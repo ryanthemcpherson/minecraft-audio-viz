@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
@@ -26,6 +26,19 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, loading, logout } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close user dropdown when clicking outside
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    function handleMouseDown(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [userMenuOpen]);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-xl">
@@ -72,16 +85,19 @@ export default function Navbar() {
           {!loading && (
             <>
               {user ? (
-                <div className="relative">
+                <div ref={userMenuRef} className="relative">
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
                     className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors hover:bg-white/5"
                   >
                     {user.avatar_url ? (
-                      <img
+                      <Image
                         src={user.avatar_url}
                         alt={user.display_name}
+                        width={28}
+                        height={28}
                         className="h-7 w-7 rounded-full"
+                        unoptimized
                       />
                     ) : (
                       <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-xs font-bold">
