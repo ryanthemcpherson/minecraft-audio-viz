@@ -1,0 +1,90 @@
+name: Update Minecraft Server Jar
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Jar source provider'
+        required: true
+        default: 'paper'
+        type: choice
+        options:
+          - paper
+          - url
+      minecraft_version:
+        description: 'Minecraft version (for Paper, optional if auto-detected)'
+        required: false
+        type: string
+      jar_url:
+        description: 'Direct jar URL (required when provider=url)'
+        required: false
+        type: string
+      jar_sha256:
+        description: 'Optional SHA256 for provider=url'
+        required: false
+        type: string
+
+concurrency:
+  group: update-minecraft-jar
+  cancel-in-progress: false
+
+jobs:
+  update-jar:
+    name: Update server jar on dev host
+    runs-on: [self-hosted, dev-server]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve inputs
+        id: resolve
+        shell: bash
+        run: |
+          PROVIDER="${{ github.event.inputs.provider }}"
+          if [ -z "$PROVIDER" ]; then
+            PROVIDER="paper"
+          fi
+          echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "mc_version=${{ github.event.inputs.minecraft_version }}" >> "$GITHUB_OUTPUT"
+          echo "jar_url=${{ github.event.inputs.jar_url }}" >> "$GITHUB_OUTPUT"
+          echo "jar_sha256=${{ github.event.inputs.jar_sha256 }}" >> "$GITHUB_OUTPUT"
+
+      - name: Update jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--provider "${{ steps.resolve.outputs.provider }}")
+
+          if [ -n "${{ steps.resolve.outputs.mc_version }}" ]; then
+            args+=(--mc-version "${{ steps.resolve.outputs.mc_version }}")
+          fi
+
+          if [ "${{ steps.resolve.outputs.provider }}" = "url" ]; then
+            if [ -z "${{ steps.resolve.outputs.jar_url }}" ]; then
+              echo "jar_url is required when provider=url" >&2
+              exit 1
+            fi
+            args+=(--jar-url "${{ steps.resolve.outputs.jar_url }}")
+
+            if [ -n "${{ steps.resolve.outputs.jar_sha256 }}" ]; then
+              args+=(--sha256 "${{ steps.resolve.outputs.jar_sha256 }}")
+            fi
+          fi
+
+          bash ./scripts/update-minecraft-jar.sh "${args[@]}"
+
+      - name: Post-update status
+        shell: bash
+        run: |
+          echo "### Server Jar Update" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Provider: \`${{ steps.resolve.outputs.provider }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ steps.resolve.outputs.mc_version }}" ]; then
+            echo "- Minecraft version input: \`${{ steps.resolve.outputs.mc_version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- Service: \`minecraft.service\`" >> "$GITHUB_STEP_SUMMARY"
