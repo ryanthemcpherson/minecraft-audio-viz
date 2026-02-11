@@ -127,3 +127,6 @@ worker/dist/
 
 # Additional env
 .env.production.local
+
+# Test databases
+coordinator/test.db

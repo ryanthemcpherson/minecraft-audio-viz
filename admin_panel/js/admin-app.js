@@ -115,6 +115,7 @@ class AdminApp {
             notes: false,
             dust: false
         };
+        this._threeLoadInFlight = false;
 
         // Preview config
         this._previewConfig = {
@@ -1230,7 +1231,9 @@ class AdminApp {
         this.state.entities = data.entities || [];
 
         // Store latency, BPM, and FPS for throttled update
-        if (data.latency_ms !== undefined) {
+        if (data.ping_ms !== undefined) {
+            this.state.latencyMs = data.ping_ms;
+        } else if (data.latency_ms !== undefined) {
             this.state.latencyMs = data.latency_ms;
         }
         if (data.fps !== undefined) {
@@ -2231,7 +2234,46 @@ class AdminApp {
 
     // === 3D Preview Methods ===
 
-    _initPreview() {
+    _loadThreeScript(src) {
+        return new Promise((resolve, reject) => {
+            const existing = Array.from(document.scripts).find(s => s.src && s.src.includes(src));
+            if (existing && typeof THREE !== 'undefined') {
+                resolve(true);
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = () => resolve(true);
+            script.onerror = () => reject(new Error(`Failed to load ${src}`));
+            document.head.appendChild(script);
+        });
+    }
+
+    async _ensureThreeLoaded() {
+        if (typeof THREE !== 'undefined') return true;
+        if (this._threeLoadInFlight) return false;
+        this._threeLoadInFlight = true;
+        try {
+            // Prefer local vendor copy.
+            await this._loadThreeScript('js/vendor/three-r128.min.js');
+            if (typeof THREE !== 'undefined') return true;
+        } catch (_) {
+            // fall through to CDN
+        }
+
+        try {
+            await this._loadThreeScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+            return typeof THREE !== 'undefined';
+        } catch (_) {
+            return false;
+        } finally {
+            this._threeLoadInFlight = false;
+        }
+    }
+
+    async _initPreview() {
         if (this._previewInitialized || this._previewFailed) return;
 
         const canvas = document.getElementById('preview-canvas');
@@ -2244,9 +2286,12 @@ class AdminApp {
         // Check if THREE is loaded
         if (typeof THREE === 'undefined') {
             console.warn('[Preview] Three.js not loaded');
-            this._previewFailed = true;
-            this._showToast('Three.js failed to load; 3D Preview disabled', 'warning');
-            return;
+            const loaded = await this._ensureThreeLoaded();
+            if (!loaded || typeof THREE === 'undefined') {
+                this._previewFailed = true;
+                this._showToast('Three.js failed to load; 3D Preview disabled', 'warning');
+                return;
+            }
         }
 
         try {
