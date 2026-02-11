@@ -119,7 +119,11 @@ impl DjClient {
             return Err(ClientError::AlreadyConnected);
         }
 
-        let scheme = if crate::is_local_host(&self.config.server_host) { "ws" } else { "wss" };
+        let scheme = if crate::is_local_host(&self.config.server_host) {
+            "ws"
+        } else {
+            "wss"
+        };
         let url = format!(
             "{}://{}:{}",
             scheme, self.config.server_host, self.config.server_port
