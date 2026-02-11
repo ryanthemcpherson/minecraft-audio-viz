@@ -106,6 +106,7 @@ public class MessageHandler {
             // Voice chat
             case "voice_audio" -> handleVoiceAudio(message);
             case "voice_config" -> handleVoiceConfig(message);
+            case "get_voice_status" -> handleGetVoiceStatus();
             default -> createError("Unknown message type: " + type);
         };
     }
@@ -1553,6 +1554,20 @@ public class MessageHandler {
 
         // Also return voice_status as the direct response to the sender
         return status;
+    }
+
+    private JsonObject handleGetVoiceStatus() {
+        VoicechatIntegration voiceChat = plugin.getVoicechatIntegration();
+        if (voiceChat == null) {
+            JsonObject status = new JsonObject();
+            status.addProperty("type", "voice_status");
+            status.addProperty("available", false);
+            status.addProperty("streaming", false);
+            status.addProperty("channel_type", "static");
+            status.addProperty("connected_players", 0);
+            return status;
+        }
+        return voiceChat.getStatus();
     }
 
     private JsonObject createError(String message) {

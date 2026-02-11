@@ -742,6 +742,7 @@ class AdminApp {
             this.ws.send({ type: 'get_zone', zone: this.state.zone.name });
             this.ws.send({ type: 'get_connect_codes' });
             this.ws.send({ type: 'get_pending_djs' });
+            this.ws.send({ type: 'get_voice_status' });
         });
 
         this.ws.addEventListener('disconnected', () => {
@@ -1152,7 +1153,15 @@ class AdminApp {
                 badge.className = 'dj-badge-live';
                 badge.textContent = 'LIVE';
                 actionsDiv.appendChild(badge);
-            } else {
+            }
+            if (dj.direct_mode) {
+                const directBadge = document.createElement('span');
+                directBadge.className = 'dj-badge-direct';
+                directBadge.textContent = dj.mc_connected ? 'DIRECT: MC OK' : 'DIRECT: RELAY';
+                if (!dj.mc_connected) directBadge.classList.add('dj-badge-direct-relay');
+                actionsDiv.appendChild(directBadge);
+            }
+            if (!isActive) {
                 const goLiveBtn = document.createElement('button');
                 goLiveBtn.className = 'btn btn-go-live';
                 goLiveBtn.dataset.action = 'activate';
@@ -2312,7 +2321,8 @@ class AdminApp {
             if (dj.direct_mode) {
                 const badge = document.createElement('span');
                 badge.className = 'dj-badge-direct';
-                badge.textContent = 'DIRECT';
+                badge.textContent = dj.mc_connected ? 'DIRECT: MC OK' : 'DIRECT: RELAY';
+                if (!dj.mc_connected) badge.classList.add('dj-badge-direct-relay');
                 meta.appendChild(badge);
             }
 

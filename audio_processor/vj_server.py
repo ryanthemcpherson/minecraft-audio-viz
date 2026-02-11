@@ -1931,6 +1931,25 @@ class VJServer:
                             f"type={data.get('channel_type')}"
                         )
 
+                    elif msg_type == "get_voice_status":
+                        # Forward get_voice_status to Minecraft and relay response
+                        if self.viz_client and self.viz_client.connected:
+                            response = await self.viz_client.send({"type": "get_voice_status"})
+                            if response:
+                                await websocket.send(json.dumps(response))
+                        else:
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "voice_status",
+                                        "available": False,
+                                        "streaming": False,
+                                        "channel_type": "static",
+                                        "connected_players": 0,
+                                    }
+                                )
+                            )
+
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
                         # Sync local state when zone config changes entity count,

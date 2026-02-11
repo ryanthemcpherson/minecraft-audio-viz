@@ -71,17 +71,6 @@ fn resolve_direct_mc_route(conn_state: &protocol::ConnectionState) -> Option<Dir
     })
 }
 
-fn env_flag_enabled(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| {
-            matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
-}
-
 fn build_direct_entities(
     analysis: &audio::AnalysisResult,
     entity_count: usize,
@@ -166,24 +155,55 @@ async fn start_direct_mc_session(
         }
     });
 
-    // Reader (respond to ping from Minecraft heartbeat loop)
+    // Reader (respond to ping from Minecraft, measure RTT from pong)
     let tx_reader = tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
                     if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if data.get("type").and_then(|t| t.as_str()) == Some("ping") {
-                            let _ = tx_reader
-                                .send(Message::Text(
-                                    serde_json::json!({ "type": "pong" }).to_string().into(),
-                                ))
-                                .await;
+                        match data.get("type").and_then(|t| t.as_str()) {
+                            Some("ping") => {
+                                let _ = tx_reader
+                                    .send(Message::Text(
+                                        serde_json::json!({ "type": "pong" }).to_string().into(),
+                                    ))
+                                    .await;
+                            }
+                            Some("pong") => {
+                                // RTT measurement: extract echoed timestamp
+                                if let Some(ts) = data.get("ts").and_then(|v| v.as_f64()) {
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs_f64();
+                                    let rtt_ms = ((now - ts) * 1000.0).max(0.0);
+                                    log::debug!("Direct MC RTT: {:.1}ms", rtt_ms);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
                 Ok(Message::Close(_)) | Err(_) => break,
                 _ => {}
+            }
+        }
+    });
+
+    // Periodic ping for RTT measurement (every 5 seconds)
+    let tx_ping = tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64();
+            let ping = serde_json::json!({ "type": "ping", "ts": ts }).to_string();
+            if tx_ping.send(Message::Text(ping.into())).await.is_err() {
+                break;
             }
         }
     });
@@ -328,7 +348,6 @@ async fn run_bridge(
     mut shutdown_rx: mpsc::Receiver<()>,
     app_handle: AppHandle,
 ) {
-    let direct_batch_enabled = env_flag_enabled("MCAV_DIRECT_BATCH_UPDATE");
     let mut reconnect_count: u32 = 0;
 
     'reconnect: loop {
@@ -340,18 +359,11 @@ async fn run_bridge(
         let mut mc_pool_key: Option<String> = None;
         let mut next_mc_connect_attempt = Instant::now();
         let mut last_phase_predicted_beat_at = 0.0_f64;
+        let mut last_mc_send = Instant::now() - Duration::from_secs(1);
         // Track whether this iteration exited due to explicit shutdown
         let mut shutdown_requested = false;
 
-        log::info!(
-            "Bridge task started (direct batch mode: {}, reconnect #{})",
-            if direct_batch_enabled {
-                "enabled"
-            } else {
-                "disabled"
-            },
-            reconnect_count
-        );
+        log::info!("Bridge task started (reconnect #{})", reconnect_count);
 
         loop {
             tokio::select! {
@@ -480,10 +492,12 @@ async fn run_bridge(
                             }
                         }
 
-                        // Dual publish: route policy controls whether MC receives audio_state
-                        // (legacy) or full batch_update (feature flagged).
+                        // Dual publish: send full batch_update directly to MC,
+                        // bypassing the VJ relay hop for ~10-20ms latency savings.
                         if let (Some(direct_tx), Some(route)) = (mc_tx.as_ref(), desired_route.as_ref()) {
-                            let mc_msg = if direct_batch_enabled {
+                            // Pace direct MC sends to ~20fps (every 45ms) to match MC's 20 TPS.
+                            // VJ server still gets 60fps for browser preview + admin panel.
+                            if last_mc_send.elapsed() >= Duration::from_millis(45) {
                                 let pool_key = format!(
                                     "{}:{}:{}:{}",
                                     route.host, route.port, route.zone, route.entity_count
@@ -521,7 +535,7 @@ async fn run_bridge(
                                 } else {
                                     Vec::new()
                                 };
-                                json!({
+                                let mc_msg = json!({
                                     "type": "batch_update",
                                     "zone": route.zone,
                                     "entities": entities,
@@ -537,31 +551,19 @@ async fn run_bridge(
                                     "source_id": "dj_tauri_client",
                                     "stream_seq": seq
                                 })
-                                .to_string()
-                            } else {
-                                json!({
-                                    "type": "audio_state",
-                                    "zone": route.zone,
-                                    "bands": analysis.bands,
-                                    "amplitude": analysis.peak,
-                                    "is_beat": out_is_beat,
-                                    "beat_intensity": out_beat_intensity,
-                                    "bpm": analysis.bpm,
-                                    "tempo_confidence": analysis.tempo_confidence,
-                                    "beat_phase": analysis.beat_phase,
-                                    "frame": seq
-                                })
-                                .to_string()
-                            };
+                                .to_string();
 
-                            if direct_tx.send(Message::Text(mc_msg.into())).await.is_err() {
-                                mc_tx = None;
-                                if let Some(shutdown) = mc_shutdown_tx.take() {
-                                    let _ = shutdown.send(()).await;
+                                if direct_tx.send(Message::Text(mc_msg.into())).await.is_err() {
+                                    mc_tx = None;
+                                    if let Some(shutdown) = mc_shutdown_tx.take() {
+                                        let _ = shutdown.send(()).await;
+                                    }
+                                    mc_pool_key = None;
+                                    next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
+                                    log::warn!("Direct MC dual-publish channel closed; will retry");
+                                } else {
+                                    last_mc_send = Instant::now();
                                 }
-                                mc_pool_key = None;
-                                next_mc_connect_attempt = Instant::now() + Duration::from_secs(2);
-                                log::warn!("Direct MC dual-publish channel closed; will retry");
                             }
                         }
                     }
@@ -593,13 +595,18 @@ async fn run_bridge(
 
                     // 3. Update connection state from DjClient and emit events
                     {
+                        let mc_is_connected = mc_tx.is_some();
                         let mut app_state = state_arc.lock();
+                        // Update the atomic flag for heartbeats before borrowing mutably
+                        if let Some(ref client) = app_state.client {
+                            client.set_mc_connected(mc_is_connected);
+                        }
                         if let Some(ref client) = app_state.client {
                             let latest = client.get_state();
                             app_state.status.is_active = latest.is_active;
                             app_state.status.latency_ms = latest.latency_ms;
                             app_state.status.route_mode = latest.route_mode;
-                            app_state.status.mc_connected = mc_tx.is_some();
+                            app_state.status.mc_connected = mc_is_connected;
                             if !latest.connected {
                                 app_state.status.connected = false;
                                 app_state.status.error = Some("Server disconnected".to_string());

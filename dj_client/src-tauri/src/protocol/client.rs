@@ -3,6 +3,7 @@
 use super::messages::*;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -105,6 +106,7 @@ pub struct DjClient {
     state: Arc<Mutex<ConnectionState>>,
     tx: Option<mpsc::Sender<Message>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
+    mc_connected: Arc<AtomicBool>,
 }
 
 impl DjClient {
@@ -115,7 +117,13 @@ impl DjClient {
             state: Arc::new(Mutex::new(ConnectionState::default())),
             tx: None,
             shutdown_tx: None,
+            mc_connected: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Update the mc_connected flag reported in heartbeats to the VJ server.
+    pub fn set_mc_connected(&self, val: bool) {
+        self.mc_connected.store(val, Ordering::Relaxed);
     }
 
     /// Connect to the VJ server
@@ -327,13 +335,16 @@ impl DjClient {
 
         // Heartbeat task - delay first tick to avoid racing with handshake
         let tx_heartbeat = tx;
+        let mc_connected_flag = self.mc_connected.clone();
         tokio::spawn(async move {
             // Wait one full interval before sending first heartbeat
             tokio::time::sleep(Duration::from_secs_f64(heartbeat_interval)).await;
             let mut interval = tokio::time::interval(Duration::from_secs_f64(heartbeat_interval));
             loop {
                 interval.tick().await;
-                let msg = serde_json::to_string(&HeartbeatMessage::new()).unwrap();
+                let mut hb = HeartbeatMessage::new();
+                hb.mc_connected = Some(mc_connected_flag.load(Ordering::Relaxed));
+                let msg = serde_json::to_string(&hb).unwrap();
                 if tx_heartbeat.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }

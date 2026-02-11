@@ -21,7 +21,7 @@ impl DjAuthMessage {
             dj_id,
             dj_key,
             dj_name,
-            direct_mode: None,
+            direct_mode: Some(true),
         }
     }
 }
@@ -33,6 +33,8 @@ pub struct CodeAuthMessage {
     pub msg_type: String,
     pub code: String,
     pub dj_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_mode: Option<bool>,
 }
 
 impl CodeAuthMessage {
@@ -41,6 +43,7 @@ impl CodeAuthMessage {
             msg_type: "code_auth".to_string(),
             code,
             dj_name,
+            direct_mode: Some(true),
         }
     }
 }
@@ -373,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn dj_auth_message_defaults_direct_mode_to_none() {
+    fn dj_auth_message_sets_direct_mode_true() {
         let msg = DjAuthMessage::new("dj_1".to_string(), "key_1".to_string(), "DJ".to_string());
         let json = serde_json::to_value(&msg).expect("dj auth should serialize");
 
@@ -381,7 +384,16 @@ mod tests {
         assert_eq!(json["dj_id"], "dj_1");
         assert_eq!(json["dj_key"], "key_1");
         assert_eq!(json["dj_name"], "DJ");
-        assert!(json.get("direct_mode").is_none());
+        assert_eq!(json["direct_mode"], true);
+    }
+
+    #[test]
+    fn code_auth_message_sets_direct_mode_true() {
+        let msg = CodeAuthMessage::new("BEAT-7K3M".to_string(), "DJ Spark".to_string());
+        let json = serde_json::to_value(&msg).expect("code auth should serialize");
+
+        assert_eq!(json["type"], "code_auth");
+        assert_eq!(json["direct_mode"], true);
     }
 
     #[test]
