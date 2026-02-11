@@ -3098,7 +3098,11 @@ class Tesseract(VisualizationPattern):
 
             # Apply 4D rotations
             rotated = self._rotate_4d(
-                point, self._rotation_xw, self._rotation_yw, self._rotation_zw, self._rotation_xy
+                point,
+                self._rotation_xw,
+                self._rotation_yw,
+                self._rotation_zw,
+                self._rotation_xy,
             )
 
             # Project to 3D
@@ -3243,7 +3247,11 @@ class CrystalGrowth(VisualizationPattern):
                     # Normalize
                     mag = math.sqrt(new_dx**2 + new_dy**2 + new_dz**2)
                     if mag > 0:
-                        new_dx, new_dy, new_dz = new_dx / mag, new_dy / mag, new_dz / mag
+                        new_dx, new_dy, new_dz = (
+                            new_dx / mag,
+                            new_dy / mag,
+                            new_dz / mag,
+                        )
 
                     # Child branches are shorter
                     child_length = length * 0.6
@@ -3265,7 +3273,13 @@ class CrystalGrowth(VisualizationPattern):
         for i in range(3):
             angle = i * math.pi * 2 / 3
             add_branch(
-                0, 0, 0, (math.cos(angle) * 0.3, -0.3, math.sin(angle) * 0.3), 0.15, 2, f"root_{i}"
+                0,
+                0,
+                0,
+                (math.cos(angle) * 0.3, -0.3, math.sin(angle) * 0.3),
+                0.15,
+                2,
+                f"root_{i}",
             )
 
         return points

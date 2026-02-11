@@ -8,10 +8,10 @@ Supports:
 
 Usage:
     # Generate a bcrypt hash
-    python -m audio_processor.auth hash "mypassword"
+    python -m vj_server.auth hash "mypassword"
 
     # Verify a password
-    python -m audio_processor.auth verify "mypassword" "bcrypt:$2b$12$..."
+    python -m vj_server.auth verify "mypassword" "bcrypt:$2b$12$..."
 """
 
 import argparse
@@ -98,7 +98,7 @@ def verify_password(password: str, hash_str: str) -> bool:
             # Legacy format: sha256:hash (no salt)
             logging.warning(
                 "Legacy unsalted SHA256 hash detected. "
-                "Rehash with: python -m audio_processor.auth hash <password>"
+                "Rehash with: python -m vj_server.auth hash <password>"
             )
             stored_hash = parts[1]
             computed = hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -107,7 +107,7 @@ def verify_password(password: str, hash_str: str) -> bool:
 
     else:
         # Reject plaintext passwords — all hashes must use a recognized prefix.
-        # Migrate legacy plaintext entries with: python -m audio_processor.auth hash "<password>"
+        # Migrate legacy plaintext entries with: python -m vj_server.auth hash "<password>"
         return False
 
 
@@ -136,7 +136,10 @@ def create_auth_config(output_path: str, djs: list, vjs: list = None):
 
     if vjs:
         for vj_id, name, password in vjs:
-            config["vj_operators"][vj_id] = {"name": name, "key_hash": hash_password(password)}
+            config["vj_operators"][vj_id] = {
+                "name": name,
+                "key_hash": hash_password(password),
+            }
 
     with open(output_path, "w") as f:
         json.dump(config, f, indent=2)

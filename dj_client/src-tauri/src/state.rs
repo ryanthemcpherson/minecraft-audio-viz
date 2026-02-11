@@ -73,6 +73,9 @@ pub struct AppState {
 
     /// Voice streaming status (updated from server)
     pub voice_status: VoiceStatus,
+
+    /// Currently active audio preset name
+    pub active_preset: String,
 }
 
 impl Default for AppState {
@@ -95,6 +98,7 @@ impl Default for AppState {
             voice_streamer: None,
             voice_config: VoiceConfig::default(),
             voice_status: VoiceStatus::default(),
+            active_preset: "auto".to_string(),
         }
     }
 }
@@ -136,5 +140,6 @@ mod tests {
         assert!(!state.voice_config.enabled);
         assert_eq!(state.voice_config.channel_type, "static");
         assert!(!state.voice_status.available);
+        assert_eq!(state.active_preset, "auto");
     }
 }

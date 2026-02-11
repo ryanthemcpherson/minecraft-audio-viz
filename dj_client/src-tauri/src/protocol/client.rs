@@ -98,6 +98,8 @@ pub struct ConnectionState {
     pub voice_streaming: bool,
     pub voice_channel_type: Option<String>,
     pub voice_connected_players: Option<u32>,
+    /// Preset name received from server (bridge task consumes this)
+    pub pending_preset: Option<String>,
 }
 
 /// DJ Client for VJ server communication
@@ -378,6 +380,8 @@ impl DjClient {
             bpm,
             tempo_confidence,
             beat_phase,
+            0.0,   // instant_bass (not available in this code path)
+            false,  // instant_kick
         );
         let json =
             serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
@@ -421,6 +425,11 @@ impl DjClient {
     /// Returns None if not connected.
     pub fn get_tx_clone(&self) -> Option<mpsc::Sender<Message>> {
         self.tx.clone()
+    }
+
+    /// Take the pending preset name (if any) that was received from the server.
+    pub fn take_pending_preset(&self) -> Option<String> {
+        self.state.lock().pending_preset.take()
     }
 }
 
@@ -483,9 +492,15 @@ async fn handle_server_message(
             };
             state.lock().latency_ms = latency.max(0.0);
         }
+        ServerMessage::PresetSync(ps) => {
+            // Extract preset name from the server payload
+            if let Some(name) = ps.preset.get("name").and_then(|v| v.as_str()) {
+                log::info!("Preset sync from server: {}", name);
+                state.lock().pending_preset = Some(name.to_string());
+            }
+        }
         ServerMessage::PatternSync(_)
         | ServerMessage::ConfigSync(_)
-        | ServerMessage::PresetSync(_)
         | ServerMessage::EffectTriggered(_) => {
             // These are informational, no action needed for basic client
         }

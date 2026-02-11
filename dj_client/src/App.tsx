@@ -57,6 +57,10 @@ function App() {
   const [bands, setBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const [isBeat, setIsBeat] = useState(false);
 
+  // Audio preset state
+  const [activePreset, setActivePreset] = useState(() => localStorage.getItem('mcav.preset') || 'auto');
+  const PRESETS = ['auto', 'edm', 'chill', 'rock', 'hiphop', 'classical'];
+
   // Voice streaming state
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>({
@@ -139,6 +143,19 @@ function App() {
     }
   }, [selectedSource]);
 
+  // Persist preset selection
+  useEffect(() => {
+    localStorage.setItem('mcav.preset', activePreset);
+  }, [activePreset]);
+
+  // Restore preset on mount (send to backend once capture is ready)
+  useEffect(() => {
+    const saved = localStorage.getItem('mcav.preset');
+    if (saved && PRESETS.includes(saved)) {
+      invoke('set_preset', { name: saved }).catch(() => {});
+    }
+  }, []);
+
   // Listen for audio levels and status events pushed from the backend
   useEffect(() => {
     if (!status.connected) return;
@@ -161,6 +178,12 @@ function App() {
     unlisteners.push(
       listen<VoiceStatus>('voice-status', (event) => {
         setVoiceStatus(event.payload);
+      })
+    );
+
+    unlisteners.push(
+      listen<string>('preset-changed', (event) => {
+        setActivePreset(event.payload);
       })
     );
 
@@ -327,6 +350,15 @@ function App() {
       setVoiceStatus({ available: false, streaming: false, channel_type: 'static', connected_players: 0 });
     } catch (e) {
       console.error('Disconnect error:', e);
+    }
+  };
+
+  const handlePresetChange = async (name: string) => {
+    setActivePreset(name);
+    try {
+      await invoke('set_preset', { name });
+    } catch (e) {
+      console.error('Preset change error:', e);
     }
   };
 
@@ -519,6 +551,22 @@ function App() {
           <>
             <section className="section">
               <FrequencyMeter bands={bands} />
+            </section>
+
+            <section className="section preset-section">
+              <span className="input-label" style={{ marginBottom: '6px' }}>Audio Preset</span>
+              <div className="preset-buttons">
+                {PRESETS.map(name => (
+                  <button
+                    key={name}
+                    className={`btn btn-preset ${activePreset === name ? 'active' : ''}`}
+                    onClick={() => handlePresetChange(name)}
+                    type="button"
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
             </section>
 
             <section className="section">

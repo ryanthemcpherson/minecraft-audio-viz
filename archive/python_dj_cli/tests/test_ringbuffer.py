@@ -7,7 +7,6 @@ import time
 
 import numpy as np
 import pytest
-
 from audio_processor.ringbuffer import (
     CHUNK_FLAG_BEAT,
     AudioChunkBuffer,

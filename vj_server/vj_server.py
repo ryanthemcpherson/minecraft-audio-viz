@@ -5,7 +5,7 @@ Accepts connections from multiple remote DJs, manages active DJ selection,
 and forwards visualization data to Minecraft and browser clients.
 
 Usage:
-    python -m audio_processor.vj_server --config configs/dj_auth.json
+    python -m vj_server.vj_server --config configs/dj_auth.json
 
 Architecture:
     DJ 1 (Remote) â”€â”€â”
@@ -44,10 +44,16 @@ try:
 except ImportError:
     HAS_WEBSOCKETS = False
 
-from audio_processor.config import PRESETS as AUDIO_PRESETS
-from audio_processor.patterns import PATTERNS, AudioState, PatternConfig, get_pattern, list_patterns
-from audio_processor.spectrograph import TerminalSpectrograph
 from python_client.viz_client import VizClient
+from vj_server.config import PRESETS as AUDIO_PRESETS
+from vj_server.patterns import (
+    PATTERNS,
+    AudioState,
+    PatternConfig,
+    get_pattern,
+    list_patterns,
+)
+from vj_server.spectrograph import TerminalSpectrograph
 
 # ---------------------------------------------------------------------------
 # Input validation helpers (security hardening)
@@ -344,14 +350,17 @@ class DJAuthConfig:
     def _warn_plaintext_passwords(self) -> list:
         """Check for plaintext passwords and log warnings. Returns list of offending IDs."""
         plaintext_ids = []
-        for section_name, section in [("djs", self.djs), ("vj_operators", self.vj_operators)]:
+        for section_name, section in [
+            ("djs", self.djs),
+            ("vj_operators", self.vj_operators),
+        ]:
             for entry_id, entry in section.items():
                 key_hash = entry.get("key_hash", "")
                 if key_hash and not key_hash.startswith(("bcrypt:", "sha256:")):
                     plaintext_ids.append(f"{section_name}/{entry_id}")
                     logger.critical(
                         f"SECURITY WARNING: {section_name}/{entry_id} has a plaintext password! "
-                        f"Hash it with: python -m audio_processor.auth hash <password>"
+                        f"Hash it with: python -m vj_server.auth hash <password>"
                     )
         return plaintext_ids
 
@@ -372,7 +381,7 @@ class DJAuthConfig:
         expected_hash = dj.get("key_hash", "")
 
         # Use auth module for secure password verification
-        from audio_processor.auth import verify_password
+        from vj_server.auth import verify_password
 
         if not verify_password(key, expected_hash):
             return None
@@ -387,7 +396,7 @@ class DJAuthConfig:
         expected_hash = vj.get("key_hash", "")
 
         # Use auth module for secure password verification
-        from audio_processor.auth import verify_password
+        from vj_server.auth import verify_password
 
         if not verify_password(key, expected_hash):
             return None
@@ -458,8 +467,8 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
 
 def run_http_server(port: int, directory: str):
     """Run HTTP server for admin panel."""
-    # directory is audio_processor, parent is project root
-    project_root = Path(directory).parent
+    # directory is the project root
+    project_root = Path(directory)
     admin_dir = project_root / "admin_panel"
     frontend_dir = project_root / "preview_tool" / "frontend"
 
@@ -711,7 +720,12 @@ class VJServer:
                     if not connect_code.is_valid():
                         logger.warning(f"DJ code auth failed: expired code {code}")
                         await websocket.send(
-                            json.dumps({"type": "auth_error", "error": "Connect code has expired"})
+                            json.dumps(
+                                {
+                                    "type": "auth_error",
+                                    "error": "Connect code has expired",
+                                }
+                            )
                         )
                         await websocket.close(4004, "Connect code expired")
                         return
@@ -854,7 +868,8 @@ class VJServer:
                         logger.debug(f"Invalid JSON from DJ {dj_name}")
                     except Exception as e:
                         logger.error(
-                            f"Error processing DJ frame from {dj_name}: {e}", exc_info=True
+                            f"Error processing DJ frame from {dj_name}: {e}",
+                            exc_info=True,
                         )
                 return
 
@@ -1277,7 +1292,13 @@ class VJServer:
                 "is_active": True,
             }
         else:
-            msg = {"type": "dj_info", "dj_name": "", "dj_id": "", "bpm": 0.0, "is_active": False}
+            msg = {
+                "type": "dj_info",
+                "dj_name": "",
+                "dj_id": "",
+                "bpm": 0.0,
+                "is_active": False,
+            }
 
         try:
             await self.viz_client.send(msg)
@@ -1878,7 +1899,10 @@ class VJServer:
                             profiles_summary[did] = summary
                         await websocket.send(
                             json.dumps(
-                                {"type": "all_banner_profiles", "profiles": profiles_summary}
+                                {
+                                    "type": "all_banner_profiles",
+                                    "profiles": profiles_summary,
+                                }
                             )
                         )
 
@@ -1999,7 +2023,12 @@ class VJServer:
                         else:
                             logger.warning(f"Cannot forward {msg_type}: Minecraft not connected")
                             await websocket.send(
-                                json.dumps({"type": "error", "message": "Minecraft not connected"})
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "message": "Minecraft not connected",
+                                    }
+                                )
                             )
 
                 except json.JSONDecodeError:
@@ -2021,7 +2050,11 @@ class VJServer:
     async def _broadcast_dj_roster(self):
         """Broadcast DJ roster to all browser clients."""
         message = json.dumps(
-            {"type": "dj_roster", "roster": self._get_dj_roster(), "active_dj": self._active_dj_id}
+            {
+                "type": "dj_roster",
+                "roster": self._get_dj_roster(),
+                "active_dj": self._active_dj_id,
+            }
         )
         dead_clients = set()
         for client in list(self._broadcast_clients):
@@ -2204,7 +2237,11 @@ class VJServer:
     async def _broadcast_pattern_change(self):
         """Broadcast pattern change to all browser clients."""
         message = json.dumps(
-            {"type": "pattern_changed", "pattern": self._pattern_name, "patterns": list_patterns()}
+            {
+                "type": "pattern_changed",
+                "pattern": self._pattern_name,
+                "patterns": list_patterns(),
+            }
         )
         dead_clients = set()
         for client in list(self._broadcast_clients):
@@ -2242,7 +2279,11 @@ class VJServer:
     async def _broadcast_config_sync_to_djs(self):
         """Broadcast config sync (entity count, zone) to all connected DJs."""
         message = json.dumps(
-            {"type": "config_sync", "entity_count": self.entity_count, "zone": self.zone}
+            {
+                "type": "config_sync",
+                "entity_count": self.entity_count,
+                "zone": self.zone,
+            }
         )
 
         for dj in list(self._djs.values()):
@@ -2282,7 +2323,11 @@ class VJServer:
 
         # Also broadcast to browser clients
         browser_msg = json.dumps(
-            {"type": "preset_changed", "preset": preset_name or "custom", "settings": preset}
+            {
+                "type": "preset_changed",
+                "preset": preset_name or "custom",
+                "settings": preset,
+            }
         )
         dead_clients = set()
         for client in list(self._broadcast_clients):
@@ -2318,7 +2363,11 @@ class VJServer:
         """Send a message to a client with a timeout. Adds to dead_clients on failure."""
         try:
             await asyncio.wait_for(client.send(message), timeout=timeout)
-        except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed, Exception):
+        except (
+            asyncio.TimeoutError,
+            websockets.exceptions.ConnectionClosed,
+            Exception,
+        ):
             dead_clients.add(client)
 
     async def _broadcast_viz_state(
@@ -2435,7 +2484,8 @@ class VJServer:
 
         try:
             await asyncio.wait_for(
-                self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN"), timeout=5.0
+                self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN"),
+                timeout=5.0,
             )
         except asyncio.TimeoutError:
             logger.warning("Timeout initializing entity pool, continuing anyway")
@@ -2491,7 +2541,8 @@ class VJServer:
                             )
                             # Increase backoff with exponential factor
                             self._mc_reconnect_backoff = min(
-                                self._mc_reconnect_backoff * backoff_multiplier, max_backoff
+                                self._mc_reconnect_backoff * backoff_multiplier,
+                                max_backoff,
                             )
                     except Exception as e:
                         logger.error(f"[MC RECONNECT] Reconnection error: {e}")
@@ -2840,7 +2891,10 @@ class VJServer:
                         using_fft=True,
                     )
                     self.spectrograph.display(
-                        bands=bands, amplitude=peak, is_beat=is_beat, beat_intensity=beat_intensity
+                        bands=bands,
+                        amplitude=peak,
+                        is_beat=is_beat,
+                        beat_intensity=beat_intensity,
                     )
 
                 if should_send_to_mc:
@@ -2907,7 +2961,7 @@ class VJServer:
             project_root = Path(__file__).parent.parent
             http_thread = threading.Thread(
                 target=run_http_server,
-                args=(self.http_port, str(project_root / "audio_processor")),
+                args=(self.http_port, str(project_root)),
                 daemon=True,
             )
             http_thread.start()
@@ -3042,7 +3096,11 @@ async def main():
         help="HTTP port for admin panel (default: 8080)",
     )
     parser.add_argument(
-        "--minecraft-host", "--host", type=str, default="localhost", help="Minecraft server host"
+        "--minecraft-host",
+        "--host",
+        type=str,
+        default="localhost",
+        help="Minecraft server host",
     )
     parser.add_argument(
         "--port", type=_validate_port, default=8765, help="Minecraft WebSocket port"
@@ -3050,7 +3108,10 @@ async def main():
     parser.add_argument("--zone", type=str, default="main", help="Visualization zone")
     parser.add_argument("--entities", type=_validate_positive_int, default=16, help="Entity count")
     parser.add_argument(
-        "--config", type=str, default="configs/dj_auth.json", help="Path to DJ auth config"
+        "--config",
+        type=str,
+        default="configs/dj_auth.json",
+        help="Path to DJ auth config",
     )
     parser.add_argument("--require-auth", action="store_true", help="Require DJ authentication")
     parser.add_argument("--no-minecraft", action="store_true", help="Run without Minecraft")

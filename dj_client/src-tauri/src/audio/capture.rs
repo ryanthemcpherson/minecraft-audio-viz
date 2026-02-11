@@ -1,6 +1,6 @@
 //! Audio capture implementation using a dedicated thread
 
-use super::{AudioConfig, FftAnalyzer};
+use super::{AudioConfig, BassLane, FftAnalyzer};
 use crate::voice::VoiceStreamer;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, StreamConfig};
@@ -58,6 +58,12 @@ pub struct AnalysisResult {
 
     /// Position within the beat cycle [0, 1)
     pub beat_phase: f32,
+
+    /// Instant bass energy from bass lane IIR filter (0-1), ~1ms latency
+    pub instant_bass: f32,
+
+    /// Instant kick detected by bass lane onset detector
+    pub instant_kick: bool,
 }
 
 /// Commands sent to the audio thread
@@ -78,6 +84,9 @@ pub struct AudioCaptureHandle {
 
     /// Latest analysis result (shared between threads)
     latest_result: Arc<Mutex<AnalysisResult>>,
+
+    /// Shared FFT analyzer (for applying presets at runtime)
+    analyzer: Arc<Mutex<FftAnalyzer>>,
 }
 
 // AudioCaptureHandle is now Send + Sync because it only contains:
@@ -102,13 +111,23 @@ impl AudioCaptureHandle {
         let latest_result = Arc::new(Mutex::new(AnalysisResult::default()));
         let result_clone = latest_result.clone();
 
+        // Create a shared analyzer so presets can be applied at runtime.
+        // The audio thread will replace this with a properly configured one
+        // once the device sample rate is known.
+        let analyzer = Arc::new(Mutex::new(FftAnalyzer::new(AudioConfig::default())));
+        let analyzer_clone = analyzer.clone();
+
         // Spawn audio thread
         let thread_handle = thread::Builder::new()
             .name("audio-capture".to_string())
             .spawn(move || {
-                if let Err(e) =
-                    run_audio_thread(source_id, command_rx, result_clone, voice_streamer)
-                {
+                if let Err(e) = run_audio_thread(
+                    source_id,
+                    command_rx,
+                    result_clone,
+                    voice_streamer,
+                    analyzer_clone,
+                ) {
                     log::error!("Audio thread error: {}", e);
                 }
             })
@@ -118,7 +137,13 @@ impl AudioCaptureHandle {
             command_tx,
             thread_handle: Some(thread_handle),
             latest_result,
+            analyzer,
         })
+    }
+
+    /// Get a reference to the shared analyzer for applying presets
+    pub fn analyzer(&self) -> &Arc<Mutex<FftAnalyzer>> {
+        &self.analyzer
     }
 
     /// Get the latest analysis result
@@ -142,14 +167,14 @@ impl Drop for AudioCaptureHandle {
 }
 
 /// Circular audio buffer
-struct AudioBuffer {
+pub struct AudioBuffer {
     samples: Vec<f32>,
     write_pos: usize,
     capacity: usize,
 }
 
 impl AudioBuffer {
-    fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
             samples: vec![0.0; capacity],
             write_pos: 0,
@@ -157,14 +182,14 @@ impl AudioBuffer {
         }
     }
 
-    fn push_samples(&mut self, data: &[f32]) {
+    pub fn push_samples(&mut self, data: &[f32]) {
         for &sample in data {
             self.samples[self.write_pos] = sample;
             self.write_pos = (self.write_pos + 1) % self.capacity;
         }
     }
 
-    fn get_latest(&self, count: usize) -> Vec<f32> {
+    pub fn get_latest(&self, count: usize) -> Vec<f32> {
         let count = count.min(self.capacity);
         let mut result = Vec::with_capacity(count);
 
@@ -189,6 +214,7 @@ fn run_audio_thread(
     command_rx: mpsc::Receiver<AudioCommand>,
     result_out: Arc<Mutex<AnalysisResult>>,
     voice_streamer: Option<Arc<VoiceStreamer>>,
+    shared_analyzer: Arc<Mutex<FftAnalyzer>>,
 ) -> Result<(), CaptureError> {
     let host = cpal::default_host();
 
@@ -223,9 +249,125 @@ fn run_audio_thread(
                 .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
                 .ok_or_else(|| CaptureError::SourceNotFound(device_name.to_string()))?
         }
+        #[cfg(target_os = "windows")]
         Some(id) if id.starts_with("app:") => {
-            // Per-app capture not yet implemented - fall back to loopback
-            log::info!("Per-app capture not yet implemented, using system audio loopback");
+            // Per-app capture via Process Loopback API (Windows 10 Build 20348+)
+            // Source ID format: "app:<pid>:<name>"
+            let parts: Vec<&str> = id.splitn(3, ':').collect();
+            let pid = parts
+                .get(1)
+                .and_then(|p| p.parse::<u32>().ok())
+                .ok_or_else(|| CaptureError::SourceNotFound(format!("Invalid app source: {}", id)))?;
+
+            if super::platform::windows::supports_process_loopback() {
+                log::info!("Using Process Loopback API for PID {}", pid);
+
+                // Create buffer; reinitialize the shared analyzer once we know sample rate
+                let buffer = Arc::new(Mutex::new(AudioBuffer::new(48000 * 2)));
+
+                match super::platform::windows::start_process_loopback(
+                    pid,
+                    buffer.clone(),
+                    voice_streamer.clone(),
+                ) {
+                    Ok((mut loopback_handle, sample_rate, _channels)) => {
+                        log::info!(
+                            "Process loopback active: PID {} ({}Hz)",
+                            pid,
+                            sample_rate,
+                        );
+
+                        // Resize buffer for actual sample rate
+                        {
+                            let mut buf = buffer.lock();
+                            *buf = AudioBuffer::new(sample_rate as usize * 2);
+                        }
+
+                        // Reinitialize analyzer with actual sample rate
+                        {
+                            let mut ana = shared_analyzer.lock();
+                            *ana = FftAnalyzer::new(AudioConfig {
+                                sample_rate,
+                                ..Default::default()
+                            });
+                        }
+                        let analyzer = shared_analyzer;
+                        let bass_lane = Arc::new(Mutex::new(BassLane::new(sample_rate as f32)));
+
+                        // Run analysis loop - copy samples under lock, release, then process
+                        loop {
+                            match command_rx.try_recv() {
+                                Ok(AudioCommand::Stop) => {
+                                    log::info!("Audio capture stopping (process loopback)");
+                                    break;
+                                }
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    log::info!("Audio capture channel disconnected");
+                                    break;
+                                }
+                                Err(mpsc::TryRecvError::Empty) => {}
+                            }
+
+                            // Copy samples under lock, then release before expensive processing
+                            let (samples, fft_size) = {
+                                let buf = buffer.lock();
+                                let ana = analyzer.lock();
+                                let sz = ana.fft_size();
+                                (buf.get_latest(sz), sz)
+                            };
+
+                            if samples.len() >= fft_size {
+                                let (i_bass, i_kick) = {
+                                    let mut bl = bass_lane.lock();
+                                    bl.process(&samples)
+                                };
+
+                                let mut result = {
+                                    let mut ana = analyzer.lock();
+                                    ana.analyze(&samples)
+                                };
+
+                                result.instant_bass = i_bass;
+                                result.instant_kick = i_kick;
+
+                                if i_kick && !result.is_beat {
+                                    result.is_beat = true;
+                                    result.beat_intensity = result.beat_intensity.max(0.5);
+                                }
+
+                                *result_out.lock() = result;
+                            }
+
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+
+                        loopback_handle.stop();
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Process loopback failed for PID {}: {}. Falling back to system loopback.",
+                            pid,
+                            e
+                        );
+                        is_loopback = true;
+                        host.default_output_device()
+                            .ok_or(CaptureError::NoOutputDevice)?
+                    }
+                }
+            } else {
+                log::warn!(
+                    "Process Loopback API not supported (Windows build < {}). Falling back to system loopback.",
+                    20348
+                );
+                is_loopback = true;
+                host.default_output_device()
+                    .ok_or(CaptureError::NoOutputDevice)?
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        Some(id) if id.starts_with("app:") => {
+            log::info!("Per-app capture not available on this platform, using system audio loopback");
             is_loopback = true;
             host.default_output_device()
                 .ok_or(CaptureError::NoOutputDevice)?
@@ -256,12 +398,19 @@ fn run_audio_thread(
 
     log::info!("Audio capture: {} Hz, {} channels", sample_rate, channels);
 
-    // Create buffer and analyzer
+    // Create buffer; reinitialize the shared analyzer with the actual sample rate
     let buffer = Arc::new(Mutex::new(AudioBuffer::new(sample_rate as usize * 2)));
-    let analyzer = Arc::new(Mutex::new(FftAnalyzer::new(AudioConfig {
-        sample_rate,
-        ..Default::default()
-    })));
+    {
+        let mut ana = shared_analyzer.lock();
+        *ana = FftAnalyzer::new(AudioConfig {
+            sample_rate,
+            ..Default::default()
+        });
+    }
+    let analyzer = shared_analyzer;
+
+    // Create bass lane for ultra-fast kick detection (~1ms latency)
+    let bass_lane = Arc::new(Mutex::new(BassLane::new(sample_rate as f32)));
 
     // Clone for stream callback
     let buffer_clone = buffer.clone();
@@ -320,14 +469,41 @@ fn run_audio_thread(
             }
         }
 
-        // Analyze audio
-        {
+        // Analyze audio (FFT + merge bass lane results)
+        // IMPORTANT: Copy samples under lock, then release lock before expensive FFT.
+        // Holding the buffer lock during analyze() blocks the audio callback.
+        let (samples, fft_size) = {
             let buf = buffer.lock();
-            let mut ana = analyzer.lock();
-            let samples = buf.get_latest(ana.fft_size());
-            let result = ana.analyze(&samples);
+            let ana = analyzer.lock();
+            let sz = ana.fft_size();
+            (buf.get_latest(sz), sz)
+        };
+        // All locks dropped - audio callback can push freely
 
-            // Update shared result
+        if samples.len() >= fft_size {
+            // Run bass lane on the same samples (moved out of audio callback to avoid contention)
+            let (i_bass, i_kick) = {
+                let mut bl = bass_lane.lock();
+                bl.process(&samples)
+            };
+            // bass_lane lock dropped
+
+            let mut result = {
+                let mut ana = analyzer.lock();
+                ana.analyze(&samples)
+            };
+            // analyzer lock dropped
+
+            result.instant_bass = i_bass;
+            result.instant_kick = i_kick;
+
+            // If bass lane detects kick but FFT didn't, supplement beat detection
+            if i_kick && !result.is_beat {
+                result.is_beat = true;
+                result.beat_intensity = result.beat_intensity.max(0.5);
+            }
+
+            // Update shared result (brief lock)
             *result_out.lock() = result;
         }
 
@@ -372,6 +548,8 @@ where
                 })
                 .collect();
 
+            // Push mono samples to buffer for FFT + bass lane analysis
+            // Bass lane runs in the analysis thread (not callback) to avoid lock contention
             buffer.lock().push_samples(&mono);
         },
         |err| {

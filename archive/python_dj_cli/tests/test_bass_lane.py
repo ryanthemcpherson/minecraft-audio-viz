@@ -6,7 +6,6 @@ import time
 
 import numpy as np
 import pytest
-
 from audio_processor.fft_analyzer import BassLane
 
 

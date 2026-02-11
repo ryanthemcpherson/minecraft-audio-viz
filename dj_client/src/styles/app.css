@@ -704,6 +704,42 @@ body {
   box-shadow: 0 0 6px rgba(67, 197, 255, 0.4);
 }
 
+/* Audio Presets */
+.preset-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn-preset {
+  padding: 6px 13px;
+  font-size: 0.8rem;
+  border-radius: 8px;
+  background: rgba(8, 25, 40, 0.84);
+  border: 1px solid rgba(130, 189, 245, 0.25);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-transform: capitalize;
+}
+
+.btn-preset.active {
+  background: rgba(67, 197, 255, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px rgba(67, 197, 255, 0.15);
+}
+
+.btn-preset:hover:not(.active):not(:disabled) {
+  border-color: rgba(130, 189, 245, 0.45);
+  color: var(--text-primary);
+}
+
 @media (max-width: 720px) {
   .app {
     padding: 12px 10px 18px;

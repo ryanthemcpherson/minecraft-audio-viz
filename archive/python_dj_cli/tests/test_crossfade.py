@@ -11,7 +11,6 @@ import time
 from unittest.mock import patch
 
 import pytest
-
 from audio_processor.timeline.cue_executor import (
     EASING_FUNCTIONS,
     CrossfadeState,

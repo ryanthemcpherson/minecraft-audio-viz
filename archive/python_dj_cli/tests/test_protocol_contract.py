@@ -12,7 +12,6 @@ import json
 from typing import Any
 
 import pytest
-
 from audio_processor.app_capture import PRESETS
 from audio_processor.config import PRESETS as CONFIG_PRESETS
 from audio_processor.config import AudioConfig

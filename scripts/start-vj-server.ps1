@@ -29,5 +29,5 @@ Write-Host "Waiting for DJ connections..." -ForegroundColor Gray
 Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
-# Run
-& audioviz-vj @arguments
+# Run (uses vj_server package)
+& python -m vj_server.cli @arguments

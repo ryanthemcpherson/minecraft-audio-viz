@@ -8,24 +8,35 @@ Minecraft Audio Visualizer is a real-time audio visualization system that captur
 
 ## Architecture
 
-Three-tier distributed system:
+Distributed system with Rust DJ client + Python VJ server:
 ```
-Windows Audio (WASAPI) → Python FFT Processor → WebSocket → Minecraft Plugin + Browser Preview
-                                                    ↓
-                                              Admin Panel (DJ Control)
+System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSocket → VJ Server
+                                                                          ↓
+                                              Minecraft Plugin + Browser Preview + Admin Panel
 ```
 
 ### Core Components
 
-1. **audio_processor/** (Python) - Audio capture, FFT analysis, beat detection, pattern generation
-   - `cli.py` - CLI entry points (`audioviz`, `audioviz-vj`)
-   - `config.py` - Centralized configuration and presets
-   - `app_capture.py` - Per-application audio capture
-   - `fft_analyzer.py` - 5-band FFT with beat/drum detection
-   - `patterns.py` - 15+ visualization patterns (VisualizationPattern base class)
-   - `vj_server.py` - Multi-DJ server for centralized control
+1. **dj_client/** (Rust/Tauri) - Desktop DJ client for audio capture and streaming
+   - `src-tauri/src/audio/capture.rs` - Audio capture via cpal (system + per-app process loopback)
+   - `src-tauri/src/audio/fft.rs` - 5-band FFT, beat detection, BPM estimation, bass lane, audio presets
+   - `src-tauri/src/audio/sources.rs` - Audio source enumeration (system, app, input device)
+   - `src-tauri/src/audio/platform/` - Platform-specific audio (Windows WASAPI, macOS, Linux)
+   - `src-tauri/src/protocol/` - WebSocket client, message types, connect-code auth
+   - `src-tauri/src/voice.rs` - Voice streaming (Opus + PCM) for Simple Voice Chat
+   - `src-tauri/src/lib.rs` - Tauri commands (start_capture, connect, set_preset, etc.)
+   - `src/App.tsx` - React frontend (audio source selection, preset picker, voice controls)
 
-2. **minecraft_plugin/** (Java 21, Paper API) - Minecraft visualization rendering
+2. **vj_server/** (Python) - Multi-DJ visualization server
+   - `vj_server.py` - Central server: DJ auth, queue management, pattern engine, Minecraft relay
+   - `patterns.py` - 25+ visualization patterns (VisualizationPattern base class)
+   - `config.py` - Audio presets (auto, edm, chill, rock, hiphop, classical) and server config
+   - `auth.py` - DJ/VJ authentication (bcrypt, SHA256, connect codes)
+   - `cli.py` - CLI entry point (`audioviz-vj`)
+   - `spectrograph.py` - Terminal spectrograph display
+   - `pyproject.toml` (name: mcav-vj-server) - Independent package
+
+3. **minecraft_plugin/** (Java 21, Paper API) - Minecraft visualization rendering
    - `AudioVizPlugin.java` - Main plugin entry point
    - `entities/EntityPoolManager.java` - Pre-allocated Display Entity pools with batch updates
    - `entities/EntityUpdate.java` - Immutable update record for batching
@@ -36,19 +47,19 @@ Windows Audio (WASAPI) → Python FFT Processor → WebSocket → Minecraft Plug
    - `gui/menus/` - In-game inventory menus
    - `particles/` - Beat-reactive particle effects
 
-3. **admin_panel/** - DJ control interface (vanilla JS with debouncing)
-4. **preview_tool/frontend/** - Three.js 3D browser preview
-5. **python_client/** - `VizClient` WebSocket client library
-6. **scripts/** - Quick-start PowerShell scripts
+4. **admin_panel/** - DJ control interface (vanilla JS with debouncing)
+5. **preview_tool/frontend/** - Three.js 3D browser preview
+6. **python_client/** - `VizClient` WebSocket client library (used by vj_server)
+7. **scripts/** - Quick-start PowerShell scripts
 
-7. **site/** (TypeScript/React) - Landing page and pattern gallery at mcav.live
+8. **site/** (TypeScript/React) - Landing page and pattern gallery at mcav.live
    - Next.js 15 with App Router, React 19, Tailwind CSS 4
    - `src/app/` - Pages (home, getting started, pattern gallery, login, dashboard)
    - `src/components/` - Navbar, AuthProvider, Three.js visualizations
    - `src/lib/` - Auth utilities, audio simulation, pattern implementations
    - `package.json` (name: mcav-site) - Independent from root package.json
 
-8. **coordinator/** (Python 3.12+) - Central DJ coordinator API
+9. **coordinator/** (Python 3.12+) - Central DJ coordinator API
    - FastAPI with SQLAlchemy async, PostgreSQL, Alembic migrations
    - `app/main.py` - FastAPI application entry point
    - `app/config.py` - Pydantic Settings configuration (MCAV_* env vars)
@@ -60,15 +71,18 @@ Windows Audio (WASAPI) → Python FFT Processor → WebSocket → Minecraft Plug
    - `pyproject.toml` (name: mcav-coordinator) - Independent from root pyproject.toml
    - `Dockerfile` + `Procfile` - Railway deployment
 
-9. **worker/** (TypeScript) - Cloudflare Workers tenant router
-   - `src/index.ts` - Wildcard subdomain routing for multi-tenant
-   - `wrangler.toml` - Cloudflare Workers configuration
-   - `package.json` (name: mcav-tenant-router)
+10. **worker/** (TypeScript) - Cloudflare Workers tenant router
+    - `src/index.ts` - Wildcard subdomain routing for multi-tenant
+    - `wrangler.toml` - Cloudflare Workers configuration
+    - `package.json` (name: mcav-tenant-router)
+
+11. **archive/python_dj_cli/** - Archived Python DJ CLI (replaced by dj_client/)
+    - Preserved for reference only; see `archive/python_dj_cli/README.md`
 
 ### WebSocket Ports
-- 8765: Minecraft plugin ↔ Python processor
-- 8766: Browser clients ↔ Python processor
-- 9000: Remote DJs ↔ VJ server
+- 8765: Minecraft plugin ↔ VJ server
+- 8766: Browser clients ↔ VJ server
+- 9000: Remote DJs (Rust client) ↔ VJ server
 - 8090: Coordinator REST API
 - 3000: Site dev server (Next.js)
 
@@ -78,6 +92,25 @@ Bass (40-250Hz), Low-mid (250-500Hz), Mid (500-2000Hz), High-mid (2-6kHz), High 
 Note: The system uses 5 frequency bands with ultra-low-latency mode (21ms window) as default. Sub-bass was removed since 1024-sample FFT cannot accurately detect frequencies below 43Hz.
 
 ## Quick Start
+
+### DJ Client (Rust/Tauri)
+```bash
+cd dj_client
+npm install
+npm run tauri dev                            # Development mode
+npm run tauri build                          # Production build
+```
+
+### VJ Server (Python)
+```bash
+# Install VJ server
+cd vj_server && pip install -e .
+
+# Run VJ server (multi-DJ mode)
+audioviz-vj
+audioviz-vj --port 9000 --minecraft-host mc.local
+audioviz-vj --no-auth                        # Dev only - skip authentication
+```
 
 ### Site & Coordinator Development
 ```bash
@@ -93,50 +126,13 @@ uvicorn app.main:app --reload --port 8090   # http://localhost:8090
 cd coordinator && pytest
 ```
 
-### Installation
-```bash
-# Using UV (recommended)
-uv pip install -e .
-
-# Or using pip
-pip install -e .
-
-# With all optional dependencies
-pip install -e ".[full]"
-```
-
-### Running
-```bash
-# Local DJ mode (captures Spotify, sends to localhost)
-audioviz
-
-# Specify application and host
-audioviz --app chrome --host 192.168.1.100
-
-# Test mode (no Minecraft, just spectrograph)
-audioviz --test
-
-# VJ server mode (for multi-DJ setups)
-audioviz-vj
-
-# List audio apps/devices
-audioviz --list-apps
-audioviz --list-devices
-```
-
 ### PowerShell Scripts
 ```powershell
-# Install
+# Install VJ server
 .\scripts\install.ps1
-
-# Local DJ mode
-.\scripts\start-local.ps1 -App spotify -Preview
 
 # VJ server
 .\scripts\start-vj-server.ps1
-
-# Test audio capture
-.\scripts\test-audio.ps1 -ListApps
 ```
 
 ## Build Commands
@@ -148,16 +144,17 @@ mvn package                                  # Build JAR with shaded dependencie
 # Output: target/audioviz-plugin-1.0.0-SNAPSHOT.jar → copy to plugins/
 ```
 
-### Tests
+### Rust (DJ Client)
 ```bash
-pytest                                       # Python tests
-pytest audio_processor/tests/test_beat_detection.py  # Specific test
+cd dj_client/src-tauri
+cargo build                                  # Build Rust backend
+cargo test                                   # Run Rust tests
 ```
 
 ## Key Patterns & Extension Points
 
 ### Adding a Visualization Pattern
-Extend `VisualizationPattern` in `audio_processor/patterns.py`:
+Extend `VisualizationPattern` in `vj_server/patterns.py`:
 ```python
 class MyPattern(VisualizationPattern):
     def calculate_entities(self, audio_state: AudioState, config: PatternConfig) -> List[EntityData]:
@@ -166,14 +163,16 @@ class MyPattern(VisualizationPattern):
 Register in `get_pattern()` and `list_patterns()`.
 
 ### Adding an Audio Preset
-Add to `PRESETS` dict in `audio_processor/config.py`:
+Presets are defined in both the Rust DJ client (`dj_client/src-tauri/src/audio/fft.rs`) and the VJ server (`vj_server/config.py`). Add to both:
+
+**Rust (DJ client):**
+```rust
+AudioPreset { name: "mypreset", attack: 0.5, release: 0.1, beat_threshold: 1.3, .. }
+```
+
+**Python (VJ server):**
 ```python
-"mypreset": AudioConfig(
-    attack=0.5,
-    release=0.1,
-    beat_threshold=1.3,
-    # ... other settings
-)
+"mypreset": AudioConfig(attack=0.5, release=0.1, beat_threshold=1.3, ...)
 ```
 
 ### Adding a Particle Effect
@@ -193,7 +192,8 @@ Extend `Menu` in `minecraft_plugin/.../gui/menus/`.
 
 ## Configuration Files
 
-- `pyproject.toml` - Python package configuration
+- `vj_server/pyproject.toml` - VJ server Python package
+- `dj_client/src-tauri/Cargo.toml` - DJ client Rust dependencies
 - `.env` - Environment variables (copy from `.env.example`)
 - `configs/dj_auth.json` - DJ credentials and permissions
 - `minecraft_plugin/src/main/resources/config.yml` - Plugin settings
@@ -201,12 +201,12 @@ Extend `Menu` in `minecraft_plugin/.../gui/menus/`.
 
 ## Data Flow
 
-Audio frames flow as JSON via WebSocket:
+Audio frames flow from DJ client to VJ server as JSON via WebSocket:
 ```json
-{"bands": [0.8, 0.6, ...], "peak": 0.9, "beat": true, "frame": 12345}
+{"type": "dj_audio_frame", "bands": [0.8, 0.6, ...], "peak": 0.9, "beat": true, "bpm": 128.0, "i_bass": 0.7, "i_kick": true, "seq": 12345}
 ```
 
-Entity updates use batch_update messages with normalized (0-1) positions that ZoneManager converts to world coordinates.
+The VJ server forwards visualization data to Minecraft as batch_update messages with normalized (0-1) positions that ZoneManager converts to world coordinates.
 
 ## Performance Notes
 
@@ -224,18 +224,10 @@ Entity updates use batch_update messages with normalized (0-1) positions that Zo
 
 All WebSocket connections support configurable timeouts and automatic reconnection with exponential backoff. See `docs/CONNECTIVITY.md` for full architecture documentation.
 
-### DJRelayConfig Options
-```python
-from audio_processor.dj_relay import DJRelayConfig
+### DJ Client (Rust)
+The Rust DJ client handles reconnection automatically with exponential backoff (1s to 30s, up to 10 retries). Configuration is managed through the Tauri frontend.
 
-config = DJRelayConfig(
-    max_connect_attempts=3,     # Initial connection retries (default: 3)
-    reconnect_interval=5.0,     # Initial backoff in seconds (default: 5.0)
-    heartbeat_interval=2.0,     # Heartbeat frequency in seconds (default: 2.0)
-)
-```
-
-### VizClient Options
+### VizClient Options (Python - used by VJ server)
 ```python
 from python_client import VizClient
 
@@ -246,25 +238,10 @@ client = VizClient(
 )
 ```
 
-### Network Tuning Examples
-
-**LAN Deployment (Low Latency):**
-```python
-# Aggressive reconnection for reliable local networks
-config = DJRelayConfig(reconnect_interval=2.0, heartbeat_interval=1.0, max_connect_attempts=5)
-client = VizClient(connect_timeout=5.0, auto_reconnect=True)
-```
-
-**WAN Deployment (High Latency):**
-```python
-# Patient reconnection for internet connections
-config = DJRelayConfig(reconnect_interval=10.0, heartbeat_interval=5.0, max_connect_attempts=3)
-client = VizClient(connect_timeout=30.0, auto_reconnect=True, max_reconnect_attempts=15)
-```
-
 ## Platform Notes
 
-- **Windows-only** audio capture (WASAPI via pycaw)
+- **DJ Client**: Cross-platform audio via cpal; per-app capture uses Windows Process Loopback API (build 20348+)
+- **VJ Server**: Python 3.11+, runs on any platform
 - Requires **Paper/Spigot 1.21.1+** (Display Entities)
 - **Java 21** for Minecraft plugin
-- **Python 3.11+** for audio processor
+- **Rust** + **Node.js** for DJ client (Tauri v2)

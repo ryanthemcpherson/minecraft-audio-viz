@@ -1,14 +1,13 @@
-# AudioViz - Installation Script
-# Installs the Python package using UV or pip
+# MCAV - Installation Script
+# Installs the VJ Server package using UV or pip
 
 param(
-    [switch]$Dev,
     [switch]$Full,
     [switch]$UsePip
 )
 
-Write-Host "AudioViz - Installation" -ForegroundColor Cyan
-Write-Host "=======================" -ForegroundColor Cyan
+Write-Host "MCAV VJ Server - Installation" -ForegroundColor Cyan
+Write-Host "==============================" -ForegroundColor Cyan
 Write-Host ""
 
 # Check for UV first
@@ -28,18 +27,15 @@ $extras = ""
 if ($Full) {
     $extras = "[full]"
     Write-Host "Installing with all optional dependencies" -ForegroundColor White
-} elseif ($Dev) {
-    $extras = "[dev]"
-    Write-Host "Installing with development dependencies" -ForegroundColor White
 }
 
-# Install
+# Install from vj_server/ directory
 if ($useUV) {
-    Write-Host "Running: uv pip install -e .$extras" -ForegroundColor Gray
-    uv pip install -e ".$extras"
+    Write-Host "Running: uv pip install -e ./vj_server$extras" -ForegroundColor Gray
+    uv pip install -e "./vj_server$extras"
 } else {
-    Write-Host "Running: pip install -e .$extras" -ForegroundColor Gray
-    pip install -e ".$extras"
+    Write-Host "Running: pip install -e ./vj_server$extras" -ForegroundColor Gray
+    pip install -e "./vj_server$extras"
 }
 
 if ($LASTEXITCODE -eq 0) {
@@ -47,9 +43,8 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "Installation successful!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Available commands:" -ForegroundColor White
-    Write-Host "  audioviz          - Local DJ mode" -ForegroundColor Gray
     Write-Host "  audioviz-vj       - VJ server mode" -ForegroundColor Gray
-    Write-Host "  audioviz --help   - Show all options" -ForegroundColor Gray
+    Write-Host "  audioviz-vj --help - Show all options" -ForegroundColor Gray
 } else {
     Write-Host ""
     Write-Host "Installation failed!" -ForegroundColor Red

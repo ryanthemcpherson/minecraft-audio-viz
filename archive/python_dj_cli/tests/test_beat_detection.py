@@ -612,7 +612,6 @@ class TestBPMEstimation:
         )
 
         import numpy as np
-
         from audio_processor.fft_analyzer import FFTAnalyzer
 
         # Create analyzer without starting capture

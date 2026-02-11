@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from audio_processor.vj_server import (
+from vj_server.vj_server import (
     _clamp_finite,
     _sanitize_audio_frame,
     _sanitize_entities,
@@ -324,7 +324,7 @@ class TestSanitizeEntities:
 class TestRateLimiter:
     def test_rate_limit_allows_normal_rate(self):
         """DJConnection.check_rate_limit should allow frames under the limit."""
-        from audio_processor.vj_server import DJConnection
+        from vj_server.vj_server import DJConnection
 
         # Create a mock-like DJConnection (need a websocket arg)
         class FakeWS:
@@ -338,7 +338,7 @@ class TestRateLimiter:
 
     def test_rate_limit_drops_excess(self):
         """After exhausting tokens, check_rate_limit should return False."""
-        from audio_processor.vj_server import DJConnection
+        from vj_server.vj_server import DJConnection
 
         class FakeWS:
             remote_address = ("127.0.0.1", 1234)

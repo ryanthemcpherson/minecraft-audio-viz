@@ -8,7 +8,7 @@ pub mod protocol;
 pub mod state;
 pub mod voice;
 
-use audio::{AudioCaptureHandle, AudioSource};
+use audio::{AudioCaptureHandle, AudioPreset, AudioSource};
 use protocol::{AudioFrameMessage, DjClient, DjClientConfig};
 use state::AppState;
 use voice::{VoiceStatus, VoiceStreamer};
@@ -360,6 +360,11 @@ async fn run_bridge(
         let mut next_mc_connect_attempt = Instant::now();
         let mut last_phase_predicted_beat_at = 0.0_f64;
         let mut last_mc_send = Instant::now() - Duration::from_secs(1);
+        // Throttle UI events: audio-levels ~30fps, status/voice ~4fps
+        let mut last_audio_emit = Instant::now() - Duration::from_secs(1);
+        let mut last_status_emit = Instant::now() - Duration::from_secs(1);
+        let mut prev_status_hash: u64 = 0;
+        let mut prev_voice_hash: u64 = 0;
         // Track whether this iteration exited due to explicit shutdown
         let mut shutdown_requested = false;
 
@@ -445,6 +450,9 @@ async fn run_bridge(
                     }
 
                     // 2. Send audio frame if we have analysis data
+                    // Hoist beat output vars for use in UI event emission (section 3)
+                    let mut out_is_beat = analysis.as_ref().map_or(false, |a| a.is_beat);
+                    let mut out_beat_intensity = analysis.as_ref().map_or(0.0, |a| a.beat_intensity);
                     if let Some(ref analysis) = analysis {
                         let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
                         let now_secs = std::time::SystemTime::now()
@@ -455,8 +463,6 @@ async fn run_bridge(
                         // Phase-aware beat assist: when tempo lock is strong and phase is near
                         // the beat boundary, emit a conservative predicted beat so both VJ and
                         // direct MC routes stay visually tight.
-                        let mut out_is_beat = analysis.is_beat;
-                        let mut out_beat_intensity = analysis.beat_intensity;
                         if !out_is_beat && analysis.tempo_confidence >= 0.60 && analysis.bpm >= 60.0 {
                             let beat_period = 60.0_f64 / analysis.bpm as f64;
                             let phase = analysis.beat_phase.clamp(0.0, 1.0);
@@ -471,6 +477,12 @@ async fn run_bridge(
                             }
                         }
 
+                        // Use bass lane kick to supplement beat detection
+                        if !out_is_beat && analysis.instant_kick {
+                            out_is_beat = true;
+                            out_beat_intensity = out_beat_intensity.max(0.5);
+                        }
+
                         let msg = AudioFrameMessage::new(
                             seq,
                             analysis.bands,
@@ -480,6 +492,8 @@ async fn run_bridge(
                             analysis.bpm,
                             analysis.tempo_confidence,
                             analysis.beat_phase,
+                            analysis.instant_bass,
+                            analysis.instant_kick,
                         );
 
                         if let Ok(json) = serde_json::to_string(&msg) {
@@ -547,6 +561,8 @@ async fn run_bridge(
                                     "bpm": analysis.bpm,
                                     "tempo_confidence": analysis.tempo_confidence,
                                     "beat_phase": analysis.beat_phase,
+                                    "i_bass": analysis.instant_bass,
+                                    "i_kick": analysis.instant_kick,
                                     "frame": seq,
                                     "source_id": "dj_tauri_client",
                                     "stream_seq": seq
@@ -593,14 +609,29 @@ async fn run_bridge(
                         }
                     }
 
-                    // 3. Update connection state from DjClient and emit events
-                    {
+                    // 3. Update connection state from DjClient (brief lock, no events)
+                    let (status_snapshot, voice_snapshot, preset_changed) = {
                         let mc_is_connected = mc_tx.is_some();
                         let mut app_state = state_arc.lock();
                         // Update the atomic flag for heartbeats before borrowing mutably
                         if let Some(ref client) = app_state.client {
                             client.set_mc_connected(mc_is_connected);
                         }
+
+                        // Check for preset_sync from server
+                        let mut preset_event: Option<String> = None;
+                        if let Some(ref client) = app_state.client {
+                            if let Some(preset_name) = client.take_pending_preset() {
+                                if let Some(preset) = audio::get_preset(&preset_name) {
+                                    if let Some(ref capture) = app_state.audio_capture {
+                                        capture.analyzer().lock().apply_preset(&preset);
+                                    }
+                                    app_state.active_preset = preset.name.clone();
+                                    preset_event = Some(preset.name.clone());
+                                }
+                            }
+                        }
+
                         if let Some(ref client) = app_state.client {
                             let latest = client.get_state();
                             app_state.status.is_active = latest.is_active;
@@ -624,18 +655,56 @@ async fn run_bridge(
                             }
                         }
 
-                        // Push audio levels and status to frontend via events
-                        if let Some(ref analysis) = analysis {
+                        // Clone data for events — lock is released after this block
+                        (app_state.status.clone(), app_state.voice_status.clone(), preset_event)
+                    };
+                    // state_arc lock dropped — emit events without holding any lock
+
+                    if let Some(ref preset_name) = preset_changed {
+                        let _ = app_handle.emit("preset-changed", preset_name);
+                    }
+
+                    // Audio levels: emit at ~30fps, but always emit immediately on beat
+                    if let Some(ref analysis) = analysis {
+                        let is_beat_frame = analysis.is_beat || out_is_beat;
+                        if is_beat_frame || last_audio_emit.elapsed() >= Duration::from_millis(33) {
                             let _ = app_handle.emit("audio-levels", AudioLevels {
                                 bands: analysis.bands,
                                 peak: analysis.peak,
-                                is_beat: analysis.is_beat,
-                                beat_intensity: analysis.beat_intensity,
+                                is_beat: out_is_beat,
+                                beat_intensity: out_beat_intensity,
                                 bpm: analysis.bpm,
                             });
+                            last_audio_emit = Instant::now();
                         }
-                        let _ = app_handle.emit("dj-status", &app_state.status);
-                        let _ = app_handle.emit("voice-status", &app_state.voice_status);
+                    }
+
+                    // Status + voice: emit at ~4fps OR immediately on change
+                    {
+                        use std::hash::{Hash, Hasher};
+                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                        format!("{:?}", status_snapshot).hash(&mut h);
+                        let s_hash = h.finish();
+
+                        let mut h2 = std::collections::hash_map::DefaultHasher::new();
+                        format!("{:?}", voice_snapshot).hash(&mut h2);
+                        let v_hash = h2.finish();
+
+                        let status_changed = s_hash != prev_status_hash;
+                        let voice_changed = v_hash != prev_voice_hash;
+                        let throttle_elapsed = last_status_emit.elapsed() >= Duration::from_millis(250);
+
+                        if status_changed || throttle_elapsed {
+                            let _ = app_handle.emit("dj-status", &status_snapshot);
+                            prev_status_hash = s_hash;
+                        }
+                        if voice_changed || throttle_elapsed {
+                            let _ = app_handle.emit("voice-status", &voice_snapshot);
+                            prev_voice_hash = v_hash;
+                        }
+                        if status_changed || voice_changed || throttle_elapsed {
+                            last_status_emit = Instant::now();
+                        }
                     }
                 }
             }
@@ -766,6 +835,12 @@ async fn start_capture(
         .map_err(|e| e.to_string())?;
 
     let mut app_state = state.0.lock();
+
+    // Apply the active preset to the new analyzer
+    if let Some(preset) = audio::get_preset(&app_state.active_preset) {
+        capture.analyzer().lock().apply_preset(&preset);
+    }
+
     app_state.audio_capture = Some(capture);
     app_state.voice_streamer = Some(voice_streamer);
 
@@ -928,6 +1003,30 @@ async fn set_voice_config(
     Ok(())
 }
 
+/// List available audio presets
+#[tauri::command]
+fn list_presets() -> Vec<AudioPreset> {
+    audio::get_presets()
+}
+
+/// Get the currently active preset name
+#[tauri::command]
+fn get_current_preset(state: State<'_, AppStateWrapper>) -> String {
+    state.0.lock().active_preset.clone()
+}
+
+/// Apply an audio preset by name
+#[tauri::command]
+fn set_preset(state: State<'_, AppStateWrapper>, name: String) -> Result<String, String> {
+    let preset = audio::get_preset(&name).ok_or_else(|| format!("Unknown preset: {}", name))?;
+    let mut app_state = state.0.lock();
+    if let Some(ref capture) = app_state.audio_capture {
+        capture.analyzer().lock().apply_preset(&preset);
+    }
+    app_state.active_preset = preset.name.clone();
+    Ok(preset.name)
+}
+
 /// Get current connection status
 #[tauri::command]
 fn get_status(state: State<'_, AppStateWrapper>) -> state::ConnectionStatus {
@@ -990,6 +1089,9 @@ pub fn run() {
             set_voice_streaming,
             get_voice_status,
             set_voice_config,
+            list_presets,
+            get_current_preset,
+            set_preset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
