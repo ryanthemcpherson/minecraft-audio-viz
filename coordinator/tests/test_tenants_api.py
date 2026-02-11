@@ -34,7 +34,7 @@ async def _setup_tenant(client: AsyncClient) -> dict:
     assert org_resp.status_code == 201
     org = org_resp.json()
 
-    # Register VJ server
+    # Register VJ server (requires user auth)
     server_resp = await client.post(
         "/api/v1/servers/register",
         json={
@@ -42,6 +42,7 @@ async def _setup_tenant(client: AsyncClient) -> dict:
             "websocket_url": "wss://example.com/ws",
             "api_key": "tenant-test-key",
         },
+        headers={"Authorization": f"Bearer {auth['access_token']}"},
     )
     assert server_resp.status_code == 201
     server = server_resp.json()

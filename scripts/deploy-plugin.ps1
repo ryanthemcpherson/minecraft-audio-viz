@@ -104,6 +104,12 @@ Write-Host "[2/3] Deploying to $Server..." -ForegroundColor Yellow
 if ($DryRun) {
     Write-Host "  DRY RUN: Would copy $($jarFile.Name) to ${User}@${Server}:${PluginsDir}/" -ForegroundColor DarkGray
 } else {
+    ssh ${User}@${Server} "mkdir -p '$PluginsDir' && rm -f '$PluginsDir'/audioviz-plugin-*.jar"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  FAILED to prepare plugins directory on remote host" -ForegroundColor Red
+        exit 1
+    }
+
     # Copy JAR via SCP
     $scpTarget = "${User}@${Server}:${PluginsDir}/"
     Write-Host "  Copying $($jarFile.Name) -> $scpTarget" -ForegroundColor Gray

@@ -119,7 +119,7 @@ class TestAssignServer:
         auth = await _register_and_auth(client)
         org = await _create_org(client, auth["access_token"])
 
-        # Register a VJ server
+        # Register a VJ server (requires user auth)
         server_resp = await client.post(
             "/api/v1/servers/register",
             json={
@@ -127,6 +127,7 @@ class TestAssignServer:
                 "websocket_url": "wss://example.com/ws",
                 "api_key": "test-api-key",
             },
+            headers={"Authorization": f"Bearer {auth['access_token']}"},
         )
         assert server_resp.status_code == 201
         server_id = server_resp.json()["server_id"]

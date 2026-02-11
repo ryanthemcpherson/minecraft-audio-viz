@@ -409,17 +409,10 @@ class TestPresets:
     """Test preset configurations."""
 
     def test_all_presets_valid(self):
-        """All presets should have required keys."""
-        import os
-        import sys
-
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-
+        """All presets should have required attributes."""
         from audio_processor.app_capture import PRESETS
 
-        required_keys = [
+        required_attrs = [
             "attack",
             "release",
             "beat_threshold",
@@ -429,50 +422,32 @@ class TestPresets:
         ]
 
         for preset_name, preset in PRESETS.items():
-            for key in required_keys:
-                assert key in preset, f"Preset '{preset_name}' missing key '{key}'"
+            for attr in required_attrs:
+                assert hasattr(preset, attr), f"Preset '{preset_name}' missing attribute '{attr}'"
 
     def test_preset_values_in_range(self):
         """Preset values should be within valid ranges."""
-        import os
-        import sys
-
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-
         from audio_processor.app_capture import PRESETS
 
         for preset_name, preset in PRESETS.items():
-            assert 0 < preset["attack"] <= 1, f"{preset_name}: attack out of range"
-            assert 0 < preset["release"] <= 1, f"{preset_name}: release out of range"
-            assert 0.5 <= preset["beat_threshold"] <= 3, (
-                f"{preset_name}: beat_threshold out of range"
-            )
-            assert 1 <= preset["agc_max_gain"] <= 20, f"{preset_name}: agc_max_gain out of range"
-            assert 0 < preset["beat_sensitivity"] <= 3, (
-                f"{preset_name}: beat_sensitivity out of range"
-            )
-            assert len(preset["band_sensitivity"]) == 5, (
+            assert 0 < preset.attack <= 1, f"{preset_name}: attack out of range"
+            assert 0 < preset.release <= 1, f"{preset_name}: release out of range"
+            assert 0.5 <= preset.beat_threshold <= 3, f"{preset_name}: beat_threshold out of range"
+            assert 1 <= preset.agc_max_gain <= 20, f"{preset_name}: agc_max_gain out of range"
+            assert 0 < preset.beat_sensitivity <= 3, f"{preset_name}: beat_sensitivity out of range"
+            assert len(preset.band_sensitivity) == 5, (
                 f"{preset_name}: band_sensitivity wrong length (expected 5-band system)"
             )
 
     def test_edm_preset_bass_heavy(self):
         """EDM preset should boost bass bands."""
-        import os
-        import sys
-
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-
         from audio_processor.app_capture import PRESETS
 
         edm = PRESETS["edm"]
         # Bass band (index 0) should be boosted (> 1.0)
-        assert edm["band_sensitivity"][0] > 1.0, "EDM should boost bass"
+        assert edm.band_sensitivity[0] > 1.0, "EDM should boost bass"
         # Bass weight should be high
-        assert edm.get("bass_weight", 0.7) >= 0.8, "EDM should have high bass weight"
+        assert getattr(edm, "bass_weight", 0.7) >= 0.8, "EDM should have high bass weight"
 
 
 class TestAGC:

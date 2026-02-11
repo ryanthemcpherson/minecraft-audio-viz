@@ -212,7 +212,7 @@ async function api<T>(
   });
 
   // On 401 with a Bearer token, try to refresh and retry once
-  if (res.status === 401 && mergedHeaders.Authorization?.startsWith("Bearer ")) {
+  if (res.status === 401 && (mergedHeaders as Record<string, string>).Authorization?.startsWith("Bearer ")) {
     const newToken = await tryRefreshAccessToken();
     if (newToken) {
       const retryHeaders = { ...mergedHeaders, Authorization: `Bearer ${newToken}` };

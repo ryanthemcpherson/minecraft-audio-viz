@@ -10,6 +10,38 @@ import pytest
 from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _get_user_token(client: AsyncClient, email: str = "test@example.com") -> str:
+    """Register a user and return the access token for authenticated requests."""
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "testpass123", "display_name": "Test User"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["access_token"]
+
+
+async def _register_server(
+    client: AsyncClient,
+    user_token: str,
+    name: str = "Test Stage",
+    websocket_url: str = "ws://localhost:9000",
+    api_key: str = "my-secret-api-key",
+) -> dict:
+    """Register a VJ server with user auth and return the response data."""
+    resp = await client.post(
+        "/api/v1/servers/register",
+        json={"name": name, "websocket_url": websocket_url, "api_key": api_key},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -32,16 +64,8 @@ async def test_health_returns_ok(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_register_server(client: AsyncClient) -> None:
-    resp = await client.post(
-        "/api/v1/servers/register",
-        json={
-            "name": "Test Stage",
-            "websocket_url": "ws://localhost:9000",
-            "api_key": "my-secret-api-key",
-        },
-    )
-    assert resp.status_code == 201
-    data = resp.json()
+    user_token = await _get_user_token(client)
+    data = await _register_server(client, user_token)
     assert data["name"] == "Test Stage"
     assert "server_id" in data
     assert data["jwt_secret"].startswith("jws_")
@@ -56,17 +80,17 @@ async def test_register_server(client: AsyncClient) -> None:
 async def test_full_flow(client: AsyncClient) -> None:
     """Register a server, create a show, and resolve the connect code."""
 
+    # 0. Get auth token
+    user_token = await _get_user_token(client, "flow@example.com")
+
     # 1. Register a VJ server
-    reg_resp = await client.post(
-        "/api/v1/servers/register",
-        json={
-            "name": "Main Stage",
-            "websocket_url": "ws://192.168.1.50:9000",
-            "api_key": "test-key-12345",
-        },
+    reg_data = await _register_server(
+        client,
+        user_token,
+        name="Main Stage",
+        websocket_url="ws://192.168.1.50:9000",
+        api_key="test-key-12345",
     )
-    assert reg_resp.status_code == 201
-    reg_data = reg_resp.json()
     server_id = reg_data["server_id"]
     jwt_secret = reg_data["jwt_secret"]
 
@@ -163,15 +187,15 @@ async def test_create_show_wrong_key_returns_401(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_heartbeat(client: AsyncClient) -> None:
     # Register first
-    reg_resp = await client.post(
-        "/api/v1/servers/register",
-        json={
-            "name": "Heartbeat Server",
-            "websocket_url": "ws://localhost:9001",
-            "api_key": "heartbeat-key",
-        },
+    user_token = await _get_user_token(client, "heartbeat@example.com")
+    reg_data = await _register_server(
+        client,
+        user_token,
+        name="Heartbeat Server",
+        websocket_url="ws://localhost:9001",
+        api_key="heartbeat-key",
     )
-    server_id = reg_resp.json()["server_id"]
+    server_id = reg_data["server_id"]
 
     # Send heartbeat
     hb_resp = await client.put(
@@ -186,13 +210,13 @@ async def test_heartbeat(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_heartbeat_wrong_server_returns_403(client: AsyncClient) -> None:
     # Register a server
-    await client.post(
-        "/api/v1/servers/register",
-        json={
-            "name": "Server A",
-            "websocket_url": "ws://localhost:9002",
-            "api_key": "key-a",
-        },
+    user_token = await _get_user_token(client, "hb403@example.com")
+    await _register_server(
+        client,
+        user_token,
+        name="Server A",
+        websocket_url="ws://localhost:9002",
+        api_key="key-a",
     )
     # Try to heartbeat a different server_id
     hb_resp = await client.put(
@@ -205,15 +229,15 @@ async def test_heartbeat_wrong_server_returns_403(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_end_show_twice_returns_400(client: AsyncClient) -> None:
     # Register + create show
-    reg = await client.post(
-        "/api/v1/servers/register",
-        json={
-            "name": "Double End",
-            "websocket_url": "ws://localhost:9003",
-            "api_key": "double-end-key",
-        },
+    user_token = await _get_user_token(client, "doubleend@example.com")
+    reg_data = await _register_server(
+        client,
+        user_token,
+        name="Double End",
+        websocket_url="ws://localhost:9003",
+        api_key="double-end-key",
     )
-    server_id = reg.json()["server_id"]
+    server_id = reg_data["server_id"]
 
     show = await client.post(
         "/api/v1/shows",

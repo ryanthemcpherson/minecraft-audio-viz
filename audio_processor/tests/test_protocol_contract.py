@@ -131,12 +131,12 @@ def make_preset_changed_message(preset_name="edm"):
         "type": "preset_changed",
         "preset": preset_name,
         "settings": {
-            "attack": preset["attack"],
-            "release": preset["release"],
-            "beat_threshold": preset["beat_threshold"],
-            "agc_max_gain": preset["agc_max_gain"],
-            "beat_sensitivity": preset["beat_sensitivity"],
-            "band_sensitivity": preset["band_sensitivity"],
+            "attack": preset.attack,
+            "release": preset.release,
+            "beat_threshold": preset.beat_threshold,
+            "agc_max_gain": preset.agc_max_gain,
+            "beat_sensitivity": preset.beat_sensitivity,
+            "band_sensitivity": list(preset.band_sensitivity),
         },
     }
 
@@ -460,7 +460,7 @@ class TestPresetConfiguration:
     def test_app_capture_presets_band_sensitivity_length(self):
         """All presets in app_capture.PRESETS must have band_sensitivity of length 5."""
         for name, preset in PRESETS.items():
-            bands = preset.get("band_sensitivity")
+            bands = preset.band_sensitivity
             assert bands is not None, f"app_capture preset '{name}' missing 'band_sensitivity'"
             assert len(bands) == 5, (
                 f"app_capture preset '{name}': band_sensitivity has "
@@ -479,8 +479,8 @@ class TestPresetConfiguration:
             )
 
     def test_app_capture_presets_required_keys(self):
-        """All app_capture presets must have the required audio config keys."""
-        required_keys = {
+        """All app_capture presets must have the required audio config attributes."""
+        required_attrs = [
             "attack",
             "release",
             "beat_threshold",
@@ -488,10 +488,12 @@ class TestPresetConfiguration:
             "beat_sensitivity",
             "bass_weight",
             "band_sensitivity",
-        }
+        ]
         for name, preset in PRESETS.items():
-            missing = required_keys - set(preset.keys())
-            assert not missing, f"app_capture preset '{name}' missing keys: {missing}"
+            for attr in required_attrs:
+                assert hasattr(preset, attr), (
+                    f"app_capture preset '{name}' missing attribute '{attr}'"
+                )
 
     def test_config_presets_have_matching_names(self):
         """The config.PRESETS and app_capture.PRESETS should share common preset names."""
@@ -515,7 +517,7 @@ class TestPresetConfiguration:
     def test_app_capture_presets_band_sensitivity_values_are_numeric(self):
         """All band_sensitivity values in app_capture.PRESETS must be numeric."""
         for name, preset in PRESETS.items():
-            for i, val in enumerate(preset["band_sensitivity"]):
+            for i, val in enumerate(preset.band_sensitivity):
                 assert isinstance(val, (int, float)), (
                     f"app_capture preset '{name}': band_sensitivity[{i}] "
                     f"is {type(val).__name__}, expected numeric"
@@ -709,14 +711,16 @@ class TestCrossComponentConsistency:
             assert not missing, f"Entity missing keys: {missing}"
 
     def test_preset_config_keys_align_between_dicts(self):
-        """Keys present in app_capture PRESETS should align with AudioConfig fields."""
+        """Attributes in app_capture PRESETS should align with AudioConfig fields."""
         audio_config_fields = set(AudioConfig.__dataclass_fields__.keys())
-        for name, preset_dict in PRESETS.items():
-            for key in preset_dict:
-                assert key in audio_config_fields, (
-                    f"app_capture preset '{name}' has key '{key}' "
-                    f"not in AudioConfig fields: {audio_config_fields}"
-                )
+        for name, preset in PRESETS.items():
+            # PRESETS are now AudioConfig instances, so their fields are the same
+            preset_fields = set(preset.__dataclass_fields__.keys())
+            extra = preset_fields - audio_config_fields
+            assert not extra, (
+                f"app_capture preset '{name}' has fields {extra} "
+                f"not in AudioConfig fields: {audio_config_fields}"
+            )
 
     def test_five_band_frequency_layout(self):
         """The system uses exactly 5 frequency bands everywhere."""
@@ -736,8 +740,8 @@ class TestCrossComponentConsistency:
 
         # Every preset has 5 band sensitivities (app_capture)
         for name, preset in PRESETS.items():
-            assert len(preset["band_sensitivity"]) == 5, (
-                f"PRESETS['{name}'] has {len(preset['band_sensitivity'])} bands"
+            assert len(preset.band_sensitivity) == 5, (
+                f"PRESETS['{name}'] has {len(preset.band_sensitivity)} bands"
             )
 
         # Every preset has 5 band sensitivities (config)

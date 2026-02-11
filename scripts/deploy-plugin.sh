@@ -18,7 +18,7 @@ USER="ryan"
 PLUGINS_DIR="/home/ryan/minecraft-server/plugins"
 SERVER_DIR="/home/ryan/minecraft-server"
 RCON_PORT="25575"
-RCON_PASS="audioviz123"
+RCON_PASS="${MCAV_RCON_PASSWORD:-}"
 SKIP_BUILD=false
 SKIP_TESTS=false
 DO_RESTART=false
@@ -60,6 +60,11 @@ echo "  ======================"
 echo "  Server:  $USER@$SERVER"
 echo "  Plugins: $PLUGINS_DIR"
 echo ""
+
+if [ -z "$RCON_PASS" ]; then
+    echo "  ERROR: RCON password required. Set MCAV_RCON_PASSWORD or pass --rcon-pass." >&2
+    exit 1
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1: Build
@@ -124,6 +129,7 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 echo "[2/3] Deploying to $SERVER..."
 
+ssh "${USER}@${SERVER}" "mkdir -p '${PLUGINS_DIR}' && rm -f '${PLUGINS_DIR}'/audioviz-plugin-*.jar"
 scp "$JAR_FILE" "${USER}@${SERVER}:${PLUGINS_DIR}/"
 echo "  Deployed successfully"
 

@@ -20,6 +20,7 @@ env:
   DEPLOY_PATH: /home/ryan/minecraft-audio-viz
   PLUGINS_DIR: /home/ryan/minecraft-server/plugins
   JAVA_VERSION: '21'
+  RCON_PORT: '25575'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -116,6 +117,7 @@ jobs:
         run: |
           echo "=== Copying plugin JAR ==="
           mkdir -p "${{ env.PLUGINS_DIR }}"
+          rm -f "${{ env.PLUGINS_DIR }}"/audioviz-plugin-*.jar
           cp -v ./plugin-jar/audioviz-plugin-*.jar "${{ env.PLUGINS_DIR }}/"
 
       # --- Install Python dependencies ---
@@ -148,6 +150,27 @@ jobs:
           else
             echo "ERROR: minecraft.service failed to start"
             sudo journalctl -u minecraft.service --no-pager -n 30
+            exit 1
+          fi
+
+      # --- Verify plugin loaded ---
+      - name: Verify AudioViz plugin is active
+        env:
+          MCAV_RCON_PASSWORD: ${{ secrets.MCAV_RCON_PASSWORD }}
+        run: |
+          if [ -z "${MCAV_RCON_PASSWORD:-}" ]; then
+            echo "RCON secret not set; skipping plugin status check."
+            exit 0
+          fi
+
+          echo "=== Verifying AudioViz plugin via RCON ==="
+          PLUGINS_OUTPUT="$(mcrcon -H 127.0.0.1 -P "${{ env.RCON_PORT }}" -p "${MCAV_RCON_PASSWORD}" "plugins" || true)"
+          echo "$PLUGINS_OUTPUT"
+          if echo "$PLUGINS_OUTPUT" | grep -qi "AudioViz"; then
+            echo "SUCCESS: AudioViz plugin is loaded"
+          else
+            echo "ERROR: AudioViz plugin not found in plugin list"
+            sudo journalctl -u minecraft.service --no-pager -n 50
             exit 1
           fi
 
