@@ -339,6 +339,32 @@ export async function logout(refreshTokenValue: string): Promise<void> {
   });
 }
 
+export async function updateAccount(
+  accessToken: string,
+  data: { display_name?: string }
+): Promise<UserProfile> {
+  return api<UserProfile>("/api/v1/auth/me", {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function changePassword(
+  accessToken: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<UserProfile> {
+  return api<UserProfile>("/api/v1/auth/change-password", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Onboarding & org endpoints
 // ---------------------------------------------------------------------------

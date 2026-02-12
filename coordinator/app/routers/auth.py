@@ -16,6 +16,7 @@ from app.dependencies.auth import get_current_user
 from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
+    ChangePasswordRequest,
     DiscordAuthorizeResponse,
     DJProfileResponse,
     LoginRequest,
@@ -23,10 +24,12 @@ from app.models.schemas import (
     OrgSummary,
     RefreshRequest,
     RegisterRequest,
+    UpdateAccountRequest,
     UserProfileResponse,
     UserResponse,
 )
 from app.services import auth_service, discord_oauth
+from app.services.password import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -282,14 +285,8 @@ async def refresh(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/me",
-    response_model=UserProfileResponse,
-    summary="Get current user profile",
-)
-async def me(
-    user: User = Depends(get_current_user),
-) -> UserProfileResponse:
+def _build_user_profile_response(user: User) -> UserProfileResponse:
+    """Build a ``UserProfileResponse`` from a fully-loaded ``User``."""
     orgs = [
         OrgSummary(
             id=m.organization.id,
@@ -342,6 +339,68 @@ async def me(
         dj_profile=dj_profile,
         organizations=orgs,
     )
+
+
+@router.get(
+    "/me",
+    response_model=UserProfileResponse,
+    summary="Get current user profile",
+)
+async def me(
+    user: User = Depends(get_current_user),
+) -> UserProfileResponse:
+    return _build_user_profile_response(user)
+
+
+# ---------------------------------------------------------------------------
+# PATCH /auth/me
+# ---------------------------------------------------------------------------
+
+
+@router.patch(
+    "/me",
+    response_model=UserProfileResponse,
+    summary="Update current user account",
+)
+async def update_me(
+    body: UpdateAccountRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserProfileResponse:
+    if body.display_name is not None:
+        user.display_name = body.display_name
+
+    await session.commit()
+    return _build_user_profile_response(user)
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/change-password
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/change-password",
+    response_model=UserProfileResponse,
+    summary="Change password for the current user",
+)
+async def change_password(
+    body: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserProfileResponse:
+    if user.password_hash is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Account uses Discord login — set a password via email registration first",
+        )
+
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    user.password_hash = hash_password(body.new_password)
+    await session.commit()
+    return _build_user_profile_response(user)
 
 
 # ---------------------------------------------------------------------------

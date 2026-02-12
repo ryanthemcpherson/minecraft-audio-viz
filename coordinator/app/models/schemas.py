@@ -143,6 +143,15 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
 
+class UpdateAccountRequest(BaseModel):
+    display_name: str | None = Field(None, min_length=1, max_length=100)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=200)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 

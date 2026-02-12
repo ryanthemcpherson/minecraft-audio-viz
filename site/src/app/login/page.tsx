@@ -26,7 +26,7 @@ function consumeCookie(name: string): string | null {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setAuth } = useAuth();
+  const { user, loading: authLoading, setAuth } = useAuth();
 
   const [tab, setTab] = useState<Tab>("login");
   const [email, setEmail] = useState("");
@@ -36,6 +36,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const oauthHandled = useRef(false);
+
+  // Redirect already-logged-in users to dashboard
+  useEffect(() => {
+    if (!authLoading && user) {
+      router.replace(user.onboarding_completed ? "/dashboard" : "/onboarding");
+    }
+  }, [authLoading, user, router]);
 
   // Check for OAuth callback cookie (set by middleware redirect)
   useEffect(() => {
@@ -140,7 +147,7 @@ export default function LoginPage() {
         {/* Tabs */}
         <div className="mb-8 flex rounded-lg border border-white/5 bg-white/[0.02] p-1">
           <button
-            onClick={() => { setTab("login"); setError(""); }}
+            onClick={() => { setTab("login"); setError(""); setEmail(""); setPassword(""); setDisplayName(""); }}
             className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               tab === "login"
                 ? "bg-white/10 text-white"
@@ -150,7 +157,7 @@ export default function LoginPage() {
             Log in
           </button>
           <button
-            onClick={() => { setTab("signup"); setError(""); }}
+            onClick={() => { setTab("signup"); setError(""); setEmail(""); setPassword(""); setDisplayName(""); }}
             className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               tab === "signup"
                 ? "bg-white/10 text-white"
@@ -178,34 +185,26 @@ export default function LoginPage() {
           <div className="h-px flex-1 bg-white/10" />
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {tab === "signup" && (
-            <div>
-              <label htmlFor="displayName" className="mb-1 block text-sm text-text-secondary">
-                Display name
-              </label>
-              <input
-                id="displayName"
-                type="text"
-                required
-                autoComplete="name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
-                placeholder="Your name"
-              />
-            </div>
-          )}
+        {error && (
+          <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            {error}
+          </p>
+        )}
 
+        {/* Login form */}
+        <form
+          onSubmit={handleSubmit}
+          className={`flex flex-col gap-4 ${tab !== "login" ? "hidden" : ""}`}
+        >
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm text-text-secondary">
+            <label htmlFor="login-email" className="mb-1 block text-sm text-text-secondary">
               Email
             </label>
             <input
-              id="email"
+              id="login-email"
+              name="email"
               type="email"
-              required
+              required={tab === "login"}
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -215,38 +214,95 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm text-text-secondary">
+            <label htmlFor="login-password" className="mb-1 block text-sm text-text-secondary">
               Password
             </label>
             <input
-              id="password"
+              id="login-password"
+              name="password"
               type="password"
-              required
-              autoComplete={tab === "signup" ? "new-password" : "current-password"}
+              required={tab === "login"}
+              autoComplete="current-password"
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
-              placeholder={tab === "signup" ? "Min 8 characters" : "Your password"}
+              placeholder="Your password"
             />
           </div>
-
-          {error && (
-            <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-              {error}
-            </p>
-          )}
 
           <button
             type="submit"
             disabled={loading}
             className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {loading
-              ? "..."
-              : tab === "login"
-                ? "Log in"
-                : "Create account"}
+            {loading ? "..." : "Log in"}
+          </button>
+        </form>
+
+        {/* Signup form */}
+        <form
+          onSubmit={handleSubmit}
+          className={`flex flex-col gap-4 ${tab !== "signup" ? "hidden" : ""}`}
+        >
+          <div>
+            <label htmlFor="signup-name" className="mb-1 block text-sm text-text-secondary">
+              Display name
+            </label>
+            <input
+              id="signup-name"
+              name="name"
+              type="text"
+              required={tab === "signup"}
+              autoComplete="name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+              placeholder="Your name"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="signup-email" className="mb-1 block text-sm text-text-secondary">
+              Email
+            </label>
+            <input
+              id="signup-email"
+              name="email"
+              type="email"
+              required={tab === "signup"}
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+              placeholder="you@example.com"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="signup-password" className="mb-1 block text-sm text-text-secondary">
+              Password
+            </label>
+            <input
+              id="signup-password"
+              name="new-password"
+              type="password"
+              required={tab === "signup"}
+              autoComplete="new-password"
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+              placeholder="Min 8 characters"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? "..." : "Create account"}
           </button>
         </form>
       </div>
