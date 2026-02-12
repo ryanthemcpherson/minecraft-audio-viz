@@ -5,14 +5,9 @@ WORKDIR /app
 # Install UV for fast dependency resolution and curl for healthcheck
 RUN pip install --no-cache-dir uv && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency spec first for better layer caching
-COPY pyproject.toml .
-
-# Install package dependencies (non-editable, no dev extras)
-RUN uv pip install --system --no-cache .
-
-# Copy application source
+# Copy everything and install (source needed for hatchling to build the wheel)
 COPY . .
+RUN uv pip install --system --no-cache .
 
 EXPOSE ${PORT:-8090}
 
