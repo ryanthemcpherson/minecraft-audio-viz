@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
-from alembic import context
-from app.models.db import Base
-from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
+# Ensure the project root (parent of alembic/) is on sys.path so that
+# ``from app.models.db import Base`` works even when the package was not
+# installed into site-packages (e.g. Railway pre-deploy command).
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from alembic import context  # noqa: E402
+from app.models.db import Base  # noqa: E402
+from sqlalchemy import pool  # noqa: E402
+from sqlalchemy.ext.asyncio import async_engine_from_config  # noqa: E402
 
 # Alembic Config object
 config = context.config
