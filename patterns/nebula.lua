@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Nebula"
 description = "Cosmic gas cloud with drifting particles"
+category = "Cosmic"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -32,7 +34,7 @@ function calculate(audio, config, dt)
 
     -- Expansion with amplitude
     local target_expansion = 0.8 + audio.amplitude * 0.4
-    state.expansion = state.expansion + (target_expansion - state.expansion) * 0.1
+    state.expansion = smooth(state.expansion, target_expansion, 0.1, dt)
 
     -- Beat triggers star flashes (random subset)
     if audio.is_beat then

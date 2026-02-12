@@ -1,5 +1,7 @@
 name = "Sacred Geometry"
 description = "Morphing platonic solids - icosahedron"
+category = "Epic"
+static_camera = false
 state = {}
 
 local PHI = (1 + math.sqrt(5)) / 2
@@ -78,7 +80,7 @@ function calculate(audio, config, dt)
     if audio.beat then
         state.pulse = 1.0
     end
-    state.pulse = state.pulse * 0.9
+    state.pulse = decay(state.pulse, 0.9, dt)
 
     -- Scale based on bass
     local base_radius = 0.12 + audio.bands[1] * 0.05 + state.pulse * 0.04

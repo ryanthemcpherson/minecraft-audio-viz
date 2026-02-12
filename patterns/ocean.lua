@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Ocean Waves"
 description = "Water surface with splashes and ripples"
+category = "Organic"
+static_camera = false
 
 -- Per-instance state
 state = {

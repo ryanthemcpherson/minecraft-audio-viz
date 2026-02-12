@@ -1,5 +1,7 @@
 name = "Galaxy"
 description = "Spiral galaxy - cosmic visualization"
+category = "Epic"
+static_camera = false
 state = {}
 
 function calculate(audio, config, dt)
@@ -21,7 +23,7 @@ function calculate(audio, config, dt)
     if audio.beat then
         state.core_pulse = 1.0
     end
-    state.core_pulse = state.core_pulse * 0.9
+    state.core_pulse = decay(state.core_pulse, 0.9, dt)
 
     -- Core entities (dense center) - 20%
     local core_count = math.floor(n / 5)

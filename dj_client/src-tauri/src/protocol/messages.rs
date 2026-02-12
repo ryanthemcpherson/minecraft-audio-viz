@@ -110,6 +110,9 @@ pub struct HeartbeatMessage {
     pub msg_type: String,
     /// Client timestamp when heartbeat was sent (for RTT calculation)
     pub ts: f64,
+    /// Client-measured RTT from heartbeat_ack (stable across clock skew)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mc_connected: Option<bool>,
 }
@@ -122,6 +125,7 @@ impl HeartbeatMessage {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64(),
+            latency_ms: None,
             mc_connected: None,
         }
     }

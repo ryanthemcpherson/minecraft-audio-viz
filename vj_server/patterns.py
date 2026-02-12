@@ -8,6 +8,7 @@ Designed for electronic music visualization.
 import logging
 import math
 import random
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -3709,6 +3710,10 @@ class LuaPattern(VisualizationPattern):
         self._pattern_key = pattern_key
         self._lua = None
         self._calculate = None
+        self._last_call_time = None
+        self._audio_table = None
+        self._bands_table = None
+        self._config_table = None
         self._load_lua(pattern_key)
 
     def _load_lua(self, pattern_key: str):
@@ -3732,6 +3737,28 @@ class LuaPattern(VisualizationPattern):
         if pattern_path.exists():
             self._lua.execute(pattern_path.read_text(encoding="utf-8"))
             self._calculate = self._lua.globals()["calculate"]
+            # Pre-allocate persistent Lua tables for reuse each frame
+            self._audio_table = self._lua.table_from(
+                {
+                    "amplitude": 0.0,
+                    "peak": 0.0,
+                    "is_beat": False,
+                    "beat": False,
+                    "beat_intensity": 0.0,
+                    "frame": 0,
+                }
+            )
+            self._bands_table = self._lua.table_from({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0})
+            self._audio_table["bands"] = self._bands_table
+            self._config_table = self._lua.table_from(
+                {
+                    "entity_count": 0,
+                    "zone_size": 0,
+                    "beat_boost": 0.0,
+                    "base_scale": 0.0,
+                    "max_scale": 0.0,
+                }
+            )
             # Read metadata from Lua globals
             g = self._lua.globals()
             try:
@@ -3754,33 +3781,35 @@ class LuaPattern(VisualizationPattern):
             return []
 
         try:
-            # Build audio table for Lua
-            lua = self._lua
-            audio_table = lua.table_from(
-                {
-                    "amplitude": audio.amplitude,
-                    "peak": audio.amplitude,  # alias
-                    "is_beat": audio.is_beat,
-                    "beat": audio.is_beat,  # alias
-                    "beat_intensity": audio.beat_intensity,
-                    "frame": audio.frame,
-                }
-            )
-            # bands as 1-indexed Lua table
-            bands_table = lua.table_from({i + 1: v for i, v in enumerate(audio.bands)})
-            audio_table["bands"] = bands_table
+            # Compute real dt
+            now = time.monotonic()
+            if self._last_call_time is not None:
+                dt = min(now - self._last_call_time, 0.05)  # Cap at 50ms
+            else:
+                dt = 0.016
+            self._last_call_time = now
 
-            config_table = lua.table_from(
-                {
-                    "entity_count": self.config.entity_count,
-                    "zone_size": self.config.zone_size,
-                    "beat_boost": self.config.beat_boost,
-                    "base_scale": self.config.base_scale,
-                    "max_scale": self.config.max_scale,
-                }
-            )
+            # Update pre-allocated audio table in-place
+            audio_table = self._audio_table
+            audio_table["amplitude"] = audio.amplitude
+            audio_table["peak"] = audio.amplitude
+            audio_table["is_beat"] = audio.is_beat
+            audio_table["beat"] = audio.is_beat
+            audio_table["beat_intensity"] = audio.beat_intensity
+            audio_table["frame"] = audio.frame
+            bands_table = self._bands_table
+            for i, v in enumerate(audio.bands):
+                bands_table[i + 1] = v
 
-            result = self._calculate(audio_table, config_table, 0.016)
+            # Update pre-allocated config table in-place
+            config_table = self._config_table
+            config_table["entity_count"] = self.config.entity_count
+            config_table["zone_size"] = self.config.zone_size
+            config_table["beat_boost"] = self.config.beat_boost
+            config_table["base_scale"] = self.config.base_scale
+            config_table["max_scale"] = self.config.max_scale
+
+            result = self._calculate(audio_table, config_table, dt)
 
             # Convert Lua table to Python list of dicts
             entities = []

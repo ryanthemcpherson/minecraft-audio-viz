@@ -3,7 +3,8 @@
 import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { VisualizationPattern, EntityData } from "@/lib/patterns/base";
+import type { EntityData } from "@/lib/patterns/base";
+import type { PatternInstance } from "@/lib/patterns";
 import { generateAudioState } from "@/lib/audioSim";
 
 const BLOCK_SIZE = 0.22;
@@ -20,7 +21,7 @@ const BAND_COLORS = [
 ];
 
 interface PatternSceneProps {
-  pattern: VisualizationPattern;
+  pattern: PatternInstance;
   phaseOffset: number;
   staticCamera?: boolean;
 }

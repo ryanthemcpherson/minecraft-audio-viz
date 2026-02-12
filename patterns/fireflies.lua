@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Fireflies"
 description = "Swarm of synchronized flashing lights"
+category = "Organic"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -61,7 +63,7 @@ function calculate(audio, config, dt)
 
     -- Decay group flashes
     for g = 1, 4 do
-        state.group_flash[g] = state.group_flash[g] * 0.92
+        state.group_flash[g] = decay(state.group_flash[g], 0.92, dt)
     end
 
     local entities = {}
@@ -81,9 +83,9 @@ function calculate(audio, config, dt)
         local az = math.cos(t * 0.4 + i * 0.7) * 0.0002
 
         -- Update velocity with acceleration
-        vx = vx * 0.98 + ax
-        vy = vy * 0.98 + ay
-        vz = vz * 0.98 + az
+        vx = decay(vx, 0.98, dt) + ax * (dt / 0.016)
+        vy = decay(vy, 0.98, dt) + ay * (dt / 0.016)
+        vz = decay(vz, 0.98, dt) + az * (dt / 0.016)
 
         -- Clamp velocity
         local max_v = 0.015
@@ -92,9 +94,9 @@ function calculate(audio, config, dt)
         vz = clamp(vz, -max_v, max_v)
 
         -- Update position
-        x = x + vx
-        y = y + vy
-        z = z + vz
+        x = x + vx * (dt / 0.016)
+        y = y + vy * (dt / 0.016)
+        z = z + vz * (dt / 0.016)
 
         -- Soft boundaries - turn around near edges
         if x < 0.15 or x > 0.85 then vx = vx * -0.5 end
@@ -106,7 +108,7 @@ function calculate(audio, config, dt)
         z = clamp(z, 0.1, 0.9)
 
         -- Update glow phase
-        glow_phase = glow_phase + 0.05 + math.random() * 0.02
+        glow_phase = glow_phase + (0.05 + math.random() * 0.02) * (dt / 0.016)
 
         -- Store updated values
         state.fireflies[i].x = x

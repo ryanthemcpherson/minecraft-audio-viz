@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Black Hole"
 description = "Accretion disk with jets - gravity visualization"
+category = "Cosmic"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -37,8 +39,8 @@ function calculate(audio, config, dt)
         state.jet_intensity = 1.0
         state.warp = 0.5
     end
-    state.jet_intensity = state.jet_intensity * 0.92
-    state.warp = state.warp * 0.95
+    state.jet_intensity = decay(state.jet_intensity, 0.92, dt)
+    state.warp = decay(state.warp, 0.95, dt)
 
     -- Accretion rate from bass
     local accretion_rate = 0.001 + audio.bands[1] * 0.003 + audio.bands[2] * 0.002

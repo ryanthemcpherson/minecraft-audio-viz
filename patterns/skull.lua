@@ -1,5 +1,7 @@
 name = "Skull"
 description = "Clean anatomical skull with animated jaw and glowing eyes"
+category = "Epic"
+static_camera = false
 state = {}
 
 local function skull_slice(y_norm, front_only)
@@ -207,7 +209,7 @@ function calculate(audio, config, dt)
     state.rotation = state.time * 0.12
 
     -- Breathing
-    state.breathe = state.breathe + 0.012 * state.breathe_dir
+    state.breathe = state.breathe + 0.012 * state.breathe_dir * (dt / 0.016)
     if state.breathe > 1.0 then
         state.breathe_dir = -1
     elseif state.breathe < 0.0 then
@@ -220,16 +222,16 @@ function calculate(audio, config, dt)
         state.beat_intensity = 1.0
         state.eye_glow = 1.0
     end
-    state.head_bob = state.head_bob * 0.9
-    state.beat_intensity = state.beat_intensity * 0.92
-    state.eye_glow = state.eye_glow * 0.85
+    state.head_bob = decay(state.head_bob, 0.9, dt)
+    state.beat_intensity = decay(state.beat_intensity, 0.92, dt)
+    state.eye_glow = decay(state.eye_glow, 0.85, dt)
 
     -- Jaw opens with bass
     local target_jaw = audio.bands[1] * 0.08 + audio.bands[2] * 0.04
     if audio.beat then
         target_jaw = target_jaw + 0.06
     end
-    state.jaw_open = state.jaw_open + (target_jaw - state.jaw_open) * 0.25
+    state.jaw_open = smooth(state.jaw_open, target_jaw, 0.25, dt)
 
     local breathe_scale = 1.0 + state.breathe * 0.02
     local skull_scale = 0.56 + audio.bands[2] * 0.05 + state.beat_intensity * 0.02

@@ -1,5 +1,7 @@
 name = "Tesseract"
 description = "4D hypercube rotating through dimensions"
+category = "Cosmic"
+static_camera = false
 state = {}
 
 local function generate_tesseract()
@@ -97,7 +99,7 @@ function calculate(audio, config, dt)
     if audio.beat then
         state.pulse = 1.0
     end
-    state.pulse = state.pulse * 0.9
+    state.pulse = decay(state.pulse, 0.9, dt)
 
     local entities = {}
     local center = 0.5

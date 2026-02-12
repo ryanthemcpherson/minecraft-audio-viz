@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Spectrum Circle"
 description = "Radial frequency bars in a circle"
+category = "Spectrum"
+static_camera = true
 
 -- Per-instance state
 state = {
@@ -20,7 +22,7 @@ function calculate(audio, config, dt)
     -- Smooth the band values
     for i = 1, 5 do
         local target = audio.bands[i]
-        state.smooth_heights[i] = state.smooth_heights[i] + (target - state.smooth_heights[i]) * 0.3
+        state.smooth_heights[i] = smooth(state.smooth_heights[i], target, 0.3, dt)
     end
 
     -- Mirror the 5 bands to create symmetry (10 segments)

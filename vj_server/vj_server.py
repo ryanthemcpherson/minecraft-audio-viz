@@ -899,18 +899,26 @@ class VJServer:
                         elif frame_type == "dj_heartbeat":
                             now = time.time()
                             dj.last_heartbeat = now
+                            reported_latency_ms = frame_data.get("latency_ms")
                             heartbeat_ts = frame_data.get("ts")
-                            if isinstance(heartbeat_ts, (int, float)) and math.isfinite(
+                            rtt_ms = None
+                            if isinstance(reported_latency_ms, (int, float)) and math.isfinite(
+                                reported_latency_ms
+                            ):
+                                # Prefer client-measured RTT from heartbeat_ack; avoids long-session
+                                # drift from wall-clock skew between DJ and server.
+                                rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
+                            elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(
                                 heartbeat_ts
                             ):
-                                # Correct for clock skew between DJ and server
+                                # Fallback: estimate from DJ send timestamp corrected by clock offset.
                                 corrected_ts = (
                                     float(heartbeat_ts) - dj.clock_offset
                                     if dj.clock_sync_done
                                     else float(heartbeat_ts)
                                 )
-                                rtt_ms = (now - corrected_ts) * 1000.0
-                                rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
+                                rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
+                            if rtt_ms is not None:
                                 if dj.network_rtt_ms > 0:
                                     dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
                                 else:
@@ -1105,16 +1113,24 @@ class VJServer:
                     elif msg_type == "dj_heartbeat":
                         now = time.time()
                         dj.last_heartbeat = now
+                        reported_latency_ms = data.get("latency_ms")
                         heartbeat_ts = data.get("ts")
-                        if isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
-                            # Correct for clock skew between DJ and server
+                        rtt_ms = None
+                        if isinstance(reported_latency_ms, (int, float)) and math.isfinite(
+                            reported_latency_ms
+                        ):
+                            # Prefer client-measured RTT from heartbeat_ack; avoids long-session
+                            # drift from wall-clock skew between DJ and server.
+                            rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
+                        elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
+                            # Fallback: estimate from DJ send timestamp corrected by clock offset.
                             corrected_ts = (
                                 float(heartbeat_ts) - dj.clock_offset
                                 if dj.clock_sync_done
                                 else float(heartbeat_ts)
                             )
-                            rtt_ms = (now - corrected_ts) * 1000.0
-                            rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
+                            rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
+                        if rtt_ms is not None:
                             if dj.network_rtt_ms > 0:
                                 dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
                             else:

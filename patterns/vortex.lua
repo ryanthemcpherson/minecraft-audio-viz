@@ -1,5 +1,7 @@
 name = "Vortex"
 description = "Swirling tunnel - spiral into infinity"
+category = "Epic"
+static_camera = false
 state = {}
 
 function calculate(audio, config, dt)
@@ -18,7 +20,7 @@ function calculate(audio, config, dt)
         state.intensity = 1.0
     end
     state.rotation = state.rotation + speed * dt
-    state.intensity = state.intensity * 0.95
+    state.intensity = decay(state.intensity, 0.95, dt)
 
     -- Z movement (flying through tunnel)
     state.z_offset = state.z_offset + (0.55 + audio.bands[1] * 0.65) * dt

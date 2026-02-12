@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Expanding Sphere"
 description = "3D sphere that breathes and pulses"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -46,7 +48,7 @@ function calculate(audio, config, dt)
     if audio.is_beat then
         target_breath = target_breath + 0.3
     end
-    state.breath = state.breath + (target_breath - state.breath) * 0.15
+    state.breath = smooth(state.breath, target_breath, 0.15, dt)
 
     local entities = {}
     local center = 0.5

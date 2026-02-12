@@ -1,5 +1,7 @@
 name = "Mandala"
 description = "Sacred geometry rings - frequency mapped"
+category = "Cosmic"
+static_camera = false
 state = {}
 
 function calculate(audio, config, dt)
@@ -18,8 +20,8 @@ function calculate(audio, config, dt)
         state.pulse = 1.0
         state.petal_boost = 1.0
     end
-    state.pulse = state.pulse * 0.9
-    state.petal_boost = state.petal_boost * 0.85
+    state.pulse = decay(state.pulse, 0.9, dt)
+    state.petal_boost = decay(state.petal_boost, 0.85, dt)
 
     -- Golden angle for petal distribution
     local golden_angle = math.pi * (3.0 - math.sqrt(5.0))

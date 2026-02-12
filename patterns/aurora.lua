@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Aurora"
 description = "Northern lights curtains - flowing waves"
+category = "Organic"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -18,7 +20,7 @@ function calculate(audio, config, dt)
     state.wave_time = state.wave_time + dt
 
     -- Color sweep
-    state.color_offset = state.color_offset + audio.amplitude * 0.02 + 0.005
+    state.color_offset = state.color_offset + (audio.amplitude * 0.02 + 0.005) * (dt / 0.016)
 
     -- Beat triggers new ripple
     if audio.is_beat then
@@ -29,7 +31,7 @@ function calculate(audio, config, dt)
     -- Update ripples
     local new_ripples = {}
     for _, ripple in ipairs(state.ripple_origins) do
-        ripple.time = ripple.time + 0.03 + audio.amplitude * 0.02  -- Ripple expands
+        ripple.time = ripple.time + (0.03 + audio.amplitude * 0.02) * (dt / 0.016)  -- Ripple expands
         if ripple.time < 2.0 then  -- Keep ripple alive for ~2 units
             new_ripples[#new_ripples + 1] = ripple
         end

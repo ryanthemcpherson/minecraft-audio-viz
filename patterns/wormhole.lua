@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Wormhole Portal"
 description = "Infinite tunnel - rings fly toward you"
+category = "Epic"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -37,8 +39,8 @@ function calculate(audio, config, dt)
         state.flash = 1.0
         state.pulse = 0.3
     end
-    state.flash = state.flash * 0.85
-    state.pulse = state.pulse * 0.9
+    state.flash = decay(state.flash, 0.85, dt)
+    state.pulse = decay(state.pulse, 0.9, dt)
 
     -- Create rings at different depths
     local num_rings = math.max(6, math.floor(n / 10))

@@ -1,5 +1,7 @@
 name = "Pyramid"
 description = "Egyptian pyramid - inverts on drops"
+category = "Epic"
+static_camera = false
 state = {}
 
 function calculate(audio, config, dt)
@@ -25,7 +27,7 @@ function calculate(audio, config, dt)
 
     -- Hover with bass
     local target_hover = audio.bands[1] * 0.1 + audio.bands[2] * 0.05
-    state.hover = state.hover + (target_hover - state.hover) * 0.1
+    state.hover = smooth(state.hover, target_hover, 0.1, dt)
 
     -- Pyramid layers
     local layers = math.max(3, math.floor(math.sqrt(n)))

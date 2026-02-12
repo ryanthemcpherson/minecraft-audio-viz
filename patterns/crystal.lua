@@ -1,5 +1,7 @@
 name = "Crystal Growth"
 description = "Fractal crystal with recursive branching"
+category = "Cosmic"
+static_camera = false
 state = {}
 
 local function generate_crystal_structure(depth)
@@ -93,19 +95,19 @@ function calculate(audio, config, dt)
     state.rotation = state.rotation or 0
     state.sway = state.sway or 0
 
-    state.sparkle_phase = state.sparkle_phase + 0.1
+    state.sparkle_phase = state.sparkle_phase + 0.1 * (dt / 0.016)
     state.rotation = state.rotation + (0.15 + audio.peak * 0.3) * dt
     state.sway = math.sin(state.sparkle_phase * 0.5) * (0.05 + audio.bands[3] * 0.08)
 
     -- Growth responds to bass
     local target_growth = 0.5 + audio.bands[1] * 0.3 + audio.bands[2] * 0.2
-    state.growth = state.growth + (target_growth - state.growth) * 0.05
+    state.growth = smooth(state.growth, target_growth, 0.05, dt)
 
     -- Beat triggers growth spurt
     if audio.beat then
         state.growth_spurt = 0.35
     end
-    state.growth_spurt = state.growth_spurt * 0.9
+    state.growth_spurt = decay(state.growth_spurt, 0.9, dt)
 
     local effective_growth = state.growth + state.growth_spurt
 

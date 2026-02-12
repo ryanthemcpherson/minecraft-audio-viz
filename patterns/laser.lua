@@ -1,5 +1,7 @@
 name = "Laser Array"
 description = "Laser beams shooting from center"
+category = "Epic"
+static_camera = false
 state = {}
 
 function calculate(audio, config, dt)
@@ -20,7 +22,7 @@ function calculate(audio, config, dt)
     if audio.beat then
         state.flash = 1.0
     end
-    state.flash = state.flash * 0.85
+    state.flash = decay(state.flash, 0.85, dt)
 
     -- Number of beams
     local num_beams = math.min(8, math.max(4, math.floor(n / 8)))
@@ -39,7 +41,7 @@ function calculate(audio, config, dt)
 
         -- Smooth beam extension
         local bl_idx = beam + 1
-        state.beam_lengths[bl_idx] = state.beam_lengths[bl_idx] + (target_length - state.beam_lengths[bl_idx]) * 0.3
+        state.beam_lengths[bl_idx] = smooth(state.beam_lengths[bl_idx], target_length, 0.3, dt)
         local beam_length = state.beam_lengths[bl_idx]
 
         -- Beam tilt (elevation angle)

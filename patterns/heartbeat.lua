@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Breathing Cube"
 description = "Rotating cube vertices - expands with beats"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -126,7 +128,7 @@ function calculate(audio, config, dt)
     if audio.is_beat then
         target_breath = target_breath + 0.15
     end
-    state.breath = state.breath + (target_breath - state.breath) * 0.2
+    state.breath = smooth(state.breath, target_breath, 0.2, dt)
 
     for i = 1, n do
         local px = state.points[i][1]

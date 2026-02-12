@@ -379,6 +379,7 @@ impl DjClient {
 
         // Heartbeat task - delay first tick to avoid racing with handshake
         let tx_heartbeat = tx;
+        let state_heartbeat = state.clone();
         let mc_connected_flag = self.mc_connected.clone();
         tokio::spawn(async move {
             // Wait one full interval before sending first heartbeat
@@ -387,6 +388,10 @@ impl DjClient {
             loop {
                 interval.tick().await;
                 let mut hb = HeartbeatMessage::new();
+                let latency_ms = state_heartbeat.lock().latency_ms;
+                if latency_ms.is_finite() && latency_ms >= 0.0 {
+                    hb.latency_ms = Some(latency_ms as f64);
+                }
                 hb.mc_connected = Some(mc_connected_flag.load(Ordering::Relaxed));
                 let msg = serde_json::to_string(&hb).unwrap();
                 if tx_heartbeat.send(Message::Text(msg.into())).await.is_err() {

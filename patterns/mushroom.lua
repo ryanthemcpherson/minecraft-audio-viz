@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Mushroom"
 description = "Psychedelic toadstool with spots, gills, and spores"
+category = "Epic"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -41,7 +43,7 @@ function calculate(audio, config, dt)
     state.rotation = state.rotation + (0.2 + audio.amplitude * 0.4) * dt
 
     -- Breathing animation (slow oscillation)
-    state.breathe = state.breathe + 0.02 * state.breathe_dir
+    state.breathe = state.breathe + 0.02 * state.breathe_dir * (dt / 0.016)
     if state.breathe > 1.0 then
         state.breathe_dir = -1
     elseif state.breathe < 0.0 then
@@ -56,11 +58,11 @@ function calculate(audio, config, dt)
         state.grow = 1.15
         state.cap_tilt = 0.08 + audio.amplitude * 0.08
     end
-    state.pulse = state.pulse * 0.92
-    state.glow = state.glow * 0.93
-    state.wobble = state.wobble * 0.9
-    state.grow = 1.0 + (state.grow - 1.0) * 0.95
-    state.cap_tilt = state.cap_tilt * 0.92
+    state.pulse = decay(state.pulse, 0.92, dt)
+    state.glow = decay(state.glow, 0.93, dt)
+    state.wobble = decay(state.wobble, 0.9, dt)
+    state.grow = 1.0 + decay(state.grow - 1.0, 0.95, dt)
+    state.cap_tilt = decay(state.cap_tilt, 0.92, dt)
 
     state.spore_time = state.spore_time + dt
 

@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Fountain"
 description = "Upward spray with gravity arcs"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -54,7 +56,7 @@ function calculate(audio, config, dt)
         local x, y, z, vx, vy, vz, age, spin = p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]
 
         -- Update physics
-        vy = vy - gravity
+        vy = vy - gravity * (dt / 0.016)
         age = age + dt
 
         -- Add gentle swirl and drag for a more fluid fountain
@@ -70,8 +72,8 @@ function calculate(audio, config, dt)
         vx = new_vx
         vz = new_vz
 
-        vx = vx * drag
-        vz = vz * drag
+        vx = decay(vx, drag, dt)
+        vz = decay(vz, drag, dt)
         x = x + vx * dt * 60
         y = y + vy * dt * 60
         z = z + vz * dt * 60

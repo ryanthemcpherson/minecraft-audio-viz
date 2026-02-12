@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Supernova"
 description = "Explosive burst on beats - 3D shockwave"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -40,11 +42,11 @@ function calculate(audio, config, dt)
     for i = 1, n do
         -- Update position
         state.positions[i][1] = state.positions[i][1] + state.velocities[i] * dt
-        state.velocities[i] = state.velocities[i] * 0.96  -- Drag
+        state.velocities[i] = decay(state.velocities[i], 0.96, dt)  -- Drag
 
         -- Gravity back to center
         if state.positions[i][1] > 0.05 then
-            state.velocities[i] = state.velocities[i] - 0.02
+            state.velocities[i] = state.velocities[i] - 0.02 * (dt / 0.016)
         end
 
         -- Clamp radius

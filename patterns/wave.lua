@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "DNA Helix"
 description = "Double helix spiral - rotates and stretches"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -23,7 +25,7 @@ function calculate(audio, config, dt)
 
     -- Stretch based on bass
     local target_stretch = 0.8 + audio.bands[1] * 0.6 + audio.bands[2] * 0.4
-    state.stretch = state.stretch + (target_stretch - state.stretch) * 0.1
+    state.stretch = smooth(state.stretch, target_stretch, 0.1, dt)
 
     -- Helix parameters
     local radius = 0.15 + audio.amplitude * 0.1

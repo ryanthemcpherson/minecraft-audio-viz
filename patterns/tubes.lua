@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Spectrum Tubes"
 description = "3D cylindrical frequency tubes"
+category = "Spectrum"
+static_camera = true
 
 -- Per-instance state
 state = {
@@ -20,13 +22,13 @@ function calculate(audio, config, dt)
     -- Smooth the band values and track pulses
     for i = 1, 5 do
         local target = audio.bands[i]
-        state.smooth_heights[i] = state.smooth_heights[i] + (target - state.smooth_heights[i]) * 0.25
+        state.smooth_heights[i] = smooth(state.smooth_heights[i], target, 0.25, dt)
 
         -- Pulse on beat
         if audio.is_beat then
             state.pulse[i] = 0.5
         end
-        state.pulse[i] = state.pulse[i] * 0.9
+        state.pulse[i] = decay(state.pulse[i], 0.9, dt)
     end
 
     -- Layout: 5 tubes in a row

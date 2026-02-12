@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Atom Model"
 description = "Nucleus + electrons on 3D orbital planes"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -23,7 +25,7 @@ function calculate(audio, config, dt)
     if audio.is_beat then
         state.nucleus_pulse = 1.0
     end
-    state.nucleus_pulse = state.nucleus_pulse * 0.9
+    state.nucleus_pulse = decay(state.nucleus_pulse, 0.9, dt)
 
     -- Nucleus: first 4 blocks clustered at center
     local nucleus_count = math.min(4, n)

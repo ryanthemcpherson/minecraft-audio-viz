@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Stacked Tower"
 description = "Spiraling vertical tower - blocks orbit and bounce"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -29,9 +31,9 @@ function calculate(audio, config, dt)
 
     -- Propagate bounce wave upward
     for i = math.min(n, #state.bounce_wave), 2, -1 do
-        state.bounce_wave[i] = state.bounce_wave[i] * 0.9 + state.bounce_wave[i - 1] * 0.15
+        state.bounce_wave[i] = decay(state.bounce_wave[i], 0.9, dt) + state.bounce_wave[i - 1] * 0.15 * (dt / 0.016)
     end
-    state.bounce_wave[1] = state.bounce_wave[1] * 0.85
+    state.bounce_wave[1] = decay(state.bounce_wave[1], 0.85, dt)
 
     for i = 1, n do
         -- Vertical position - scale to fit within bounds

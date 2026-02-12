@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Floating Platforms"
 description = "6 levitating platforms - one per frequency"
+category = "Original"
+static_camera = false
 
 -- Per-instance state
 state = {
@@ -20,13 +22,13 @@ function calculate(audio, config, dt)
     -- Update platform heights based on bands
     for band = 1, 5 do
         local target_y = 0.15 + (band - 1) * 0.14 + audio.bands[band] * 0.15
-        state.platform_y[band] = state.platform_y[band] + (target_y - state.platform_y[band]) * 0.1
+        state.platform_y[band] = smooth(state.platform_y[band], target_y, 0.1, dt)
 
         -- Bounce on beat
         if audio.is_beat and band <= 3 then
             state.bounce[band] = 0.15
         end
-        state.bounce[band] = state.bounce[band] * 0.9
+        state.bounce[band] = decay(state.bounce[band], 0.9, dt)
     end
 
     -- Distribute entities across 5 platforms

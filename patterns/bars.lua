@@ -1,6 +1,8 @@
 -- Pattern metadata
 name = "Spectrum Bars"
 description = "Classic vertical frequency bars"
+category = "Spectrum"
+static_camera = true
 
 -- Per-instance state
 state = {
@@ -18,14 +20,14 @@ function calculate(audio, config, dt)
     -- Smooth the band values
     for i = 1, 5 do
         local target = audio.bands[i]
-        state.smooth_heights[i] = state.smooth_heights[i] + (target - state.smooth_heights[i]) * 0.3
+        state.smooth_heights[i] = smooth(state.smooth_heights[i], target, 0.3, dt)
 
         -- Peak hold with fall
         if state.smooth_heights[i] > state.peak_heights[i] then
             state.peak_heights[i] = state.smooth_heights[i]
             state.peak_fall[i] = 0.0
         else
-            state.peak_fall[i] = state.peak_fall[i] + 0.02
+            state.peak_fall[i] = state.peak_fall[i] + 0.02 * (dt / 0.016)
             state.peak_heights[i] = state.peak_heights[i] - state.peak_fall[i] * dt
         end
 
