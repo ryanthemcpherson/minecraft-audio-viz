@@ -4,7 +4,7 @@
  * Run: node scripts/generate-patterns.mjs
  */
 
-import { readFileSync, readdirSync, writeFileSync } from "fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -39,6 +39,17 @@ function extractMeta(source, filename) {
 }
 
 function main() {
+  // On Railway, rootDirectory is /site so ../patterns doesn't exist.
+  // Fall back to the committed generated.ts (kept in git).
+  if (!existsSync(PATTERNS_DIR)) {
+    if (existsSync(OUTPUT)) {
+      console.log("Patterns dir not found (Railway build). Using committed generated.ts.");
+      return;
+    }
+    console.error("ERROR: patterns/ dir missing and no generated.ts — cannot build.");
+    process.exit(1);
+  }
+
   console.log("Generating pattern bundle from", PATTERNS_DIR);
 
   // Read lib.lua
