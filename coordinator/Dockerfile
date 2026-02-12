@@ -5,15 +5,15 @@ WORKDIR /app
 # Ensure alembic (preDeployCommand) can import the app package from /app
 ENV PYTHONPATH=/app
 
-# Install UV for fast dependency resolution and curl for healthcheck
-RUN pip install --no-cache-dir uv \
-    && apt-get update \
+# Install system dependencies
+RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
 
-# Copy source and install — source must be present for hatchling to build the wheel
-COPY . .
-RUN uv pip install --system --no-cache .
+# Copy source first, then install (source must be present for hatchling build)
+COPY . /app/
+RUN uv pip install --system --no-cache /app/
 
 EXPOSE ${PORT:-8090}
 
