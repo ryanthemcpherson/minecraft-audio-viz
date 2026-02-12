@@ -12,7 +12,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,7 @@ class VisualizationPattern(ABC):
 
     name: str = "Base"
     description: str = "Base pattern"
+    recommended_entities: Optional[int] = None
 
     def __init__(self, config: PatternConfig = None):
         self.config = config or PatternConfig()
@@ -3714,6 +3715,8 @@ class LuaPattern(VisualizationPattern):
         self._audio_table = None
         self._bands_table = None
         self._config_table = None
+        self._entity_state = {}
+        self._position_deadband = 0.0015
         self._load_lua(pattern_key)
 
     def _load_lua(self, pattern_key: str):
@@ -3773,6 +3776,18 @@ class LuaPattern(VisualizationPattern):
                     self.description = str(lua_desc)
             except (KeyError, IndexError):
                 pass
+            try:
+                rec = g["recommended_entities"]
+                if isinstance(rec, (int, float)):
+                    self.recommended_entities = max(1, min(256, int(rec)))
+            except (KeyError, IndexError):
+                pass
+            try:
+                rec = g["start_blocks"]
+                if self.recommended_entities is None and isinstance(rec, (int, float)):
+                    self.recommended_entities = max(1, min(256, int(rec)))
+            except (KeyError, IndexError):
+                pass
         else:
             logger.warning(f"Pattern file not found: {pattern_path}")
 
@@ -3813,23 +3828,79 @@ class LuaPattern(VisualizationPattern):
 
             # Convert Lua table to Python list of dicts
             entities = []
+            seen_ids = set()
             if result is not None:
                 for i in range(1, len(result) + 1):
                     entry = result[i]
                     if entry is not None:
+                        entity_id = str(entry["id"]) if entry["id"] else f"block_{i - 1}"
+                        seen_ids.add(entity_id)
+                        target_x = float(entry["x"] or 0.5)
+                        target_y = float(entry["y"] or 0.5)
+                        target_z = float(entry["z"] or 0.5)
+                        target_scale = float(entry["scale"] or 0.2)
+                        target_rotation = float(entry["rotation"] or 0.0)
+                        prev = self._entity_state.get(entity_id)
+
+                        if prev is None:
+                            x = target_x
+                            y = target_y
+                            z = target_z
+                            scale = target_scale
+                            rotation = target_rotation % 360.0
+                        else:
+                            # Fast for larger moves, gentler for tiny changes to reduce wobble.
+                            pos_delta = max(
+                                abs(target_x - prev["x"]),
+                                abs(target_y - prev["y"]),
+                                abs(target_z - prev["z"]),
+                            )
+                            pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
+                            x = prev["x"] + (target_x - prev["x"]) * pos_alpha
+                            y = prev["y"] + (target_y - prev["y"]) * pos_alpha
+                            z = prev["z"] + (target_z - prev["z"]) * pos_alpha
+                            if abs(x - prev["x"]) < self._position_deadband:
+                                x = prev["x"]
+                            if abs(y - prev["y"]) < self._position_deadband:
+                                y = prev["y"]
+                            if abs(z - prev["z"]) < self._position_deadband:
+                                z = prev["z"]
+
+                            scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
+                            scale = prev["scale"] + (target_scale - prev["scale"]) * scale_alpha
+
+                            # Shortest-path angle smoothing.
+                            current_rot = prev["rotation"] % 360.0
+                            desired_rot = target_rotation % 360.0
+                            delta_rot = ((desired_rot - current_rot + 180.0) % 360.0) - 180.0
+                            rotation = (current_rot + delta_rot * 0.52) % 360.0
+
+                        self._entity_state[entity_id] = {
+                            "x": x,
+                            "y": y,
+                            "z": z,
+                            "scale": scale,
+                            "rotation": rotation,
+                        }
                         entities.append(
                             {
-                                "id": str(entry["id"]) if entry["id"] else f"block_{i - 1}",
-                                "x": float(entry["x"] or 0.5),
-                                "y": float(entry["y"] or 0.5),
-                                "z": float(entry["z"] or 0.5),
-                                "scale": float(entry["scale"] or 0.2),
+                                "id": entity_id,
+                                "x": x,
+                                "y": y,
+                                "z": z,
+                                "scale": scale,
+                                "rotation": rotation,
                                 "band": int(entry["band"] or 0),
                                 "visible": bool(entry["visible"])
                                 if entry["visible"] is not None
                                 else True,
                             }
                         )
+            # Cleanup stale cached entities.
+            if self._entity_state:
+                stale = [eid for eid in self._entity_state.keys() if eid not in seen_ids]
+                for eid in stale:
+                    del self._entity_state[eid]
             return entities
         except Exception as e:
             logger.error(f"Lua pattern error ({self._pattern_key}): {e}")
@@ -3884,6 +3955,37 @@ PATTERNS = {
     "circle": SpectrumCircle,
 }
 
+# Tuned default entity counts per pattern.
+PATTERN_DEFAULT_ENTITY_COUNTS: Dict[str, int] = {
+    "spectrum": 64,
+    "bars": 96,
+    "tubes": 120,
+    "circle": 100,
+    "ring": 64,
+    "wave": 72,
+    "explode": 72,
+    "columns": 80,
+    "orbit": 80,
+    "matrix": 96,
+    "heartbeat": 64,
+    "mushroom": 72,
+    "skull": 88,
+    "sacred": 90,
+    "vortex": 96,
+    "pyramid": 72,
+    "galaxy": 96,
+    "laser": 88,
+    "mandala": 104,
+    "tesseract": 88,
+    "crystal": 96,
+    "blackhole": 90,
+    "nebula": 96,
+    "wormhole": 90,
+    "aurora": 96,
+    "ocean": 96,
+    "fireflies": 110,
+}
+
 
 def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern:
     """Get a pattern by name. Prefers Lua implementation if available."""
@@ -3897,16 +3999,45 @@ def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern
     return pattern_class(config)
 
 
-def list_patterns() -> List[Dict[str, str]]:
+def get_recommended_entity_count(name: str, fallback: int = 64) -> int:
+    """Get recommended block count for a pattern."""
+    key = name.lower()
+    if _lua_pattern_exists(key):
+        try:
+            pat = LuaPattern(key)
+            if pat.recommended_entities is not None:
+                return pat.recommended_entities
+        except Exception:
+            pass
+    if key in PATTERN_DEFAULT_ENTITY_COUNTS:
+        return PATTERN_DEFAULT_ENTITY_COUNTS[key]
+    return max(1, min(256, int(fallback)))
+
+
+def list_patterns() -> List[Dict[str, Any]]:
     """List all available patterns."""
     result = []
     for key, cls in PATTERNS.items():
         if _lua_pattern_exists(key):
             try:
                 pat = LuaPattern(key)
-                result.append({"id": key, "name": pat.name, "description": pat.description})
+                result.append(
+                    {
+                        "id": key,
+                        "name": pat.name,
+                        "description": pat.description,
+                        "recommended_entities": get_recommended_entity_count(key),
+                    }
+                )
                 continue
             except Exception:
                 pass
-        result.append({"id": key, "name": cls.name, "description": cls.description})
+        result.append(
+            {
+                "id": key,
+                "name": cls.name,
+                "description": cls.description,
+                "recommended_entities": get_recommended_entity_count(key),
+            }
+        )
     return result

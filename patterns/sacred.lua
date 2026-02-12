@@ -2,6 +2,7 @@ name = "Sacred Geometry"
 description = "Morphing platonic solids - icosahedron"
 category = "Epic"
 static_camera = false
+start_blocks = 96
 state = {}
 
 local PHI = (1 + math.sqrt(5)) / 2
@@ -137,6 +138,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_y + state.rotation_z + i * 0.05) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -184,6 +186,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_x + state.rotation_y + i * 0.03) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }

@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  async rewrites() {
+    const coordinatorUrl =
+      process.env.COORDINATOR_API_URL || "https://api.mcav.live";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${coordinatorUrl}/api/v1/:path*`,
+      },
+    ];
+  },
   async headers() {
     return [
       {

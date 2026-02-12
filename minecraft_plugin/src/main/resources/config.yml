@@ -16,7 +16,7 @@ defaults:
   material: GLOWSTONE
 
   # Entity interpolation duration (ticks)
-  interpolation_duration: 2
+  interpolation_duration: 1
 
 # Performance settings
 performance:

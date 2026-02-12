@@ -6,7 +6,7 @@
  */
 
 const COORDINATOR_URL =
-  process.env.NEXT_PUBLIC_COORDINATOR_URL || "http://localhost:8090";
+  process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
 
 // ---------------------------------------------------------------------------
 // Types

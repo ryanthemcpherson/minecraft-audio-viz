@@ -3,12 +3,14 @@ name = "Spectrum Bars"
 description = "Classic vertical frequency bars"
 category = "Spectrum"
 static_camera = true
+start_blocks = 96
 
 -- Per-instance state
 state = {
     smooth_heights = {0.0, 0.0, 0.0, 0.0, 0.0},
     peak_heights = {0.0, 0.0, 0.0, 0.0, 0.0},
     peak_fall = {0.0, 0.0, 0.0, 0.0, 0.0},
+    rotation = 0.0,
 }
 
 -- Main calculation function
@@ -16,6 +18,10 @@ function calculate(audio, config, dt)
     local entities = {}
     local n = config.entity_count
     local center = 0.5
+    if n <= 0 then
+        return entities
+    end
+    state.rotation = state.rotation + (0.4 + audio.amplitude * 0.9) * dt
 
     -- Smooth the band values
     for i = 1, 5 do
@@ -34,16 +40,30 @@ function calculate(audio, config, dt)
         state.peak_heights[i] = math.max(0, state.peak_heights[i])
     end
 
-    -- Distribute entities across 5 bars
-    local blocks_per_bar = math.floor(n / 5)
-    local bar_spacing = 0.16
-    local start_x = center - (2.0 * bar_spacing)
+    -- Interpolated virtual bars: more blocks = more horizontal granularity.
+    local num_bars = math.max(5, math.min(28, math.floor(n / 4)))
+    num_bars = math.max(1, math.min(num_bars, n))
+    local blocks_per_bar = math.max(1, math.floor(n / num_bars))
+    local span = 0.72
+    local start_x = center - span * 0.5
+    local bar_spacing = (num_bars > 1) and (span / (num_bars - 1)) or 0
+
+    local function sample5(values, t)
+        local p = clamp(t, 0.0, 1.0) * 4.0
+        local i0 = math.floor(p) + 1
+        local i1 = math.min(5, i0 + 1)
+        local f = p - math.floor(p)
+        return lerp(values[i0], values[i1], f)
+    end
 
     local entity_idx = 0
 
-    for bar = 0, 4 do
+    for bar = 0, num_bars - 1 do
+        if entity_idx >= n then break end
         local bar_x = start_x + bar * bar_spacing
-        local bar_height = state.smooth_heights[bar + 1]
+        local t = (num_bars > 1) and (bar / (num_bars - 1)) or 0.0
+        local bar_height = sample5(state.smooth_heights, t)
+        local bar_band = math.floor(t * 4 + 0.5)
 
         -- Stack blocks vertically for this bar
         for j = 0, blocks_per_bar - 1 do
@@ -73,10 +93,11 @@ function calculate(audio, config, dt)
             end
 
             -- Slight depth variation per bar
-            local z = center + (bar - 2.5) * 0.02
+            local z = center + (t - 0.5) * 0.06
 
             local final_scale = scale
             if not visible then final_scale = 0.01 end
+            local rot = (state.rotation + t * math.pi * 1.4 + block_y_norm * math.pi * 0.8) * 180 / math.pi
 
             entities[#entities + 1] = {
                 id = string.format("block_%d", entity_idx),
@@ -84,7 +105,8 @@ function calculate(audio, config, dt)
                 y = clamp(block_y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, final_scale),
-                band = bar,
+                rotation = rot % 360,
+                band = bar_band,
                 visible = visible,
             }
             entity_idx = entity_idx + 1

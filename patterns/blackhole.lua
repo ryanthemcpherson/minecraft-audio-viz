@@ -3,6 +3,7 @@ name = "Black Hole"
 description = "Accretion disk with jets - gravity visualization"
 category = "Cosmic"
 static_camera = false
+start_blocks = 96
 
 -- Per-instance state
 state = {
@@ -109,6 +110,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = (theta * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -149,6 +151,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, scale),
+                rotation = (jet_angle * 180 / math.pi) % 360,
                 band = band_idx,
                 visible = visible,
             }

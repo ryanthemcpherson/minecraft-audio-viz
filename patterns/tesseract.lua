@@ -2,6 +2,7 @@ name = "Tesseract"
 description = "4D hypercube rotating through dimensions"
 category = "Cosmic"
 static_camera = false
+start_blocks = 96
 state = {}
 
 local function generate_tesseract()
@@ -92,7 +93,7 @@ function calculate(audio, config, dt)
     -- Rotation speeds driven by frequency bands
     state.rotation_xw = state.rotation_xw + (0.2 + audio.bands[1] * 0.8) * dt
     state.rotation_yw = state.rotation_yw + (0.15 + audio.bands[3] * 0.6) * dt
-    state.rotation_zw = state.rotation_zw + (0.1 + audio.bands[5] * 0.5 + audio.bands[5] * 0.3) * dt
+    state.rotation_zw = state.rotation_zw + (0.1 + audio.bands[5] * 0.8) * dt
     state.rotation_xy = state.rotation_xy + 0.3 * dt
 
     -- Beat pulse
@@ -156,6 +157,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_xy + pw * 0.8 + i * 0.04) * 180 / math.pi) % 360,
             band = math.floor(band_idx),
             visible = true,
         }
@@ -191,6 +193,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_xy + i * 0.06) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }

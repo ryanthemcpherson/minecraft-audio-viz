@@ -76,7 +76,20 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
     - `wrangler.toml` - Cloudflare Workers configuration
     - `package.json` (name: mcav-tenant-router)
 
-11. **archive/python_dj_cli/** - Archived Python DJ CLI (replaced by dj_client/)
+11. **protocol/** - WebSocket message contract schemas (source of truth)
+    - JSON Schema definitions for all cross-runtime messages
+    - `schemas/messages/` - Message schemas (dj-audio-frame, batch-update, set-pattern, etc.)
+    - `schemas/types/` - Shared types (audio-state, entity-update, renderer-backend)
+    - Every message requires a `type` field; `v` field optional (defaults to `1.0.0`)
+
+12. **patterns/** - Lua visualization patterns (28 files)
+    - Executed by the VJ server's Lua pattern engine
+    - `lib.lua` - Shared utilities used by all Lua patterns
+
+13. **discord_bot/** - Discord bot for audio streaming
+    - `bot.py` - Bot entry, `audio_sink.py` - Audio capture from Discord voice
+
+14. **archive/python_dj_cli/** - Archived Python DJ CLI (replaced by dj_client/)
     - Preserved for reference only; see `archive/python_dj_cli/README.md`
 
 ### WebSocket Ports

@@ -3,6 +3,7 @@ name = "Wormhole Portal"
 description = "Infinite tunnel - rings fly toward you"
 category = "Epic"
 static_camera = false
+start_blocks = 108
 
 -- Per-instance state
 state = {
@@ -104,6 +105,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, math.max(0.05, scale)),
+                rotation = ((angle + ring_depth * math.pi * 1.2) * 180 / math.pi) % 360,
                 band = band_idx,
                 visible = true,
             }

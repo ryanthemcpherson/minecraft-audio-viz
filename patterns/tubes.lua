@@ -3,6 +3,7 @@ name = "Spectrum Tubes"
 description = "3D cylindrical frequency tubes"
 category = "Spectrum"
 static_camera = true
+start_blocks = 120
 
 -- Per-instance state
 state = {
@@ -16,6 +17,9 @@ function calculate(audio, config, dt)
     local entities = {}
     local n = config.entity_count
     local center = 0.5
+    if n <= 0 then
+        return entities
+    end
 
     state.rotation = state.rotation + 0.3 * dt
 
@@ -31,21 +35,36 @@ function calculate(audio, config, dt)
         state.pulse[i] = decay(state.pulse[i], 0.9, dt)
     end
 
-    -- Layout: 5 tubes in a row
-    local tube_spacing = 0.15
-    local start_x = center - (2.0 * tube_spacing)
+    local function sample5(values, t)
+        local p = clamp(t, 0.0, 1.0) * 4.0
+        local i0 = math.floor(p) + 1
+        local i1 = math.min(5, i0 + 1)
+        local f = p - math.floor(p)
+        return lerp(values[i0], values[i1], f)
+    end
+
+    -- Dynamic tube count: more blocks = more spectrum detail across X.
+    local num_tubes = math.max(5, math.min(18, math.floor(n / 8)))
+    num_tubes = math.max(1, math.min(num_tubes, n))
+    local span = 0.72
+    local tube_spacing = (num_tubes > 1) and (span / (num_tubes - 1)) or 0
+    local start_x = center - span * 0.5
 
     -- Points per tube
-    local points_per_tube = math.floor(n / 5)
+    local points_per_tube = math.max(1, math.floor(n / num_tubes))
     local rings_per_tube = math.max(3, math.floor(points_per_tube / 4))
-    local points_per_ring = math.floor(points_per_tube / rings_per_tube)
+    local points_per_ring = math.max(1, math.floor(points_per_tube / rings_per_tube))
 
     local entity_idx = 0
 
-    for tube = 0, 4 do
+    for tube = 0, num_tubes - 1 do
+        if entity_idx >= n then break end
         local tube_x = start_x + tube * tube_spacing
-        local tube_height = state.smooth_heights[tube + 1]
-        local tube_radius = 0.03 + state.pulse[tube + 1] * 0.02
+        local t = (num_tubes > 1) and (tube / (num_tubes - 1)) or 0.0
+        local tube_height = sample5(state.smooth_heights, t)
+        local tube_pulse = sample5(state.pulse, t)
+        local tube_radius = 0.022 + tube_pulse * 0.02
+        local tube_band = math.floor(t * 4 + 0.5)
 
         for ring = 0, rings_per_tube - 1 do
             if entity_idx >= n then break end
@@ -66,7 +85,7 @@ function calculate(audio, config, dt)
 
                 -- Angle around ring
                 local angle = state.rotation + (p / points_per_ring) * math.pi * 2
-                angle = angle + tube * 0.5  -- Offset per tube
+                angle = angle + tube * 0.35  -- Offset per tube
 
                 -- Position
                 local x = tube_x + math.cos(angle) * current_radius
@@ -79,7 +98,7 @@ function calculate(audio, config, dt)
                     if ring_y_norm > tube_height - 0.15 then
                         scale = scale * 1.5
                     end
-                    scale = scale + audio.bands[tube + 1] * 0.3
+                    scale = scale + sample5(audio.bands, t) * 0.3
                 end
 
                 if audio.is_beat then
@@ -88,6 +107,7 @@ function calculate(audio, config, dt)
 
                 local final_scale = scale
                 if not visible then final_scale = 0.01 end
+                local rot = (angle + ring_y_norm * math.pi * 0.6) * 180 / math.pi
 
                 entities[#entities + 1] = {
                     id = string.format("block_%d", entity_idx),
@@ -95,7 +115,8 @@ function calculate(audio, config, dt)
                     y = clamp(ring_y),
                     z = clamp(z),
                     scale = math.min(config.max_scale, final_scale),
-                    band = tube,
+                    rotation = rot % 360,
+                    band = tube_band,
                     visible = visible,
                 }
                 entity_idx = entity_idx + 1

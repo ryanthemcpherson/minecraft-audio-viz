@@ -3,6 +3,7 @@ name = "Nebula"
 description = "Cosmic gas cloud with drifting particles"
 category = "Cosmic"
 static_camera = false
+start_blocks = 104
 
 -- Per-instance state
 state = {
@@ -10,6 +11,7 @@ state = {
     expansion = 1.0,
     flash_particles = {},  -- set: flash_particles[i] = true
     drift_time = 0.0,
+    swirl = 0.0,
 }
 
 -- Main calculation function
@@ -31,6 +33,7 @@ function calculate(audio, config, dt)
     end
 
     state.drift_time = state.drift_time + dt
+    state.swirl = state.swirl + (0.18 + audio.bands[4] * 0.45) * dt
 
     -- Expansion with amplitude
     local target_expansion = 0.8 + audio.amplitude * 0.4
@@ -79,9 +82,12 @@ function calculate(audio, config, dt)
         end
 
         -- World position
-        local x = center + px * base_radius + drift_x
+        local swirl_angle = state.swirl + dist * 1.6
+        local sx = math.cos(swirl_angle) * px - math.sin(swirl_angle) * pz
+        local sz = math.sin(swirl_angle) * px + math.cos(swirl_angle) * pz
+        local x = center + sx * base_radius + drift_x
         local y = center + py * base_radius + drift_y
-        local z = center + pz * base_radius + drift_z
+        local z = center + sz * base_radius + drift_z
 
         -- Band based on position (creates color gradients)
         -- Higher Y = higher frequency colors
@@ -110,6 +116,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, math.max(0.05, scale)),
+            rotation = ((state.swirl + phase + dist * 2.2) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
