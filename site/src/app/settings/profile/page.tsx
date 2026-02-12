@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
 import {
   fetchMe,
@@ -273,7 +274,7 @@ export default function ProfileEditPage() {
             >
               {avatarUrl ? (
                 <>
-                  <img src={avatarUrl} alt="Avatar" className="h-full w-full rounded-full object-cover" />
+                  <Image src={avatarUrl} alt="Avatar" width={96} height={96} className="h-full w-full rounded-full object-cover" unoptimized />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity hover:opacity-100">
                     <span className="text-xs text-white">
                       {uploadingAvatar ? "..." : "Change"}

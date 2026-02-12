@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
 import type {
   UserProfile,
@@ -460,10 +461,13 @@ export default function DashboardPage() {
         {/* Profile header with capability badges */}
         <div className="mb-10 flex items-center gap-4">
           {profile.avatar_url ? (
-            <img
+            <Image
               src={profile.avatar_url}
               alt={profile.display_name}
+              width={56}
+              height={56}
               className="h-14 w-14 rounded-full"
+              unoptimized
             />
           ) : (
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-xl font-bold">

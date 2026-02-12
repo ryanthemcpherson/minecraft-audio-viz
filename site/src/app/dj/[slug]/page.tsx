@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import { getDJProfileBySlug } from "@/lib/auth";
 import type { DJProfile } from "@/lib/auth";
 
@@ -58,10 +59,13 @@ export default function PublicDJProfilePage() {
         {/* Avatar */}
         <div className="mb-4">
           {profile.avatar_url ? (
-            <img
+            <Image
               src={profile.avatar_url}
               alt={profile.dj_name}
+              width={112}
+              height={112}
               className="h-28 w-28 rounded-full border-4 border-[#0a0a0a] object-cover"
+              unoptimized
             />
           ) : (
             <div

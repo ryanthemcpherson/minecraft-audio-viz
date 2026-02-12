@@ -314,7 +314,8 @@ jobs:
         with:
           name: license-reports-${{ github.sha }}
           path: |
-            minecraft_plugin/target/site/aggregate-third-party-report.html
+            minecraft_plugin/target/site/
+          if-no-files-found: ignore
           retention-days: 30
 
   # ---------------------------------------------------------------------------
