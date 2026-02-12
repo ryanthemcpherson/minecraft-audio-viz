@@ -4,7 +4,11 @@ dockerfilePath = "Dockerfile"
 watchPatterns = ["coordinator/**"]
 
 [deploy]
-preDeployCommand = "alembic upgrade head"
+# NOTE: preDeployCommand removed temporarily — Railway Docker cache
+# prevents the updated alembic/env.py from being picked up.  The DB
+# is already at the latest migration (006_dj_profile_enhancements).
+# Re-add once Railway cache is invalidated:
+#   preDeployCommand = "alembic upgrade head"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
