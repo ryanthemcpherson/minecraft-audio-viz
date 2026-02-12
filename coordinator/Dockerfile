@@ -3,9 +3,12 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install UV for fast dependency resolution and curl for healthcheck
-RUN pip install --no-cache-dir uv && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir uv \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy everything and install (source needed for hatchling to build the wheel)
+# Copy source and install — source must be present for hatchling to build the wheel
 COPY . .
 RUN uv pip install --system --no-cache .
 
