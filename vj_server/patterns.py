@@ -3733,12 +3733,19 @@ class LuaPattern(VisualizationPattern):
             self._lua.execute(pattern_path.read_text(encoding="utf-8"))
             self._calculate = self._lua.globals()["calculate"]
             # Read metadata from Lua globals
-            lua_name = self._lua.globals().get("name")
-            lua_desc = self._lua.globals().get("description")
-            if lua_name:
-                self.name = str(lua_name)
-            if lua_desc:
-                self.description = str(lua_desc)
+            g = self._lua.globals()
+            try:
+                lua_name = g["name"]
+                if lua_name:
+                    self.name = str(lua_name)
+            except (KeyError, IndexError):
+                pass
+            try:
+                lua_desc = g["description"]
+                if lua_desc:
+                    self.description = str(lua_desc)
+            except (KeyError, IndexError):
+                pass
         else:
             logger.warning(f"Pattern file not found: {pattern_path}")
 
