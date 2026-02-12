@@ -1,4 +1,8 @@
-"""FastAPI application entry-point for the MCAV DJ Coordinator."""
+"""FastAPI application entry-point for the MCAV DJ Coordinator.
+
+Serves the REST API for DJ authentication, show management,
+organization management, and the unified dashboard.
+"""
 
 from __future__ import annotations
 
