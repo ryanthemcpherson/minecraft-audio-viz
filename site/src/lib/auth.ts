@@ -120,6 +120,25 @@ export type DashboardSummary =
   | DJDashboardData
   | GenericDashboard;
 
+export interface DJDashboardSection {
+  dj_name: string;
+  bio: string | null;
+  genres: string | null;
+  slug: string | null;
+  session_count: number;
+  recent_sessions: RecentShowSummary[];
+}
+
+export interface UnifiedDashboard {
+  user_type: string | null;
+  checklist: ServerOwnerChecklist | null;
+  organizations: OrgDashboardSummary[];
+  recent_shows: RecentShowSummary[];
+  dj: DJDashboardSection | null;
+  has_dj_profile: boolean;
+  has_orgs: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Org server management types
 // ---------------------------------------------------------------------------
@@ -428,6 +447,14 @@ export async function fetchDashboardSummary(
   accessToken: string
 ): Promise<DashboardSummary> {
   return api<DashboardSummary>("/api/v1/dashboard/summary", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function fetchUnifiedDashboard(
+  accessToken: string
+): Promise<UnifiedDashboard> {
+  return api<UnifiedDashboard>("/api/v1/dashboard/unified", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 }

@@ -488,3 +488,22 @@ class DJDashboardData(BaseModel):
 class GenericDashboard(BaseModel):
     user_type: str = "generic"
     organizations: list[OrgDashboardSummary]
+
+
+class DJDashboardSection(BaseModel):
+    dj_name: str
+    bio: str | None
+    genres: str | None
+    slug: str | None
+    session_count: int
+    recent_sessions: list[RecentShowSummary]
+
+
+class UnifiedDashboard(BaseModel):
+    user_type: str | None
+    checklist: ServerOwnerChecklist | None
+    organizations: list[OrgDashboardSummary]
+    recent_shows: list[RecentShowSummary]
+    dj: DJDashboardSection | None
+    has_dj_profile: bool
+    has_orgs: bool

@@ -20,12 +20,14 @@ from app.models.db import (
 )
 from app.models.schemas import (
     DJDashboardData,
+    DJDashboardSection,
     GenericDashboard,
     OrgDashboardSummary,
     RecentShowSummary,
     ServerOwnerChecklist,
     ServerOwnerDashboard,
     TeamMemberDashboard,
+    UnifiedDashboard,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -183,3 +185,108 @@ async def dashboard_summary(
 
     # Generic / skipped
     return GenericDashboard(organizations=orgs)
+
+
+@router.get(
+    "/unified",
+    response_model=UnifiedDashboard,
+    summary="Unified dashboard data combining all user capabilities",
+)
+async def unified_dashboard(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UnifiedDashboard:
+    # Eager-load relationships (same as dashboard_summary)
+    stmt = (
+        select(User)
+        .where(User.id == user.id)
+        .options(
+            selectinload(User.org_memberships)
+            .selectinload(OrgMember.organization)
+            .selectinload(Organization.servers)
+            .selectinload(VJServer.shows),
+            selectinload(User.org_memberships)
+            .selectinload(OrgMember.organization)
+            .selectinload(Organization.members),
+            selectinload(User.dj_profile),
+        )
+    )
+    result = await session.execute(stmt)
+    user = result.scalar_one()
+
+    orgs = _org_summaries(user)
+    recent_shows = _recent_shows(user)
+    has_orgs = len(orgs) > 0
+
+    # Checklist: build if user has orgs or user_type is server_owner
+    checklist = None
+    if has_orgs or user.user_type == "server_owner":
+        org_ids = [m.org_id for m in user.org_memberships]
+        invite_count = 0
+        if org_ids:
+            result = await session.execute(
+                select(func.count()).select_from(OrgInvite).where(OrgInvite.org_id.in_(org_ids))
+            )
+            invite_count = result.scalar_one()
+
+        has_server = any(o.server_count > 0 for o in orgs)
+        has_show = any(o.active_show_count > 0 for o in orgs)
+
+        checklist = ServerOwnerChecklist(
+            org_created=has_orgs,
+            server_registered=has_server,
+            invite_created=invite_count > 0,
+            show_started=has_show,
+        )
+
+    # DJ section
+    dj_section = None
+    dj = user.dj_profile
+    has_dj_profile = dj is not None
+
+    if dj:
+        result = await session.execute(
+            select(func.count()).select_from(DJSession).where(DJSession.dj_name == dj.dj_name)
+        )
+        session_count = result.scalar_one()
+
+        dj_recent: list[RecentShowSummary] = []
+        rows = await session.execute(
+            select(DJSession, Show, VJServer)
+            .join(Show, DJSession.show_id == Show.id)
+            .join(VJServer, Show.server_id == VJServer.id)
+            .where(DJSession.dj_name == dj.dj_name)
+            .order_by(DJSession.connected_at.desc())
+            .limit(10)
+        )
+        for dj_sess, show, srv in rows:
+            dj_recent.append(
+                RecentShowSummary(
+                    id=show.id,
+                    name=show.name,
+                    server_name=srv.name,
+                    connect_code=show.connect_code,
+                    status=show.status,
+                    current_djs=show.current_djs,
+                    created_at=dj_sess.connected_at,
+                )
+            )
+
+        dj_section = DJDashboardSection(
+            dj_name=dj.dj_name,
+            bio=dj.bio,
+            genres=dj.genres,
+            slug=dj.slug,
+            session_count=session_count,
+            recent_sessions=dj_recent,
+        )
+
+    return UnifiedDashboard(
+        user_type=user.user_type,
+        checklist=checklist,
+        organizations=orgs,
+        recent_shows=recent_shows,
+        dj=dj_section,
+        has_dj_profile=has_dj_profile,
+        has_orgs=has_orgs,
+    )
