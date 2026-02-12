@@ -142,11 +142,34 @@ jobs:
       # --- Restart Minecraft server ---
       - name: Restart Minecraft server
         run: |
-          echo "=== Restarting Minecraft server ==="
-          sudo systemctl restart minecraft.service
+          echo "=== Stopping Minecraft server ==="
+          sudo systemctl stop minecraft.service || true
+
+          # Kill any rogue java processes holding the world lock (e.g. manually started)
+          LOCK_FILE="/home/ryan/minecraft-server/world/session.lock"
+          if LOCK_PID=$(sudo fuser "$LOCK_FILE" 2>/dev/null); then
+            echo "WARNING: session.lock held by PID $LOCK_PID — killing stale process"
+            sudo kill "$LOCK_PID" 2>/dev/null || true
+            sleep 3
+            sudo kill -9 "$LOCK_PID" 2>/dev/null || true
+            sleep 2
+          fi
+
+          # Wait for the lock file to be released
+          for i in $(seq 1 10); do
+            if ! sudo fuser "$LOCK_FILE" >/dev/null 2>&1; then
+              echo "Lock file is free"
+              break
+            fi
+            echo "Waiting for lock to release (attempt $i/10)..."
+            sleep 2
+          done
+
+          echo "=== Starting Minecraft server ==="
+          sudo systemctl start minecraft.service
 
           echo "=== Waiting for Minecraft to start ==="
-          sleep 10
+          sleep 15
 
           echo "=== Health check ==="
           if systemctl is-active --quiet minecraft.service; then
