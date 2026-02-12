@@ -5,11 +5,15 @@ Each pattern creates unique 3D formations with dynamic movement.
 Designed for electronic music visualization.
 """
 
+import logging
 import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Utility Functions
@@ -3693,8 +3697,119 @@ class SpectrumCircle(VisualizationPattern):
 
 
 # ============================================================================
+# Lua Pattern Runner
+# ============================================================================
+
+
+class LuaPattern(VisualizationPattern):
+    """Pattern implementation that runs a Lua script."""
+
+    def __init__(self, pattern_key: str, config: PatternConfig = None):
+        super().__init__(config)
+        self._pattern_key = pattern_key
+        self._lua = None
+        self._calculate = None
+        self._load_lua(pattern_key)
+
+    def _load_lua(self, pattern_key: str):
+        try:
+            from lupa import LuaRuntime
+        except ImportError:
+            # Fallback: if lupa not installed, use a no-op pattern
+            logger.warning("lupa not installed, Lua patterns unavailable")
+            return
+
+        self._lua = LuaRuntime(unpack_returned_tuples=True)
+
+        # Load lib.lua
+        patterns_dir = Path(__file__).parent.parent / "patterns"
+        lib_path = patterns_dir / "lib.lua"
+        if lib_path.exists():
+            self._lua.execute(lib_path.read_text(encoding="utf-8"))
+
+        # Load pattern script
+        pattern_path = patterns_dir / f"{pattern_key}.lua"
+        if pattern_path.exists():
+            self._lua.execute(pattern_path.read_text(encoding="utf-8"))
+            self._calculate = self._lua.globals()["calculate"]
+            # Read metadata from Lua globals
+            lua_name = self._lua.globals().get("name")
+            lua_desc = self._lua.globals().get("description")
+            if lua_name:
+                self.name = str(lua_name)
+            if lua_desc:
+                self.description = str(lua_desc)
+        else:
+            logger.warning(f"Pattern file not found: {pattern_path}")
+
+    def calculate_entities(self, audio: AudioState) -> list:
+        if self._calculate is None:
+            return []
+
+        try:
+            # Build audio table for Lua
+            lua = self._lua
+            audio_table = lua.table_from(
+                {
+                    "amplitude": audio.amplitude,
+                    "peak": audio.amplitude,  # alias
+                    "is_beat": audio.is_beat,
+                    "beat": audio.is_beat,  # alias
+                    "beat_intensity": audio.beat_intensity,
+                    "frame": audio.frame,
+                }
+            )
+            # bands as 1-indexed Lua table
+            bands_table = lua.table_from({i + 1: v for i, v in enumerate(audio.bands)})
+            audio_table["bands"] = bands_table
+
+            config_table = lua.table_from(
+                {
+                    "entity_count": self.config.entity_count,
+                    "zone_size": self.config.zone_size,
+                    "beat_boost": self.config.beat_boost,
+                    "base_scale": self.config.base_scale,
+                    "max_scale": self.config.max_scale,
+                }
+            )
+
+            result = self._calculate(audio_table, config_table, 0.016)
+
+            # Convert Lua table to Python list of dicts
+            entities = []
+            if result is not None:
+                for i in range(1, len(result) + 1):
+                    entry = result[i]
+                    if entry is not None:
+                        entities.append(
+                            {
+                                "id": str(entry["id"]) if entry["id"] else f"block_{i - 1}",
+                                "x": float(entry["x"] or 0.5),
+                                "y": float(entry["y"] or 0.5),
+                                "z": float(entry["z"] or 0.5),
+                                "scale": float(entry["scale"] or 0.2),
+                                "band": int(entry["band"] or 0),
+                                "visible": bool(entry["visible"])
+                                if entry["visible"] is not None
+                                else True,
+                            }
+                        )
+            return entities
+        except Exception as e:
+            logger.error(f"Lua pattern error ({self._pattern_key}): {e}")
+            return []
+
+
+# ============================================================================
 # Pattern Registry
 # ============================================================================
+
+
+def _lua_pattern_exists(key: str) -> bool:
+    """Check if a Lua pattern file exists for the given key."""
+    patterns_dir = Path(__file__).parent.parent / "patterns"
+    return (patterns_dir / f"{key}.lua").exists()
+
 
 # Pattern registry - keep old names for backwards compatibility
 PATTERNS = {
@@ -3735,14 +3850,27 @@ PATTERNS = {
 
 
 def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern:
-    """Get a pattern by name."""
-    pattern_class = PATTERNS.get(name.lower(), StackedTower)
+    """Get a pattern by name. Prefers Lua implementation if available."""
+    key = name.lower()
+    if _lua_pattern_exists(key):
+        pattern = LuaPattern(key, config)
+        if pattern._calculate is not None:
+            return pattern
+    # Fallback to Python
+    pattern_class = PATTERNS.get(key, StackedTower)
     return pattern_class(config)
 
 
 def list_patterns() -> List[Dict[str, str]]:
     """List all available patterns."""
-    return [
-        {"id": key, "name": cls.name, "description": cls.description}
-        for key, cls in PATTERNS.items()
-    ]
+    result = []
+    for key, cls in PATTERNS.items():
+        if _lua_pattern_exists(key):
+            try:
+                pat = LuaPattern(key)
+                result.append({"id": key, "name": pat.name, "description": pat.description})
+                continue
+            except Exception:
+                pass
+        result.append({"id": key, "name": cls.name, "description": cls.description})
+    return result

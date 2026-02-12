@@ -3,6 +3,7 @@
 use super::messages::*;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -80,7 +81,7 @@ impl Default for DjClientConfig {
 }
 
 /// Connection state
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ConnectionState {
     pub connected: bool,
     pub authenticated: bool,
@@ -100,6 +101,47 @@ pub struct ConnectionState {
     pub voice_connected_players: Option<u32>,
     /// Preset name received from server (bridge task consumes this)
     pub pending_preset: Option<String>,
+    /// Current pattern name
+    pub current_pattern: String,
+    /// Per-band sensitivity multipliers
+    pub band_sensitivity: [f32; 5],
+    /// Pattern scripts received from server (consumed by bridge task)
+    pub pending_pattern_scripts: Option<HashMap<String, String>>,
+    /// Pattern change received from server (consumed by bridge task)
+    pub pending_pattern_change: Option<String>,
+    /// Band sensitivity change received from server (consumed by bridge task)
+    pub pending_band_sensitivity: Option<[f32; 5]>,
+    /// Config change received from server (consumed by bridge task)
+    pub pending_config_change: Option<(u32, String)>,
+}
+
+impl Default for ConnectionState {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            authenticated: false,
+            is_active: false,
+            dj_id: None,
+            latency_ms: 0.0,
+            reconnect_attempts: 0,
+            route_mode: String::new(),
+            mc_host: None,
+            mc_port: None,
+            mc_zone: None,
+            mc_entity_count: None,
+            voice_available: false,
+            voice_streaming: false,
+            voice_channel_type: None,
+            voice_connected_players: None,
+            pending_preset: None,
+            current_pattern: String::new(),
+            band_sensitivity: [1.0; 5],
+            pending_pattern_scripts: None,
+            pending_pattern_change: None,
+            pending_band_sensitivity: None,
+            pending_config_change: None,
+        }
+    }
 }
 
 /// DJ Client for VJ server communication
@@ -431,6 +473,26 @@ impl DjClient {
     pub fn take_pending_preset(&self) -> Option<String> {
         self.state.lock().pending_preset.take()
     }
+
+    /// Take pending pattern scripts (if any) that were received from the server.
+    pub fn take_pending_pattern_scripts(&self) -> Option<HashMap<String, String>> {
+        self.state.lock().pending_pattern_scripts.take()
+    }
+
+    /// Take pending pattern change (if any) that was received from the server.
+    pub fn take_pending_pattern_change(&self) -> Option<String> {
+        self.state.lock().pending_pattern_change.take()
+    }
+
+    /// Take pending band sensitivity (if any) that was received from the server.
+    pub fn take_pending_band_sensitivity(&self) -> Option<[f32; 5]> {
+        self.state.lock().pending_band_sensitivity.take()
+    }
+
+    /// Take pending config change (if any) that was received from the server.
+    pub fn take_pending_config_change(&self) -> Option<(u32, String)> {
+        self.state.lock().pending_config_change.take()
+    }
 }
 
 /// Handle incoming server messages
@@ -499,10 +561,50 @@ async fn handle_server_message(
                 state.lock().pending_preset = Some(name.to_string());
             }
         }
-        ServerMessage::PatternSync(_)
-        | ServerMessage::ConfigSync(_)
-        | ServerMessage::EffectTriggered(_) => {
-            // These are informational, no action needed for basic client
+        ServerMessage::PatternSync(ps) => {
+            log::info!("Pattern sync from VJ: {}", ps.pattern);
+            let mut s = state.lock();
+            s.pending_pattern_change = Some(ps.pattern.clone());
+            s.current_pattern = ps.pattern;
+            if let Some(ref config) = ps.config {
+                if let Some(count) = config.entity_count {
+                    s.mc_entity_count = Some(count);
+                }
+            }
+        }
+        ServerMessage::ConfigSync(cfg) => {
+            let mut s = state.lock();
+            s.mc_entity_count = Some(cfg.entity_count);
+            s.pending_config_change = Some((cfg.entity_count, cfg.zone.clone()));
+            log::info!(
+                "Config sync: entity_count={}, zone={}",
+                cfg.entity_count,
+                cfg.zone
+            );
+            s.mc_zone = Some(cfg.zone);
+        }
+        ServerMessage::EffectTriggered(eff) => {
+            log::info!("Effect triggered: {}", eff.effect);
+        }
+        ServerMessage::BandSensitivitySync(bs) => {
+            if bs.sensitivity.len() >= 5 {
+                let mut arr = [1.0f32; 5];
+                for i in 0..5 {
+                    arr[i] = bs.sensitivity[i];
+                }
+                let mut s = state.lock();
+                s.band_sensitivity = arr;
+                s.pending_band_sensitivity = Some(arr);
+                log::info!("Band sensitivity sync: {:?}", arr);
+            }
+        }
+        ServerMessage::AudioSettingSync(as_msg) => {
+            log::info!(
+                "Audio setting sync: {} = {}",
+                as_msg.setting,
+                as_msg.value
+            );
+            // Audio settings are applied to the FFT analyzer via the bridge task
         }
         ServerMessage::StreamRoute(route) => {
             let mut s = state.lock();
@@ -515,7 +617,25 @@ async fn handle_server_message(
             s.mc_zone = route.zone;
             s.mc_entity_count = route
                 .entity_count
-                .or_else(|| route.pattern_config.and_then(|cfg| cfg.entity_count));
+                .or_else(|| route.pattern_config.as_ref().and_then(|cfg| cfg.entity_count));
+            // Store pattern scripts for engine initialization
+            if let Some(scripts) = route.pattern_scripts {
+                s.pending_pattern_scripts = Some(scripts);
+            }
+            if let Some(ref sensitivity) = route.band_sensitivity {
+                if sensitivity.len() >= 5 {
+                    let mut arr = [1.0f32; 5];
+                    for i in 0..5 {
+                        arr[i] = sensitivity[i];
+                    }
+                    s.band_sensitivity = arr;
+                    s.pending_band_sensitivity = Some(arr);
+                }
+            }
+            if let Some(ref pattern) = route.current_pattern {
+                s.current_pattern = pattern.clone();
+                s.pending_pattern_change = Some(pattern.clone());
+            }
         }
         ServerMessage::VoiceStatus(vs) => {
             log::info!(

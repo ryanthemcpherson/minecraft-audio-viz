@@ -1342,6 +1342,8 @@ class VJServer:
                 "base_scale": self._pattern_config.base_scale,
                 "max_scale": self._pattern_config.max_scale,
             },
+            "pattern_scripts": self._get_pattern_scripts(),
+            "band_sensitivity": list(self._band_sensitivity),
             "relay_fallback": True,
             "reason": "active_direct_dj" if route_mode == "dual" else "standby_or_relay_mode",
         }
@@ -1808,6 +1810,13 @@ class VJServer:
                         if 0 <= band < 5:
                             self._band_sensitivity[band] = max(0.0, min(2.0, sensitivity))
                             logger.debug(f"Band {band} sensitivity: {sensitivity}")
+                            # Sync to DJs
+                            await self._broadcast_to_djs(
+                                {
+                                    "type": "band_sensitivity_sync",
+                                    "sensitivity": list(self._band_sensitivity),
+                                }
+                            )
 
                     elif msg_type == "set_audio_setting":
                         # Apply audio settings locally (not forwarded to MC)
@@ -1821,6 +1830,14 @@ class VJServer:
                             elif setting == "beat_threshold":
                                 self._pattern_config.beat_threshold = float(value)
                             logger.debug(f"Audio setting {setting}: {value}")
+                            # Sync to DJs
+                            await self._broadcast_to_djs(
+                                {
+                                    "type": "audio_setting_sync",
+                                    "setting": setting,
+                                    "value": float(value),
+                                }
+                            )
 
                     elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
@@ -2436,6 +2453,32 @@ class VJServer:
                 await dj.websocket.send(message)
             except Exception:
                 pass
+
+    async def _broadcast_to_djs(self, msg: dict):
+        """Broadcast a message dict to all connected DJs."""
+        message = json.dumps(msg)
+        for dj in list(self._djs.values()):
+            try:
+                await dj.websocket.send(message)
+            except Exception as e:
+                logger.debug(f"Failed to broadcast to DJ {dj.dj_id}: {e}")
+
+    def _get_pattern_scripts(self) -> dict:
+        """Load all Lua pattern scripts for sending to DJs."""
+        scripts = {}
+        patterns_dir = Path(__file__).parent.parent / "patterns"
+        if not patterns_dir.exists():
+            return scripts
+        # Load lib.lua
+        lib_path = patterns_dir / "lib.lua"
+        if lib_path.exists():
+            scripts["lib"] = lib_path.read_text(encoding="utf-8")
+        # Load all pattern files
+        for lua_file in patterns_dir.glob("*.lua"):
+            if lua_file.name != "lib.lua":
+                key = lua_file.stem
+                scripts[key] = lua_file.read_text(encoding="utf-8")
+        return scripts
 
     async def _send_with_timeout(
         self, client, message: str, dead_clients: set, timeout: float = 0.5
