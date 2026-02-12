@@ -2108,6 +2108,9 @@ class VJServer:
                                     logger.info(
                                         f"Entity count synced from zone config: {old_count} -> {new_count}"
                                     )
+                                    # Sync to all DJs and browser clients
+                                    await self._broadcast_config_sync_to_djs()
+                                    await self._broadcast_config_to_browsers()
                                 # Sync scale settings to pattern config
                                 if "base_scale" in config:
                                     self._pattern_config.base_scale = float(config["base_scale"])

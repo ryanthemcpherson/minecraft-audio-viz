@@ -52,13 +52,13 @@ end
 
 -- dt-aware smoothing: at dt=0.016, returns identical results to raw lerp
 function smooth(current, target, rate, dt)
-    local factor = 1.0 - math.pow(1.0 - rate, dt / 0.016)
+    local factor = 1.0 - (1.0 - rate) ^ (dt / 0.016)
     return current + (target - current) * factor
 end
 
 -- dt-aware decay: at dt=0.016, returns identical results to raw multiply
 function decay(value, rate, dt)
-    return value * math.pow(rate, dt / 0.016)
+    return value * rate ^ (dt / 0.016)
 end
 
 function simple_noise(x, y, z, seed)
