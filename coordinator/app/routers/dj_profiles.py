@@ -53,6 +53,9 @@ def _profile_response(profile: DJProfile) -> DJProfileResponse:
         banner_url=profile.banner_url,
         color_palette=_parse_color_palette(profile.color_palette),
         slug=profile.slug,
+        soundcloud_url=profile.soundcloud_url,
+        spotify_url=profile.spotify_url,
+        website_url=profile.website_url,
         is_public=profile.is_public,
         created_at=profile.created_at,
     )
@@ -99,6 +102,9 @@ async def create_profile(
         genres=body.genres,
         slug=body.slug,
         color_palette=_serialize_color_palette(body.color_palette),
+        soundcloud_url=body.soundcloud_url or None,
+        spotify_url=body.spotify_url or None,
+        website_url=body.website_url or None,
     )
     session.add(profile)
     await session.commit()
@@ -160,6 +166,12 @@ async def update_profile(
         profile.banner_url = body.banner_url
     if body.is_public is not None:
         profile.is_public = body.is_public
+    if body.soundcloud_url is not None:
+        profile.soundcloud_url = body.soundcloud_url or None
+    if body.spotify_url is not None:
+        profile.spotify_url = body.spotify_url or None
+    if body.website_url is not None:
+        profile.website_url = body.website_url or None
 
     await session.commit()
     await session.refresh(profile)

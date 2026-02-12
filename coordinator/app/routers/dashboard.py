@@ -277,6 +277,9 @@ async def unified_dashboard(
             bio=dj.bio,
             genres=dj.genres,
             slug=dj.slug,
+            soundcloud_url=dj.soundcloud_url,
+            spotify_url=dj.spotify_url,
+            website_url=dj.website_url,
             session_count=session_count,
             recent_sessions=dj_recent,
         )

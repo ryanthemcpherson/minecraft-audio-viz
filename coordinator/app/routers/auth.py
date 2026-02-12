@@ -324,6 +324,9 @@ async def me(
             banner_url=user.dj_profile.banner_url,
             color_palette=color_palette,
             slug=user.dj_profile.slug,
+            soundcloud_url=user.dj_profile.soundcloud_url,
+            spotify_url=user.dj_profile.spotify_url,
+            website_url=user.dj_profile.website_url,
             is_public=user.dj_profile.is_public,
             created_at=user.dj_profile.created_at,
         )

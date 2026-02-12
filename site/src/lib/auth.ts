@@ -38,6 +38,9 @@ export interface DJProfile {
   banner_url: string | null;
   color_palette: string[] | null;
   slug: string | null;
+  soundcloud_url: string | null;
+  spotify_url: string | null;
+  website_url: string | null;
   is_public: boolean;
   created_at: string;
 }
@@ -125,6 +128,9 @@ export interface DJDashboardSection {
   bio: string | null;
   genres: string | null;
   slug: string | null;
+  soundcloud_url: string | null;
+  spotify_url: string | null;
+  website_url: string | null;
   session_count: number;
   recent_sessions: RecentShowSummary[];
 }
@@ -392,7 +398,7 @@ export async function createInvite(
 
 export async function createDJProfile(
   accessToken: string,
-  data: { dj_name: string; bio?: string; genres?: string; slug?: string; color_palette?: string[] }
+  data: { dj_name: string; bio?: string; genres?: string; slug?: string; color_palette?: string[]; soundcloud_url?: string; spotify_url?: string; website_url?: string }
 ): Promise<DJProfile> {
   return api<DJProfile>("/api/v1/dj/profile", {
     method: "POST",
@@ -412,6 +418,9 @@ export async function updateDJProfile(
     avatar_url?: string;
     banner_url?: string;
     is_public?: boolean;
+    soundcloud_url?: string;
+    spotify_url?: string;
+    website_url?: string;
   }
 ): Promise<DJProfile> {
   return api<DJProfile>("/api/v1/dj/profile", {

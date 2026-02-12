@@ -222,6 +222,9 @@ class DJProfile(Base):
     banner_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     color_palette: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slug: Mapped[str | None] = mapped_column(String(60), unique=True, nullable=True, index=True)
+    soundcloud_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    spotify_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    website_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

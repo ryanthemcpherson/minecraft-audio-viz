@@ -134,11 +134,11 @@ export default function Navbar() {
                         Dashboard
                       </Link>
                       <Link
-                        href="/settings/profile"
+                        href="/settings"
                         onClick={() => setUserMenuOpen(false)}
                         className="block px-4 py-2 text-sm text-text-primary transition-colors hover:bg-white/5 hover:text-white"
                       >
-                        DJ Profile
+                        Settings
                       </Link>
                       <button
                         onClick={() => {
@@ -228,11 +228,11 @@ export default function Navbar() {
                       Dashboard
                     </Link>
                     <Link
-                      href="/settings/profile"
+                      href="/settings"
                       onClick={() => setMobileOpen(false)}
                       className="block rounded-lg px-4 py-3 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
                     >
-                      DJ Profile
+                      Settings
                     </Link>
                     <button
                       onClick={() => {

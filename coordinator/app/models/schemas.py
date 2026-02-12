@@ -173,6 +173,9 @@ class DJProfileResponse(BaseModel):
     banner_url: str | None
     color_palette: list[str] | None
     slug: str | None
+    soundcloud_url: str | None = None
+    spotify_url: str | None = None
+    website_url: str | None = None
     is_public: bool
     created_at: datetime
 
@@ -357,6 +360,9 @@ class JoinOrgResponse(BaseModel):
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$")
 HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+SOUNDCLOUD_URL_PATTERN = re.compile(r"^https?://(www\.)?soundcloud\.com/.+")
+SPOTIFY_URL_PATTERN = re.compile(r"^https?://open\.spotify\.com/(artist|user|playlist)/.+")
+WEBSITE_URL_PATTERN = re.compile(r"^https?://.+")
 
 
 class CreateDJProfileRequest(BaseModel):
@@ -365,6 +371,9 @@ class CreateDJProfileRequest(BaseModel):
     genres: str | None = Field(None, max_length=500)
     slug: str | None = Field(None, min_length=3, max_length=30)
     color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+    soundcloud_url: str | None = Field(None, max_length=500)
+    spotify_url: str | None = Field(None, max_length=500)
+    website_url: str | None = Field(None, max_length=500)
 
     @field_validator("slug")
     @classmethod
@@ -383,6 +392,27 @@ class CreateDJProfileRequest(BaseModel):
             for color in v:
                 if not HEX_COLOR_PATTERN.match(color):
                     raise ValueError(f"Invalid hex color: {color}")
+        return v
+
+    @field_validator("soundcloud_url")
+    @classmethod
+    def validate_soundcloud_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SOUNDCLOUD_URL_PATTERN.match(v):
+            raise ValueError("Invalid SoundCloud URL")
+        return v
+
+    @field_validator("spotify_url")
+    @classmethod
+    def validate_spotify_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SPOTIFY_URL_PATTERN.match(v):
+            raise ValueError("Invalid Spotify URL")
+        return v
+
+    @field_validator("website_url")
+    @classmethod
+    def validate_website_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not WEBSITE_URL_PATTERN.match(v):
+            raise ValueError("Invalid website URL — must start with http:// or https://")
         return v
 
 
@@ -395,6 +425,9 @@ class UpdateDJProfileRequest(BaseModel):
     avatar_url: str | None = Field(None, max_length=500)
     banner_url: str | None = Field(None, max_length=500)
     is_public: bool | None = None
+    soundcloud_url: str | None = Field(None, max_length=500)
+    spotify_url: str | None = Field(None, max_length=500)
+    website_url: str | None = Field(None, max_length=500)
 
     @field_validator("slug")
     @classmethod
@@ -413,6 +446,27 @@ class UpdateDJProfileRequest(BaseModel):
             for color in v:
                 if not HEX_COLOR_PATTERN.match(color):
                     raise ValueError(f"Invalid hex color: {color}")
+        return v
+
+    @field_validator("soundcloud_url")
+    @classmethod
+    def validate_soundcloud_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SOUNDCLOUD_URL_PATTERN.match(v):
+            raise ValueError("Invalid SoundCloud URL")
+        return v
+
+    @field_validator("spotify_url")
+    @classmethod
+    def validate_spotify_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SPOTIFY_URL_PATTERN.match(v):
+            raise ValueError("Invalid Spotify URL")
+        return v
+
+    @field_validator("website_url")
+    @classmethod
+    def validate_website_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not WEBSITE_URL_PATTERN.match(v):
+            raise ValueError("Invalid website URL — must start with http:// or https://")
         return v
 
 
@@ -495,6 +549,9 @@ class DJDashboardSection(BaseModel):
     bio: str | None
     genres: str | None
     slug: str | None
+    soundcloud_url: str | None = None
+    spotify_url: str | None = None
+    website_url: str | None = None
     session_count: int
     recent_sessions: list[RecentShowSummary]
 
