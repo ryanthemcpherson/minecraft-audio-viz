@@ -18,9 +18,8 @@ from scipy.io import wavfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import click
-from viz_client import VizClient
-
 from audio_processor.processor import AudioFrame, AudioProcessor
+from viz_client import VizClient
 
 
 def generate_test_audio(filepath: str, duration: float = 30.0, bpm: float = 120.0):
