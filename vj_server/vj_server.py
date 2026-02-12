@@ -2622,11 +2622,11 @@ class VJServer:
         Continuously monitor Minecraft connection and attempt reconnection.
 
         Checks connection every 5 seconds. On disconnect, attempts reconnection
-        with exponential backoff (1.5x multiplier, max 60s). Resets backoff on
+        with exponential backoff (1.5x multiplier, max 10s). Resets backoff on
         successful reconnection.
         """
         check_interval = 5.0  # Check connection every 5 seconds
-        max_backoff = 60.0  # Maximum backoff time in seconds
+        max_backoff = 10.0  # Maximum backoff time in seconds
         backoff_multiplier = 1.5
 
         while self._running:
