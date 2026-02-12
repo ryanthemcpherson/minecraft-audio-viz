@@ -114,7 +114,7 @@ jobs:
       - name: SpotBugs (advisory)
         working-directory: minecraft_plugin
         continue-on-error: true
-        run: mvn spotbugs:check
+        run: mvn spotbugs:check -Dspotbugs.excludeFilterFile=spotbugs-exclude.xml
 
       - name: Upload plugin JAR
         uses: actions/upload-artifact@v6

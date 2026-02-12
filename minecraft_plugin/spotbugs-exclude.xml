@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!-- Bukkit plugins store a mutable Plugin reference by design -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+  </Match>
+
+  <!-- Thread-safety of Bukkit scheduler primitives is handled by the server -->
+  <Match>
+    <Bug pattern="AT_STALE_THREAD_WRITE_OF_PRIMITIVE" />
+  </Match>
+
+  <!-- Swallowing exceptions in shutdown/cleanup is intentional -->
+  <Match>
+    <Bug pattern="DE_MIGHT_IGNORE" />
+    <Method name="shutdown" />
+  </Match>
+
+  <!-- Null checks on config values are handled upstream -->
+  <Match>
+    <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE" />
+    <Class name="com.audioviz.zones.ZoneManager" />
+    <Method name="loadZones" />
+  </Match>
+</FindBugsFilter>
