@@ -4,7 +4,7 @@ dockerfilePath = "Dockerfile"
 watchPatterns = ["coordinator/**"]
 
 [deploy]
-preDeployCommand = "alembic upgrade head"
+preDeployCommand = "PYTHONPATH=/app alembic upgrade head"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

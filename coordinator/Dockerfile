@@ -2,6 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Ensure alembic (preDeployCommand) can import the app package from /app
+ENV PYTHONPATH=/app
+
 # Install UV for fast dependency resolution and curl for healthcheck
 RUN pip install --no-cache-dir uv \
     && apt-get update \
