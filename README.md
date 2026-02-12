@@ -23,6 +23,22 @@
 
 ---
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Screenshots & Demo](#screenshots--demo)
+- [Visualization Patterns](#visualization-patterns-27)
+- [CLI Reference](#cli-reference)
+- [Minecraft Commands](#minecraft-commands)
+- [Project Structure](#project-structure)
+- [Development](#development)
+- [Known Limitations](#known-limitations)
+- [License](#license)
+
+---
+
 ## Features
 
 - **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
