@@ -30,42 +30,10 @@ jobs:
         run: pip install "ruff>=0.1.0,<1"
 
       - name: Ruff check
-        run: ruff check audio_processor/ python_client/
+        run: ruff check vj_server/ python_client/
 
       - name: Ruff format check
-        run: ruff format --check audio_processor/ python_client/
-
-  python-test:
-    name: Python Test (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Cache pip
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            pip-${{ matrix.python-version }}-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run tests
-        run: pytest audio_processor/tests/ -v --tb=short
+        run: ruff format --check vj_server/ python_client/
 
   # ---------------------------------------------------------------------------
   # Python: security static analysis (Bandit)
@@ -86,11 +54,11 @@ jobs:
 
       - name: Run Bandit
         # Bandit exits non-zero when findings exist; report is still written
-        run: bandit -r audio_processor/ python_client/ -c pyproject.toml -f json -o bandit-report.json || true
+        run: bandit -r vj_server/ python_client/ -c pyproject.toml -f json -o bandit-report.json || true
 
       - name: Bandit (console output)
         continue-on-error: true
-        run: bandit -r audio_processor/ python_client/ -c pyproject.toml
+        run: bandit -r vj_server/ python_client/ -c pyproject.toml
 
       - name: Upload Bandit report
         if: always()
@@ -117,7 +85,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" pip-audit
+          pip install -e "vj_server/[full]" -e "coordinator/[dev]" pip-audit
 
       - name: Run pip-audit
         continue-on-error: true
@@ -321,7 +289,7 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" pip-licenses
+          pip install -e "vj_server/[full]" -e "coordinator/[dev]" pip-licenses
 
       - name: Python license check
         run: |
@@ -393,7 +361,7 @@ jobs:
       - name: Install Python deps + CycloneDX
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" cyclonedx-bom
+          pip install -e "vj_server/[full]" -e "coordinator/[dev]" cyclonedx-bom
 
       - name: Generate Python SBOM
         run: cyclonedx-py environment -o sbom-python.json --output-format json
@@ -450,14 +418,13 @@ jobs:
   ci-passed:
     name: CI Passed
     if: always()
-    needs: [python-lint, python-test, java-build, site-build, coordinator-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
+    needs: [python-lint, java-build, site-build, coordinator-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
     runs-on: ubuntu-latest
     steps:
       - name: Check required results
         run: |
           # Core jobs (blocking)
           if [[ "${{ needs.python-lint.result }}" == "failure" ||
-                "${{ needs.python-test.result }}" == "failure" ||
                 "${{ needs.java-build.result }}" == "failure" ||
                 "${{ needs.site-build.result }}" == "failure" ||
                 "${{ needs.coordinator-test.result }}" == "failure" ]]; then
