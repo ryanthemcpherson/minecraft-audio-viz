@@ -1,8 +1,8 @@
 # Default owner for everything
 * @ryanthemcpherson
 
-# Python audio processor
-/audio_processor/ @ryanthemcpherson
+# Python VJ server
+/vj_server/ @ryanthemcpherson
 /python_client/ @ryanthemcpherson
 
 # Minecraft plugin (Java)

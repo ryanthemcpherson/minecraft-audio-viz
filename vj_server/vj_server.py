@@ -48,9 +48,9 @@ except ImportError:
 from python_client.viz_client import VizClient
 from vj_server.config import PRESETS as AUDIO_PRESETS
 from vj_server.patterns import (
-    PATTERNS,
     AudioState,
     PatternConfig,
+    _lua_pattern_exists,
     get_pattern,
     get_recommended_entity_count,
     list_patterns,
@@ -1772,7 +1772,7 @@ class VJServer:
 
                     elif msg_type == "set_pattern":
                         pattern_name = data.get("pattern", "spectrum")
-                        if pattern_name in PATTERNS:
+                        if _lua_pattern_exists(pattern_name):
                             old_count = self.entity_count
                             recommended = get_recommended_entity_count(pattern_name, old_count)
                             if recommended != self.entity_count:

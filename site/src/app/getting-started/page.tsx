@@ -6,14 +6,14 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Getting Started - MCAV",
   description:
-    "Set up MCAV on your Minecraft server in minutes. Download the plugin, install the audio processor, and start visualizing music in real-time.",
+    "Set up MCAV on your Minecraft server in minutes. Download the plugin, install the VJ server, and start visualizing music in real-time.",
 };
 
 const tocItems = [
   { id: "prerequisites", label: "Prerequisites" },
   { id: "server-setup", label: "Server Owners / VJ Operators" },
   { id: "install-plugin", label: "Install the Plugin", indent: true },
-  { id: "install-processor", label: "Install Audio Processor", indent: true },
+  { id: "install-processor", label: "Install VJ Server", indent: true },
   { id: "start-vj-server", label: "Start the VJ Server", indent: true },
   { id: "in-game-setup", label: "In-Game Setup", indent: true },
   { id: "dj-setup", label: "For DJs" },
@@ -142,7 +142,7 @@ export default function GettingStartedPage() {
                     <h3 className="font-semibold">Python 3.11+</h3>
                   </div>
                   <p className="text-sm text-text-secondary">
-                    Required for server owners running the audio processor / VJ server.
+                    Required for server owners running the VJ server.
                   </p>
                 </div>
 
@@ -174,7 +174,7 @@ export default function GettingStartedPage() {
                   For Server Owners / VJ Operators
                 </h2>
                 <p className="mt-3 text-text-secondary max-w-2xl">
-                  Set up the Minecraft plugin and audio processor to host visualization shows on your server.
+                  Set up the Minecraft plugin and VJ server to host visualization shows on your server.
                 </p>
               </div>
 
@@ -240,18 +240,18 @@ cp target/audioviz-plugin-*.jar /path/to/server/plugins/`}
                 </div>
               </div>
 
-              {/* Step 2: Install Audio Processor */}
+              {/* Step 2: Install VJ Server */}
               <div id="install-processor" className="mb-16">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-electric-blue to-deep-purple text-white font-bold text-sm">
                     02
                   </div>
-                  <h3 className="text-xl font-bold">Install the Audio Processor</h3>
+                  <h3 className="text-xl font-bold">Install the VJ Server</h3>
                 </div>
 
                 <div className="space-y-6 pl-0 sm:pl-16">
                   <p className="text-text-secondary">
-                    The audio processor captures system audio, performs FFT analysis, and sends visualization data to the Minecraft plugin over WebSocket.
+                    The VJ server receives audio data from DJ clients, runs Lua visualization patterns, and sends entity updates to the Minecraft plugin over WebSocket.
                   </p>
 
                   <CodeBlock
@@ -322,7 +322,7 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
 
                 <div className="space-y-6 pl-0 sm:pl-16">
                   <p className="text-text-secondary">
-                    Once the plugin is installed and the audio processor is running, initialize the visualization zone in-game.
+                    Once the plugin is installed and the VJ server is running, initialize the visualization zone in-game.
                   </p>
 
                   <CodeBlock
@@ -481,12 +481,12 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
 
                 <div className="space-y-6 pl-0 sm:pl-16">
                   <p className="text-text-secondary">
-                    Prefer the command line? You can use the Python audio processor directly instead of the DJ Client app.
+                    Prefer the command line? You can use the Python CLI directly instead of the DJ Client app.
                   </p>
 
                   <CodeBlock
                     title="Terminal"
-                    code={`# Install the audio processor
+                    code={`# Install the VJ server
 pip install git+https://github.com/ryanthemcpherson/minecraft-audio-viz.git
 
 # Connect directly to a Minecraft server
@@ -576,7 +576,7 @@ audioviz --list-devices`}
                     <ul className="list-disc pl-5 space-y-2">
                       <li>Enable low-latency mode: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">audioviz --low-latency</code> (~20ms window)</li>
                       <li>Reduce entity count for better server performance</li>
-                      <li>Ensure the audio processor and Minecraft server are on the same network for minimal latency</li>
+                      <li>Ensure the VJ server and Minecraft server are on the same network for minimal latency</li>
                       <li>Close resource-heavy applications on the audio capture machine</li>
                     </ul>
                   </div>

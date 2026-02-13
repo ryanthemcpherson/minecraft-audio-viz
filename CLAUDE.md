@@ -29,7 +29,7 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
 
 2. **vj_server/** (Python) - Multi-DJ visualization server
    - `vj_server.py` - Central server: DJ auth, queue management, pattern engine, Minecraft relay
-   - `patterns.py` - 25+ visualization patterns (VisualizationPattern base class)
+   - `patterns.py` - Lua pattern engine (LuaPattern) and pattern registry
    - `config.py` - Audio presets (auto, edm, chill, rock, hiphop, classical) and server config
    - `auth.py` - DJ/VJ authentication (bcrypt, SHA256, connect codes)
    - `cli.py` - CLI entry point (`audioviz-vj`)
@@ -167,13 +167,25 @@ cargo test                                   # Run Rust tests
 ## Key Patterns & Extension Points
 
 ### Adding a Visualization Pattern
-Extend `VisualizationPattern` in `vj_server/patterns.py`:
-```python
-class MyPattern(VisualizationPattern):
-    def calculate_entities(self, audio_state: AudioState, config: PatternConfig) -> List[EntityData]:
-        # Return list of entity positions (0-1 normalized coordinates)
+Create a new Lua file in `patterns/` (e.g., `patterns/mypattern.lua`):
+```lua
+name = "My Pattern"
+description = "A custom visualization pattern"
+recommended_entities = 64
+
+function calculate(audio, config, dt)
+    local entities = {}
+    for i = 1, config.entity_count do
+        entities[i] = {
+            id = "block_" .. (i - 1),
+            x = 0.5, y = 0.5, z = 0.5,
+            scale = 0.2, rotation = 0, band = 0, visible = true,
+        }
+    end
+    return entities
+end
 ```
-Register in `get_pattern()` and `list_patterns()`.
+Patterns are auto-discovered from `patterns/*.lua` — no registration needed.
 
 ### Adding an Audio Preset
 Presets are defined in both the Rust DJ client (`dj_client/src-tauri/src/audio/fft.rs`) and the VJ server (`vj_server/config.py`). Add to both:
