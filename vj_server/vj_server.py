@@ -549,6 +549,7 @@ class VJServer:
 
         # Browser clients
         self._broadcast_clients: Set = set()
+        self._voice_subscribers: Set = set()  # Clients subscribed to voice_audio frames
         self._browser_heartbeat_task: Optional[asyncio.Task] = None
         self._browser_pong_pending: Dict = {}  # websocket -> missed_pong_count
         self._browser_last_pong: Dict = {}  # websocket -> timestamp of last pong
@@ -2247,6 +2248,20 @@ class VJServer:
                                 )
                             )
 
+                    elif msg_type == "subscribe_voice":
+                        self._voice_subscribers.add(websocket)
+                        logger.info(
+                            f"Voice subscriber added. Total: {len(self._voice_subscribers)}"
+                        )
+                        await websocket.send(json.dumps({"type": "subscribe_voice_ack"}))
+
+                    elif msg_type == "unsubscribe_voice":
+                        self._voice_subscribers.discard(websocket)
+                        logger.info(
+                            f"Voice subscriber removed. Total: {len(self._voice_subscribers)}"
+                        )
+                        await websocket.send(json.dumps({"type": "unsubscribe_voice_ack"}))
+
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
                         # Sync local state when zone config changes entity count,
@@ -2317,6 +2332,7 @@ class VJServer:
             pass
         finally:
             self._broadcast_clients.discard(websocket)
+            self._voice_subscribers.discard(websocket)
             # Clean up heartbeat tracking for this client
             self._browser_pong_pending.pop(websocket, None)
             self._browser_last_pong.pop(websocket, None)
@@ -3084,6 +3100,24 @@ class VJServer:
             await self.viz_client.send_voice_frame(pcm_data, seq)
         except Exception:
             pass  # Fire and forget
+
+        # Broadcast to voice subscribers (Discord bot, etc.)
+        if self._voice_subscribers:
+            voice_msg = json.dumps(
+                {
+                    "type": "voice_audio",
+                    "data": pcm_data,
+                    "seq": seq,
+                    "codec": data.get("codec", "pcm"),
+                }
+            )
+            dead_clients = set()
+            for client in list(self._voice_subscribers):
+                try:
+                    await client.send(voice_msg)
+                except Exception:
+                    dead_clients.add(client)
+            self._voice_subscribers -= dead_clients
 
     async def _forward_voice_config(self, config: dict):
         """Forward voice_config to the Minecraft plugin and relay voice_status response."""

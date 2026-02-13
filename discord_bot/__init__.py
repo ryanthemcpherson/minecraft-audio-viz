@@ -1,11 +1,7 @@
 """
-AudioViz Discord Bot
+AudioViz Discord Bot — Audio Output
 
-Discord bot for audio streaming and synchronization.
-Captures mixed voice channel audio and streams it to the AudioViz
-processor for real-time visualization in Minecraft.
-
-Note: This is NOT used for local audio capture — WASAPI handles that.
-The Discord bot is for streaming remote audio sources (voice channels)
-and synchronizing visualization across distributed setups.
+Receives the active DJ's audio stream from the VJ server and plays it
+into a Discord voice channel, letting Discord users hear the DJ's music
+alongside Minecraft players using Simple Voice Chat.
 """
