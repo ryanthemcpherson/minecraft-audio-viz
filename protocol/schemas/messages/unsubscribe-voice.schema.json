@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "unsubscribe-voice.schema.json",
+  "title": "UnsubscribeVoiceMessage",
+  "description": "Opt-out of receiving voice_audio frames. Sent by browser clients to the VJ server.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "unsubscribe_voice"
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "subscribe-voice.schema.json",
+  "title": "SubscribeVoiceMessage",
+  "description": "Opt-in to receive voice_audio frames from the active DJ. Sent by browser clients (e.g. Discord bot) to the VJ server.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "subscribe_voice"
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}

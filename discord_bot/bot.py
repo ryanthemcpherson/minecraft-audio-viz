@@ -54,13 +54,17 @@ class VJAudioSource(discord.AudioSource):
     FRAME_SIZE = 3840  # 20 ms of 48 kHz stereo s16le
     SILENCE = b"\x00" * FRAME_SIZE
 
-    def __init__(self):
+    def __init__(self, volume: float = 1.0):
         self._buffer: deque[bytes] = deque(maxlen=50)  # ~1 s ring buffer
+        self.volume: float = volume
 
     def push_frame(self, stereo_pcm: bytes) -> None:
         """Thread-safe push of one 20 ms stereo PCM frame."""
-        if len(stereo_pcm) == self.FRAME_SIZE:
-            self._buffer.append(stereo_pcm)
+        if len(stereo_pcm) != self.FRAME_SIZE:
+            return
+        if self.volume != 1.0:
+            stereo_pcm = _scale_pcm(stereo_pcm, self.volume)
+        self._buffer.append(stereo_pcm)
 
     def read(self) -> bytes:
         """Return next frame or silence."""
@@ -94,6 +98,19 @@ def mono_to_stereo(mono: bytes) -> bytes:
     return bytes(stereo)
 
 
+def _scale_pcm(pcm: bytes, volume: float) -> bytes:
+    """Scale s16le PCM samples by a volume factor (0.0–2.0)."""
+    import struct as _struct
+
+    n_samples = len(pcm) // 2
+    samples = _struct.unpack(f"<{n_samples}h", pcm)
+    scaled = _struct.pack(
+        f"<{n_samples}h",
+        *(max(-32768, min(32767, int(s * volume))) for s in samples),
+    )
+    return scaled
+
+
 # ---------------------------------------------------------------------------
 # Main bot
 # ---------------------------------------------------------------------------
@@ -116,8 +133,9 @@ class AudioVizBot(discord.Client):
         self._vj_ws = None
         self._vj_task: Optional[asyncio.Task] = None
 
-        # Audio source (created when joining a voice channel)
-        self._audio_source: Optional[VJAudioSource] = None
+        # Audio sources per guild (guild_id -> VJAudioSource)
+        self._audio_sources: dict[int, VJAudioSource] = {}
+        self._volume: float = 1.0  # Default volume for new sources
 
         # Opus decoder (lazy init)
         self._opus_decoder = None
@@ -155,8 +173,8 @@ class AudioVizBot(discord.Client):
     # ------------------------------------------------------------------
 
     def _process_voice_frame(self, data: dict) -> None:
-        """Decode a voice_audio message and push to the audio source buffer."""
-        if self._audio_source is None:
+        """Decode a voice_audio message and push to all active audio sources."""
+        if not self._audio_sources:
             return
 
         raw_data = data.get("data")
@@ -175,13 +193,16 @@ class AudioVizBot(discord.Client):
             if pcm_bytes is None:
                 return  # Drop frame — 20 ms silence gap
 
-        # At this point we have mono 48 kHz s16le PCM (1920 bytes)
+        # Convert to stereo if needed
         if len(pcm_bytes) == 1920:
             stereo = mono_to_stereo(pcm_bytes)
-            self._audio_source.push_frame(stereo)
         elif len(pcm_bytes) == 3840:
-            # Already stereo
-            self._audio_source.push_frame(pcm_bytes)
+            stereo = pcm_bytes
+        else:
+            return
+
+        for source in self._audio_sources.values():
+            source.push_frame(stereo)
 
     # ------------------------------------------------------------------
     # VJ server WebSocket connection
@@ -309,11 +330,12 @@ class AudioVizBot(discord.Client):
             else:
                 vc = await channel.connect()
 
-            # Create audio source and start playback
-            self._audio_source = VJAudioSource()
+            # Create per-guild audio source and start playback
+            source = VJAudioSource(volume=self._volume)
+            self._audio_sources[interaction.guild_id] = source
             if vc.is_playing():
                 vc.stop()
-            vc.play(self._audio_source)
+            vc.play(source)
 
             await interaction.response.send_message(
                 f"Joined **{channel.name}** — streaming DJ audio"
@@ -325,7 +347,7 @@ class AudioVizBot(discord.Client):
             if vc:
                 vc.stop()
                 await vc.disconnect()
-                self._audio_source = None
+                self._audio_sources.pop(interaction.guild_id, None)
                 await interaction.response.send_message("Left voice channel")
             else:
                 await interaction.response.send_message(
@@ -340,7 +362,8 @@ class AudioVizBot(discord.Client):
             dj_info = self._active_dj or "None"
             pattern_info = self._current_pattern
             bpm_info = f"{self._current_bpm:.0f}" if self._current_bpm > 0 else "—"
-            buf_depth = len(self._audio_source._buffer) if self._audio_source else 0
+            source = self._audio_sources.get(interaction.guild_id)
+            buf_depth = len(source._buffer) if source else 0
 
             embed = discord.Embed(
                 title="AudioViz Bot Status",
@@ -352,8 +375,19 @@ class AudioVizBot(discord.Client):
             embed.add_field(name="Pattern", value=pattern_info, inline=True)
             embed.add_field(name="BPM", value=bpm_info, inline=True)
             embed.add_field(name="Buffer", value=f"{buf_depth}/50 frames", inline=True)
+            embed.add_field(name="Volume", value=f"{int(self._volume * 100)}%", inline=True)
 
             await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="volume", description="Set playback volume (0-200%)")
+        @app_commands.describe(percent="Volume percentage (0-200)")
+        async def volume_cmd(interaction: discord.Interaction, percent: int):
+            percent = max(0, min(200, percent))
+            self._volume = percent / 100.0
+            # Update any active sources
+            for source in self._audio_sources.values():
+                source.volume = self._volume
+            await interaction.response.send_message(f"Volume set to {percent}%")
 
     # ------------------------------------------------------------------
     # Lifecycle
