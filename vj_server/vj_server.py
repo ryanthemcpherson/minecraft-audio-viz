@@ -565,6 +565,13 @@ class VJServer:
         self._current_pattern = get_pattern("spectrum", self._pattern_config)
         self._pattern_name = "spectrum"
 
+        # Pattern crossfade transition system
+        self._transition_duration = 1.0  # Default 1 second crossfade
+        self._transitioning = False
+        self._transition_start = 0.0
+        self._old_pattern: Optional[Any] = None
+        self._old_pattern_name: Optional[str] = None
+
         # Spectrograph
         self.spectrograph = TerminalSpectrograph() if show_spectrograph else None
 
@@ -1779,8 +1786,28 @@ class VJServer:
                             if recommended != self.entity_count:
                                 self.entity_count = recommended
                                 self._pattern_config.entity_count = recommended
-                            self._pattern_name = pattern_name
-                            self._current_pattern = get_pattern(pattern_name, self._pattern_config)
+
+                            # Start crossfade transition
+                            if self._transition_duration > 0 and pattern_name != self._pattern_name:
+                                self._old_pattern = self._current_pattern
+                                self._old_pattern_name = self._pattern_name
+                                self._current_pattern = get_pattern(
+                                    pattern_name, self._pattern_config
+                                )
+                                self._pattern_name = pattern_name
+                                self._transitioning = True
+                                self._transition_start = time.monotonic()
+                                logger.info(
+                                    f"Starting {self._transition_duration}s crossfade: {self._old_pattern_name} -> {pattern_name}"
+                                )
+                            else:
+                                # Instant switch (transition_duration = 0 or same pattern)
+                                self._pattern_name = pattern_name
+                                self._current_pattern = get_pattern(
+                                    pattern_name, self._pattern_config
+                                )
+                                self._transitioning = False
+
                             if self.viz_client and self.viz_client.connected:
                                 try:
                                     await self.viz_client.cleanup_zone(self.zone)
@@ -2016,6 +2043,21 @@ class VJServer:
                                     "value": float(value),
                                 }
                             )
+
+                    elif msg_type == "set_transition_duration":
+                        # Set pattern crossfade transition duration
+                        duration = data.get("duration", 1.0)
+                        self._transition_duration = max(0.0, min(3.0, float(duration)))
+                        logger.info(
+                            f"Pattern transition duration set to {self._transition_duration}s"
+                        )
+                        # Broadcast to all browsers
+                        await self._broadcast_to_browsers(
+                            {
+                                "type": "transition_duration_sync",
+                                "duration": self._transition_duration,
+                            }
+                        )
 
                     elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
@@ -2534,6 +2576,8 @@ class VJServer:
                 "type": "pattern_changed",
                 "pattern": self._pattern_name,
                 "patterns": list_patterns(),
+                "transitioning": self._transitioning,
+                "transition_duration": self._transition_duration if self._transitioning else 0,
             }
         )
         dead_clients = set()
@@ -3029,7 +3073,7 @@ class VJServer:
     def _calculate_entities(
         self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float
     ) -> List[dict]:
-        """Calculate entity positions from audio state."""
+        """Calculate entity positions from audio state, with pattern crossfade support."""
         audio_state = AudioState(
             bands=bands,
             amplitude=peak,
@@ -3037,7 +3081,87 @@ class VJServer:
             beat_intensity=beat_intensity,
             frame=self._frame_count,
         )
+
+        # Check if we're transitioning between patterns
+        if self._transitioning:
+            elapsed = time.monotonic() - self._transition_start
+
+            # Check if transition is complete
+            if elapsed >= self._transition_duration:
+                self._transitioning = False
+                self._old_pattern = None
+                self._old_pattern_name = None
+                logger.info(f"Crossfade complete: now on {self._pattern_name}")
+                return self._current_pattern.calculate_entities(audio_state)
+
+            # Calculate blend alpha using smoothstep easing
+            t = elapsed / self._transition_duration
+            alpha = self._smoothstep(t)
+
+            # Get entities from both patterns
+            old_entities = self._old_pattern.calculate_entities(audio_state)
+            new_entities = self._current_pattern.calculate_entities(audio_state)
+
+            # Blend the entities
+            return self._blend_entities(old_entities, new_entities, alpha)
+
+        # No transition - just return current pattern
         return self._current_pattern.calculate_entities(audio_state)
+
+    def _smoothstep(self, t: float) -> float:
+        """Smoothstep interpolation for smooth easing (0->1)."""
+        t = max(0.0, min(1.0, t))
+        return t * t * (3.0 - 2.0 * t)
+
+    def _blend_entities(
+        self, old_entities: List[dict], new_entities: List[dict], alpha: float
+    ) -> List[dict]:
+        """
+        Blend between old and new entity lists using alpha (0=old, 1=new).
+        Handles entities appearing/disappearing between patterns.
+        """
+        # Build dictionaries by entity ID for fast lookup
+        old_dict = {e.get("id", f"e{i}"): e for i, e in enumerate(old_entities)}
+        new_dict = {e.get("id", f"e{i}"): e for i, e in enumerate(new_entities)}
+
+        # All entity IDs from both patterns
+        all_ids = set(old_dict.keys()) | set(new_dict.keys())
+
+        blended = []
+        for eid in all_ids:
+            old_e = old_dict.get(eid)
+            new_e = new_dict.get(eid)
+
+            if old_e and new_e:
+                # Entity exists in both patterns - lerp all properties
+                blended_e = {
+                    "id": eid,
+                    "x": self._lerp(old_e.get("x", 0.5), new_e.get("x", 0.5), alpha),
+                    "y": self._lerp(old_e.get("y", 0.5), new_e.get("y", 0.5), alpha),
+                    "z": self._lerp(old_e.get("z", 0.5), new_e.get("z", 0.5), alpha),
+                    "scale": self._lerp(old_e.get("scale", 0.5), new_e.get("scale", 0.5), alpha),
+                    "rotation": self._lerp(
+                        old_e.get("rotation", 0.0), new_e.get("rotation", 0.0), alpha
+                    ),
+                    "band": new_e.get("band", old_e.get("band", 0)),
+                    "visible": True,
+                }
+            elif new_e:
+                # Entity only in new pattern - fade in from scale 0
+                blended_e = new_e.copy()
+                blended_e["scale"] = new_e.get("scale", 0.5) * alpha
+            else:
+                # Entity only in old pattern - fade out to scale 0
+                blended_e = old_e.copy()
+                blended_e["scale"] = old_e.get("scale", 0.5) * (1.0 - alpha)
+
+            blended.append(blended_e)
+
+        return blended
+
+    def _lerp(self, a: float, b: float, t: float) -> float:
+        """Linear interpolation between a and b."""
+        return a + (b - a) * t
 
     async def _update_minecraft(
         self,

@@ -24,6 +24,13 @@ const footerLinks = [
       { label: "Audio Processing", href: "https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/docs/AUDIO_PROCESSING.md", external: true },
     ],
   },
+  {
+    heading: "Legal",
+    links: [
+      { label: "Privacy Policy", href: "/privacy" },
+      { label: "Terms of Service", href: "/terms" },
+    ],
+  },
 ];
 
 export default function Footer() {

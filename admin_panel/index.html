@@ -196,6 +196,16 @@
                             <div id="pattern-grid" class="pattern-grid">
                                 <!-- Populated by JS -->
                             </div>
+                            <!-- Transition Duration Control -->
+                            <div class="transition-control">
+                                <label for="transition-duration-slider" class="control-label">
+                                    <span>Transition:</span>
+                                    <span id="transition-duration-value" class="control-value">1.0s</span>
+                                </label>
+                                <input type="range" id="transition-duration-slider" class="slider"
+                                       min="0" max="3000" step="100" value="1000">
+                                <span id="transition-status" class="transition-status hidden">Crossfading...</span>
+                            </div>
                         </section>
 
                         <!-- Preset Buttons -->

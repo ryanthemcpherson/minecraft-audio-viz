@@ -1,0 +1,15 @@
+# robots.txt for https://mcav.live
+
+# Allow all crawlers by default
+User-agent: *
+Allow: /
+
+# Disallow private/authenticated pages
+Disallow: /api/
+Disallow: /auth/callback
+Disallow: /dashboard
+Disallow: /settings
+Disallow: /onboarding
+
+# Sitemap location
+Sitemap: https://mcav.live/sitemap.xml

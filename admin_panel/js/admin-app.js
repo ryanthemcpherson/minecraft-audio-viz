@@ -298,6 +298,11 @@ class AdminApp {
         this.elements.voiceChannelType = document.getElementById('voice-channel-type');
         this.elements.voiceDistance = document.getElementById('voice-distance');
         this.elements.voiceDistanceRow = document.getElementById('voice-distance-row');
+
+        // Pattern transition elements
+        this.elements.transitionDurationSlider = document.getElementById('transition-duration-slider');
+        this.elements.transitionDurationValue = document.getElementById('transition-duration-value');
+        this.elements.transitionStatus = document.getElementById('transition-status');
     }
 
     _setupEventListeners() {
@@ -409,6 +414,22 @@ class AdminApp {
         if (this.elements.btnRefreshZones) {
             this.elements.btnRefreshZones.addEventListener('click', () => {
                 this.ws.send({ type: 'get_zones' });
+            });
+        }
+
+        // Pattern transition duration slider
+        if (this.elements.transitionDurationSlider) {
+            const sendTransitionDuration = debounce((value) => {
+                this.ws.send({ type: 'set_transition_duration', duration: value / 1000 });
+            }, 50);
+
+            this.elements.transitionDurationSlider.addEventListener('input', () => {
+                const ms = parseInt(this.elements.transitionDurationSlider.value);
+                const seconds = (ms / 1000).toFixed(1);
+                if (this.elements.transitionDurationValue) {
+                    this.elements.transitionDurationValue.textContent = `${seconds}s`;
+                }
+                sendTransitionDuration(ms);
             });
         }
 
@@ -836,6 +857,17 @@ class AdminApp {
 
             case 'preset_changed':
                 this._handlePresetChanged(data);
+                break;
+
+            case 'transition_duration_sync':
+                // Server synced transition duration
+                if (data.duration !== undefined && this.elements.transitionDurationSlider) {
+                    const ms = Math.round(data.duration * 1000);
+                    this.elements.transitionDurationSlider.value = ms;
+                    if (this.elements.transitionDurationValue) {
+                        this.elements.transitionDurationValue.textContent = `${data.duration.toFixed(1)}s`;
+                    }
+                }
                 break;
 
             case 'state_snapshot':
@@ -1347,6 +1379,21 @@ class AdminApp {
         this.state.currentPattern = data.pattern;
         this._updateCurrentPattern(data.pattern);
         this._highlightActivePattern(data.pattern);
+
+        // Show transition status if transitioning
+        if (data.transitioning && this.elements.transitionStatus) {
+            this.elements.transitionStatus.classList.remove('hidden');
+            // Auto-hide after transition completes
+            if (data.transition_duration) {
+                setTimeout(() => {
+                    if (this.elements.transitionStatus) {
+                        this.elements.transitionStatus.classList.add('hidden');
+                    }
+                }, data.transition_duration * 1000);
+            }
+        } else if (this.elements.transitionStatus) {
+            this.elements.transitionStatus.classList.add('hidden');
+        }
     }
 
     _handlePresetChanged(data) {

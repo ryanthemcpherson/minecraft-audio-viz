@@ -6,6 +6,8 @@ organization management, and the unified dashboard.
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -15,7 +17,9 @@ from fastapi.responses import JSONResponse
 
 from app.config import Settings, get_settings
 from app.database import init_engine, shutdown_engine
+from app.logging_config import configure_logging
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.security import SecurityHeadersMiddleware
 from app.routers import (
     auth,
     connect,
@@ -31,13 +35,20 @@ from app.routers import (
 )
 from app.services.rate_limiter import RateLimitExceeded
 
+_logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialise the database on startup, tear down on shutdown."""
+    # Configure logging before anything else
+    configure_logging()
+    _logger.info("Starting MCAV DJ Coordinator")
+
     settings = get_settings()
     init_engine(settings)
     yield
+    _logger.info("Shutting down MCAV DJ Coordinator")
     await shutdown_engine()
 
 
@@ -52,6 +63,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # -- Security headers middleware -------------------------------------------
+    application.add_middleware(SecurityHeadersMiddleware)
 
     # -- Rate-limit middleware --------------------------------------------------
     application.add_middleware(RateLimitMiddleware)
@@ -88,6 +102,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={"detail": str(exc)},
             headers={"Retry-After": str(exc.retry_after)},
         )
+
+    @application.exception_handler(Exception)
+    async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Catch unhandled exceptions and return a clean JSON error response."""
+        env = os.environ.get("MCAV_ENV", "development").lower()
+        is_production = env in ("production", "prod", "staging")
+
+        # Log the full traceback
+        _logger.exception(
+            "Unhandled exception",
+            extra={
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
+
+        # Don't expose internal details in production
+        if is_production:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+            )
+        else:
+            # In development, include exception details for debugging
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": "Internal server error",
+                    "error": str(exc),
+                    "type": type(exc).__name__,
+                },
+            )
 
     return application
 

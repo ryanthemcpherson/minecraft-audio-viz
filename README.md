@@ -58,38 +58,56 @@
 
 ## Quick Start
 
-**Requirements:** Windows, Python 3.11+, and optionally Java 21 + Paper 1.21.1+ for Minecraft
+### Download DJ Client (Recommended)
+
+**[⬇️ Download Latest Release](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)**
+
+The DJ Client is a cross-platform desktop app (Windows/macOS/Linux) for capturing and streaming audio:
+
+1. Download the installer for your platform from [GitHub Releases](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)
+2. Install and launch the DJ Client
+3. Select your audio source (Spotify, Chrome, system audio, etc.)
+4. Connect to a VJ server or run in standalone mode with browser preview
+
+### VJ Server Setup
+
+**Requirements:** Python 3.11+ (VJ server can run on any platform)
 
 ```bash
-# 1. Clone & install
+# 1. Clone & install VJ server
 git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
 cd minecraft-audio-viz
-uv pip install -e .          # or: pip install -e ".[full]"
+pip install -e vj_server/     # Install VJ server package
 
-# 2. Run with browser preview
-audioviz --app spotify --preview
+# 2. Start VJ server (multi-DJ mode)
+audioviz-vj                   # Starts on port 9000
 
 # 3. Open in browser
 #    3D Preview:   http://localhost:8080
-#    Admin Panel:  http://localhost:8080/admin/
+#    Admin Panel:  http://localhost:8081
 ```
 
-To connect to Minecraft, build the plugin (`cd minecraft_plugin && mvn package`), drop the jar into your server's `plugins/` folder, and run:
+### Minecraft Plugin Setup (Optional)
+
+To connect to Minecraft, build the plugin and drop it into your server's `plugins/` folder:
 
 ```bash
-audioviz --app spotify --host your-mc-server
+cd minecraft_plugin && mvn package
+# Copy target/audioviz-plugin-*.jar to your server's plugins/ folder
+# Configure VJ server: audioviz-vj --minecraft-host your-mc-server
 ```
 
 ---
 
 ## Architecture
 
-### Single DJ Mode (default)
+### Single DJ Mode (standalone)
 
 ```text
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Audio Source   │────▶│  Audio Processor │────▶│   Minecraft      │
-│ (Spotify/Chrome)│     │   (Python/FFT)   │     │    Plugin        │
+│   DJ Client     │────▶│    VJ Server     │────▶│   Minecraft      │
+│ (Rust/Tauri)    │     │  (Python/Lua)    │     │    Plugin        │
+│  Audio Capture  │     │  Pattern Engine  │     │                  │
 └─────────────────┘     └────────┬─────────┘     └─────────────────┘
                                  │
                     ┌────────────┴────────────┐
@@ -104,18 +122,18 @@ audioviz --app spotify --host your-mc-server
 
 ```text
 ┌──────────────┐
-│ DJ 1 (Remote)│───┐
-│ --dj-relay   │   │
+│  DJ Client 1 │───┐
+│   (Remote)   │   │
 └──────────────┘   │    ┌────────────────┐     ┌─────────────────┐
                    ├───▶│    VJ Server    │────▶│    Minecraft     │
 ┌──────────────┐   │    │   (Central)     │     │    (Shared)      │
-│ DJ 2 (Remote)│───┤    └───────┬────────┘     └─────────────────┘
-│ --dj-relay   │   │            │
+│  DJ Client 2 │───┤    └───────┬────────┘     └─────────────────┘
+│   (Remote)   │   │            │
 └──────────────┘   │    ┌───────┴────────┐
                    │    ▼                ▼
 ┌──────────────┐   │ ┌───────────┐ ┌───────────┐
-│ DJ 3 (Remote)│───┘ │  Viewers   │ │  VJ Admin  │
-│ --dj-relay   │     │ (Browser)  │ │   Panel    │
+│  DJ Client 3 │───┘ │  Viewers   │ │  VJ Admin  │
+│   (Remote)   │     │ (Browser)  │ │   Panel    │
 └──────────────┘     └───────────┘ └───────────┘
 ```
 
@@ -175,41 +193,23 @@ audioviz --app spotify --host your-mc-server
 
 ## CLI Reference
 
+### VJ Server Commands
+
 ```bash
-# Local DJ mode
-audioviz --app spotify                    # capture Spotify
-audioviz --app chrome --preview           # capture Chrome + web preview
-audioviz --host 192.168.1.100             # send to remote Minecraft server
-audioviz --low-latency                    # ultra-low latency (~20ms)
-audioviz --test                           # run without Minecraft
-
-# VJ server (multi-DJ)
-audioviz-vj                               # start VJ server
+# Start VJ server (multi-DJ mode)
+audioviz-vj                               # start on default port 9000
 audioviz-vj --port 9000                   # custom DJ port
-
-# Utilities
-audioviz --list-apps                      # list capturable applications
-audioviz --list-devices                   # list audio devices
+audioviz-vj --minecraft-host mc.local     # connect to Minecraft server
+audioviz-vj --no-auth                     # dev mode - skip authentication
 ```
 
-### Options
+### DJ Client
 
-```text
---app NAME          Application to capture audio from (default: spotify)
---host HOST         Minecraft server host (default: localhost)
---port PORT         Minecraft WebSocket port (default: 8765)
+The DJ Client is a desktop GUI app. Audio source selection and streaming controls are in the app interface.
 
---preview           Enable browser preview server
---preview-port      WebSocket port for browser (default: 8766)
---http-port         HTTP port for web interface (default: 8080)
+**Download:** [GitHub Releases](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)
 
---low-latency       Enable ultra-low latency mode (~20ms)
---no-minecraft      Run without Minecraft connection
---no-fft            Disable FFT analysis (use synthetic bands)
-
---entities N        Number of visualization entities (default: 16)
---zone NAME         Visualization zone name (default: main)
-```
+For development, see `dj_client/README.md`
 
 ---
 
@@ -238,47 +238,26 @@ audioviz --list-devices                   # list audio devices
 ### 1) Start the VJ Server (central control)
 
 ```bash
-python -m audio_processor.vj_server --no-minecraft
+audioviz-vj
 ```
 
 Defaults:
 - DJ connection port: `ws://localhost:9000`
 - Browser preview: `http://localhost:8080`
-- Admin panel: `http://localhost:8080/admin/`
+- Admin panel: `http://localhost:8081`
 
-### 2) DJs connect in relay mode (each DJ machine)
+### 2) DJs connect using DJ Client (each DJ machine)
 
-```bash
-python -m audio_processor.app_capture --dj-relay \
-  --vj-server ws://VJ_SERVER_IP:9000 \
-  --dj-name "DJ Alice" \
-  --dj-id "dj_alice" \
-  --dj-key "alice123"
-```
+1. Download and install the [DJ Client](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)
+2. Launch the DJ Client
+3. Enter VJ server connection details (host, port, DJ name, connect code)
+4. Select audio source and start streaming
 
 ### 3) Optional: DJ authentication (recommended)
 
-Generate bcrypt hashes:
+The VJ server supports connect-code authentication for multi-DJ sessions. Configure DJ credentials in `vj_server/config.py` or use environment variables.
 
-```bash
-python -m audio_processor.auth hash "mysecretpassword"
-python -m audio_processor.auth init configs/dj_auth.json
-```
-
-`configs/dj_auth.json` is intentionally gitignored. Start from `configs/dj_auth.example.json` and keep real keys local.
-
-Example `configs/dj_auth.json`:
-
-```json
-{
-  "djs": {
-    "dj_alice": {"name": "DJ Alice", "key_hash": "bcrypt:$2b$12$...", "priority": 1},
-    "dj_bob": {"name": "DJ Bob", "key_hash": "bcrypt:$2b$12$...", "priority": 2}
-  }
-}
-```
-
-For production, run the VJ server with `--require-auth`.
+For production, the VJ server enforces authentication by default.
 
 </details>
 
@@ -346,9 +325,9 @@ MINECRAFT_HOST=mc.example.com docker-compose up -d
 
 ```text
 minecraft-audio-viz/
-├── audio_processor/       # Python audio processing + FFT + patterns
+├── dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
+├── vj_server/             # VJ Server (Python, pattern engine + routing)
 ├── admin_panel/           # Web control panel (VJ interface)
-├── dj_client/             # Desktop DJ client (Tauri + React)
 ├── preview_tool/          # 3D browser preview (Three.js)
 ├── minecraft_plugin/      # Paper plugin (Java 21)
 ├── site/                  # Landing page (Next.js 15, mcav.live)
@@ -356,11 +335,13 @@ minecraft-audio-viz/
 ├── worker/                # Tenant router (Cloudflare Workers)
 ├── python_client/         # VizClient WebSocket library
 ├── protocol/              # Shared protocol schemas
+├── patterns/              # Lua visualization patterns
 ├── configs/               # Configuration files
 ├── docs/                  # Architecture and ops docs
 ├── scripts/               # PowerShell quick-start scripts
 ├── shows/                 # Saved show files
-└── images/                # Screenshots
+└── archive/               # Archived components
+    └── python_dj_cli/     # Old Python DJ CLI (deprecated)
 ```
 
 ### Web Platform (mcav.live)

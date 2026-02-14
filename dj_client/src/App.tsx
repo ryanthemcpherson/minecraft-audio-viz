@@ -93,12 +93,14 @@ function App() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
+  const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
 
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
     const storedName = localStorage.getItem('mcav.djName');
     const storedHost = localStorage.getItem('mcav.serverHost');
     const storedPort = localStorage.getItem('mcav.serverPort');
+    const onboardingComplete = localStorage.getItem('mcav.onboardingComplete');
 
     if (storedName) {
       setDjName(storedName);
@@ -111,6 +113,11 @@ function App() {
       if (!Number.isNaN(parsedPort)) {
         setServerPort(parsedPort);
       }
+    }
+
+    // Show welcome overlay if first run
+    if (!onboardingComplete) {
+      setShowWelcomeOverlay(true);
     }
 
     loadAudioSources();
@@ -324,10 +331,27 @@ function App() {
 
       setStatus(prev => ({ ...prev, connected: true }));
     } catch (e) {
-      setStatus(prev => ({ ...prev, error: String(e) }));
+      const errStr = String(e);
+      let errorMessage = errStr;
+
+      // Better error messages
+      if (errStr.includes('timeout') || errStr.includes('timed out') || errStr.includes('connection refused')) {
+        errorMessage = "Can't reach server. Check that the VJ server is running and your firewall allows connections on this port.";
+      } else if (errStr.includes('auth') || errStr.includes('invalid') || errStr.includes('unauthorized')) {
+        errorMessage = 'Invalid connect code. Ask your VJ operator for a new code.';
+      } else if (errStr.includes('connect')) {
+        errorMessage = 'Connection lost. Attempting to reconnect...';
+      }
+
+      setStatus(prev => ({ ...prev, error: errorMessage }));
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  const handleDismissWelcome = () => {
+    localStorage.setItem('mcav.onboardingComplete', 'true');
+    setShowWelcomeOverlay(false);
   };
 
   const handleDisconnect = async () => {
@@ -398,6 +422,55 @@ function App() {
 
   return (
     <div className="app">
+      {showWelcomeOverlay && (
+        <div className="welcome-overlay">
+          <div className="welcome-modal">
+            <h2>Welcome to MCAV DJ Client</h2>
+            <p className="welcome-subtitle">Stream your audio to Minecraft visualizations</p>
+
+            <div className="welcome-steps">
+              <div className="welcome-step">
+                <div className="step-number">1</div>
+                <div className="step-content">
+                  <h3>Get a connect code</h3>
+                  <p>Request a code from your VJ operator or server admin</p>
+                </div>
+              </div>
+
+              <div className="welcome-step">
+                <div className="step-number">2</div>
+                <div className="step-content">
+                  <h3>Select audio source</h3>
+                  <p>Choose which audio to stream: system audio, specific app, or microphone</p>
+                </div>
+              </div>
+
+              <div className="welcome-step">
+                <div className="step-number">3</div>
+                <div className="step-content">
+                  <h3>Connect and go live</h3>
+                  <p>Hit connect and start streaming to Minecraft</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="welcome-actions">
+              <button className="btn btn-connect" onClick={handleDismissWelcome} type="button">
+                Get Started
+              </button>
+              <a
+                className="btn btn-link"
+                href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Learn More
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="app-header">
         <div className="brand">
           <img className="brand-logo" src={MCAV_LOGO_DATA_URI} alt="MCAV logo" />
@@ -406,7 +479,21 @@ function App() {
             <h1>DJ Client</h1>
           </div>
         </div>
-        <BeatIndicator active={isBeat && status.connected} />
+        <div className="header-actions">
+          <a
+            className="help-link"
+            href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Help & Documentation"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M10 14v-1m0-4c0-.55.2-1.02.59-1.41C10.98 7.2 11.45 7 12 7c.55 0 1.02.2 1.41.59.39.39.59.86.59 1.41 0 .28-.07.54-.2.78-.14.24-.32.45-.55.63l-.77.6c-.24.19-.43.4-.57.63-.14.24-.21.5-.21.78" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </a>
+          <BeatIndicator active={isBeat && status.connected} />
+        </div>
       </header>
 
       <main className="app-main">
@@ -511,10 +598,13 @@ function App() {
             </section>
 
             <section className="section">
+              <div className="label-with-help">
+                <span className="input-label">Step 2 - Connect Code</span>
+                <span className="help-text">Get this from your VJ operator or server admin</span>
+              </div>
               <ConnectCode
                 value={connectCode}
                 onChange={setConnectCode}
-                label="Step 2 - Connect Code"
               />
               <div className="code-display">
                 {formatCode(connectCode) || 'XXXX-XXXX'}
@@ -522,13 +612,25 @@ function App() {
             </section>
 
             <section className="section">
-              <AudioSourceSelect
-                sources={audioSources}
-                value={selectedSource}
-                onChange={setSelectedSource}
-                onRefresh={loadAudioSources}
-                label="Step 3 - Audio Source"
-              />
+              <div className="label-with-help">
+                <span className="input-label">Step 3 - Audio Source</span>
+                <span className="help-text">System: all PC audio, Application: specific app, Input Device: microphone/line-in</span>
+              </div>
+              {audioSources.length === 0 ? (
+                <div className="empty-state">
+                  <p>No audio sources found. Make sure your audio devices are connected and enabled.</p>
+                  <button className="btn btn-link" onClick={loadAudioSources} type="button">
+                    Refresh
+                  </button>
+                </div>
+              ) : (
+                <AudioSourceSelect
+                  sources={audioSources}
+                  value={selectedSource}
+                  onChange={setSelectedSource}
+                  onRefresh={loadAudioSources}
+                />
+              )}
             </section>
 
             {status.error && (
