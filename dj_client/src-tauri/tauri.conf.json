@@ -31,12 +31,29 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
       "icons/icon.png",
       "icons/icon.ico"
     ],
+    "publisher": "MCAV",
+    "copyright": "Copyright (c) 2024 Ryan McPherson",
+    "shortDescription": "Real-time audio visualization for Minecraft",
+    "longDescription": "MCAV DJ Client captures system audio and streams real-time frequency analysis to Minecraft servers, powering beat-reactive visualizations built with Display Entities.",
     "windows": {
+      "nsis": {
+        "license": "installer/LICENSE.txt",
+        "headerImage": "installer/nsis-header.bmp",
+        "sidebarImage": "installer/nsis-sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
+        "installMode": "both",
+        "displayLanguageSelector": false
+      },
       "wix": {
-        "language": "en-US"
+        "language": "en-US",
+        "bannerPath": "installer/wix-banner.bmp",
+        "dialogImagePath": "installer/wix-dialog.bmp"
       }
     }
   },
