@@ -83,6 +83,7 @@ export interface LuaPatternDef {
   description: string;
   category: string;
   staticCamera: boolean;
+  startBlocks: number | null;
   source: string;
 }
 
@@ -93,6 +94,7 @@ export const PATTERNS: LuaPatternDef[] = [
     description: "6 levitating platforms - one per frequency",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Floating Platforms"
 description = "6 levitating platforms - one per frequency"
@@ -173,6 +175,7 @@ end
     description: "Explosive burst on beats - 3D shockwave",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Supernova"
 description = "Explosive burst on beats - 3D shockwave"
@@ -262,6 +265,7 @@ end
     description: "Rotating cube vertices - expands with beats",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Breathing Cube"
 description = "Rotating cube vertices - expands with beats"
@@ -451,6 +455,7 @@ end
     description: "Upward spray with gravity arcs",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Fountain"
 description = "Upward spray with gravity arcs"
@@ -571,6 +576,7 @@ end
     description: "Nucleus + electrons on 3D orbital planes",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Atom Model"
 description = "Nucleus + electrons on 3D orbital planes"
@@ -699,6 +705,7 @@ end
     description: "3D sphere that breathes and pulses",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Expanding Sphere"
 description = "3D sphere that breathes and pulses"
@@ -806,6 +813,7 @@ end
     description: "Spiraling vertical tower - blocks orbit and bounce",
     category: "Original",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Stacked Tower"
 description = "Spiraling vertical tower - blocks orbit and bounce"
@@ -897,16 +905,20 @@ end
     description: "Double helix spiral - rotates and stretches",
     category: "Original",
     staticCamera: false,
+    startBlocks: 90,
     source: `-- Pattern metadata
 name = "DNA Helix"
 description = "Double helix spiral - rotates and stretches"
 category = "Original"
 static_camera = false
+start_blocks = 90
 
 -- Per-instance state
 state = {
     rotation = 0.0,
     stretch = 1.0,
+    beat_pulse = 0.0,
+    phase = 0.0,
 }
 
 -- Main calculation function
@@ -914,20 +926,26 @@ function calculate(audio, config, dt)
     local entities = {}
     local n = config.entity_count
     local center = 0.5
+    if n <= 0 then
+        return entities
+    end
 
     -- Rotation speed based on energy
-    local speed = 1.0 + audio.amplitude * 2.0
+    local speed = 0.85 + audio.amplitude * 2.2
     if audio.is_beat then
         speed = speed * 1.5
+        state.beat_pulse = 1.0
     end
     state.rotation = state.rotation + speed * dt
+    state.phase = state.phase + (0.45 + audio.bands[4] * 0.9) * dt
+    state.beat_pulse = decay(state.beat_pulse, 0.84, dt)
 
     -- Stretch based on bass
     local target_stretch = 0.8 + audio.bands[1] * 0.6 + audio.bands[2] * 0.4
-    state.stretch = smooth(state.stretch, target_stretch, 0.1, dt)
+    state.stretch = smooth(state.stretch, target_stretch, 0.13, dt)
 
     -- Helix parameters
-    local radius = 0.15 + audio.amplitude * 0.1
+    local radius = 0.12 + audio.amplitude * 0.12 + state.beat_pulse * 0.035
     local pitch = 0.08 * state.stretch
 
     for i = 1, n do
@@ -937,13 +955,15 @@ function calculate(audio, config, dt)
 
         -- Position along helix
         local half_n = n / 2
-        local t = idx / half_n * math.pi * 3  -- 3 full turns
+        local t = idx / half_n * math.pi * 3.4  -- 3.4 turns for denser helix
         local angle = t + state.rotation + (helix * math.pi)  -- Offset second helix by 180 degrees
 
         -- Helix coordinates
-        local x = center + math.cos(angle) * radius
-        local z = center + math.sin(angle) * radius
-        local y = 0.1 + (idx / half_n) * 0.8 + pitch * math.sin(t)  -- Vertical spread with pitch modulation
+        local wobble = math.sin(t * 1.7 + state.phase) * (0.012 + audio.bands[3] * 0.02)
+        local local_radius = radius + wobble
+        local x = center + math.cos(angle) * local_radius
+        local z = center + math.sin(angle) * local_radius
+        local y = 0.08 + (idx / half_n) * 0.84 + pitch * math.sin(t + state.phase * 0.4)
 
         -- Pulse radius with band
         local band_idx = (idx % 5) + 1
@@ -951,10 +971,12 @@ function calculate(audio, config, dt)
         x = x + math.cos(angle) * pulse
         z = z + math.sin(angle) * pulse
 
-        local scale = config.base_scale + audio.bands[band_idx] * 0.4
+        local scale = config.base_scale * 0.85 + audio.bands[band_idx] * 0.45
         if audio.is_beat then
-            scale = scale * 1.3
+            scale = scale * 1.22
         end
+        scale = scale + state.beat_pulse * 0.08
+        local rot = (angle + y * math.pi * 2.0 + helix * 0.4) * 180 / math.pi
 
         entities[#entities + 1] = {
             id = string.format("block_%d", i - 1),
@@ -962,6 +984,7 @@ function calculate(audio, config, dt)
             y = clamp(y, 0, 1),
             z = clamp(z, 0, 1),
             scale = math.min(config.max_scale, scale),
+            rotation = rot % 360,
             band = band_idx - 1,
             visible = true,
         }
@@ -977,6 +1000,7 @@ end
     description: "Spiral galaxy - cosmic visualization",
     category: "Epic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Galaxy"
 description = "Spiral galaxy - cosmic visualization"
 category = "Epic"
@@ -1104,6 +1128,7 @@ end
     description: "Laser beams shooting from center",
     category: "Epic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Laser Array"
 description = "Laser beams shooting from center"
 category = "Epic"
@@ -1194,6 +1219,7 @@ end
     description: "Psychedelic toadstool with spots, gills, and spores",
     category: "Epic",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Mushroom"
 description = "Psychedelic toadstool with spots, gills, and spores"
@@ -1511,6 +1537,7 @@ end
     description: "Egyptian pyramid - inverts on drops",
     category: "Epic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Pyramid"
 description = "Egyptian pyramid - inverts on drops"
 category = "Epic"
@@ -1632,10 +1659,12 @@ end
     description: "Morphing platonic solids - icosahedron",
     category: "Epic",
     staticCamera: false,
+    startBlocks: 96,
     source: `name = "Sacred Geometry"
 description = "Morphing platonic solids - icosahedron"
 category = "Epic"
 static_camera = false
+start_blocks = 96
 state = {}
 
 local PHI = (1 + math.sqrt(5)) / 2
@@ -1771,6 +1800,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_y + state.rotation_z + i * 0.05) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -1818,6 +1848,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_x + state.rotation_y + i * 0.03) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -1833,6 +1864,7 @@ end
     description: "Clean anatomical skull with animated jaw and glowing eyes",
     category: "Epic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Skull"
 description = "Clean anatomical skull with animated jaw and glowing eyes"
 category = "Epic"
@@ -2170,6 +2202,7 @@ end
     description: "Swirling tunnel - spiral into infinity",
     category: "Epic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Vortex"
 description = "Swirling tunnel - spiral into infinity"
 category = "Epic"
@@ -2266,11 +2299,13 @@ end
     description: "Infinite tunnel - rings fly toward you",
     category: "Epic",
     staticCamera: false,
+    startBlocks: 108,
     source: `-- Pattern metadata
 name = "Wormhole Portal"
 description = "Infinite tunnel - rings fly toward you"
 category = "Epic"
 static_camera = false
+start_blocks = 108
 
 -- Per-instance state
 state = {
@@ -2372,6 +2407,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, math.max(0.05, scale)),
+                rotation = ((angle + ring_depth * math.pi * 1.2) * 180 / math.pi) % 360,
                 band = band_idx,
                 visible = true,
             }
@@ -2388,11 +2424,13 @@ end
     description: "Accretion disk with jets - gravity visualization",
     category: "Cosmic",
     staticCamera: false,
+    startBlocks: 96,
     source: `-- Pattern metadata
 name = "Black Hole"
 description = "Accretion disk with jets - gravity visualization"
 category = "Cosmic"
 static_camera = false
+start_blocks = 96
 
 -- Per-instance state
 state = {
@@ -2499,6 +2537,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = (theta * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -2539,6 +2578,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, scale),
+                rotation = (jet_angle * 180 / math.pi) % 360,
                 band = band_idx,
                 visible = visible,
             }
@@ -2555,6 +2595,7 @@ end
     description: "Fractal crystal with recursive branching",
     category: "Cosmic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Crystal Growth"
 description = "Fractal crystal with recursive branching"
 category = "Cosmic"
@@ -2774,6 +2815,7 @@ end
     description: "Sacred geometry rings - frequency mapped",
     category: "Cosmic",
     staticCamera: false,
+    startBlocks: null,
     source: `name = "Mandala"
 description = "Sacred geometry rings - frequency mapped"
 category = "Cosmic"
@@ -2869,11 +2911,13 @@ end
     description: "Cosmic gas cloud with drifting particles",
     category: "Cosmic",
     staticCamera: false,
+    startBlocks: 104,
     source: `-- Pattern metadata
 name = "Nebula"
 description = "Cosmic gas cloud with drifting particles"
 category = "Cosmic"
 static_camera = false
+start_blocks = 104
 
 -- Per-instance state
 state = {
@@ -2881,6 +2925,7 @@ state = {
     expansion = 1.0,
     flash_particles = {},  -- set: flash_particles[i] = true
     drift_time = 0.0,
+    swirl = 0.0,
 }
 
 -- Main calculation function
@@ -2902,6 +2947,7 @@ function calculate(audio, config, dt)
     end
 
     state.drift_time = state.drift_time + dt
+    state.swirl = state.swirl + (0.18 + audio.bands[4] * 0.45) * dt
 
     -- Expansion with amplitude
     local target_expansion = 0.8 + audio.amplitude * 0.4
@@ -2950,9 +2996,12 @@ function calculate(audio, config, dt)
         end
 
         -- World position
-        local x = center + px * base_radius + drift_x
+        local swirl_angle = state.swirl + dist * 1.6
+        local sx = math.cos(swirl_angle) * px - math.sin(swirl_angle) * pz
+        local sz = math.sin(swirl_angle) * px + math.cos(swirl_angle) * pz
+        local x = center + sx * base_radius + drift_x
         local y = center + py * base_radius + drift_y
-        local z = center + pz * base_radius + drift_z
+        local z = center + sz * base_radius + drift_z
 
         -- Band based on position (creates color gradients)
         -- Higher Y = higher frequency colors
@@ -2981,6 +3030,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, math.max(0.05, scale)),
+            rotation = ((state.swirl + phase + dist * 2.2) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -2996,10 +3046,12 @@ end
     description: "4D hypercube rotating through dimensions",
     category: "Cosmic",
     staticCamera: false,
+    startBlocks: 96,
     source: `name = "Tesseract"
 description = "4D hypercube rotating through dimensions"
 category = "Cosmic"
 static_camera = false
+start_blocks = 96
 state = {}
 
 local function generate_tesseract()
@@ -3090,7 +3142,7 @@ function calculate(audio, config, dt)
     -- Rotation speeds driven by frequency bands
     state.rotation_xw = state.rotation_xw + (0.2 + audio.bands[1] * 0.8) * dt
     state.rotation_yw = state.rotation_yw + (0.15 + audio.bands[3] * 0.6) * dt
-    state.rotation_zw = state.rotation_zw + (0.1 + audio.bands[5] * 0.5 + audio.bands[5] * 0.3) * dt
+    state.rotation_zw = state.rotation_zw + (0.1 + audio.bands[5] * 0.8) * dt
     state.rotation_xy = state.rotation_xy + 0.3 * dt
 
     -- Beat pulse
@@ -3154,6 +3206,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_xy + pw * 0.8 + i * 0.04) * 180 / math.pi) % 360,
             band = math.floor(band_idx),
             visible = true,
         }
@@ -3189,6 +3242,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = ((state.rotation_xy + i * 0.06) * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
         }
@@ -3204,6 +3258,7 @@ end
     description: "Northern lights curtains - flowing waves",
     category: "Organic",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Aurora"
 description = "Northern lights curtains - flowing waves"
@@ -3325,6 +3380,7 @@ end
     description: "Swarm of synchronized flashing lights",
     category: "Organic",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Fireflies"
 description = "Swarm of synchronized flashing lights"
@@ -3485,6 +3541,7 @@ end
     description: "Water surface with splashes and ripples",
     category: "Organic",
     staticCamera: false,
+    startBlocks: null,
     source: `-- Pattern metadata
 name = "Ocean Waves"
 description = "Water surface with splashes and ripples"
@@ -3611,17 +3668,20 @@ end
     description: "Classic vertical frequency bars",
     category: "Spectrum",
     staticCamera: true,
+    startBlocks: 96,
     source: `-- Pattern metadata
 name = "Spectrum Bars"
 description = "Classic vertical frequency bars"
 category = "Spectrum"
 static_camera = true
+start_blocks = 96
 
 -- Per-instance state
 state = {
     smooth_heights = {0.0, 0.0, 0.0, 0.0, 0.0},
     peak_heights = {0.0, 0.0, 0.0, 0.0, 0.0},
     peak_fall = {0.0, 0.0, 0.0, 0.0, 0.0},
+    rotation = 0.0,
 }
 
 -- Main calculation function
@@ -3629,6 +3689,10 @@ function calculate(audio, config, dt)
     local entities = {}
     local n = config.entity_count
     local center = 0.5
+    if n <= 0 then
+        return entities
+    end
+    state.rotation = state.rotation + (0.4 + audio.amplitude * 0.9) * dt
 
     -- Smooth the band values
     for i = 1, 5 do
@@ -3647,16 +3711,30 @@ function calculate(audio, config, dt)
         state.peak_heights[i] = math.max(0, state.peak_heights[i])
     end
 
-    -- Distribute entities across 5 bars
-    local blocks_per_bar = math.floor(n / 5)
-    local bar_spacing = 0.16
-    local start_x = center - (2.0 * bar_spacing)
+    -- Interpolated virtual bars: more blocks = more horizontal granularity.
+    local num_bars = math.max(5, math.min(28, math.floor(n / 4)))
+    num_bars = math.max(1, math.min(num_bars, n))
+    local blocks_per_bar = math.max(1, math.floor(n / num_bars))
+    local span = 0.72
+    local start_x = center - span * 0.5
+    local bar_spacing = (num_bars > 1) and (span / (num_bars - 1)) or 0
+
+    local function sample5(values, t)
+        local p = clamp(t, 0.0, 1.0) * 4.0
+        local i0 = math.floor(p) + 1
+        local i1 = math.min(5, i0 + 1)
+        local f = p - math.floor(p)
+        return lerp(values[i0], values[i1], f)
+    end
 
     local entity_idx = 0
 
-    for bar = 0, 4 do
+    for bar = 0, num_bars - 1 do
+        if entity_idx >= n then break end
         local bar_x = start_x + bar * bar_spacing
-        local bar_height = state.smooth_heights[bar + 1]
+        local t = (num_bars > 1) and (bar / (num_bars - 1)) or 0.0
+        local bar_height = sample5(state.smooth_heights, t)
+        local bar_band = math.floor(t * 4 + 0.5)
 
         -- Stack blocks vertically for this bar
         for j = 0, blocks_per_bar - 1 do
@@ -3686,10 +3764,11 @@ function calculate(audio, config, dt)
             end
 
             -- Slight depth variation per bar
-            local z = center + (bar - 2.5) * 0.02
+            local z = center + (t - 0.5) * 0.06
 
             local final_scale = scale
             if not visible then final_scale = 0.01 end
+            local rot = (state.rotation + t * math.pi * 1.4 + block_y_norm * math.pi * 0.8) * 180 / math.pi
 
             entities[#entities + 1] = {
                 id = string.format("block_%d", entity_idx),
@@ -3697,7 +3776,8 @@ function calculate(audio, config, dt)
                 y = clamp(block_y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, final_scale),
-                band = bar,
+                rotation = rot % 360,
+                band = bar_band,
                 visible = visible,
             }
             entity_idx = entity_idx + 1
@@ -3714,11 +3794,13 @@ end
     description: "Radial frequency bars in a circle",
     category: "Spectrum",
     staticCamera: true,
+    startBlocks: 100,
     source: `-- Pattern metadata
 name = "Spectrum Circle"
 description = "Radial frequency bars in a circle"
 category = "Spectrum"
 static_camera = true
+start_blocks = 100
 
 -- Per-instance state
 state = {
@@ -3731,6 +3813,9 @@ function calculate(audio, config, dt)
     local entities = {}
     local n = config.entity_count
     local center = 0.5
+    if n <= 0 then
+        return entities
+    end
 
     -- Slow rotation
     state.rotation = state.rotation + (0.1 + audio.amplitude * 0.2) * dt
@@ -3741,26 +3826,29 @@ function calculate(audio, config, dt)
         state.smooth_heights[i] = smooth(state.smooth_heights[i], target, 0.3, dt)
     end
 
-    -- Mirror the 5 bands to create symmetry (10 segments)
-    local mirrored_heights = {}
-    for i = 1, 5 do
-        mirrored_heights[i] = state.smooth_heights[i]
-    end
-    for i = 1, 5 do
-        mirrored_heights[5 + i] = state.smooth_heights[6 - i]
+    local function sample5(values, t)
+        local p = clamp(t, 0.0, 1.0) * 4.0
+        local i0 = math.floor(p) + 1
+        local i1 = math.min(5, i0 + 1)
+        local f = p - math.floor(p)
+        return lerp(values[i0], values[i1], f)
     end
 
-    -- Bars around a circle
-    local num_segments = 10
-    local points_per_segment = math.floor(n / num_segments)
+    -- Dynamic radial granularity: more blocks -> more spokes.
+    local num_segments = math.max(10, math.min(64, math.floor(n / 3)))
+    num_segments = math.max(1, math.min(num_segments, n))
+    local points_per_segment = math.max(1, math.floor(n / num_segments))
     local base_radius = 0.15
     local max_bar_length = 0.25
 
     local entity_idx = 0
 
     for seg = 0, num_segments - 1 do
+        if entity_idx >= n then break end
         local seg_angle = state.rotation + (seg / num_segments) * math.pi * 2
-        local seg_height = mirrored_heights[(seg % 10) + 1]
+        local t = (num_segments > 1) and (seg / (num_segments - 1)) or 0.0
+        local seg_height = sample5(state.smooth_heights, t)
+        local band_sample = sample5(audio.bands, t)
 
         for j = 0, points_per_segment - 1 do
             if entity_idx >= n then break end
@@ -3777,14 +3865,14 @@ function calculate(audio, config, dt)
             local y = center  -- Flat on horizontal plane
 
             -- Scale
-            local band_idx = seg % 5
+            local band_idx = math.floor(t * 4 + 0.5)
             local scale = config.base_scale
             if visible then
                 -- Brighter at the end
                 if bar_pos > seg_height - 0.2 then
                     scale = scale * 1.3
                 end
-                scale = scale + audio.bands[band_idx + 1] * 0.2
+                scale = scale + band_sample * 0.2
             end
 
             if audio.is_beat then
@@ -3793,6 +3881,7 @@ function calculate(audio, config, dt)
 
             local final_scale = scale
             if not visible then final_scale = 0.01 end
+            local rot = (seg_angle + bar_pos * math.pi * 0.9) * 180 / math.pi
 
             entities[#entities + 1] = {
                 id = string.format("block_%d", entity_idx),
@@ -3800,6 +3889,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, final_scale),
+                rotation = rot % 360,
                 band = band_idx,
                 visible = visible,
             }
@@ -3817,11 +3907,13 @@ end
     description: "3D cylindrical frequency tubes",
     category: "Spectrum",
     staticCamera: true,
+    startBlocks: 120,
     source: `-- Pattern metadata
 name = "Spectrum Tubes"
 description = "3D cylindrical frequency tubes"
 category = "Spectrum"
 static_camera = true
+start_blocks = 120
 
 -- Per-instance state
 state = {
@@ -3835,6 +3927,9 @@ function calculate(audio, config, dt)
     local entities = {}
     local n = config.entity_count
     local center = 0.5
+    if n <= 0 then
+        return entities
+    end
 
     state.rotation = state.rotation + 0.3 * dt
 
@@ -3850,21 +3945,36 @@ function calculate(audio, config, dt)
         state.pulse[i] = decay(state.pulse[i], 0.9, dt)
     end
 
-    -- Layout: 5 tubes in a row
-    local tube_spacing = 0.15
-    local start_x = center - (2.0 * tube_spacing)
+    local function sample5(values, t)
+        local p = clamp(t, 0.0, 1.0) * 4.0
+        local i0 = math.floor(p) + 1
+        local i1 = math.min(5, i0 + 1)
+        local f = p - math.floor(p)
+        return lerp(values[i0], values[i1], f)
+    end
+
+    -- Dynamic tube count: more blocks = more spectrum detail across X.
+    local num_tubes = math.max(5, math.min(18, math.floor(n / 8)))
+    num_tubes = math.max(1, math.min(num_tubes, n))
+    local span = 0.72
+    local tube_spacing = (num_tubes > 1) and (span / (num_tubes - 1)) or 0
+    local start_x = center - span * 0.5
 
     -- Points per tube
-    local points_per_tube = math.floor(n / 5)
+    local points_per_tube = math.max(1, math.floor(n / num_tubes))
     local rings_per_tube = math.max(3, math.floor(points_per_tube / 4))
-    local points_per_ring = math.floor(points_per_tube / rings_per_tube)
+    local points_per_ring = math.max(1, math.floor(points_per_tube / rings_per_tube))
 
     local entity_idx = 0
 
-    for tube = 0, 4 do
+    for tube = 0, num_tubes - 1 do
+        if entity_idx >= n then break end
         local tube_x = start_x + tube * tube_spacing
-        local tube_height = state.smooth_heights[tube + 1]
-        local tube_radius = 0.03 + state.pulse[tube + 1] * 0.02
+        local t = (num_tubes > 1) and (tube / (num_tubes - 1)) or 0.0
+        local tube_height = sample5(state.smooth_heights, t)
+        local tube_pulse = sample5(state.pulse, t)
+        local tube_radius = 0.022 + tube_pulse * 0.02
+        local tube_band = math.floor(t * 4 + 0.5)
 
         for ring = 0, rings_per_tube - 1 do
             if entity_idx >= n then break end
@@ -3885,7 +3995,7 @@ function calculate(audio, config, dt)
 
                 -- Angle around ring
                 local angle = state.rotation + (p / points_per_ring) * math.pi * 2
-                angle = angle + tube * 0.5  -- Offset per tube
+                angle = angle + tube * 0.35  -- Offset per tube
 
                 -- Position
                 local x = tube_x + math.cos(angle) * current_radius
@@ -3898,7 +4008,7 @@ function calculate(audio, config, dt)
                     if ring_y_norm > tube_height - 0.15 then
                         scale = scale * 1.5
                     end
-                    scale = scale + audio.bands[tube + 1] * 0.3
+                    scale = scale + sample5(audio.bands, t) * 0.3
                 end
 
                 if audio.is_beat then
@@ -3907,6 +4017,7 @@ function calculate(audio, config, dt)
 
                 local final_scale = scale
                 if not visible then final_scale = 0.01 end
+                local rot = (angle + ring_y_norm * math.pi * 0.6) * 180 / math.pi
 
                 entities[#entities + 1] = {
                     id = string.format("block_%d", entity_idx),
@@ -3914,7 +4025,8 @@ function calculate(audio, config, dt)
                     y = clamp(ring_y),
                     z = clamp(z),
                     scale = math.min(config.max_scale, final_scale),
-                    band = tube,
+                    rotation = rot % 360,
+                    band = tube_band,
                     visible = visible,
                 }
                 entity_idx = entity_idx + 1

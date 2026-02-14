@@ -34,6 +34,13 @@ interface AudioLevels {
   bpm: number;
 }
 
+interface ConnectionHistoryEntry {
+  host: string;
+  port: number;
+  djName: string;
+  timestamp: number;
+}
+
 interface VoiceStatus {
   available: boolean;
   streaming: boolean;
@@ -95,6 +102,13 @@ function App() {
   const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
 
+  // Test audio state
+  const [isTestingAudio, setIsTestingAudio] = useState(false);
+  const [testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
+
+  // Connection history state
+  const [connectionHistory, setConnectionHistory] = useState<ConnectionHistoryEntry[]>([]);
+
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
     const storedName = localStorage.getItem('mcav.djName');
@@ -122,6 +136,17 @@ function App() {
 
     loadAudioSources();
     checkForUpdates(false);
+
+    // Load connection history
+    const storedHistory = localStorage.getItem('mcav.connectionHistory');
+    if (storedHistory) {
+      try {
+        const parsed = JSON.parse(storedHistory);
+        setConnectionHistory(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setConnectionHistory([]);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -314,6 +339,11 @@ function App() {
 
     setIsConnecting(true);
     try {
+      // Stop test audio if running
+      if (isTestingAudio) {
+        await handleStopTest();
+      }
+
       // Format code as XXXX-XXXX
       const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
 
@@ -330,6 +360,9 @@ function App() {
       }
 
       setStatus(prev => ({ ...prev, connected: true }));
+
+      // Save to connection history
+      saveToConnectionHistory(serverHost, serverPort, djName.trim());
     } catch (e) {
       const errStr = String(e);
       let errorMessage = errStr;
@@ -418,6 +451,68 @@ function App() {
     const str = code.join('');
     if (str.length <= 4) return str;
     return `${str.slice(0, 4)}-${str.slice(4)}`;
+  };
+
+  const saveToConnectionHistory = (host: string, port: number, name: string) => {
+    const newEntry: ConnectionHistoryEntry = {
+      host,
+      port,
+      djName: name,
+      timestamp: Date.now(),
+    };
+
+    // Deduplicate by host+port, keep most recent
+    const filtered = connectionHistory.filter(
+      (entry) => !(entry.host === host && entry.port === port)
+    );
+
+    const updated = [newEntry, ...filtered].slice(0, 3);
+    setConnectionHistory(updated);
+    localStorage.setItem('mcav.connectionHistory', JSON.stringify(updated));
+  };
+
+  const loadHistoryEntry = (entry: ConnectionHistoryEntry) => {
+    setServerHost(entry.host);
+    setServerPort(entry.port);
+    setDjName(entry.djName);
+  };
+
+  const handleStartTest = async () => {
+    if (!selectedSource) return;
+
+    try {
+      setIsTestingAudio(true);
+      await invoke('start_capture', { sourceId: selectedSource });
+
+      // Poll audio levels for 10 seconds
+      const interval = setInterval(async () => {
+        try {
+          const levels = await invoke<AudioLevels>('get_audio_levels');
+          setTestBands(levels.bands);
+        } catch (err) {
+          console.error('Failed to get audio levels:', err);
+        }
+      }, 50);
+
+      // Auto-stop after 10 seconds
+      setTimeout(() => {
+        clearInterval(interval);
+        void handleStopTest();
+      }, 10000);
+    } catch (err) {
+      console.error('Failed to start test audio:', err);
+      setIsTestingAudio(false);
+    }
+  };
+
+  const handleStopTest = async () => {
+    try {
+      await invoke('stop_capture');
+      setIsTestingAudio(false);
+      setTestBands([0, 0, 0, 0, 0]);
+    } catch (err) {
+      console.error('Failed to stop test audio:', err);
+    }
   };
 
   return (
@@ -580,6 +675,25 @@ function App() {
                     />
                   </div>
                 </label>
+
+                {connectionHistory.length > 0 && (
+                  <div className="connection-history">
+                    <span className="history-label">Recent Connections</span>
+                    <div className="history-list">
+                      {connectionHistory.map((entry, idx) => (
+                        <button
+                          key={idx}
+                          className="btn btn-history"
+                          onClick={() => loadHistoryEntry(entry)}
+                          type="button"
+                        >
+                          <span className="history-name">{entry.djName}</span>
+                          <span className="history-server">{entry.host}:{entry.port}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
             )}
 
@@ -624,12 +738,39 @@ function App() {
                   </button>
                 </div>
               ) : (
-                <AudioSourceSelect
-                  sources={audioSources}
-                  value={selectedSource}
-                  onChange={setSelectedSource}
-                  onRefresh={loadAudioSources}
-                />
+                <>
+                  <div className="audio-source-row">
+                    <AudioSourceSelect
+                      sources={audioSources}
+                      value={selectedSource}
+                      onChange={setSelectedSource}
+                      onRefresh={loadAudioSources}
+                    />
+                    <button
+                      className={`btn btn-test ${isTestingAudio ? 'testing' : ''}`}
+                      onClick={isTestingAudio ? handleStopTest : handleStartTest}
+                      disabled={!selectedSource}
+                      type="button"
+                    >
+                      {isTestingAudio ? 'Stop Test' : 'Test'}
+                    </button>
+                  </div>
+                  {isTestingAudio && (
+                    <div className="test-meter">
+                      {testBands.map((level, i) => (
+                        <div key={i} className="test-bar">
+                          <div
+                            className="test-fill"
+                            style={{
+                              width: `${Math.min(100, level * 100)}%`,
+                              background: `hsl(${180 + i * 40}, 70%, 50%)`,
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </section>
 

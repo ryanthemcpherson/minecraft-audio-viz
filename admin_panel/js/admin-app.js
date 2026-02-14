@@ -89,7 +89,10 @@ class AdminApp {
                 connectedPlayers: 0
             },
             // 3D Preview state
-            entities: []
+            entities: [],
+            // Scene presets state
+            scenes: [],
+            currentScene: null
         };
 
         // Tap tempo tracking
@@ -201,6 +204,11 @@ class AdminApp {
 
         // Effect triggers
         this.elements.effectButtons = document.querySelectorAll('.effect-btn');
+
+        // Scene presets
+        this.elements.sceneNameInput = document.getElementById('scene-name-input');
+        this.elements.savesceneBtn = document.getElementById('save-scene-btn');
+        this.elements.scenesGrid = document.getElementById('scenes-grid');
 
         // Particle effects
         this.elements.particleGlobalIntensity = document.getElementById('particle-global-intensity');
@@ -386,6 +394,16 @@ class AdminApp {
         this.elements.effectButtons.forEach(btn => {
             btn.addEventListener('click', () => this._triggerEffect(btn.dataset.effect));
         });
+
+        // Scene presets
+        if (this.elements.saveSceneBtn) {
+            this.elements.saveSceneBtn.addEventListener('click', () => this._saveScene());
+        }
+        if (this.elements.sceneNameInput) {
+            this.elements.sceneNameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this._saveScene();
+            });
+        }
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this._handleKeyboard(e));
@@ -764,6 +782,7 @@ class AdminApp {
             this.ws.send({ type: 'get_connect_codes' });
             this.ws.send({ type: 'get_pending_djs' });
             this.ws.send({ type: 'get_voice_status' });
+            this.ws.send({ type: 'list_scenes' });
         });
 
         this.ws.addEventListener('disconnected', () => {
@@ -961,6 +980,25 @@ class AdminApp {
 
             case 'pool_initialized':
                 this._showToast(`Pool initialized: ${data.count || '?'} entities`, 'success');
+                break;
+
+            case 'scenes_list':
+                this.state.scenes = data.scenes || [];
+                this._renderScenes();
+                break;
+
+            case 'scene_saved':
+                this._showToast(`Scene "${data.name}" saved`, 'success');
+                break;
+
+            case 'scene_loaded':
+                this._showToast(`Scene "${data.name}" loaded`, 'success');
+                this.state.currentScene = data.name;
+                this._renderScenes();
+                break;
+
+            case 'scene_deleted':
+                this._showToast(`Scene "${data.name}" deleted`, 'success');
                 break;
         }
     }
@@ -1653,6 +1691,69 @@ class AdminApp {
 
     _setPreset(preset) {
         this.ws.send({ type: 'set_preset', preset: preset });
+    }
+
+    _saveScene() {
+        const name = this.elements.sceneNameInput.value.trim();
+        if (!name) {
+            alert('Please enter a scene name');
+            return;
+        }
+
+        this.ws.send({ type: 'save_scene', name });
+        this.elements.sceneNameInput.value = '';
+    }
+
+    _loadScene(name) {
+        this.ws.send({ type: 'load_scene', name });
+    }
+
+    _deleteScene(name) {
+        if (confirm(`Delete scene "${name}"?`)) {
+            this.ws.send({ type: 'delete_scene', name });
+        }
+    }
+
+    _renderScenes() {
+        if (!this.elements.scenesGrid) return;
+
+        const builtInScenes = ['Chill Lounge', 'EDM Stage', 'Rock Arena', 'Ambient'];
+
+        this.elements.scenesGrid.innerHTML = this.state.scenes.map(scene => {
+            const isBuiltIn = builtInScenes.includes(scene.name);
+            const isActive = this.state.currentScene === scene.name;
+            const activeClass = isActive ? 'active' : '';
+            const builtInClass = isBuiltIn ? 'built-in' : '';
+
+            return `
+                <div class="scene-card ${activeClass} ${builtInClass}" data-scene="${scene.name}">
+                    ${!isBuiltIn ? `<button class="scene-card-delete" data-scene="${scene.name}">×</button>` : ''}
+                    <div class="scene-card-name">${scene.name}</div>
+                    <div class="scene-card-details">
+                        <div class="scene-card-pattern">${scene.pattern}</div>
+                        <div>${scene.preset} · ${scene.entity_count} blocks</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Add click handlers for scene cards
+        this.elements.scenesGrid.querySelectorAll('.scene-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Don't trigger load if clicking delete button
+                if (!e.target.classList.contains('scene-card-delete')) {
+                    this._loadScene(card.dataset.scene);
+                }
+            });
+        });
+
+        // Add click handlers for delete buttons
+        this.elements.scenesGrid.querySelectorAll('.scene-card-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._deleteScene(btn.dataset.scene);
+            });
+        });
     }
 
     _sendBandSensitivity(band, value) {

@@ -627,6 +627,11 @@ class VJServer:
         self._dj_banner_profiles: Dict[str, dict] = {}
         self._load_banner_profiles()
 
+        # Pattern hot-reload
+        self._pattern_hot_reload_enabled = True  # Can be disabled via CLI arg
+        self._pattern_hot_reload_task: Optional[asyncio.Task] = None
+        self._pattern_file_mtimes: Dict[str, float] = {}  # filename -> mtime
+
     @property
     def active_dj(self) -> Optional[DJConnection]:
         """Get the currently active DJ."""
@@ -1672,6 +1677,122 @@ class VJServer:
             logger.error(f"Failed to process logo image: {e}")
             return None
 
+    def _capture_current_state(self) -> dict:
+        """Capture the current VJ state for saving as a scene."""
+        return {
+            "pattern": self._pattern_name,
+            "preset": self._pattern_config.preset
+            if hasattr(self._pattern_config, "preset")
+            else "auto",
+            "transition_duration": self._transition_duration,
+            "band_sensitivity": self._band_sensitivity.copy(),
+            "attack": self._pattern_config.attack,
+            "release": self._pattern_config.release,
+            "beat_threshold": self._pattern_config.beat_threshold,
+            "entity_count": self.entity_count,
+            "block_type": "SEA_LANTERN",  # Default, would need to get from zone config
+        }
+
+    def _save_scene_to_file(self, name: str, scene_data: dict):
+        """Save a scene to disk as JSON."""
+        scenes_dir = Path("configs/scenes")
+        scenes_dir.mkdir(parents=True, exist_ok=True)
+
+        scene_path = scenes_dir / f"{name}.json"
+        with open(scene_path, "w") as f:
+            json.dump(scene_data, f, indent=2)
+
+    def _load_scene_from_file(self, name: str) -> dict:
+        """Load a scene from disk."""
+        scene_path = Path("configs/scenes") / f"{name}.json"
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene '{name}' not found")
+
+        with open(scene_path, "r") as f:
+            return json.load(f)
+
+    def _delete_scene_file(self, name: str):
+        """Delete a scene file from disk."""
+        scene_path = Path("configs/scenes") / f"{name}.json"
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene '{name}' not found")
+        scene_path.unlink()
+
+    def _list_scenes(self) -> list:
+        """List all available scenes."""
+        scenes_dir = Path("configs/scenes")
+        if not scenes_dir.exists():
+            return []
+
+        scenes = []
+        for scene_file in scenes_dir.glob("*.json"):
+            try:
+                with open(scene_file, "r") as f:
+                    scene_data = json.load(f)
+                scenes.append(
+                    {
+                        "name": scene_file.stem,
+                        "pattern": scene_data.get("pattern", "unknown"),
+                        "preset": scene_data.get("preset", "auto"),
+                        "entity_count": scene_data.get("entity_count", 16),
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to load scene {scene_file.stem}: {e}")
+
+        return scenes
+
+    async def _apply_scene_state(self, scene_data: dict):
+        """Apply a saved scene state with crossfade transition."""
+        # Apply pattern with crossfade (use existing transition system)
+        pattern_name = scene_data.get("pattern", "spectrum")
+        if pattern_name != self._pattern_name:
+            # Start crossfade transition
+            self._old_pattern = self._current_pattern
+            self._old_pattern_name = self._pattern_name
+            self._transitioning = True
+            self._transition_start = time.time()
+
+            # Load new pattern
+            self._pattern_name = pattern_name
+            self._current_pattern = get_pattern(pattern_name, self._pattern_config)
+
+            logger.info(
+                f"Scene transition: {self._old_pattern_name} -> {pattern_name} ({self._transition_duration}s)"
+            )
+
+        # Apply audio settings
+        if "band_sensitivity" in scene_data:
+            self._band_sensitivity = scene_data["band_sensitivity"].copy()
+        if "attack" in scene_data:
+            self._pattern_config.attack = scene_data["attack"]
+        if "release" in scene_data:
+            self._pattern_config.release = scene_data["release"]
+        if "beat_threshold" in scene_data:
+            self._pattern_config.beat_threshold = scene_data["beat_threshold"]
+
+        # Apply transition duration
+        if "transition_duration" in scene_data:
+            self._transition_duration = scene_data["transition_duration"]
+
+        # Apply entity count
+        if "entity_count" in scene_data:
+            new_count = scene_data["entity_count"]
+            if new_count != self.entity_count:
+                self.entity_count = new_count
+                self._pattern_config.entity_count = new_count
+                # Reinit pattern with new count
+                self._current_pattern = get_pattern(self._pattern_name, self._pattern_config)
+
+        # Broadcast state to all connected clients
+        await self._broadcast_config_to_browsers()
+
+        # Sync audio settings to DJs
+        preset_name = scene_data.get("preset", "auto")
+        if preset_name in AUDIO_PRESETS:
+            config = AUDIO_PRESETS[preset_name]
+            await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
+
     async def _auto_switch_dj(self):
         """Automatically switch to next available DJ."""
         async with self._dj_lock:
@@ -2303,6 +2424,128 @@ class VJServer:
                             f"Voice subscriber removed. Total: {len(self._voice_subscribers)}"
                         )
                         await websocket.send(json.dumps({"type": "unsubscribe_voice_ack"}))
+
+                    elif msg_type == "save_scene":
+                        # Save current VJ state as a named scene
+                        scene_name = data.get("name", "").strip()
+                        if not scene_name:
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Scene name is required"})
+                            )
+                            continue
+
+                        try:
+                            scene_data = self._capture_current_state()
+                            self._save_scene_to_file(scene_name, scene_data)
+                            logger.info(f"Scene saved: {scene_name}")
+                            await websocket.send(
+                                json.dumps({"type": "scene_saved", "name": scene_name})
+                            )
+                            # Broadcast updated scene list to all browsers
+                            scenes = self._list_scenes()
+                            await self._broadcast_to_browsers(
+                                {"type": "scenes_list", "scenes": scenes}
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to save scene '{scene_name}': {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Failed to save scene: {str(e)}"}
+                                )
+                            )
+
+                    elif msg_type == "load_scene":
+                        # Load a saved scene
+                        scene_name = data.get("name", "").strip()
+                        if not scene_name:
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Scene name is required"})
+                            )
+                            continue
+
+                        try:
+                            scene_data = self._load_scene_from_file(scene_name)
+                            await self._apply_scene_state(scene_data)
+                            logger.info(f"Scene loaded: {scene_name}")
+                            await websocket.send(
+                                json.dumps({"type": "scene_loaded", "name": scene_name})
+                            )
+                        except FileNotFoundError:
+                            logger.warning(f"Scene not found: {scene_name}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Scene '{scene_name}' not found"}
+                                )
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to load scene '{scene_name}': {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Failed to load scene: {str(e)}"}
+                                )
+                            )
+
+                    elif msg_type == "delete_scene":
+                        # Delete a saved scene
+                        scene_name = data.get("name", "").strip()
+                        if not scene_name:
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Scene name is required"})
+                            )
+                            continue
+
+                        # Prevent deletion of built-in scenes
+                        if scene_name in ["Chill Lounge", "EDM Stage", "Rock Arena", "Ambient"]:
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": "Cannot delete built-in scenes"}
+                                )
+                            )
+                            continue
+
+                        try:
+                            self._delete_scene_file(scene_name)
+                            logger.info(f"Scene deleted: {scene_name}")
+                            await websocket.send(
+                                json.dumps({"type": "scene_deleted", "name": scene_name})
+                            )
+                            # Broadcast updated scene list to all browsers
+                            scenes = self._list_scenes()
+                            await self._broadcast_to_browsers(
+                                {"type": "scenes_list", "scenes": scenes}
+                            )
+                        except FileNotFoundError:
+                            logger.warning(f"Scene not found: {scene_name}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Scene '{scene_name}' not found"}
+                                )
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to delete scene '{scene_name}': {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "message": f"Failed to delete scene: {str(e)}",
+                                    }
+                                )
+                            )
+
+                    elif msg_type == "list_scenes":
+                        # List all saved scenes
+                        try:
+                            scenes = self._list_scenes()
+                            await websocket.send(
+                                json.dumps({"type": "scenes_list", "scenes": scenes})
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to list scenes: {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Failed to list scenes: {str(e)}"}
+                                )
+                            )
 
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
@@ -3007,6 +3250,163 @@ class VJServer:
                 logger.error(f"[BROWSER HEARTBEAT] Loop error: {e}")
                 await asyncio.sleep(ping_interval)
 
+    async def _pattern_hot_reload_loop(self):
+        """
+        Monitor pattern files for changes and reload them automatically.
+
+        Polls the patterns/ directory every 2.5 seconds for file modifications.
+        When a pattern file changes:
+        - Reload its Lua script
+        - If it's the active pattern, switch to the reloaded version
+        - Broadcast updated pattern list to browsers
+        """
+        check_interval = 2.5  # Check every 2.5 seconds
+        patterns_dir = Path(__file__).parent.parent / "patterns"
+
+        # Initialize mtime cache
+        if patterns_dir.exists():
+            for lua_file in patterns_dir.glob("*.lua"):
+                try:
+                    self._pattern_file_mtimes[lua_file.name] = lua_file.stat().st_mtime
+                except Exception:
+                    pass
+
+        while self._running:
+            try:
+                await asyncio.sleep(check_interval)
+
+                if not self._pattern_hot_reload_enabled or not patterns_dir.exists():
+                    continue
+
+                # Track changes
+                changed_patterns = []
+                new_patterns = []
+                deleted_patterns = []
+                lib_changed = False
+
+                # Check if lib.lua changed (affects all patterns)
+                lib_file = patterns_dir / "lib.lua"
+                if lib_file.exists():
+                    try:
+                        lib_mtime = lib_file.stat().st_mtime
+                        last_lib_mtime = self._pattern_file_mtimes.get("lib.lua")
+                        if last_lib_mtime is None:
+                            self._pattern_file_mtimes["lib.lua"] = lib_mtime
+                        elif lib_mtime > last_lib_mtime:
+                            lib_changed = True
+                            self._pattern_file_mtimes["lib.lua"] = lib_mtime
+                            logger.info(
+                                "[PATTERN RELOAD] Detected change in 'lib.lua' (affects all patterns)"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[PATTERN RELOAD] Error checking lib.lua: {e}")
+
+                # Get current pattern files
+                current_files = set()
+                for lua_file in patterns_dir.glob("*.lua"):
+                    if lua_file.name == "lib.lua":
+                        continue
+                    current_files.add(lua_file.name)
+
+                    try:
+                        current_mtime = lua_file.stat().st_mtime
+                        last_mtime = self._pattern_file_mtimes.get(lua_file.name)
+
+                        if last_mtime is None:
+                            # New file
+                            new_patterns.append(lua_file.stem)
+                            self._pattern_file_mtimes[lua_file.name] = current_mtime
+                        elif current_mtime > last_mtime or lib_changed:
+                            # Modified file or lib.lua changed
+                            changed_patterns.append(lua_file.stem)
+                            self._pattern_file_mtimes[lua_file.name] = current_mtime
+                    except Exception as e:
+                        logger.debug(f"[PATTERN RELOAD] Error checking {lua_file.name}: {e}")
+
+                # Check for deleted files
+                cached_files = set(self._pattern_file_mtimes.keys())
+                for filename in cached_files - current_files:
+                    pattern_key = Path(filename).stem
+                    deleted_patterns.append(pattern_key)
+                    del self._pattern_file_mtimes[filename]
+
+                # Handle changes
+                if changed_patterns:
+                    for pattern_key in changed_patterns:
+                        logger.info(f"[PATTERN RELOAD] Detected change in '{pattern_key}.lua'")
+
+                        # If this is the active pattern, reload it
+                        if pattern_key == self._pattern_name:
+                            try:
+                                # Reload the active pattern
+                                self._current_pattern = get_pattern(
+                                    pattern_key, self._pattern_config
+                                )
+                                logger.info(
+                                    f"[PATTERN RELOAD] Reloaded active pattern '{pattern_key}'"
+                                )
+
+                                # If transitioning from this pattern, also reload old pattern
+                                if self._transitioning and self._old_pattern_name == pattern_key:
+                                    self._old_pattern = get_pattern(
+                                        pattern_key, self._pattern_config
+                                    )
+                            except Exception as e:
+                                logger.error(
+                                    f"[PATTERN RELOAD] Failed to reload active pattern '{pattern_key}': {e}"
+                                )
+
+                    # Broadcast updated pattern list to browsers
+                    await self._broadcast_pattern_list()
+
+                if new_patterns:
+                    for pattern_key in new_patterns:
+                        logger.info(f"[PATTERN RELOAD] New pattern discovered: '{pattern_key}.lua'")
+                    await self._broadcast_pattern_list()
+
+                if deleted_patterns:
+                    for pattern_key in deleted_patterns:
+                        logger.info(f"[PATTERN RELOAD] Pattern deleted: '{pattern_key}.lua'")
+
+                        # If deleted pattern was active, switch to fallback
+                        if pattern_key == self._pattern_name:
+                            fallback = "spectrum"
+                            logger.warning(
+                                f"[PATTERN RELOAD] Active pattern '{pattern_key}' was deleted, switching to '{fallback}'"
+                            )
+                            self._pattern_name = fallback
+                            self._current_pattern = get_pattern(fallback, self._pattern_config)
+                            self._transitioning = False
+
+                            # Notify browsers of pattern change
+                            await self._broadcast_pattern_change()
+
+                    await self._broadcast_pattern_list()
+
+            except asyncio.CancelledError:
+                logger.debug("[PATTERN RELOAD] Pattern reload loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"[PATTERN RELOAD] Loop error: {e}")
+                await asyncio.sleep(check_interval)
+
+    async def _broadcast_pattern_list(self):
+        """Broadcast updated pattern list to all browser clients."""
+        message = json.dumps(
+            {
+                "type": "patterns",
+                "patterns": list_patterns(),
+                "current_pattern": self._pattern_name,
+            }
+        )
+        dead_clients = set()
+        for client in list(self._broadcast_clients):
+            try:
+                await client.send(message)
+            except Exception:
+                dead_clients.add(client)
+        self._broadcast_clients -= dead_clients
+
     def _apply_effects(self, entities: List[dict], bands: List[float]) -> List[dict]:
         """Apply active timed effects (flash, strobe, pulse, wave, etc.) to entities."""
         if not self._active_effects:
@@ -3520,6 +3920,13 @@ class VJServer:
         self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
         logger.debug("Started browser heartbeat monitor")
 
+        # Start pattern hot-reload loop (runs in background)
+        if self._pattern_hot_reload_enabled:
+            self._pattern_hot_reload_task = asyncio.create_task(self._pattern_hot_reload_loop())
+            logger.info("Pattern hot-reload enabled (checking every 2.5s)")
+        else:
+            logger.info("Pattern hot-reload disabled")
+
         try:
             await self._main_loop()
         finally:
@@ -3535,6 +3942,13 @@ class VJServer:
                 self._browser_heartbeat_task.cancel()
                 try:
                     await self._browser_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+            # Cancel pattern hot-reload task
+            if self._pattern_hot_reload_task:
+                self._pattern_hot_reload_task.cancel()
+                try:
+                    await self._pattern_hot_reload_task
                 except asyncio.CancelledError:
                     pass
             dj_server.close()
@@ -3561,6 +3975,14 @@ class VJServer:
             self._browser_heartbeat_task.cancel()
             try:
                 await self._browser_heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cancel pattern hot-reload task if running
+        if self._pattern_hot_reload_task and not self._pattern_hot_reload_task.done():
+            self._pattern_hot_reload_task.cancel()
+            try:
+                await self._pattern_hot_reload_task
             except asyncio.CancelledError:
                 pass
 
@@ -3638,6 +4060,11 @@ async def main():
     parser.add_argument(
         "--no-spectrograph", action="store_true", help="Disable terminal spectrograph"
     )
+    parser.add_argument(
+        "--no-hot-reload",
+        action="store_true",
+        help="Disable pattern hot-reload (default: enabled)",
+    )
 
     args = parser.parse_args()
 
@@ -3673,6 +4100,10 @@ async def main():
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Configure hot-reload
+    if args.no_hot_reload:
+        server._pattern_hot_reload_enabled = False
 
     # Connect to Minecraft
     if args.no_minecraft:

@@ -58,6 +58,24 @@
 
 ## Quick Start
 
+### Try the Demo (Zero Install)
+
+**Requirements:** Docker only
+
+Experience MCAV in your browser with simulated audio:
+
+```bash
+git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
+cd minecraft-audio-viz
+docker compose -f docker-compose.demo.yml up
+```
+
+Then open:
+- **http://localhost:8080** - Admin Panel
+- **http://localhost:8081** - 3D Preview
+
+See [`demo/README.md`](demo/README.md) for full details.
+
 ### Download DJ Client (Recommended)
 
 **[⬇️ Download Latest Release](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)**

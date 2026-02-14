@@ -1,0 +1,11 @@
+{
+  "pattern": "spectrum",
+  "preset": "rock",
+  "transition_duration": 1.0,
+  "band_sensitivity": [1.2, 1.0, 1.0, 0.9, 0.8],
+  "attack": 0.5,
+  "release": 0.12,
+  "beat_threshold": 1.3,
+  "entity_count": 48,
+  "block_type": "SEA_LANTERN"
+}

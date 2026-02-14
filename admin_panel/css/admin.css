@@ -1580,6 +1580,151 @@ body {
 }
 
 /* ============================================
+   Scene Presets Section
+   ============================================ */
+
+.scene-save-controls {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.scene-name-input {
+    flex: 1;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 10px 14px;
+    border-radius: var(--border-radius);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    transition: border-color 0.2s ease;
+}
+
+.scene-name-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.scene-name-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 24px;
+    border-radius: var(--border-radius);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+}
+
+.btn-primary:active {
+    transform: translateY(0);
+}
+
+.scenes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--spacing-sm);
+}
+
+.scene-card {
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.scene-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+}
+
+.scene-card.active {
+    border-color: var(--primary);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(168, 85, 247, 0.05));
+}
+
+.scene-card.active::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    background: var(--primary);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--primary);
+}
+
+.scene-card-name {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.scene-card-details {
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    line-height: 1.4;
+}
+
+.scene-card-pattern {
+    color: var(--primary);
+    font-weight: 500;
+}
+
+.scene-card-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(220, 38, 38, 0.8);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.scene-card:hover .scene-card-delete {
+    opacity: 1;
+}
+
+.scene-card-delete:hover {
+    background: rgba(220, 38, 38, 1);
+}
+
+.scene-card.built-in .scene-card-delete {
+    display: none;
+}
+
+/* ============================================
    Particle Effects Section
    ============================================ */
 .particle-category {

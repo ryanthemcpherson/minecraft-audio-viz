@@ -262,6 +262,16 @@ body {
   flex-direction: column;
 }
 
+.audio-source-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.audio-source-row .audio-source-select {
+  flex: 1;
+}
+
 .source-header {
   display: flex;
   align-items: center;
@@ -757,6 +767,104 @@ body {
 .btn-preset:hover:not(.active):not(:disabled) {
   border-color: rgba(130, 189, 245, 0.45);
   color: var(--text-primary);
+}
+
+/* Test Audio */
+.btn-test {
+  padding: 11px 16px;
+  font-size: 0.84rem;
+  border-radius: var(--radius-sm);
+  background: rgba(67, 197, 255, 0.16);
+  color: var(--accent);
+  border: 1px solid rgba(67, 197, 255, 0.35);
+  white-space: nowrap;
+}
+
+.btn-test.testing {
+  background: rgba(255, 103, 103, 0.22);
+  color: #ffc0c0;
+  border: 1px solid rgba(255, 103, 103, 0.45);
+}
+
+.test-meter {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(3, 12, 20, 0.6);
+  border: 1px solid rgba(130, 189, 245, 0.2);
+}
+
+.test-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(3, 12, 20, 0.85);
+  overflow: hidden;
+  border: 1px solid rgba(130, 189, 245, 0.15);
+}
+
+.test-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.05s linear;
+}
+
+/* Connection History */
+.connection-history {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-label {
+  display: block;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.btn-history {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  border-radius: var(--radius-sm);
+  background: rgba(8, 25, 40, 0.84);
+  border: 1px solid rgba(130, 189, 245, 0.25);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.btn-history:hover {
+  border-color: var(--accent);
+  background: rgba(67, 197, 255, 0.12);
+}
+
+.history-name {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.history-server {
+  font-size: 0.76rem;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  color: var(--text-muted);
 }
 
 /* Welcome Overlay */

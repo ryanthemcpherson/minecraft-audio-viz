@@ -46,6 +46,7 @@ interface PatternCardProps {
   description: string;
   category: string;
   staticCamera: boolean;
+  startBlocks: number | null;
   createPattern: () => PatternInstance;
   index: number;
 }
@@ -63,6 +64,7 @@ export default function PatternCard({
   description,
   category,
   staticCamera,
+  startBlocks,
   createPattern,
   index,
 }: PatternCardProps) {
@@ -230,6 +232,15 @@ export default function PatternCard({
             {category}
           </span>
         </div>
+
+        {/* Entity count badge */}
+        {startBlocks && (
+          <div className="absolute top-3 right-3 z-10">
+            <span className="rounded-full border border-white/10 bg-black/40 px-2.5 py-0.5 text-[10px] font-semibold text-white/80 backdrop-blur-sm">
+              {startBlocks} blocks
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Info */}

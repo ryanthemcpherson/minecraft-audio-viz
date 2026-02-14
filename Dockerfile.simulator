@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install websockets
+RUN pip install --no-cache-dir websockets
+
+# Copy simulator script
+COPY demo/audio_simulator.py .
+
+# Run simulator with environment variables
+CMD python audio_simulator.py \
+    --host ${VJ_HOST:-localhost} \
+    --port ${VJ_PORT:-9000} \
+    --bpm ${BPM:-128} \
+    --intensity ${INTENSITY:-0.7} \
+    --fps ${FPS:-21.5}
