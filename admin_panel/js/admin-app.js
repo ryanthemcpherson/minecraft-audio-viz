@@ -214,6 +214,15 @@ class AdminApp {
         this.elements.syncMode = document.getElementById('sync-mode');
         this.elements.ctrlVisualDelay = document.getElementById('ctrl-visual-delay');
         this.elements.syncDelayRow = document.getElementById('sync-delay-row');
+        this.elements.syncPresetButtons = document.querySelectorAll('.sync-preset-btn');
+        this.elements.syncDashboard = document.getElementById('sync-dashboard');
+        this.elements.metricPing = document.getElementById('metric-ping');
+        this.elements.metricPipeline = document.getElementById('metric-pipeline');
+        this.elements.metricDelay = document.getElementById('metric-delay');
+        this.elements.metricSync = document.getElementById('metric-sync');
+        this.elements.metricJitter = document.getElementById('metric-jitter');
+        this.elements.btnSyncTest = document.getElementById('btn-sync-test');
+        this.elements.syncTestResult = document.getElementById('sync-test-result');
 
         // Particle effects
         this.elements.particleGlobalIntensity = document.getElementById('particle-global-intensity');
@@ -404,6 +413,38 @@ class AdminApp {
                 // Show/hide manual delay slider
                 if (this.elements.syncDelayRow) {
                     this.elements.syncDelayRow.style.display = mode === 'manual' ? '' : 'none';
+                }
+                // Clear active sync preset when mode changes
+                this.elements.syncPresetButtons.forEach(b => b.classList.remove('active'));
+            });
+        }
+
+        // Sync preset quick-buttons
+        this.elements.syncPresetButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const delayMs = parseInt(btn.dataset.delay);
+                // Set mode to manual and apply the delay
+                this.ws.send({ type: 'set_visual_delay_mode', mode: 'manual' });
+                this.ws.send({ type: 'set_visual_delay', delay_ms: delayMs });
+                // Update UI
+                if (this.elements.syncMode) this.elements.syncMode.value = 'manual';
+                if (this.elements.ctrlVisualDelay) this.elements.ctrlVisualDelay.value = delayMs;
+                const valEl = document.getElementById('val-visual-delay');
+                if (valEl) valEl.textContent = `${delayMs}ms`;
+                if (this.elements.syncDelayRow) this.elements.syncDelayRow.style.display = '';
+                // Highlight active preset
+                this.elements.syncPresetButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // Sync test button
+        if (this.elements.btnSyncTest) {
+            this.elements.btnSyncTest.addEventListener('click', () => {
+                this._syncTestSentAt = performance.now();
+                this.ws.send({ type: 'sync_test' });
+                if (this.elements.syncTestResult) {
+                    this.elements.syncTestResult.textContent = 'Testing...';
                 }
             });
         }
@@ -1046,6 +1087,27 @@ class AdminApp {
             case 'scene_deleted':
                 this._showToast(`Scene "${data.name}" deleted`, 'success');
                 break;
+
+            case 'sync_test_flash': {
+                // Visual flash for sync test — measure round-trip
+                const flashAt = performance.now();
+                document.body.style.transition = 'background 0.05s';
+                document.body.style.background = '#ffffff';
+                setTimeout(() => {
+                    document.body.style.background = '';
+                    document.body.style.transition = '';
+                }, 100);
+                if (this._syncTestSentAt && this.elements.syncTestResult) {
+                    const rtt = Math.round(flashAt - this._syncTestSentAt);
+                    this.elements.syncTestResult.textContent = `Round-trip: ${rtt}ms`;
+                    this._syncTestSentAt = null;
+                }
+                break;
+            }
+
+            case 'link_status':
+                this._handleLinkStatus(data);
+                break;
         }
     }
 
@@ -1260,6 +1322,31 @@ class AdminApp {
                 infoDiv.appendChild(statsDiv);
             }
 
+            // Per-DJ sync health badges
+            const syncHealthDiv = document.createElement('div');
+            syncHealthDiv.className = 'dj-sync-health';
+            if (dj.clock_sync_age_s !== undefined && dj.clock_sync_age_s !== null) {
+                const clockBadge = document.createElement('span');
+                clockBadge.className = 'dj-sync-badge ' + (dj.clock_sync_age_s < 60 ? 'fresh' : 'stale');
+                clockBadge.textContent = dj.clock_sync_age_s < 60 ? 'CLK OK' : `CLK ${Math.round(dj.clock_sync_age_s)}s`;
+                syncHealthDiv.appendChild(clockBadge);
+            }
+            if (dj.clock_drift_rate !== undefined && dj.clock_drift_rate > 0.1) {
+                const driftBadge = document.createElement('span');
+                driftBadge.className = 'dj-sync-badge ' + (dj.clock_drift_rate > 5 ? 'stale' : '');
+                driftBadge.textContent = `Drift: ${dj.clock_drift_rate.toFixed(1)}ms/m`;
+                syncHealthDiv.appendChild(driftBadge);
+            }
+            if (dj.jitter_ms !== undefined && dj.jitter_ms > 0) {
+                const jitterBadge = document.createElement('span');
+                jitterBadge.className = 'dj-sync-badge ' + (dj.jitter_ms > 10 ? 'stale' : 'fresh');
+                jitterBadge.textContent = `Jtr: ${dj.jitter_ms.toFixed(1)}ms`;
+                syncHealthDiv.appendChild(jitterBadge);
+            }
+            if (syncHealthDiv.children.length > 0) {
+                infoDiv.appendChild(syncHealthDiv);
+            }
+
             // Actions area
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'dj-actions';
@@ -1385,11 +1472,24 @@ class AdminApp {
         this.state.frame = data.frame || 0;
         this.state.entities = data.entities || [];
 
-        // Store latency, BPM, and FPS for throttled update
+        // Store latency, BPM, FPS, and sync metrics for throttled update
         if (data.ping_ms !== undefined) {
             this.state.latencyMs = data.ping_ms;
+            this.state.pingMs = data.ping_ms;
         } else if (data.latency_ms !== undefined) {
             this.state.latencyMs = data.latency_ms;
+        }
+        if (data.pipeline_latency_ms !== undefined) {
+            this.state.pipelineLatencyMs = data.pipeline_latency_ms;
+        }
+        if (data.jitter_ms !== undefined) {
+            this.state.jitterMs = data.jitter_ms;
+        }
+        if (data.sync_confidence !== undefined) {
+            this.state.syncConfidence = data.sync_confidence;
+        }
+        if (data.visual_delay_ms !== undefined) {
+            this.state.effectiveDelayMs = data.visual_delay_ms;
         }
         if (data.fps !== undefined) {
             this.state.fps = data.fps;
@@ -1415,6 +1515,9 @@ class AdminApp {
                         this.elements.latencyDisplay.textContent = `Latency: ${this.state.latencyMs.toFixed(1)}ms`;
                         this.elements.latencyDisplay.classList.toggle('warning', this.state.latencyMs > 500);
                     }
+
+                    // Update sync dashboard metrics
+                    this._updateSyncDashboard();
 
                     // Update queue depth display (only show when > 0)
                     this._updateQueueDepthDisplay();
@@ -1456,6 +1559,38 @@ class AdminApp {
             } else {
                 this.elements.queueDepthDisplay.classList.add('hidden');
             }
+        }
+    }
+
+    _updateSyncDashboard() {
+        // Ping
+        if (this.elements.metricPing && this.state.pingMs !== undefined) {
+            const ping = this.state.pingMs;
+            this.elements.metricPing.textContent = `Ping: ${Math.round(ping)}ms`;
+            this.elements.metricPing.className = 'sync-metric ' + (ping < 50 ? 'good' : ping < 150 ? 'warn' : 'bad');
+        }
+        // Pipeline
+        if (this.elements.metricPipeline && this.state.pipelineLatencyMs !== undefined) {
+            const pl = this.state.pipelineLatencyMs;
+            this.elements.metricPipeline.textContent = `Pipeline: ${Math.round(pl)}ms`;
+            this.elements.metricPipeline.className = 'sync-metric ' + (pl < 50 ? 'good' : pl < 200 ? 'warn' : 'bad');
+        }
+        // Delay
+        if (this.elements.metricDelay && this.state.effectiveDelayMs !== undefined) {
+            this.elements.metricDelay.textContent = `Delay: ${Math.round(this.state.effectiveDelayMs)}ms`;
+            this.elements.metricDelay.className = 'sync-metric';
+        }
+        // Sync confidence
+        if (this.elements.metricSync && this.state.syncConfidence !== undefined) {
+            const sc = this.state.syncConfidence;
+            this.elements.metricSync.textContent = `Sync: ${Math.round(sc)}%`;
+            this.elements.metricSync.className = 'sync-metric ' + (sc >= 80 ? 'good' : sc >= 50 ? 'warn' : 'bad');
+        }
+        // Jitter
+        if (this.elements.metricJitter && this.state.jitterMs !== undefined) {
+            const jt = this.state.jitterMs;
+            this.elements.metricJitter.textContent = `Jitter: ${jt.toFixed(1)}ms`;
+            this.elements.metricJitter.className = 'sync-metric ' + (jt < 5 ? 'good' : jt < 15 ? 'warn' : 'bad');
         }
     }
 
@@ -2339,6 +2474,17 @@ class AdminApp {
             this._showToast('Voice chat streaming started', 'success');
         } else if (!data.streaming && wasStreaming) {
             this._showToast('Voice chat streaming stopped', 'info');
+        }
+    }
+
+    _handleLinkStatus(data) {
+        this.state.linkEnabled = data.enabled || false;
+        this.state.linkPeers = data.peers || 0;
+        this.state.linkTempo = data.tempo || 0;
+
+        // Update the sync dashboard with Link info if peers > 0
+        if (data.peers > 0) {
+            this._showToast(`Link: ${data.peers} peer(s) @ ${data.tempo} BPM`, 'info');
         }
     }
 

@@ -16,7 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 auth = ["bcrypt>=4.0.0"]
-full = ["bcrypt>=4.0.0"]
+link = ["aalink>=0.3"]
+full = ["bcrypt>=4.0.0", "aalink>=0.3"]
 
 [project.scripts]
 audioviz-vj = "vj_server.cli:vj_server"

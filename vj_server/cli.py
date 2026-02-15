@@ -123,6 +123,12 @@ Examples:
         default=os.environ.get("VISUAL_DELAY_MODE", "manual"),
         help="Visual delay mode: manual, auto, discord, svc (default: manual or $VISUAL_DELAY_MODE)",
     )
+    parser.add_argument(
+        "--enable-link",
+        action="store_true",
+        default=os.environ.get("ENABLE_LINK", "").lower() in ("1", "true", "yes"),
+        help="Enable Ableton Link tempo sync (requires aalink package)",
+    )
 
     args = parser.parse_args()
 
@@ -201,6 +207,7 @@ Examples:
         metrics_port=None if args.no_metrics else args.metrics_port,
         visual_delay_ms=args.visual_delay_ms,
         visual_delay_mode=args.visual_delay_mode,
+        enable_link=args.enable_link,
     )
 
     def signal_handler(sig, frame):

@@ -3539,3 +3539,129 @@ input:disabled + .toggle-slider {
 .voice-controls .control-row:last-child {
     margin-bottom: 0;
 }
+
+/* ============================================
+   Sync Preset Buttons
+   ============================================ */
+
+.sync-preset-buttons {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.sync-preset-btn {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-family: var(--font-sans);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.sync-preset-btn:hover {
+    background: var(--bg-hover);
+    border-color: rgba(0, 212, 255, 0.3);
+    color: var(--accent-primary);
+}
+
+.sync-preset-btn.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--bg-primary);
+    font-weight: 700;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.25);
+}
+
+/* ============================================
+   Sync Dashboard
+   ============================================ */
+
+.sync-dashboard {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.sync-metric {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    white-space: nowrap;
+}
+
+.sync-metric.good {
+    color: #00e676;
+    border: 1px solid rgba(0, 230, 118, 0.2);
+}
+
+.sync-metric.warn {
+    color: #ffea00;
+    border: 1px solid rgba(255, 234, 0, 0.2);
+}
+
+.sync-metric.bad {
+    color: #ff5252;
+    border: 1px solid rgba(255, 82, 82, 0.2);
+}
+
+/* ============================================
+   Sync Test
+   ============================================ */
+
+.sync-test-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+}
+
+.btn-sync-test {
+    font-size: var(--font-size-xs);
+    padding: 4px 14px;
+}
+
+.sync-test-result {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+}
+
+/* Per-DJ sync health indicators */
+.dj-sync-health {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.dj-sync-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+}
+
+.dj-sync-badge.fresh {
+    color: #00e676;
+}
+
+.dj-sync-badge.stale {
+    color: #ff5252;
+}

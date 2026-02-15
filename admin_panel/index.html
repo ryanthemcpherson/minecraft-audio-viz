@@ -318,11 +318,32 @@
                                         <option value="discord">Discord (~200ms)</option>
                                     </select>
                                 </div>
+                                <div class="control-row" id="sync-presets-row">
+                                    <label>Quick Presets</label>
+                                    <div class="sync-preset-buttons">
+                                        <button class="sync-preset-btn" data-delay="0">Local (0ms)</button>
+                                        <button class="sync-preset-btn" data-delay="80">Voice Chat</button>
+                                        <button class="sync-preset-btn" data-delay="200">Discord</button>
+                                    </div>
+                                </div>
                                 <div class="control-row" id="sync-delay-row">
                                     <label>Visual Delay</label>
                                     <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10">
                                     <span class="control-value" id="val-visual-delay">0ms</span>
                                 </div>
+                            </div>
+                            <!-- Sync Dashboard -->
+                            <div class="sync-dashboard" id="sync-dashboard">
+                                <span class="sync-metric" id="metric-ping" title="Network RTT">Ping: --ms</span>
+                                <span class="sync-metric" id="metric-pipeline" title="End-to-end pipeline">Pipeline: --ms</span>
+                                <span class="sync-metric" id="metric-delay" title="Applied visual delay">Delay: --ms</span>
+                                <span class="sync-metric" id="metric-sync" title="Sync quality score">Sync: --%</span>
+                                <span class="sync-metric" id="metric-jitter" title="Frame jitter">Jitter: --ms</span>
+                            </div>
+                            <!-- Sync Test -->
+                            <div class="sync-test-row">
+                                <button id="btn-sync-test" class="btn btn-secondary btn-sync-test">Sync Test</button>
+                                <span id="sync-test-result" class="sync-test-result"></span>
                             </div>
                         </section>
 

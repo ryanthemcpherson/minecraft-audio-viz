@@ -17,6 +17,7 @@ Architecture:
 
 import argparse
 import asyncio
+import bisect
 import http.server
 import json
 import logging
@@ -44,6 +45,13 @@ try:
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
+
+try:
+    import aalink
+
+    HAS_LINK = True
+except ImportError:
+    HAS_LINK = False
 
 from python_client.viz_client import VizClient
 from vj_server.beat_predictor import BeatPredictor
@@ -288,6 +296,12 @@ class DJConnection:
     # Positive offset means DJ clock is behind server clock
     clock_offset: float = 0.0  # seconds
     clock_sync_done: bool = False
+    _clock_sync_count: int = 0  # Number of successful clock syncs
+    _last_clock_resync: float = 0.0  # Timestamp of last successful resync
+    _clock_drift_rate: float = 0.0  # ms/sec drift rate
+    _rtt_samples: deque = field(
+        default_factory=lambda: deque(maxlen=30)
+    )  # Recent RTT samples for variance
 
     # Direct mode support
     direct_mode: bool = False  # Whether this DJ is using direct Minecraft connection
@@ -299,6 +313,14 @@ class DJConnection:
 
     # Frame buffer for visual delay (timestamped audio state ring buffer)
     _frame_buffer: deque = field(default_factory=lambda: deque(maxlen=600))  # 10s @ 60fps
+    _frame_timestamps: list = field(default_factory=list)  # Sorted timestamps for bisect lookup
+
+    # Jitter tracking
+    _jitter_ms: float = 0.0  # Smoothed frame arrival jitter
+    _frame_gaps: deque = field(
+        default_factory=lambda: deque(maxlen=60)
+    )  # Recent inter-frame intervals
+    _last_frame_arrival: float = 0.0  # Timestamp of last frame arrival
 
     # Rate limiting (token bucket: 120 tokens/sec, 2x expected 60fps)
     _rate_tokens: float = 120.0
@@ -525,6 +547,7 @@ class VJServer:
         metrics_port: Optional[int] = 9001,
         visual_delay_ms: float = 0.0,
         visual_delay_mode: str = "manual",
+        enable_link: bool = False,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -625,6 +648,23 @@ class VJServer:
         # Beat predictor for phase-locked beat firing during delayed playback
         self._beat_predictor = BeatPredictor()
 
+        # Ableton Link integration
+        self._link_enabled = enable_link and HAS_LINK
+        self._link: Optional[Any] = None
+        self._link_task: Optional[asyncio.Task] = None
+        self._link_peers: int = 0
+        self._link_tempo: float = 0.0
+        self._link_beat_phase: float = 0.0
+        if self._link_enabled:
+            try:
+                self._link = aalink.Link(120.0)
+                self._link.enabled = True
+                logger.info("Ableton Link enabled (waiting for peers)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Ableton Link: {e}")
+                self._link_enabled = False
+                self._link = None
+
         # Fallback state (used when no DJ is active)
         self._fallback_bands = [0.0] * 5
         self._fallback_peak = 0.0
@@ -710,6 +750,12 @@ class VJServer:
                     "direct_mode": dj.direct_mode,
                     "mc_connected": dj.mc_connected if dj.direct_mode else None,
                     "queue_position": queue_pos,
+                    "jitter_ms": round(dj._jitter_ms, 1),
+                    "clock_sync_count": dj._clock_sync_count,
+                    "clock_drift_rate": round(dj._clock_drift_rate * 60 * 1000, 1),  # ms/min
+                    "clock_sync_age_s": round(time.time() - dj._last_clock_resync, 0)
+                    if dj._last_clock_resync > 0
+                    else None,
                 }
             )
         # Sort by queue position (respects manual reordering)
@@ -1008,6 +1054,8 @@ class VJServer:
                             else:
                                 dj.clock_offset = clock_offset
                                 dj.clock_sync_done = True
+                                dj._last_clock_resync = time.time()
+                                dj._clock_sync_count = 1
                                 logger.info(
                                     f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
                                 )
@@ -1059,6 +1107,7 @@ class VJServer:
                                 else:
                                     dj.network_rtt_ms = rtt_ms
                                 dj.latency_ms = dj.network_rtt_ms
+                                dj._rtt_samples.append(rtt_ms)
                             if dj.direct_mode:
                                 dj.mc_connected = frame_data.get("mc_connected", False)
                             await websocket.send(
@@ -1070,6 +1119,19 @@ class VJServer:
                                     }
                                 )
                             )
+                            # Periodic clock resync (every 30s)
+                            if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
+                                try:
+                                    await websocket.send(
+                                        json.dumps(
+                                            {"type": "clock_sync_request", "server_time": now}
+                                        )
+                                    )
+                                    dj._last_clock_resync = now
+                                except Exception:
+                                    pass
+                        elif frame_type == "clock_sync_response":
+                            self._apply_clock_resync(dj, frame_data)
                         elif frame_type == "voice_audio":
                             # Relay voice audio from active DJ to Minecraft
                             dj.voice_streaming = True
@@ -1210,6 +1272,8 @@ class VJServer:
                         else:
                             dj.clock_offset = clock_offset
                             dj.clock_sync_done = True
+                            dj._last_clock_resync = time.time()
+                            dj._clock_sync_count = 1
                             logger.info(
                                 f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
                             )
@@ -1271,6 +1335,7 @@ class VJServer:
                             else:
                                 dj.network_rtt_ms = rtt_ms
                             dj.latency_ms = dj.network_rtt_ms
+                            dj._rtt_samples.append(rtt_ms)
                         # Track Minecraft connection status for direct mode DJs
                         if dj.direct_mode:
                             dj.mc_connected = data.get("mc_connected", False)
@@ -1283,6 +1348,18 @@ class VJServer:
                                 }
                             )
                         )
+                        # Periodic clock resync (every 30s)
+                        if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
+                            try:
+                                await websocket.send(
+                                    json.dumps({"type": "clock_sync_request", "server_time": now})
+                                )
+                                dj._last_clock_resync = now
+                            except Exception:
+                                pass
+
+                    elif msg_type == "clock_sync_response":
+                        self._apply_clock_resync(dj, data)
 
                     elif msg_type == "voice_audio":
                         # Relay voice audio from active DJ to Minecraft
@@ -1357,23 +1434,39 @@ class VJServer:
         dj.frame_count += 1
         dj.update_fps()
 
+        # Track jitter from frame arrival times
+        now = dj.last_frame_at
+        if dj._last_frame_arrival > 0:
+            gap = (now - dj._last_frame_arrival) * 1000.0  # ms
+            dj._frame_gaps.append(gap)
+            if len(dj._frame_gaps) >= 4:
+                mean_gap = sum(dj._frame_gaps) / len(dj._frame_gaps)
+                variance = sum((g - mean_gap) ** 2 for g in dj._frame_gaps) / len(dj._frame_gaps)
+                jitter = variance**0.5
+                dj._jitter_ms = dj._jitter_ms * 0.8 + jitter * 0.2
+        dj._last_frame_arrival = now
+
         # Append timestamped frame to buffer (for visual delay feature)
-        dj._frame_buffer.append(
-            (
-                dj.last_frame_at,
-                {
-                    "bands": list(dj.bands),
-                    "peak": dj.peak,
-                    "is_beat": dj.is_beat,
-                    "beat_intensity": dj.beat_intensity,
-                    "bpm": dj.bpm,
-                    "tempo_confidence": dj.tempo_confidence,
-                    "beat_phase": dj.beat_phase,
-                    "instant_bass": dj.instant_bass,
-                    "instant_kick": dj.instant_kick,
-                },
-            )
-        )
+        frame_data_snapshot = {
+            "bands": list(dj.bands),
+            "peak": dj.peak,
+            "is_beat": dj.is_beat,
+            "beat_intensity": dj.beat_intensity,
+            "bpm": dj.bpm,
+            "tempo_confidence": dj.tempo_confidence,
+            "beat_phase": dj.beat_phase,
+            "instant_bass": dj.instant_bass,
+            "instant_kick": dj.instant_kick,
+        }
+        dj._frame_buffer.append((now, frame_data_snapshot))
+        dj._frame_timestamps.append(now)
+
+        # Adaptive buffer trimming: keep only what's needed + margin
+        effective_delay = self._get_effective_delay_ms(dj)
+        max_frames = max(60, int(effective_delay / 16.0 * 2))
+        while len(dj._frame_buffer) > max_frames:
+            dj._frame_buffer.popleft()
+            dj._frame_timestamps.pop(0)
 
         # Feed beats to predictor when this is the active DJ
         if dj.dj_id == self._active_dj_id:
@@ -1407,6 +1500,98 @@ class VJServer:
             else:
                 dj.latency_ms = dj.pipeline_latency_ms
 
+    def _apply_clock_resync(self, dj: DJConnection, data: dict) -> None:
+        """Process an incoming clock_sync_response for periodic drift correction."""
+        t4 = time.time()
+        t2 = data.get("dj_recv_time")
+        t3 = data.get("dj_send_time")
+        if (
+            not isinstance(t2, (int, float))
+            or not isinstance(t3, (int, float))
+            or not math.isfinite(t2)
+            or not math.isfinite(t3)
+        ):
+            return
+        # Estimate the server_time (t1) from the response's context
+        t1 = data.get("server_time")
+        if not isinstance(t1, (int, float)) or not math.isfinite(t1):
+            return
+        rtt = (t4 - t1) - (t3 - t2)
+        if rtt < 0 or rtt > 30:
+            return
+        new_offset = ((t2 - t1) + (t3 - t4)) / 2
+        old_offset = dj.clock_offset
+        # Blend with existing offset using EMA (slow adaptation)
+        dj.clock_offset = old_offset * 0.9 + new_offset * 0.1
+        dj._clock_sync_count += 1
+        # Track drift rate (offset change per second)
+        if dj._last_clock_resync > 0:
+            elapsed = t4 - dj._last_clock_resync
+            if elapsed > 1.0:
+                drift_ms_per_sec = abs(new_offset - old_offset) * 1000.0 / elapsed
+                dj._clock_drift_rate = dj._clock_drift_rate * 0.7 + drift_ms_per_sec * 0.3
+                # Warn if drift > 5ms/minute (0.083ms/sec)
+                if dj._clock_drift_rate > 0.083:
+                    logger.warning(
+                        f"[CLOCK DRIFT] {dj.dj_name}: drift={dj._clock_drift_rate * 60:.1f}ms/min"
+                    )
+        dj._last_clock_resync = t4
+        logger.debug(
+            f"[CLOCK RESYNC] {dj.dj_name}: offset={dj.clock_offset * 1000:.1f}ms, "
+            f"RTT={rtt * 1000:.1f}ms, syncs={dj._clock_sync_count}"
+        )
+
+    def _calculate_sync_confidence(self, dj: DJConnection) -> float:
+        """Calculate sync quality score 0-100 for a DJ connection.
+
+        Score based on 4 components (25 pts each):
+        - Clock sync freshness (penalty if > 5 min since last sync)
+        - RTT stability (low variance = good)
+        - Beat predictor phase lock status
+        - Frame delivery consistency (low jitter)
+        """
+        score = 0.0
+
+        # 1. Clock sync age (0-25): full marks if < 60s, zero if > 300s
+        if dj.clock_sync_done and dj._last_clock_resync > 0:
+            age = time.time() - dj._last_clock_resync
+            if age < 60:
+                score += 25.0
+            elif age < 300:
+                score += 25.0 * (1.0 - (age - 60) / 240.0)
+            # else: 0 points
+        # No sync done = 0 points
+
+        # 2. RTT stability (0-25): based on variance of recent RTT samples
+        if len(dj._rtt_samples) >= 3:
+            samples = list(dj._rtt_samples)
+            mean_rtt = sum(samples) / len(samples)
+            variance = sum((s - mean_rtt) ** 2 for s in samples) / len(samples)
+            std_dev = variance**0.5
+            # < 5ms std dev = full marks, > 50ms = 0
+            if std_dev < 5.0:
+                score += 25.0
+            elif std_dev < 50.0:
+                score += 25.0 * (1.0 - (std_dev - 5.0) / 45.0)
+        elif dj.network_rtt_ms > 0:
+            # Few samples but have RTT - give partial credit
+            score += 10.0
+
+        # 3. Beat predictor phase lock (0-25)
+        if self._beat_predictor.is_phase_locked:
+            score += 25.0
+        elif self._beat_predictor.tempo_confidence > 0.5:
+            score += 25.0 * self._beat_predictor.tempo_confidence
+
+        # 4. Frame delivery consistency (0-25): based on jitter
+        if dj._jitter_ms < 3.0:
+            score += 25.0
+        elif dj._jitter_ms < 20.0:
+            score += 25.0 * (1.0 - (dj._jitter_ms - 3.0) / 17.0)
+        # else: 0 for high jitter
+
+        return max(0.0, min(100.0, score))
+
     def _get_effective_delay_ms(self, dj: Optional[DJConnection] = None) -> float:
         """Calculate effective visual delay based on mode and DJ metrics."""
         mode = self._visual_delay_mode
@@ -1427,6 +1612,7 @@ class VJServer:
     def _read_delayed_frame(self, dj: DJConnection, delay_ms: float) -> Optional[dict]:
         """Read a frame from the DJ's buffer at `now - delay_ms`.
 
+        Uses bisect for O(log n) lookup instead of linear scan.
         Returns an audio state dict matching the main loop's expected fields,
         or None if the buffer is empty or delay is zero (use live state).
         """
@@ -1434,21 +1620,31 @@ class VJServer:
             return None
 
         target_time = time.time() - (delay_ms / 1000.0)
+        timestamps = dj._frame_timestamps
+        buf = dj._frame_buffer
 
-        # Binary-style search: the buffer is in chronological order.
-        # Find the frame closest to target_time.
-        best_frame = None
-        best_diff = float("inf")
-        for ts, frame in dj._frame_buffer:
-            diff = abs(ts - target_time)
-            if diff < best_diff:
-                best_diff = diff
-                best_frame = frame
-            elif ts > target_time and best_frame is not None:
-                # Past the target, we already found the closest
-                break
+        if not timestamps:
+            return None
 
-        return best_frame
+        # bisect_left finds insertion point for target_time in sorted timestamps
+        idx = bisect.bisect_left(timestamps, target_time)
+
+        # Choose the closest frame (idx-1 or idx)
+        best_idx = None
+        if idx == 0:
+            best_idx = 0
+        elif idx >= len(timestamps):
+            best_idx = len(timestamps) - 1
+        else:
+            # Compare neighbours
+            if abs(timestamps[idx] - target_time) < abs(timestamps[idx - 1] - target_time):
+                best_idx = idx
+            else:
+                best_idx = idx - 1
+
+        if best_idx is not None and best_idx < len(buf):
+            return buf[best_idx][1]
+        return None
 
     def _stabilize_bpm(self, dj: DJConnection, raw_bpm: float) -> float:
         """Normalize octave errors and smooth BPM per-DJ."""
@@ -2280,10 +2476,12 @@ class VJServer:
                         self._visual_delay_ms = max(0.0, min(500.0, float(delay)))
                         logger.info(f"Visual delay set to {self._visual_delay_ms:.0f}ms")
                         await self._broadcast_to_browsers(
-                            {
-                                "type": "visual_delay_sync",
-                                "delay_ms": self._visual_delay_ms,
-                            }
+                            json.dumps(
+                                {
+                                    "type": "visual_delay_sync",
+                                    "delay_ms": self._visual_delay_ms,
+                                }
+                            )
                         )
 
                     elif msg_type == "set_visual_delay_mode":
@@ -2292,10 +2490,12 @@ class VJServer:
                             self._visual_delay_mode = mode
                             logger.info(f"Visual delay mode set to {mode}")
                             await self._broadcast_to_browsers(
-                                {
-                                    "type": "visual_delay_mode_sync",
-                                    "mode": self._visual_delay_mode,
-                                }
+                                json.dumps(
+                                    {
+                                        "type": "visual_delay_mode_sync",
+                                        "mode": self._visual_delay_mode,
+                                    }
+                                )
                             )
 
                     elif msg_type == "set_transition_duration":
@@ -2307,11 +2507,41 @@ class VJServer:
                         )
                         # Broadcast to all browsers
                         await self._broadcast_to_browsers(
-                            {
-                                "type": "transition_duration_sync",
-                                "duration": self._transition_duration,
-                            }
+                            json.dumps(
+                                {
+                                    "type": "transition_duration_sync",
+                                    "duration": self._transition_duration,
+                                }
+                            )
                         )
+
+                    elif msg_type == "sync_test":
+                        # Sync test: send flash to all browser clients and tone request to active DJ
+                        logger.info("[SYNC TEST] Triggered by admin")
+                        test_ts = time.time()
+                        # Flash all browsers
+                        await self._broadcast_to_browsers(
+                            json.dumps(
+                                {
+                                    "type": "sync_test_flash",
+                                    "server_time": test_ts,
+                                }
+                            )
+                        )
+                        # Request tone from active DJ
+                        dj = self.active_dj
+                        if dj:
+                            try:
+                                await dj.websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "sync_test_tone",
+                                            "server_time": test_ts,
+                                        }
+                                    )
+                                )
+                            except Exception:
+                                pass
 
                     elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
@@ -2577,7 +2807,7 @@ class VJServer:
                             # Broadcast updated scene list to all browsers
                             scenes = self._list_scenes()
                             await self._broadcast_to_browsers(
-                                {"type": "scenes_list", "scenes": scenes}
+                                json.dumps({"type": "scenes_list", "scenes": scenes})
                             )
                         except Exception as e:
                             logger.error(f"Failed to save scene '{scene_name}': {e}")
@@ -2645,7 +2875,7 @@ class VJServer:
                             # Broadcast updated scene list to all browsers
                             scenes = self._list_scenes()
                             await self._broadcast_to_browsers(
-                                {"type": "scenes_list", "scenes": scenes}
+                                json.dumps({"type": "scenes_list", "scenes": scenes})
                             )
                         except FileNotFoundError:
                             logger.warning(f"Scene not found: {scene_name}")
@@ -3135,6 +3365,9 @@ class VJServer:
         pipeline_latency_ms = 0.0
         bpm = 0.0
         fps = 0.0
+        jitter_ms = 0.0
+        sync_confidence = 0.0
+        visual_delay_ms = self._visual_delay_ms
         if self._active_dj_id and self._active_dj_id in self._djs:
             dj = self._djs[self._active_dj_id]
             latency_ms = dj.latency_ms
@@ -3142,6 +3375,9 @@ class VJServer:
             pipeline_latency_ms = dj.pipeline_latency_ms
             bpm = dj.bpm
             fps = dj.frames_per_second
+            jitter_ms = dj._jitter_ms
+            sync_confidence = self._calculate_sync_confidence(dj)
+            visual_delay_ms = self._get_effective_delay_ms(dj)
 
         message = json.dumps(
             {
@@ -3161,6 +3397,10 @@ class VJServer:
                 "ping_ms": round(ping_ms, 1),
                 "pipeline_latency_ms": round(pipeline_latency_ms, 1),
                 "fps": round(fps, 1),
+                "jitter_ms": round(jitter_ms, 1),
+                "sync_confidence": round(sync_confidence, 0),
+                "visual_delay_ms": round(visual_delay_ms, 0),
+                "visual_delay_mode": self._visual_delay_mode,
                 "zone_status": {
                     "bpm_estimate": round(bpm, 1),
                     "tempo_confidence": round(tempo_confidence, 3),
@@ -3798,6 +4038,56 @@ class VJServer:
         """Broadcast voice_status to all connected browser clients."""
         await self._broadcast_to_browsers(json.dumps(status))
 
+    async def _link_sync_loop(self):
+        """Poll Ableton Link for tempo/beat/phase at ~60Hz."""
+        prev_peers = 0
+        while self._running:
+            try:
+                if self._link is None:
+                    await asyncio.sleep(1.0)
+                    continue
+
+                state = self._link.captureSessionState()
+                tempo = state.tempo()
+                beat = state.beatAtTime(self._link.clock(), 4)
+                phase = beat % 1.0  # 0.0 - 1.0 within a beat
+                peers = self._link.numPeers()
+
+                self._link_tempo = tempo
+                self._link_beat_phase = max(0.0, min(1.0, phase))
+                self._link_peers = peers
+
+                # Override active DJ's tempo/phase when Link has peers
+                if peers > 0:
+                    dj = self.active_dj
+                    if dj:
+                        dj.bpm = tempo
+                        dj.beat_phase = self._link_beat_phase
+
+                    # Log peer changes
+                    if peers != prev_peers:
+                        logger.info(f"[LINK] Peers: {peers}, Tempo: {tempo:.1f} BPM")
+                        # Broadcast Link status to admin panel
+                        await self._broadcast_to_browsers(
+                            json.dumps(
+                                {
+                                    "type": "link_status",
+                                    "enabled": True,
+                                    "peers": peers,
+                                    "tempo": round(tempo, 1),
+                                }
+                            )
+                        )
+
+                prev_peers = peers
+                await asyncio.sleep(1.0 / 60.0)  # ~60Hz
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(f"[LINK] Error in sync loop: {e}")
+                await asyncio.sleep(1.0)
+
     async def _main_loop(self):
         """Main visualization loop."""
         frame_interval = 0.016  # 60 FPS simulation/preview loop
@@ -4104,6 +4394,11 @@ class VJServer:
         else:
             logger.info("Pattern hot-reload disabled")
 
+        # Start Ableton Link sync loop (runs in background)
+        if self._link_enabled and self._link is not None:
+            self._link_task = asyncio.create_task(self._link_sync_loop())
+            logger.info("Ableton Link sync loop started")
+
         try:
             await self._main_loop()
         finally:
@@ -4127,6 +4422,19 @@ class VJServer:
                 try:
                     await self._pattern_hot_reload_task
                 except asyncio.CancelledError:
+                    pass
+            # Cancel Link sync task
+            if self._link_task:
+                self._link_task.cancel()
+                try:
+                    await self._link_task
+                except asyncio.CancelledError:
+                    pass
+            # Disable Link
+            if self._link is not None:
+                try:
+                    self._link.enabled = False
+                except Exception:
                     pass
             dj_server.close()
             broadcast_server.close()
