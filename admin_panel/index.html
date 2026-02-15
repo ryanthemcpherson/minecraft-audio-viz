@@ -305,6 +305,27 @@
                             </div>
                         </section>
 
+                        <!-- Visual Sync -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Visual Sync</h3>
+                            <div id="sync-controls" class="controls-grid">
+                                <div class="control-row">
+                                    <label>Delay Mode</label>
+                                    <select id="sync-mode" class="control-select">
+                                        <option value="manual">Manual</option>
+                                        <option value="auto">Auto</option>
+                                        <option value="svc">Voice Chat (~80ms)</option>
+                                        <option value="discord">Discord (~200ms)</option>
+                                    </select>
+                                </div>
+                                <div class="control-row" id="sync-delay-row">
+                                    <label>Visual Delay</label>
+                                    <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10">
+                                    <span class="control-value" id="val-visual-delay">0ms</span>
+                                </div>
+                            </div>
+                        </section>
+
                         <!-- Effect Triggers -->
                         <section class="mixer-section">
                             <h3 class="section-title">Effects</h3>

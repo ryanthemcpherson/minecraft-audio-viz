@@ -46,6 +46,7 @@ except ImportError:
     HAS_WEBSOCKETS = False
 
 from python_client.viz_client import VizClient
+from vj_server.beat_predictor import BeatPredictor
 from vj_server.config import PRESETS as AUDIO_PRESETS
 from vj_server.patterns import (
     AudioState,
@@ -296,6 +297,9 @@ class DJConnection:
     # Voice streaming state
     voice_streaming: bool = False  # Whether this DJ is sending voice audio
 
+    # Frame buffer for visual delay (timestamped audio state ring buffer)
+    _frame_buffer: deque = field(default_factory=lambda: deque(maxlen=600))  # 10s @ 60fps
+
     # Rate limiting (token bucket: 120 tokens/sec, 2x expected 60fps)
     _rate_tokens: float = 120.0
     _rate_last_refill: float = field(default_factory=time.time)
@@ -519,6 +523,8 @@ class VJServer:
         require_auth: bool = True,
         show_spectrograph: bool = True,
         metrics_port: Optional[int] = 9001,
+        visual_delay_ms: float = 0.0,
+        visual_delay_mode: str = "manual",
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -607,6 +613,17 @@ class VJServer:
         self._start_time = time.time()
         self._frames_processed = 0
         self._pattern_changes = 0
+
+        # Visual delay buffer for audio-visual sync
+        self._visual_delay_ms: float = max(0.0, min(500.0, visual_delay_ms))
+        self._visual_delay_mode: str = (
+            visual_delay_mode
+            if visual_delay_mode in ("manual", "auto", "discord", "svc")
+            else "manual"
+        )
+
+        # Beat predictor for phase-locked beat firing during delayed playback
+        self._beat_predictor = BeatPredictor()
 
         # Fallback state (used when no DJ is active)
         self._fallback_bands = [0.0] * 5
@@ -1340,6 +1357,28 @@ class VJServer:
         dj.frame_count += 1
         dj.update_fps()
 
+        # Append timestamped frame to buffer (for visual delay feature)
+        dj._frame_buffer.append(
+            (
+                dj.last_frame_at,
+                {
+                    "bands": list(dj.bands),
+                    "peak": dj.peak,
+                    "is_beat": dj.is_beat,
+                    "beat_intensity": dj.beat_intensity,
+                    "bpm": dj.bpm,
+                    "tempo_confidence": dj.tempo_confidence,
+                    "beat_phase": dj.beat_phase,
+                    "instant_bass": dj.instant_bass,
+                    "instant_kick": dj.instant_kick,
+                },
+            )
+        )
+
+        # Feed beats to predictor when this is the active DJ
+        if dj.dj_id == self._active_dj_id:
+            self._beat_predictor.process_onset(dj.is_beat, dj.beat_intensity)
+
         # Calculate latency if timestamp provided
         # Apply clock offset to correct for clock skew between DJ and server
         ts = safe["ts"]
@@ -1367,6 +1406,49 @@ class VJServer:
                 dj.latency_ms = dj.network_rtt_ms
             else:
                 dj.latency_ms = dj.pipeline_latency_ms
+
+    def _get_effective_delay_ms(self, dj: Optional[DJConnection] = None) -> float:
+        """Calculate effective visual delay based on mode and DJ metrics."""
+        mode = self._visual_delay_mode
+        if mode == "manual":
+            return self._visual_delay_ms
+        if dj is None:
+            return self._visual_delay_ms
+
+        rtt_half = (dj.network_rtt_ms / 2.0) if dj.network_rtt_ms > 0 else 0.0
+        if mode == "discord":
+            return 200.0 + rtt_half
+        elif mode == "svc":
+            return 80.0 + rtt_half
+        elif mode == "auto":
+            return dj.pipeline_latency_ms + 80.0
+        return self._visual_delay_ms
+
+    def _read_delayed_frame(self, dj: DJConnection, delay_ms: float) -> Optional[dict]:
+        """Read a frame from the DJ's buffer at `now - delay_ms`.
+
+        Returns an audio state dict matching the main loop's expected fields,
+        or None if the buffer is empty or delay is zero (use live state).
+        """
+        if delay_ms <= 0 or not dj._frame_buffer:
+            return None
+
+        target_time = time.time() - (delay_ms / 1000.0)
+
+        # Binary-style search: the buffer is in chronological order.
+        # Find the frame closest to target_time.
+        best_frame = None
+        best_diff = float("inf")
+        for ts, frame in dj._frame_buffer:
+            diff = abs(ts - target_time)
+            if diff < best_diff:
+                best_diff = diff
+                best_frame = frame
+            elif ts > target_time and best_frame is not None:
+                # Past the target, we already found the closest
+                break
+
+        return best_frame
 
     def _stabilize_bpm(self, dj: DJConnection, raw_bpm: float) -> float:
         """Normalize octave errors and smooth BPM per-DJ."""
@@ -1470,6 +1552,7 @@ class VJServer:
             return
 
         self._active_dj_id = dj_id
+        self._beat_predictor.reset()
 
         logger.info(f"Active DJ: {self._djs[dj_id].dj_name}")
 
@@ -1814,6 +1897,7 @@ class VJServer:
         """Automatically switch to next available DJ (caller must hold _dj_lock)."""
         if not self._dj_queue:
             self._active_dj_id = None
+            self._beat_predictor.reset()
             logger.info("No DJs available")
             await self._send_dj_info_to_minecraft(None)
             return
@@ -1826,6 +1910,7 @@ class VJServer:
             await self._set_active_dj_locked(available[0])
         else:
             self._active_dj_id = None
+            self._beat_predictor.reset()
             await self._send_dj_info_to_minecraft(None)
 
     async def _handle_browser_client(self, websocket):
@@ -1858,6 +1943,11 @@ class VJServer:
                     "health_stats": self.get_health_stats(),
                     "minecraft_connected": mc_connected,
                     "pending_djs": pending_list,
+                    "visual_delay_ms": self._visual_delay_ms,
+                    "visual_delay_mode": self._visual_delay_mode,
+                    "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
+                    "beat_predictor_bpm": self._beat_predictor.tempo_bpm,
+                    "beat_predictor_locked": self._beat_predictor.is_phase_locked,
                     "banner_profiles": {
                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                         for did, prof in self._dj_banner_profiles.items()
@@ -1903,6 +1993,11 @@ class VJServer:
                                     "health_stats": self.get_health_stats(),
                                     "minecraft_connected": mc_status,
                                     "pending_djs": pending,
+                                    "visual_delay_ms": self._visual_delay_ms,
+                                    "visual_delay_mode": self._visual_delay_mode,
+                                    "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
+                                    "beat_predictor_bpm": self._beat_predictor.tempo_bpm,
+                                    "beat_predictor_locked": self._beat_predictor.is_phase_locked,
                                     "banner_profiles": {
                                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                                         for did, prof in self._dj_banner_profiles.items()
@@ -2177,6 +2272,29 @@ class VJServer:
                                     "type": "audio_setting_sync",
                                     "setting": setting,
                                     "value": float(value),
+                                }
+                            )
+
+                    elif msg_type == "set_visual_delay":
+                        delay = data.get("delay_ms", 0)
+                        self._visual_delay_ms = max(0.0, min(500.0, float(delay)))
+                        logger.info(f"Visual delay set to {self._visual_delay_ms:.0f}ms")
+                        await self._broadcast_to_browsers(
+                            {
+                                "type": "visual_delay_sync",
+                                "delay_ms": self._visual_delay_ms,
+                            }
+                        )
+
+                    elif msg_type == "set_visual_delay_mode":
+                        mode = data.get("mode", "manual")
+                        if mode in ("manual", "auto", "discord", "svc"):
+                            self._visual_delay_mode = mode
+                            logger.info(f"Visual delay mode set to {mode}")
+                            await self._broadcast_to_browsers(
+                                {
+                                    "type": "visual_delay_mode_sync",
+                                    "mode": self._visual_delay_mode,
                                 }
                             )
 
@@ -3703,17 +3821,40 @@ class VJServer:
                 # Get audio from active DJ or use fallback
                 dj = self.active_dj
                 if dj:
-                    bands = dj.bands
-                    peak = dj.peak
-                    is_beat = dj.is_beat
-                    beat_intensity = dj.beat_intensity
-                    instant_bass = dj.instant_bass
-                    instant_kick = dj.instant_kick
-                    tempo_confidence = dj.tempo_confidence
-                    beat_phase = dj.beat_phase
+                    # Check for delayed frame (audio-visual sync)
+                    effective_delay = self._get_effective_delay_ms(dj)
+                    delayed = self._read_delayed_frame(dj, effective_delay)
+                    if delayed:
+                        bands = delayed["bands"]
+                        peak = delayed["peak"]
+                        is_beat = delayed["is_beat"]
+                        beat_intensity = delayed["beat_intensity"]
+                        instant_bass = delayed["instant_bass"]
+                        instant_kick = delayed["instant_kick"]
+                        tempo_confidence = delayed["tempo_confidence"]
+                        beat_phase = delayed["beat_phase"]
+                    else:
+                        bands = dj.bands
+                        peak = dj.peak
+                        is_beat = dj.is_beat
+                        beat_intensity = dj.beat_intensity
+                        instant_bass = dj.instant_bass
+                        instant_kick = dj.instant_kick
+                        tempo_confidence = dj.tempo_confidence
+                        beat_phase = dj.beat_phase
                     is_beat, beat_intensity = self._apply_phase_beat_assist(
                         dj, is_beat, beat_intensity
                     )
+
+                    # Beat prediction: when delay is active, use predictor for tighter sync
+                    if effective_delay > 0 and self._beat_predictor.tempo_confidence > 0.6:
+                        self._beat_predictor.prediction_lookahead = effective_delay / 1000.0
+                        predicted_fire, predicted_intensity = (
+                            self._beat_predictor.should_fire_beat()
+                        )
+                        if predicted_fire:
+                            is_beat = True
+                            beat_intensity = max(beat_intensity, predicted_intensity)
                 else:
                     # No active DJ - fade to silence
                     bands = self._fallback_bands

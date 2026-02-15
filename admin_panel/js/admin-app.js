@@ -210,6 +210,11 @@ class AdminApp {
         this.elements.savesceneBtn = document.getElementById('save-scene-btn');
         this.elements.scenesGrid = document.getElementById('scenes-grid');
 
+        // Visual sync controls
+        this.elements.syncMode = document.getElementById('sync-mode');
+        this.elements.ctrlVisualDelay = document.getElementById('ctrl-visual-delay');
+        this.elements.syncDelayRow = document.getElementById('sync-delay-row');
+
         // Particle effects
         this.elements.particleGlobalIntensity = document.getElementById('particle-global-intensity');
         this.elements.particleBeatEffects = document.getElementById('particle-beat-effects');
@@ -384,6 +389,24 @@ class AdminApp {
             this.state.blockCount = val;
             this.ws.send({ type: 'set_block_count', count: val });
         }, (val) => `${val}`);
+
+        // Visual sync controls
+        this._setupControl('ctrl-visual-delay', 'val-visual-delay', (val) => {
+            this.state.visualDelayMs = val;
+            this.ws.send({ type: 'set_visual_delay', delay_ms: val });
+        }, (val) => `${val}ms`);
+
+        if (this.elements.syncMode) {
+            this.elements.syncMode.addEventListener('change', () => {
+                const mode = this.elements.syncMode.value;
+                this.state.visualDelayMode = mode;
+                this.ws.send({ type: 'set_visual_delay_mode', mode: mode });
+                // Show/hide manual delay slider
+                if (this.elements.syncDelayRow) {
+                    this.elements.syncDelayRow.style.display = mode === 'manual' ? '' : 'none';
+                }
+            });
+        }
 
         // Quick actions
         this.elements.btnBlackout.addEventListener('click', () => this._toggleBlackout());
@@ -840,6 +863,15 @@ class AdminApp {
                 if (data.banner_profiles) {
                     this.state.bannerProfiles = data.banner_profiles;
                 }
+                // Handle visual sync state
+                if (data.visual_delay_ms !== undefined) {
+                    this.state.visualDelayMs = data.visual_delay_ms;
+                    this._updateVisualDelayDisplay();
+                }
+                if (data.visual_delay_mode !== undefined) {
+                    this.state.visualDelayMode = data.visual_delay_mode;
+                    this._updateVisualDelayModeDisplay();
+                }
                 break;
 
             case 'config_update':
@@ -886,6 +918,20 @@ class AdminApp {
                     if (this.elements.transitionDurationValue) {
                         this.elements.transitionDurationValue.textContent = `${data.duration.toFixed(1)}s`;
                     }
+                }
+                break;
+
+            case 'visual_delay_sync':
+                if (data.delay_ms !== undefined) {
+                    this.state.visualDelayMs = data.delay_ms;
+                    this._updateVisualDelayDisplay();
+                }
+                break;
+
+            case 'visual_delay_mode_sync':
+                if (data.mode !== undefined) {
+                    this.state.visualDelayMode = data.mode;
+                    this._updateVisualDelayModeDisplay();
                 }
                 break;
 
@@ -1549,6 +1595,29 @@ class AdminApp {
         }
         if (valueDisplay) {
             valueDisplay.textContent = `${this.state.blockCount}`;
+        }
+    }
+
+    _updateVisualDelayDisplay() {
+        const slider = this.elements.ctrlVisualDelay;
+        const valueDisplay = document.getElementById('val-visual-delay');
+        if (slider) {
+            slider.value = this.state.visualDelayMs || 0;
+        }
+        if (valueDisplay) {
+            valueDisplay.textContent = `${Math.round(this.state.visualDelayMs || 0)}ms`;
+        }
+    }
+
+    _updateVisualDelayModeDisplay() {
+        const select = this.elements.syncMode;
+        if (select) {
+            select.value = this.state.visualDelayMode || 'manual';
+        }
+        // Show/hide manual delay slider based on mode
+        if (this.elements.syncDelayRow) {
+            this.elements.syncDelayRow.style.display =
+                (this.state.visualDelayMode || 'manual') === 'manual' ? '' : 'none';
         }
     }
 

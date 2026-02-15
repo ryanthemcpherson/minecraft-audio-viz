@@ -23,6 +23,8 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
+from discord_bot.audio_analyzer import AudioAnalyzer
+
 # Load .env from project root
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
@@ -127,11 +129,21 @@ class AudioVizBot(discord.Client):
 
         self.tree = app_commands.CommandTree(self)
 
-        # VJ server connection
+        # VJ server connection (browser client - voice audio playback)
         self._vj_host = os.getenv("VJ_SERVER_HOST", "localhost")
         self._vj_port = int(os.getenv("VJ_BROADCAST_PORT", "8766"))
         self._vj_ws = None
         self._vj_task: Optional[asyncio.Task] = None
+
+        # DJ server connection (FFT analysis source)
+        self._dj_port = int(os.getenv("VJ_DJ_PORT", "9000"))
+        self._dj_key = os.getenv("DISCORD_DJ_KEY", "")
+        self._dj_ws = None
+        self._dj_task: Optional[asyncio.Task] = None
+
+        # Audio analyzer for FFT
+        self._analyzer = AudioAnalyzer(sample_rate=48000)
+        self._pending_fft_frames: deque = deque(maxlen=5)
 
         # Audio sources per guild (guild_id -> VJAudioSource)
         self._audio_sources: dict[int, VJAudioSource] = {}
@@ -173,10 +185,7 @@ class AudioVizBot(discord.Client):
     # ------------------------------------------------------------------
 
     def _process_voice_frame(self, data: dict) -> None:
-        """Decode a voice_audio message and push to all active audio sources."""
-        if not self._audio_sources:
-            return
-
+        """Decode a voice_audio message, push to audio sources, and feed FFT analyzer."""
         raw_data = data.get("data")
         if not isinstance(raw_data, str):
             return
@@ -201,8 +210,16 @@ class AudioVizBot(discord.Client):
         else:
             return
 
+        # Push to audio sources for voice playback
         for source in self._audio_sources.values():
             source.push_frame(stereo)
+
+        # Feed to audio analyzer for FFT analysis (always, even without listeners)
+        result = self._analyzer.feed_pcm(stereo)
+        if result is not None:
+            frame = {"type": "dj_audio_frame", **result}
+            if len(self._pending_fft_frames) < 5:
+                self._pending_fft_frames.append(frame)
 
     # ------------------------------------------------------------------
     # VJ server WebSocket connection
@@ -275,6 +292,85 @@ class AudioVizBot(discord.Client):
             backoff = min(backoff * 2, max_backoff)
 
     # ------------------------------------------------------------------
+    # DJ server WebSocket connection (FFT analysis source)
+    # ------------------------------------------------------------------
+
+    async def _dj_connect_loop(self):
+        """Connect to VJ server as a DJ and send FFT analysis frames."""
+        import websockets
+
+        backoff = 1.0
+        max_backoff = 30.0
+
+        while True:
+            url = f"ws://{self._vj_host}:{self._dj_port}"
+            try:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
+                    self._dj_ws = ws
+                    backoff = 1.0
+                    logger.info(f"Connected to VJ server DJ port at {url}")
+
+                    # Authenticate as DJ
+                    hello = {
+                        "type": "dj_hello",
+                        "dj_id": "discord-bot",
+                        "dj_name": "Discord Voice",
+                    }
+                    if self._dj_key:
+                        hello["key"] = self._dj_key
+                    await ws.send(json.dumps(hello))
+
+                    # Wait for auth response
+                    response = json.loads(await ws.recv())
+                    if response.get("type") == "auth_error":
+                        logger.error(f"DJ auth failed: {response.get('message')}")
+                        await asyncio.sleep(60)
+                        continue
+
+                    logger.info("Authenticated as Discord Voice DJ")
+
+                    # Main loop: send FFT frames and handle server messages
+                    while True:
+                        # Send pending FFT frames
+                        while self._pending_fft_frames:
+                            frame = self._pending_fft_frames.popleft()
+                            try:
+                                await ws.send(json.dumps(frame))
+                            except Exception:
+                                break
+
+                        # Handle incoming messages (heartbeat, etc.)
+                        try:
+                            msg = await asyncio.wait_for(ws.recv(), timeout=0.05)
+                            data = json.loads(msg)
+                            if data.get("type") == "heartbeat":
+                                await ws.send(
+                                    json.dumps(
+                                        {
+                                            "type": "heartbeat_ack",
+                                            "server_ts": data.get("server_ts"),
+                                        }
+                                    )
+                                )
+                        except asyncio.TimeoutError:
+                            pass
+                        except websockets.ConnectionClosed:
+                            break
+
+                        await asyncio.sleep(0.01)  # ~100 Hz polling
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"DJ connection lost: {e}")
+            finally:
+                self._dj_ws = None
+
+            logger.info(f"Reconnecting DJ connection in {backoff:.0f}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+
+    # ------------------------------------------------------------------
     # Discord presence
     # ------------------------------------------------------------------
 
@@ -306,10 +402,11 @@ class AudioVizBot(discord.Client):
     # ------------------------------------------------------------------
 
     async def setup_hook(self):
-        """Register slash commands and start VJ connection."""
+        """Register slash commands and start VJ/DJ connections."""
         self._register_commands()
         self._vj_task = asyncio.create_task(self._vj_connect_loop())
-        logger.info("Commands registered, VJ connect loop started")
+        self._dj_task = asyncio.create_task(self._dj_connect_loop())
+        logger.info("Commands registered, VJ + DJ connect loops started")
 
     def _register_commands(self):
         @self.tree.command(
@@ -406,12 +503,13 @@ class AudioVizBot(discord.Client):
         await self._maybe_update_presence()
 
     async def close(self):
-        if self._vj_task and not self._vj_task.done():
-            self._vj_task.cancel()
-            try:
-                await self._vj_task
-            except asyncio.CancelledError:
-                pass
+        for task in (self._vj_task, self._dj_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         await super().close()
 
 

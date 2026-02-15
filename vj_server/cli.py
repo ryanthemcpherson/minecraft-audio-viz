@@ -111,6 +111,18 @@ Examples:
         action="store_true",
         help="Disable metrics HTTP endpoint",
     )
+    parser.add_argument(
+        "--visual-delay-ms",
+        type=float,
+        default=float(os.environ.get("VISUAL_DELAY_MS", "0")),
+        help="Visual delay in ms for audio-visual sync (default: 0 or $VISUAL_DELAY_MS)",
+    )
+    parser.add_argument(
+        "--visual-delay-mode",
+        choices=["manual", "auto", "discord", "svc"],
+        default=os.environ.get("VISUAL_DELAY_MODE", "manual"),
+        help="Visual delay mode: manual, auto, discord, svc (default: manual or $VISUAL_DELAY_MODE)",
+    )
 
     args = parser.parse_args()
 
@@ -187,6 +199,8 @@ Examples:
         auth_config=auth_config,
         require_auth=not args.no_auth,
         metrics_port=None if args.no_metrics else args.metrics_port,
+        visual_delay_ms=args.visual_delay_ms,
+        visual_delay_mode=args.visual_delay_mode,
     )
 
     def signal_handler(sig, frame):
