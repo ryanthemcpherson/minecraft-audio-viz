@@ -189,7 +189,7 @@ export class LuaPatternInstance {
     return this._ready;
   }
 
-  update(_dt: number = 0.016): void {
+  update(_: number = 0.016): void {
     // Lua patterns manage their own time via dt parameter to calculate()
   }
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import PatternGallery from "@/components/PatternGallery";
 import Footer from "@/components/Footer";
 
@@ -31,7 +32,9 @@ export default function PatternsPage() {
         </div>
       </section>
 
-      <PatternGallery />
+      <Suspense>
+        <PatternGallery />
+      </Suspense>
       <Footer />
     </>
   );
