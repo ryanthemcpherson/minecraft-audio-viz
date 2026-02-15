@@ -76,6 +76,12 @@ pub struct AppState {
 
     /// Currently active audio preset name
     pub active_preset: String,
+
+    /// Demo mode: shutdown sender for the demo task
+    pub demo_shutdown_tx: Option<mpsc::Sender<()>>,
+
+    /// Whether demo mode is currently active
+    pub demo_active: bool,
 }
 
 impl Default for AppState {
@@ -99,6 +105,8 @@ impl Default for AppState {
             voice_config: VoiceConfig::default(),
             voice_status: VoiceStatus::default(),
             active_preset: "auto".to_string(),
+            demo_shutdown_tx: None,
+            demo_active: false,
         }
     }
 }
@@ -141,5 +149,7 @@ mod tests {
         assert_eq!(state.voice_config.channel_type, "static");
         assert!(!state.voice_status.available);
         assert_eq!(state.active_preset, "auto");
+        assert!(state.demo_shutdown_tx.is_none());
+        assert!(!state.demo_active);
     }
 }

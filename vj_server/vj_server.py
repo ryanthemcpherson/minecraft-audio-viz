@@ -3486,7 +3486,13 @@ class VJServer:
         return modified
 
     def _calculate_entities(
-        self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float
+        self,
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+        bpm: float = 0.0,
+        beat_phase: float = 0.0,
     ) -> List[dict]:
         """Calculate entity positions from audio state, with pattern crossfade support."""
         audio_state = AudioState(
@@ -3495,6 +3501,8 @@ class VJServer:
             is_beat=is_beat,
             beat_intensity=beat_intensity,
             frame=self._frame_count,
+            bpm=bpm,
+            beat_phase=beat_phase,
         )
 
         # Check if we're transitioning between patterns
@@ -3775,7 +3783,12 @@ class VJServer:
                     else:
                         calc_start = time.perf_counter()
                         entities = self._calculate_entities(
-                            visual_bands, visual_peak, is_beat, visual_beat_intensity
+                            visual_bands,
+                            visual_peak,
+                            is_beat,
+                            visual_beat_intensity,
+                            bpm=dj.bpm if dj else 0.0,
+                            beat_phase=beat_phase,
                         )
                         calc_ms = (time.perf_counter() - calc_start) * 1000.0
                         # Apply timed effects (flash, strobe, pulse, wave, etc.)

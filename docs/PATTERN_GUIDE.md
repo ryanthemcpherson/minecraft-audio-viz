@@ -209,6 +209,27 @@ Strength of the detected beat:
 scale = scale + audio.beat_intensity * 0.3
 ```
 
+### audio.bpm (float)
+Estimated BPM from the DJ client's beat detection. Typically 60-200. Zero when no DJ is connected or tempo is unknown:
+```lua
+if audio.bpm > 0 then
+    local beat_period = 60.0 / audio.bpm  -- seconds per beat
+end
+```
+
+### audio.beat_phase (float, 0-1)
+Current position within the beat cycle. `0.0` = on the beat, `0.5` = halfway between beats. This advances continuously and resets on each detected beat, providing a smooth clock locked to the music's tempo:
+```lua
+-- Scale that peaks on every beat
+local pulse = beat_pulse(audio.beat_phase, 1, 5.0)
+scale = config.base_scale + pulse * 0.4
+
+-- Sine wave locked to half notes (2x per beat)
+local wave = beat_sin(audio.beat_phase, 2)
+```
+
+Use `audio.beat_phase` with the BPM sync helpers in lib.lua (see below) for animations that lock tightly to the rhythm.
+
 ### audio.frame (integer)
 Frame counter (increments each frame). Useful for cyclic animations:
 ```lua
@@ -279,6 +300,33 @@ end
 Smooth interpolation with ease-in/ease-out:
 ```lua
 local fade = smoothstep(0.2, 0.8, audio.amplitude)
+```
+
+### beat_sub(beat_phase, divisor)
+Get the phase (0-1) of a beat subdivision. `divisor=1` is a whole beat, `divisor=2` is half notes, `divisor=4` is quarter notes:
+```lua
+local quarter_phase = beat_sub(audio.beat_phase, 4)  -- 0-1 four times per beat
+```
+
+### beat_sin(beat_phase, divisor)
+Sine wave locked to beat subdivisions. Returns -1 to 1:
+```lua
+local wobble = beat_sin(audio.beat_phase, 2) * 0.1  -- Half-note wobble
+x = center + wobble
+```
+
+### beat_tri(beat_phase, divisor)
+Triangle wave locked to beat subdivisions. Returns 0 to 1, peaking at phase 0 (on the beat):
+```lua
+local brightness = beat_tri(audio.beat_phase, 1)  -- Peaks on every beat
+scale = config.base_scale + brightness * 0.4
+```
+
+### beat_pulse(beat_phase, divisor, sharpness)
+Sharp exponential pulse that peaks on the beat and decays. Returns 0 to 1. Higher sharpness (default 4) means faster decay:
+```lua
+local kick = beat_pulse(audio.beat_phase, 1, 5.0)  -- Sharp kick pulse
+scale = config.base_scale + kick * 0.5
 ```
 
 ## State Management
@@ -635,6 +683,8 @@ Study these patterns from the `patterns/` directory:
 - **`spectrum.lua`** - Stacked tower with spiral motion
 - **`vortex.lua`** - Rotating vortex tunnel
 - **`fireflies.lua`** - Organic particle swarm
+- **`bpm_pulse.lua`** - BPM-synced sphere with beat-locked pulsing
+- **`bpm_strobe.lua`** - Stacked rings with subdivision-locked strobe effects
 
 ## Next Steps
 

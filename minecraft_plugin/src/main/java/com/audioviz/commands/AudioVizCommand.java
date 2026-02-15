@@ -79,7 +79,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             return;
         }
         if (args.length == 0) {
-            sender.sendMessage(ChatColor.RED + "Usage: /audioviz zone <create|delete|list|setsize|info>");
+            sender.sendMessage(ChatColor.RED + "Usage: /audioviz zone <create|delete|list|setsize|info|boundaries>");
             return;
         }
 
@@ -233,7 +233,42 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     plugin.getEntityPoolManager().getEntityCount(zoneName));
             }
 
-            default -> sender.sendMessage(ChatColor.RED + "Unknown zone action. Use create, delete, list, setsize, setrotation, or info");
+            case "boundaries" -> {
+                var renderer = plugin.getZoneBoundaryRenderer();
+
+                if (args.length < 2) {
+                    // Toggle all zones
+                    if (renderer.activeCount() > 0) {
+                        renderer.hideAll();
+                        sender.sendMessage(ChatColor.YELLOW + "All zone boundaries hidden.");
+                    } else {
+                        renderer.showAll();
+                        sender.sendMessage(ChatColor.GREEN + "Showing boundaries for all zones (30s auto-hide).");
+                    }
+                    return;
+                }
+
+                String target = args[1].toLowerCase();
+                if (target.equals("on")) {
+                    renderer.showAll();
+                    sender.sendMessage(ChatColor.GREEN + "Showing boundaries for all zones (30s auto-hide).");
+                } else if (target.equals("off")) {
+                    renderer.hideAll();
+                    sender.sendMessage(ChatColor.YELLOW + "All zone boundaries hidden.");
+                } else {
+                    // Treat as zone name
+                    if (!plugin.getZoneManager().zoneExists(target)) {
+                        sender.sendMessage(ChatColor.RED + "Zone '" + args[1] + "' not found.");
+                        return;
+                    }
+                    boolean showing = renderer.toggle(target);
+                    sender.sendMessage(showing
+                        ? ChatColor.GREEN + "Showing boundaries for zone '" + args[1] + "' (30s auto-hide)."
+                        : ChatColor.YELLOW + "Boundaries hidden for zone '" + args[1] + "'.");
+                }
+            }
+
+            default -> sender.sendMessage(ChatColor.RED + "Unknown zone action. Use create, delete, list, setsize, setrotation, info, or boundaries");
         }
     }
 
@@ -665,6 +700,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone list" + ChatColor.WHITE + " - List all zones");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone setsize <name> <x> <y> <z>" + ChatColor.WHITE + " - Set zone dimensions");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone info <name>" + ChatColor.WHITE + " - Show zone details");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz zone boundaries [on|off|<name>]" + ChatColor.WHITE + " - Toggle zone boundary particles");
         sender.sendMessage(ChatColor.AQUA + "/audioviz stage create <name> <template>" + ChatColor.WHITE + " - Create stage from template");
         sender.sendMessage(ChatColor.AQUA + "/audioviz stage delete <name>" + ChatColor.WHITE + " - Delete a stage");
         sender.sendMessage(ChatColor.AQUA + "/audioviz stage list" + ChatColor.WHITE + " - List all stages");
@@ -689,7 +725,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "bedrock", "test", "help"));
         } else if (args.length == 2) {
             switch (args[0].toLowerCase()) {
-                case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info"));
+                case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info", "boundaries"));
                 case "stage" -> completions.addAll(Arrays.asList("create", "delete", "list", "info", "activate", "deactivate", "move", "rotate", "pin", "tag", "search"));
                 case "pool" -> completions.addAll(Arrays.asList("init", "cleanup"));
                 case "test" -> completions.addAll(plugin.getZoneManager().getZoneNames());
@@ -699,6 +735,9 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                 case "zone" -> {
                     if (args[1].equalsIgnoreCase("create")) {
                         completions.add("--template");
+                    } else if (args[1].equalsIgnoreCase("boundaries")) {
+                        completions.addAll(Arrays.asList("on", "off"));
+                        completions.addAll(plugin.getZoneManager().getZoneNames());
                     } else if (!args[1].equalsIgnoreCase("list")) {
                         completions.addAll(plugin.getZoneManager().getZoneNames());
                     }

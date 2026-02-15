@@ -1164,6 +1164,97 @@ fn show_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Start demo mode - simulates audio data without any server or audio device
+#[tauri::command]
+async fn start_demo(
+    app_handle: AppHandle,
+    state: State<'_, AppStateWrapper>,
+) -> Result<(), String> {
+    // If already in demo mode, no-op
+    {
+        let app_state = state.0.lock();
+        if app_state.demo_active {
+            return Ok(());
+        }
+    }
+
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+
+    {
+        let mut app_state = state.0.lock();
+        app_state.demo_active = true;
+        app_state.demo_shutdown_tx = Some(shutdown_tx);
+    }
+
+    // Spawn a task that generates simulated audio at ~30fps
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(33));
+        let start = Instant::now();
+        let mut beat_cooldown = Instant::now();
+
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    break;
+                }
+                _ = interval.tick() => {
+                    let t = start.elapsed().as_secs_f64();
+                    let bpm = 128.0_f64;
+                    let beat_period = 60.0 / bpm;
+
+                    // Generate 5 bands with sine-wave oscillation at different rates
+                    let bands = [
+                        (0.5 + 0.45 * (t * 2.1).sin() * (t * 0.3).sin().abs()) as f32,  // Bass
+                        (0.35 + 0.35 * (t * 3.3 + 1.0).sin()) as f32,                     // Low-mid
+                        (0.25 + 0.3 * (t * 4.7 + 2.0).sin()) as f32,                      // Mid
+                        (0.2 + 0.25 * (t * 6.1 + 3.0).sin()) as f32,                      // High-mid
+                        (0.15 + 0.2 * (t * 8.3 + 4.0).sin()) as f32,                      // High
+                    ];
+
+                    let peak = bands.iter().copied().fold(0.0_f32, f32::max);
+
+                    // Beat every beat_period with a small random jitter feeling
+                    let phase = (t % beat_period) / beat_period;
+                    let is_beat = phase < 0.06
+                        && beat_cooldown.elapsed() > Duration::from_millis((beat_period * 500.0) as u64);
+
+                    if is_beat {
+                        beat_cooldown = Instant::now();
+                    }
+
+                    let beat_intensity = if is_beat { 0.85 } else { 0.0 };
+
+                    let _ = app_handle.emit("audio-levels", AudioLevels {
+                        bands,
+                        peak,
+                        is_beat,
+                        beat_intensity: beat_intensity as f32,
+                        bpm: bpm as f32,
+                    });
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop demo mode
+#[tauri::command]
+async fn stop_demo(state: State<'_, AppStateWrapper>) -> Result<(), String> {
+    let shutdown_tx = {
+        let mut app_state = state.0.lock();
+        app_state.demo_active = false;
+        app_state.demo_shutdown_tx.take()
+    };
+
+    if let Some(tx) = shutdown_tx {
+        let _ = tx.send(()).await;
+    }
+
+    Ok(())
+}
+
 /// Initialize the Tauri application
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1189,6 +1280,8 @@ pub fn run() {
             get_current_preset,
             set_preset,
             show_window,
+            start_demo,
+            stop_demo,
         ])
         .setup(|app| {
             // Create system tray menu

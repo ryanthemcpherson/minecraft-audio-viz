@@ -14,6 +14,7 @@ import com.audioviz.render.RendererRegistry;
 import com.audioviz.stages.StageManager;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
+import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
 import org.bukkit.event.EventHandler;
@@ -41,6 +42,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private StageDecoratorManager decoratorManager;
     private BedrockSupport bedrockSupport;
     private VoicechatIntegration voicechatIntegration;
+    private ZoneBoundaryRenderer zoneBoundaryRenderer;
 
     @Override
     public void onEnable() {
@@ -59,6 +61,8 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.chatInputManager = new ChatInputManager(this);
         this.beatEventManager = new BeatEventManager(this);
         this.zoneEditor = new ZoneEditor(this);
+        this.zoneBoundaryRenderer = new ZoneBoundaryRenderer(this);
+        this.zoneBoundaryRenderer.start();
 
         // Detect Geyser/Floodgate for Bedrock player support
         this.bedrockSupport = new BedrockSupport(getLogger(), getConfig());
@@ -202,6 +206,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             }
         }
 
+        // Stop zone boundary renderer
+        if (zoneBoundaryRenderer != null) {
+            zoneBoundaryRenderer.stop();
+        }
+
         // Stop particle visualization manager
         if (particleVisualizationManager != null) {
             particleVisualizationManager.stop();
@@ -293,5 +302,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public VoicechatIntegration getVoicechatIntegration() {
         return voicechatIntegration;
+    }
+
+    public ZoneBoundaryRenderer getZoneBoundaryRenderer() {
+        return zoneBoundaryRenderer;
     }
 }

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 
 const navLinks = [
+  { label: "Live Preview", href: "/preview" },
   { label: "Getting Started", href: "/getting-started" },
   { label: "Patterns", href: "/patterns" },
   { label: "Features", href: "/#features" },

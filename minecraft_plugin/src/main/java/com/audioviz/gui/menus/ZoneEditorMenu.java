@@ -43,6 +43,7 @@ public class ZoneEditorMenu implements Menu {
     private static final int SLOT_INIT_POOL = 24;
     private static final int SLOT_CLEANUP = 25;
     private static final int SLOT_BACK = 27;
+    private static final int SLOT_BOUNDARIES = 29;
     private static final int SLOT_VISUAL_EDIT = 31;
     private static final int SLOT_DELETE = 35;
 
@@ -170,6 +171,17 @@ public class ZoneEditorMenu implements Menu {
         // Back button
         inventory.setItem(SLOT_BACK, ItemBuilder.backButton());
 
+        // Show boundaries toggle
+        boolean boundariesActive = plugin.getZoneBoundaryRenderer().isShowing(zone.getName());
+        inventory.setItem(SLOT_BOUNDARIES, ItemBuilder.toggle(
+            "&bShow Boundaries",
+            boundariesActive,
+            "&7Render particle outlines",
+            "&7along zone edges so you",
+            "&7can see placement in-world.",
+            "&7Auto-hides after 30 seconds."
+        ));
+
         // Visual editor (placeholder for Phase 3)
         inventory.setItem(SLOT_VISUAL_EDIT, new ItemBuilder(Material.SPYGLASS)
             .name("&dVisual Zone Editor")
@@ -292,6 +304,15 @@ public class ZoneEditorMenu implements Menu {
             case SLOT_CLEANUP -> {
                 plugin.getEntityPoolManager().cleanupZone(zone.getName());
                 player.sendMessage(ChatColor.YELLOW + "Cleaned up entities for zone: " + zone.getName());
+                menuManager.refreshMenu(player);
+            }
+
+            // Show boundaries toggle
+            case SLOT_BOUNDARIES -> {
+                boolean showing = plugin.getZoneBoundaryRenderer().toggle(zone.getName());
+                player.sendMessage(showing
+                    ? ChatColor.GREEN + "Boundaries shown for zone: " + zone.getName()
+                    : ChatColor.YELLOW + "Boundaries hidden for zone: " + zone.getName());
                 menuManager.refreshMenu(player);
             }
 

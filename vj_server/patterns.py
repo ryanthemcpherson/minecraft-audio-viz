@@ -40,6 +40,8 @@ class AudioState:
     is_beat: bool  # Beat detected this frame
     beat_intensity: float  # Beat strength 0-1
     frame: int  # Frame counter
+    bpm: float = 0.0  # Estimated BPM from DJ client
+    beat_phase: float = 0.0  # Beat phase 0.0-1.0 (0 = on beat, 0.5 = halfway)
 
 
 class VisualizationPattern(ABC):
@@ -116,6 +118,8 @@ class LuaPattern(VisualizationPattern):
                     "beat": False,
                     "beat_intensity": 0.0,
                     "frame": 0,
+                    "bpm": 0.0,
+                    "beat_phase": 0.0,
                 }
             )
             self._bands_table = self._lua.table_from({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0})
@@ -179,6 +183,8 @@ class LuaPattern(VisualizationPattern):
             audio_table["beat"] = audio.is_beat
             audio_table["beat_intensity"] = audio.beat_intensity
             audio_table["frame"] = audio.frame
+            audio_table["bpm"] = audio.bpm
+            audio_table["beat_phase"] = audio.beat_phase
             bands_table = self._bands_table
             for i, v in enumerate(audio.bands):
                 bands_table[i + 1] = v

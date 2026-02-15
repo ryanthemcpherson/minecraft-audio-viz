@@ -102,6 +102,9 @@ function App() {
   const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
 
+  // Demo mode state
+  const [isDemoMode, setIsDemoMode] = useState(false);
+
   // Test audio state
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
@@ -150,10 +153,12 @@ function App() {
         }
       }
 
-      // Escape - Close welcome overlay or stop test audio
+      // Escape - Close welcome overlay, stop demo, or stop test audio
       if (event.key === 'Escape') {
         if (showWelcomeOverlay) {
           handleDismissWelcome();
+        } else if (isDemoMode) {
+          void handleStopDemo();
         } else if (isTestingAudio) {
           void handleStopTest();
         }
@@ -162,7 +167,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [status.connected, showWelcomeOverlay, isTestingAudio, selectedSource]);
+  }, [status.connected, showWelcomeOverlay, isTestingAudio, isDemoMode, selectedSource]);
 
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
@@ -242,6 +247,20 @@ function App() {
       invoke('set_preset', { name: saved }).catch(() => {});
     }
   }, []);
+
+  // Listen for simulated audio levels during demo mode
+  useEffect(() => {
+    if (!isDemoMode) return;
+
+    const unlisten = listen<AudioLevels>('audio-levels', (event) => {
+      setBands(event.payload.bands);
+      setIsBeat(event.payload.is_beat);
+    });
+
+    return () => {
+      unlisten.then((fn_) => fn_()).catch(() => {});
+    };
+  }, [isDemoMode]);
 
   // Listen for audio levels and status events pushed from the backend
   useEffect(() => {
@@ -394,6 +413,11 @@ function App() {
 
     setIsConnecting(true);
     try {
+      // Stop demo mode if running
+      if (isDemoMode) {
+        await handleStopDemo();
+      }
+
       // Stop test audio if running
       if (isTestingAudio) {
         await handleStopTest();
@@ -532,6 +556,26 @@ function App() {
     setDjName(entry.djName);
   };
 
+  const handleStartDemo = async () => {
+    try {
+      await invoke('start_demo');
+      setIsDemoMode(true);
+    } catch (e) {
+      console.error('Failed to start demo:', e);
+    }
+  };
+
+  const handleStopDemo = async () => {
+    try {
+      await invoke('stop_demo');
+      setIsDemoMode(false);
+      setBands([0, 0, 0, 0, 0]);
+      setIsBeat(false);
+    } catch (e) {
+      console.error('Failed to stop demo:', e);
+    }
+  };
+
   const handleStartTest = async () => {
     if (!selectedSource) return;
 
@@ -659,7 +703,7 @@ function App() {
               <path d="M10 14v-1m0-4c0-.55.2-1.02.59-1.41C10.98 7.2 11.45 7 12 7c.55 0 1.02.2 1.41.59.39.39.59.86.59 1.41 0 .28-.07.54-.2.78-.14.24-.32.45-.55.63l-.77.6c-.24.19-.43.4-.57.63-.14.24-.21.5-.21.78" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </a>
-          <BeatIndicator active={isBeat && status.connected} />
+          <BeatIndicator active={isBeat && (status.connected || isDemoMode)} />
         </div>
       </header>
 
@@ -680,7 +724,7 @@ function App() {
               <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + T</kbd>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ opacity: 0.7 }}>Close overlay / Stop test</span>
+              <span style={{ opacity: 0.7 }}>Close overlay / Exit demo / Stop test</span>
               <kbd>Esc</kbd>
             </div>
           </div>
@@ -688,6 +732,16 @@ function App() {
       )}
 
       <main className="app-main">
+        {isDemoMode && (
+          <div className="demo-banner">
+            <span className="demo-banner-label">DEMO MODE</span>
+            <span className="demo-banner-text">Simulated audio -- no server connected</span>
+            <button className="btn btn-demo-exit" onClick={handleStopDemo} type="button">
+              Exit Demo
+            </button>
+          </div>
+        )}
+
         {(availableUpdate && !dismissUpdateBanner) || isCheckingUpdate || updateMessage || updateError ? (
           <section className="section update-section">
             <div className="update-header">
@@ -736,7 +790,36 @@ function App() {
           </section>
         ) : null}
 
-        {!status.connected ? (
+        {isDemoMode ? (
+          <>
+            <section className="section">
+              <FrequencyMeter bands={bands} />
+            </section>
+
+            <section className="section preset-section">
+              <span className="input-label" style={{ marginBottom: '6px' }}>Audio Preset (visual only)</span>
+              <div className="preset-buttons">
+                {PRESETS.map(name => (
+                  <button
+                    key={name}
+                    className={`btn btn-preset ${activePreset === name ? 'active' : ''}`}
+                    onClick={() => setActivePreset(name)}
+                    type="button"
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <button
+              className="btn btn-disconnect"
+              onClick={handleStopDemo}
+            >
+              Exit Demo Mode
+            </button>
+          </>
+        ) : !status.connected ? (
           <>
             <section className="section hero-section">
               <p>Enter your DJ name, paste your connect code, pick audio, then connect.</p>
@@ -883,6 +966,13 @@ function App() {
                 disabled={isConnecting || connectCode.join('').length !== 8 || !djName.trim()}
               >
                 {isConnecting ? 'Connecting...' : 'Connect'}
+              </button>
+              <button
+                className="btn btn-demo"
+                onClick={handleStartDemo}
+                type="button"
+              >
+                Try Demo
               </button>
             </div>
           </>
