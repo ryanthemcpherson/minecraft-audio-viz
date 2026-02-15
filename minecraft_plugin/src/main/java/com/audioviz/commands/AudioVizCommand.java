@@ -92,7 +92,8 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 if (args.length < 2) {
-                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz zone create <name>");
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz zone create <name> [--template <template>]");
+                    sender.sendMessage(ChatColor.GRAY + "Templates: small_stage, concert_hall, dj_booth, arena");
                     return;
                 }
                 String zoneName = args[1];
@@ -100,9 +101,43 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.RED + "Zone '" + zoneName + "' already exists!");
                     return;
                 }
+
+                // Check for --template flag
+                com.audioviz.zones.ZoneTemplate template = null;
+                if (args.length >= 4 && args[2].equalsIgnoreCase("--template")) {
+                    String templateName = args[3];
+                    template = com.audioviz.zones.ZoneTemplate.getBuiltin(templateName);
+                    if (template == null) {
+                        sender.sendMessage(ChatColor.RED + "Unknown template '" + templateName + "'.");
+                        sender.sendMessage(ChatColor.GRAY + "Available: small_stage, concert_hall, dj_booth, arena");
+                        return;
+                    }
+                }
+
+                // Create zone
                 VisualizationZone zone = plugin.getZoneManager().createZone(zoneName, player.getLocation());
-                sender.sendMessage(ChatColor.GREEN + "Created zone '" + zoneName + "' at your location!");
-                sender.sendMessage(ChatColor.GRAY + zone.toString());
+                if (zone == null) {
+                    sender.sendMessage(ChatColor.RED + "Failed to create zone.");
+                    return;
+                }
+
+                // Apply template if specified
+                if (template != null) {
+                    zone.setSize(template.size());
+                    plugin.getZoneManager().saveZones();
+                    plugin.getEntityPoolManager().initializeBlockPool(
+                        zoneName,
+                        template.entityCount(),
+                        template.material()
+                    );
+                    sender.sendMessage(ChatColor.GREEN + "Created zone '" + zoneName + "' with " +
+                        template.getDisplayName() + " template!");
+                    sender.sendMessage(ChatColor.GRAY + "Size: " + formatVector(template.size()) +
+                        " | " + template.entityCount() + " entities spawned");
+                } else {
+                    sender.sendMessage(ChatColor.GREEN + "Created zone '" + zoneName + "' at your location!");
+                    sender.sendMessage(ChatColor.GRAY + zone.toString());
+                }
             }
 
             case "delete" -> {
@@ -625,7 +660,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
     private void sendHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "=== AudioViz Commands ===");
         sender.sendMessage(ChatColor.AQUA + "/audioviz menu" + ChatColor.WHITE + " - Open the control menu");
-        sender.sendMessage(ChatColor.AQUA + "/audioviz zone create <name>" + ChatColor.WHITE + " - Create zone at your location");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz zone create <name> [--template <template>]" + ChatColor.WHITE + " - Create zone");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone delete <name>" + ChatColor.WHITE + " - Delete a zone");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone list" + ChatColor.WHITE + " - List all zones");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone setsize <name> <x> <y> <z>" + ChatColor.WHITE + " - Set zone dimensions");
@@ -662,7 +697,9 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         } else if (args.length == 3) {
             switch (args[0].toLowerCase()) {
                 case "zone" -> {
-                    if (!args[1].equalsIgnoreCase("create") && !args[1].equalsIgnoreCase("list")) {
+                    if (args[1].equalsIgnoreCase("create")) {
+                        completions.add("--template");
+                    } else if (!args[1].equalsIgnoreCase("list")) {
                         completions.addAll(plugin.getZoneManager().getZoneNames());
                     }
                 }
@@ -677,8 +714,12 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                 case "test" -> completions.addAll(Arrays.asList("wave", "pulse", "random"));
             }
         } else if (args.length == 4) {
-            if (args[0].equalsIgnoreCase("stage") && args[1].equalsIgnoreCase("create")) {
-                // Template names
+            if (args[0].equalsIgnoreCase("zone") && args[1].equalsIgnoreCase("create") &&
+                args[2].equalsIgnoreCase("--template")) {
+                // Zone template names
+                completions.addAll(com.audioviz.zones.ZoneTemplate.getBuiltinTemplates().keySet());
+            } else if (args[0].equalsIgnoreCase("stage") && args[1].equalsIgnoreCase("create")) {
+                // Stage template names
                 completions.addAll(plugin.getStageManager().getTemplateNames());
             } else if (args[0].equalsIgnoreCase("stage") && args[1].equalsIgnoreCase("tag")) {
                 // Tag suggestions: existing tags + common suggestions + "clear"

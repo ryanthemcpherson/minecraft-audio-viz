@@ -196,8 +196,7 @@ public class ZoneManagementMenu implements Menu {
 
             case SLOT_CREATE -> {
                 playClickSound(player);
-                player.closeInventory();
-                plugin.getChatInputManager().requestZoneName(player);
+                menuManager.openMenu(player, new ZoneTemplateMenu(plugin, menuManager));
             }
 
             case SLOT_NEXT_PAGE -> {

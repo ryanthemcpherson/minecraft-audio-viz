@@ -16,6 +16,7 @@ import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,6 +60,14 @@ public class MessageQueue {
 
     // Backpressure limit
     private static final int MAX_QUEUE_SIZE = 1000;
+
+    // Pre-allocated identity rotation (immutable, safe to share across all entities).
+    // Transformation constructor copies via new Quaternionf(axisAngle), so sharing is safe.
+    private static final AxisAngle4f IDENTITY_ROTATION = new AxisAngle4f(0, 0, 0, 1);
+
+    // Trig cache for batch: maps rotation float bits to precomputed [cos, sin].
+    // Cleared each tick. Uses Float.floatToRawIntBits as key for exact float matching.
+    private final HashMap<Integer, float[]> trigCache = new HashMap<>();
 
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
@@ -146,10 +155,13 @@ public class MessageQueue {
      * Called on main thread every tick.
      */
     private void processTick() {
+        // Clear per-tick trig cache
+        trigCache.clear();
+
         // Collect entity updates per zone (supports multi-zone messages)
-        Map<String, List<EntityUpdate>> updatesByZone = new java.util.HashMap<>();
+        Map<String, List<EntityUpdate>> updatesByZone = new HashMap<>();
         // Coalesce high-frequency frame messages: keep only newest batch_update per zone.
-        Map<String, JsonObject> latestBatchByZone = new java.util.HashMap<>();
+        Map<String, JsonObject> latestBatchByZone = new HashMap<>();
 
         // Process all queued messages
         JsonObject msg;
@@ -203,6 +215,13 @@ public class MessageQueue {
 
     /**
      * Extract entity updates from a batch_update message.
+     *
+     * Performance: this is the hottest path in the plugin, running for up to 1000
+     * entities every server tick (50ms). Optimizations applied:
+     * - Trig cache: cos/sin looked up by rotation float-bits, avoiding redundant Math.cos/sin
+     * - Shared identity AxisAngle4f: single static instance for right-rotation (always identity)
+     * - Fast-path for rotation==0: skip trig entirely, use simple centered pivot
+     * - Pre-sized ArrayList: avoids incremental resizing during entity iteration
      */
     private void extractEntityUpdates(JsonObject msg, String zoneName, List<EntityUpdate> updates) {
         if (!msg.has("entities")) return;
@@ -215,6 +234,9 @@ public class MessageQueue {
         JsonArray entities = msg.getAsJsonArray("entities");
         var zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
+
+        // Pre-size to avoid ArrayList resizing (entities.size() is O(1) for JsonArray)
+        ((ArrayList<EntityUpdate>) updates).ensureCapacity(updates.size() + entities.size());
 
         for (JsonElement elem : entities) {
             JsonObject entity = elem.getAsJsonObject();
@@ -239,24 +261,43 @@ public class MessageQueue {
             float rotationY = InputSanitizer.sanitizeRotation(
                 entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0f);
 
-            // Rotation-aware pivot: the block model spans [0,s] after scaling.
-            // LeftRotation rotates the scaled model around (0,0,0), shifting its
-            // center away from (s/2, s/2, s/2). Compute the translation that puts
-            // the rotated center back at (0.5, 0.5, 0.5) within the unit cell.
+            // Build transformation with rotation-aware pivot
             float halfScale = scale * 0.5f;
-            float rotRad = (float) Math.toRadians(rotationY);
-            float cosR = (float) Math.cos(rotRad);
-            float sinR = (float) Math.sin(rotRad);
-            float pivotX = 0.5f - halfScale * (cosR + sinR);
-            float pivotY = 0.5f - halfScale;
-            float pivotZ = 0.5f - halfScale * (cosR - sinR);
+            float pivotX, pivotY, pivotZ;
+            float rotRad;
 
-            // Create transformation with rotation
+            // Fast path: no rotation (common case - many patterns don't rotate entities)
+            if (rotationY == 0f) {
+                rotRad = 0f;
+                float pivotOffset = 0.5f - halfScale;
+                pivotX = pivotOffset;
+                pivotY = pivotOffset;
+                pivotZ = pivotOffset;
+            } else {
+                rotRad = (float) Math.toRadians(rotationY);
+                // Lookup cos/sin from per-tick cache, keyed by float bit pattern
+                int rotBits = Float.floatToRawIntBits(rotRad);
+                float[] cached = trigCache.get(rotBits);
+                float cosR, sinR;
+                if (cached != null) {
+                    cosR = cached[0];
+                    sinR = cached[1];
+                } else {
+                    cosR = (float) Math.cos(rotRad);
+                    sinR = (float) Math.sin(rotRad);
+                    trigCache.put(rotBits, new float[]{cosR, sinR});
+                }
+                pivotX = 0.5f - halfScale * (cosR + sinR);
+                pivotY = 0.5f - halfScale;
+                pivotZ = 0.5f - halfScale * (cosR - sinR);
+            }
+
+            // Create transformation - share static IDENTITY_ROTATION for right rotation
             Transformation transform = new Transformation(
                 new Vector3f(pivotX, pivotY, pivotZ),
                 new AxisAngle4f(rotRad, 0, 1, 0),
                 new Vector3f(scale, scale, scale),
-                new AxisAngle4f(0, 0, 0, 1)
+                IDENTITY_ROTATION
             );
 
             // Build update with optional brightness, glow, and interpolation

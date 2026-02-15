@@ -33,6 +33,7 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
    - `config.py` - Audio presets (auto, edm, chill, rock, hiphop, classical) and server config
    - `auth.py` - DJ/VJ authentication (bcrypt, SHA256, connect codes)
    - `cli.py` - CLI entry point (`audioviz-vj`)
+   - `metrics.py` - HTTP health/metrics endpoint for monitoring (Prometheus-compatible)
    - `spectrograph.py` - Terminal spectrograph display
    - `pyproject.toml` (name: mcav-vj-server) - Independent package
 
@@ -92,10 +93,11 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
 14. **archive/python_dj_cli/** - Archived Python DJ CLI (replaced by dj_client/)
     - Preserved for reference only; see `archive/python_dj_cli/README.md`
 
-### WebSocket Ports
-- 8765: Minecraft plugin ↔ VJ server
-- 8766: Browser clients ↔ VJ server
-- 9000: Remote DJs (Rust client) ↔ VJ server
+### Ports
+- 8765: Minecraft plugin ↔ VJ server (WebSocket)
+- 8766: Browser clients ↔ VJ server (WebSocket)
+- 9000: Remote DJs (Rust client) ↔ VJ server (WebSocket)
+- 9001: VJ server metrics endpoint (HTTP, optional)
 - 8090: Coordinator REST API
 - 3000: Site dev server (Next.js)
 
@@ -123,6 +125,8 @@ cd vj_server && pip install -e .
 audioviz-vj
 audioviz-vj --port 9000 --minecraft-host mc.local
 audioviz-vj --no-auth                        # Dev only - skip authentication
+audioviz-vj --metrics-port 9001              # Health metrics on port 9001 (default)
+audioviz-vj --no-metrics                     # Disable metrics endpoint
 ```
 
 ### Site & Coordinator Development

@@ -88,6 +88,28 @@ body {
   color: var(--accent);
 }
 
+.shortcuts-help {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-md);
+}
+
+kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--input-bg);
+  border: 1px solid rgba(98, 188, 255, 0.2);
+  border-radius: 5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
 .brand {
   display: flex;
   align-items: center;

@@ -167,6 +167,14 @@ public class EntityPoolManager {
         return pool.get(entityId);
     }
 
+    // Cached Brightness instances (0-15). Avoids allocating new Brightness each tick per entity.
+    private static final Display.Brightness[] BRIGHTNESS_CACHE = new Display.Brightness[16];
+    static {
+        for (int i = 0; i < 16; i++) {
+            BRIGHTNESS_CACHE[i] = new Display.Brightness(i, i);
+        }
+    }
+
     /**
      * PERFORMANCE: Batch update multiple entities in a single scheduler task.
      * This is much more efficient than individual updates when updating many entities.
@@ -201,19 +209,20 @@ public class EntityPoolManager {
                     display.setInterpolationDuration(update.interpolationDuration());
                 }
 
-                // Apply transformation update (only if changed to avoid resetting interpolation)
+                // Apply transformation update unconditionally.
+                // The previous equals() check called display.getTransformation() which
+                // allocates a new Transformation + 4 JOML objects every call, then does
+                // deep equality across 4 components. For continuously animated entities
+                // the transform almost always changes, making the check pure overhead.
                 if (update.hasTransform() && update.transformation() != null) {
-                    Transformation currentTransform = display.getTransformation();
-                    if (!update.transformation().equals(currentTransform)) {
-                        display.setTransformation(update.transformation());
-                        display.setInterpolationDelay(0); // Start interpolation immediately
-                    }
+                    display.setTransformation(update.transformation());
+                    display.setInterpolationDelay(0); // Start interpolation immediately
                 }
 
-                // Apply brightness update
+                // Apply brightness update (use cached Brightness to avoid allocation)
                 if (update.hasBrightness()) {
                     int brightness = Math.max(0, Math.min(15, update.brightness()));
-                    display.setBrightness(new Display.Brightness(brightness, brightness));
+                    display.setBrightness(BRIGHTNESS_CACHE[brightness]);
                 }
 
                 // Apply glow update

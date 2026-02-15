@@ -21,7 +21,9 @@ use std::f32::consts::TAU;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -764,6 +766,10 @@ async fn run_bridge(
 
                         if status_changed || throttle_elapsed {
                             let _ = app_handle.emit("dj-status", &status_snapshot);
+                            // Update tray tooltip when connection status changes
+                            if status_changed {
+                                update_tray_tooltip(&app_handle, status_snapshot.connected);
+                            }
                             prev_status_hash = s_hash;
                         }
                         if voice_changed || throttle_elapsed {
@@ -1136,6 +1142,28 @@ pub struct AudioLevels {
     pub bpm: f32,
 }
 
+/// Update the system tray tooltip based on connection status
+fn update_tray_tooltip(app: &AppHandle, connected: bool) {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let tooltip = if connected {
+            "MCAV DJ - Connected"
+        } else {
+            "MCAV DJ - Disconnected"
+        };
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
+}
+
+/// Show the main window
+#[tauri::command]
+fn show_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
 /// Initialize the Tauri application
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1160,7 +1188,79 @@ pub fn run() {
             list_presets,
             get_current_preset,
             set_preset,
+            show_window,
         ])
+        .setup(|app| {
+            // Create system tray menu
+            let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let disconnect_item = MenuItem::with_id(app, "disconnect", "Disconnect", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show_item,
+                    &disconnect_item,
+                    &quit_item,
+                ],
+            )?;
+
+            // Create system tray icon
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .tooltip("MCAV DJ - Disconnected")
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "disconnect" => {
+                            let state = app.state::<AppStateWrapper>();
+                            let is_connected = state.0.lock().status.connected;
+                            if is_connected {
+                                let app_clone = app.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = disconnect(app_clone.state::<AppStateWrapper>()).await;
+                                });
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Double-click to show window
+                    if let TrayIconEvent::DoubleClick { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Handle window close event - minimize to tray instead of quitting
+            if let Some(window) = app.get_webview_window("main") {
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // Prevent default close behavior
+                        api.prevent_close();
+                        // Hide the window instead
+                        let _ = window_clone.hide();
+                    }
+                });
+            }
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

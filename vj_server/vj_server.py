@@ -518,6 +518,7 @@ class VJServer:
         auth_config: Optional[DJAuthConfig] = None,
         require_auth: bool = True,
         show_spectrograph: bool = True,
+        metrics_port: Optional[int] = 9001,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -528,6 +529,7 @@ class VJServer:
         self.entity_count = entity_count
         self.auth_config = auth_config or DJAuthConfig()
         self.require_auth = require_auth
+        self.metrics_port = metrics_port
 
         # DJ management
         self._djs: Dict[str, DJConnection] = {}
@@ -601,6 +603,11 @@ class VJServer:
         self._last_health_log = time.time()
         self._last_profile_log = time.monotonic()
 
+        # Metrics tracking
+        self._start_time = time.time()
+        self._frames_processed = 0
+        self._pattern_changes = 0
+
         # Fallback state (used when no DJ is active)
         self._fallback_bands = [0.0] * 5
         self._fallback_peak = 0.0
@@ -641,6 +648,10 @@ class VJServer:
         if active_id:
             return djs.get(active_id)
         return None
+
+    def _get_active_dj(self) -> Optional[DJConnection]:
+        """Get the currently active DJ (non-property version for metrics)."""
+        return self.active_dj
 
     async def _get_active_dj_safe(self) -> Optional[DJConnection]:
         """Thread-safe version of getting active DJ."""
@@ -1756,6 +1767,7 @@ class VJServer:
             # Load new pattern
             self._pattern_name = pattern_name
             self._current_pattern = get_pattern(pattern_name, self._pattern_config)
+            self._pattern_changes += 1
 
             logger.info(
                 f"Scene transition: {self._old_pattern_name} -> {pattern_name} ({self._transition_duration}s)"
@@ -1916,6 +1928,7 @@ class VJServer:
                                     pattern_name, self._pattern_config
                                 )
                                 self._pattern_name = pattern_name
+                                self._pattern_changes += 1
                                 self._transitioning = True
                                 self._transition_start = time.monotonic()
                                 logger.info(
@@ -1923,6 +1936,8 @@ class VJServer:
                                 )
                             else:
                                 # Instant switch (transition_duration = 0 or same pattern)
+                                if pattern_name != self._pattern_name:
+                                    self._pattern_changes += 1
                                 self._pattern_name = pattern_name
                                 self._current_pattern = get_pattern(
                                     pattern_name, self._pattern_config
@@ -3675,6 +3690,7 @@ class VJServer:
                 broadcast_ms = 0.0
                 entities_count = 0
                 self._frame_count += 1
+                self._frames_processed += 1
 
                 # Get audio from active DJ or use fallback
                 dj = self.active_dj
@@ -3906,6 +3922,13 @@ class VJServer:
         )
         logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
 
+        # Start metrics HTTP server if enabled
+        metrics_server = None
+        if self.metrics_port is not None:
+            from vj_server.metrics import start_metrics_server
+
+            metrics_server = await start_metrics_server(self, self.metrics_port)
+
         logger.info("VJ Server ready. Waiting for DJ connections...")
 
         # Start Minecraft reconnection loop (runs in background)
@@ -3953,6 +3976,9 @@ class VJServer:
                     pass
             dj_server.close()
             broadcast_server.close()
+            if metrics_server:
+                metrics_server.close()
+                await metrics_server.wait_closed()
             await dj_server.wait_closed()
             await broadcast_server.wait_closed()
 

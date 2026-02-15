@@ -43,7 +43,6 @@
     "longDescription": "MCAV DJ Client captures system audio and streams real-time frequency analysis to Minecraft servers, powering beat-reactive visualizations built with Display Entities.",
     "windows": {
       "nsis": {
-        "license": "installer/LICENSE.txt",
         "headerImage": "installer/nsis-header.bmp",
         "sidebarImage": "installer/nsis-sidebar.bmp",
         "installerIcon": "icons/icon.ico",

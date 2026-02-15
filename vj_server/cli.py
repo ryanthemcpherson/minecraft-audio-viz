@@ -100,6 +100,17 @@ Examples:
         action="store_true",
         help="Hash any plaintext passwords in the auth config file and exit",
     )
+    parser.add_argument(
+        "--metrics-port",
+        type=validate_port,
+        default=int(os.environ.get("METRICS_PORT", "9001")),
+        help="Port for metrics HTTP endpoint (default: 9001 or $METRICS_PORT)",
+    )
+    parser.add_argument(
+        "--no-metrics",
+        action="store_true",
+        help="Disable metrics HTTP endpoint",
+    )
 
     args = parser.parse_args()
 
@@ -175,6 +186,7 @@ Examples:
         broadcast_port=args.broadcast_port,
         auth_config=auth_config,
         require_auth=not args.no_auth,
+        metrics_port=None if args.no_metrics else args.metrics_port,
     )
 
     def signal_handler(sig, frame):

@@ -109,6 +109,61 @@ function App() {
   // Connection history state
   const [connectionHistory, setConnectionHistory] = useState<ConnectionHistoryEntry[]>([]);
 
+  // Keyboard shortcuts state
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+
+  // Keyboard shortcuts handler
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in input fields
+      const target = event.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modifierKey = isMac ? event.metaKey : event.ctrlKey;
+
+      // Ctrl/Cmd + D - Disconnect
+      if (modifierKey && event.key === 'd') {
+        event.preventDefault();
+        if (status.connected) {
+          void handleDisconnect();
+        }
+      }
+
+      // Ctrl/Cmd + R - Refresh audio sources
+      if (modifierKey && event.key === 'r') {
+        event.preventDefault();
+        void loadAudioSources();
+      }
+
+      // Ctrl/Cmd + T - Toggle test audio
+      if (modifierKey && event.key === 't') {
+        event.preventDefault();
+        if (selectedSource && !status.connected) {
+          if (isTestingAudio) {
+            void handleStopTest();
+          } else {
+            void handleStartTest();
+          }
+        }
+      }
+
+      // Escape - Close welcome overlay or stop test audio
+      if (event.key === 'Escape') {
+        if (showWelcomeOverlay) {
+          handleDismissWelcome();
+        } else if (isTestingAudio) {
+          void handleStopTest();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [status.connected, showWelcomeOverlay, isTestingAudio, selectedSource]);
+
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
     const storedName = localStorage.getItem('mcav.djName');
@@ -575,6 +630,23 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
+          <button
+            className="help-link"
+            onClick={() => setShowShortcutsHelp(prev => !prev)}
+            title="Keyboard Shortcuts"
+            type="button"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <rect x="3" y="6" width="14" height="9" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <rect x="5" y="8" width="2" height="2" fill="currentColor"/>
+              <rect x="8" y="8" width="2" height="2" fill="currentColor"/>
+              <rect x="11" y="8" width="2" height="2" fill="currentColor"/>
+              <rect x="5" y="11" width="2" height="2" fill="currentColor"/>
+              <rect x="8" y="11" width="5" height="2" fill="currentColor"/>
+              <rect x="14" y="11" width="2" height="2" fill="currentColor"/>
+            </svg>
+          </button>
           <a
             className="help-link"
             href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
@@ -590,6 +662,30 @@ function App() {
           <BeatIndicator active={isBeat && status.connected} />
         </div>
       </header>
+
+      {showShortcutsHelp && (
+        <div className="shortcuts-help">
+          <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '14px' }}>Keyboard Shortcuts</h3>
+          <div style={{ display: 'grid', gap: '8px', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Disconnect</span>
+              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + D</kbd>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Refresh audio sources</span>
+              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + R</kbd>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Toggle test audio</span>
+              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + T</kbd>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Close overlay / Stop test</span>
+              <kbd>Esc</kbd>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="app-main">
         {(availableUpdate && !dismissUpdateBanner) || isCheckingUpdate || updateMessage || updateError ? (
