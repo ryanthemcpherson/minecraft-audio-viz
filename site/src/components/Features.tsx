@@ -10,8 +10,8 @@ const features = [
         <line x1="2" y1="12" x2="22" y2="12" />
       </svg>
     ),
-    accent: "text-electric-blue",
-    borderHover: "hover:border-electric-blue/30",
+    accent: "text-disc-cyan",
+    borderHover: "hover:border-disc-cyan/30",
   },
   {
     title: "Multi-DJ Support",
@@ -25,8 +25,8 @@ const features = [
         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </svg>
     ),
-    accent: "text-deep-purple",
-    borderHover: "hover:border-deep-purple/30",
+    accent: "text-disc-blue",
+    borderHover: "hover:border-disc-blue/30",
   },
   {
     title: "Browser Preview",
@@ -39,8 +39,8 @@ const features = [
         <line x1="12" y1="17" x2="12" y2="21" />
       </svg>
     ),
-    accent: "text-hot-pink",
-    borderHover: "hover:border-hot-pink/30",
+    accent: "text-noteblock-amber",
+    borderHover: "hover:border-noteblock-amber/30",
   },
   {
     title: "Beat Detection",
@@ -51,8 +51,8 @@ const features = [
         <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
       </svg>
     ),
-    accent: "text-electric-blue",
-    borderHover: "hover:border-electric-blue/30",
+    accent: "text-disc-cyan",
+    borderHover: "hover:border-disc-cyan/30",
   },
   {
     title: "DJ Connect Codes",
@@ -64,8 +64,8 @@ const features = [
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       </svg>
     ),
-    accent: "text-deep-purple",
-    borderHover: "hover:border-deep-purple/30",
+    accent: "text-disc-blue",
+    borderHover: "hover:border-disc-blue/30",
   },
   {
     title: "Zero Client Mods",
@@ -77,8 +77,8 @@ const features = [
         <polyline points="9 12 11 14 15 10" />
       </svg>
     ),
-    accent: "text-hot-pink",
-    borderHover: "hover:border-hot-pink/30",
+    accent: "text-noteblock-amber",
+    borderHover: "hover:border-noteblock-amber/30",
   },
 ];
 
@@ -93,7 +93,7 @@ export default function Features() {
       <div className="mx-auto max-w-7xl">
         {/* Section Header */}
         <div className="mb-20 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-hot-pink">
+          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-noteblock-amber">
             Features
           </p>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">

@@ -55,7 +55,7 @@ export default function Navbar() {
   }, [mobileOpen, userMenuOpen]);
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-xl">
+    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#08090d]/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2">
@@ -190,7 +190,7 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       {mobileOpen && (
-        <div id="mobile-menu" className="border-t border-white/5 bg-[#0a0a0a]/95 backdrop-blur-xl md:hidden">
+        <div id="mobile-menu" className="border-t border-white/5 bg-[#08090d]/95 backdrop-blur-xl md:hidden">
           <div className="flex flex-col gap-1 px-6 py-4">
             {navLinks.map((link) =>
               link.external ? (
@@ -249,7 +249,7 @@ export default function Navbar() {
                   <Link
                     href="/login"
                     onClick={() => setMobileOpen(false)}
-                    className="block rounded-lg px-4 py-3 text-sm font-medium text-electric-blue transition-colors hover:bg-white/5"
+                    className="block rounded-lg px-4 py-3 text-sm font-medium text-disc-cyan transition-colors hover:bg-white/5"
                   >
                     Log in
                   </Link>

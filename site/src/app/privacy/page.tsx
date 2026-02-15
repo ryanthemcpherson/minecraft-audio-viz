@@ -39,7 +39,7 @@ export default function PrivacyPage() {
             <section>
               <h2 className="text-2xl font-bold mb-4">Information We Collect</h2>
 
-              <h3 className="text-lg font-semibold mb-3 text-electric-blue">Account Information</h3>
+              <h3 className="text-lg font-semibold mb-3 text-disc-cyan">Account Information</h3>
               <p className="text-text-secondary leading-relaxed mb-4">
                 When you create an account on mcav.live, we collect:
               </p>
@@ -49,7 +49,7 @@ export default function PrivacyPage() {
                 <li>DJ name and server configuration preferences</li>
               </ul>
 
-              <h3 className="text-lg font-semibold mb-3 text-electric-blue">Usage Data</h3>
+              <h3 className="text-lg font-semibold mb-3 text-disc-cyan">Usage Data</h3>
               <p className="text-text-secondary leading-relaxed mb-4">
                 We automatically collect certain information when you visit our website:
               </p>
@@ -60,7 +60,7 @@ export default function PrivacyPage() {
                 <li>Referring site or source</li>
               </ul>
 
-              <h3 className="text-lg font-semibold mb-3 text-electric-blue">Audio Data</h3>
+              <h3 className="text-lg font-semibold mb-3 text-disc-cyan">Audio Data</h3>
               <p className="text-text-secondary leading-relaxed">
                 When using the DJ Client app, audio is processed locally on your device.
                 Only frequency band data (FFT analysis results) is transmitted to VJ servers.
@@ -124,7 +124,7 @@ export default function PrivacyPage() {
                   href="https://github.com/ryanthemcpherson/minecraft-audio-viz/issues"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-electric-blue hover:underline"
+                  className="text-disc-cyan hover:underline"
                 >
                   GitHub Issues
                 </a>.
@@ -149,7 +149,7 @@ export default function PrivacyPage() {
                   href="https://github.com/ryanthemcpherson/minecraft-audio-viz/issues"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-electric-blue hover:underline"
+                  className="text-disc-cyan hover:underline"
                 >
                   GitHub repository
                 </a>.
@@ -209,7 +209,7 @@ export default function PrivacyPage() {
                     href="https://github.com/ryanthemcpherson/minecraft-audio-viz/issues"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-electric-blue hover:underline"
+                    className="text-disc-cyan hover:underline"
                   >
                     GitHub Issues
                   </a>
@@ -218,7 +218,7 @@ export default function PrivacyPage() {
                   <strong>Website:</strong>{" "}
                   <a
                     href="https://mcav.live"
-                    className="text-electric-blue hover:underline"
+                    className="text-disc-cyan hover:underline"
                   >
                     https://mcav.live
                   </a>

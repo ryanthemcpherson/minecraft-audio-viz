@@ -61,7 +61,7 @@ export default function PatternGallery() {
             placeholder="Search patterns by name or description..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-full border border-white/10 bg-white/3 px-5 py-2.5 text-sm text-white placeholder-text-secondary/60 transition-all focus:border-electric-blue/50 focus:bg-white/5 focus:outline-none focus:ring-2 focus:ring-electric-blue/20"
+            className="w-full rounded-full border border-white/10 bg-white/3 px-5 py-2.5 text-sm text-white placeholder-text-secondary/60 transition-all focus:border-disc-cyan/50 focus:bg-white/5 focus:outline-none focus:ring-2 focus:ring-disc-cyan/20"
           />
           <svg
             className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary"
@@ -93,14 +93,14 @@ export default function PatternGallery() {
                 onClick={() => setActiveCategory(cat)}
                 className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-all ${
                   isActive
-                    ? "border-electric-blue/50 bg-electric-blue/10 text-white"
+                    ? "border-disc-cyan/50 bg-disc-cyan/10 text-white"
                     : "border-white/10 bg-white/3 text-text-secondary hover:border-white/20 hover:text-white"
                 }`}
               >
                 {cat}
                 <span
                   className={`ml-1.5 text-xs ${
-                    isActive ? "text-electric-blue" : "text-text-secondary"
+                    isActive ? "text-disc-cyan" : "text-text-secondary"
                   }`}
                 >
                   {count}

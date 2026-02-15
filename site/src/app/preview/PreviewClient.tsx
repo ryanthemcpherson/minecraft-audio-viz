@@ -120,7 +120,7 @@ export default function PreviewClient() {
                 {[0, 1, 2, 3, 4].map((i) => (
                   <div
                     key={i}
-                    className="eq-bar w-1.5 rounded-full bg-gradient-to-t from-electric-blue to-deep-purple"
+                    className="eq-bar w-1.5 rounded-full bg-gradient-to-t from-disc-cyan to-disc-blue"
                     style={{ height: "28px" }}
                   />
                 ))}
@@ -227,12 +227,12 @@ export default function PreviewClient() {
                               onClick={() => selectPattern(p)}
                               className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5 ${
                                 p.id === selectedPatternId
-                                  ? "text-electric-blue"
+                                  ? "text-disc-cyan"
                                   : "text-white/80"
                               }`}
                             >
                               {p.id === selectedPatternId && (
-                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-electric-blue" />
+                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-disc-cyan" />
                               )}
                               <span className="truncate">{p.name}</span>
                             </button>
@@ -287,7 +287,7 @@ export default function PreviewClient() {
                         }}
                         className={`flex w-full flex-col px-3 py-2 text-left transition-colors hover:bg-white/5 ${
                           preset.id === selectedPreset
-                            ? "text-electric-blue"
+                            ? "text-disc-cyan"
                             : "text-white/80"
                         }`}
                       >
@@ -312,7 +312,7 @@ export default function PreviewClient() {
                   onClick={() => setAutoCycle(!autoCycle)}
                   className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm backdrop-blur-xl transition-all ${
                     autoCycle
-                      ? "border-electric-blue/30 bg-electric-blue/10 text-electric-blue"
+                      ? "border-disc-cyan/30 bg-disc-cyan/10 text-disc-cyan"
                       : "border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:text-white"
                   }`}
                   title="Auto-cycle patterns every 20s"
@@ -338,7 +338,7 @@ export default function PreviewClient() {
             {/* Right: CTA */}
             <Link
               href="/getting-started"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-electric-blue to-deep-purple px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-electric-blue/20 transition-all hover:shadow-xl hover:shadow-electric-blue/30 hover:brightness-110"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-disc-cyan/20 transition-all hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110"
             >
               Get Started
               <svg

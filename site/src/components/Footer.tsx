@@ -41,7 +41,7 @@ export default function Footer() {
           {/* Brand column */}
           <div>
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-electric-blue to-deep-purple">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-disc-cyan to-disc-blue">
                 <svg
                   width="18"
                   height="18"
@@ -70,7 +70,7 @@ export default function Footer() {
                   style={{
                     height: "16px",
                     background:
-                      "linear-gradient(to top, #00D4FF, #8B5CF6)",
+                      "linear-gradient(to top, #00CCFF, #5B6AFF)",
                     animationDelay: `${i * 0.12}s`,
                     animationDuration: `${1 + (i * 0.07)}s`,
                     opacity: 0.5,

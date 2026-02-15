@@ -42,7 +42,7 @@ function SetupChecklist({ checklist }: { checklist: { org_created: boolean; serv
       </div>
       <div className="mb-4 h-2 overflow-hidden rounded-full bg-white/5">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-electric-blue to-deep-purple transition-all duration-500"
+          className="h-full rounded-full bg-gradient-to-r from-disc-cyan to-disc-blue transition-all duration-500"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -106,7 +106,7 @@ function OrgCard({
   }
 
   return (
-    <div className="glass-card rounded-xl p-5 transition-all duration-200 hover:border-electric-blue/20">
+    <div className="glass-card rounded-xl p-5 transition-all duration-200 hover:border-disc-cyan/20">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold">{org.name}</h3>
@@ -115,7 +115,7 @@ function OrgCard({
         <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-text-secondary">{org.role}</span>
       </div>
       <div className="mt-3 flex gap-4 text-xs text-text-secondary">
-        <Link href={`/org/${org.slug}/servers`} className="transition-colors hover:text-electric-blue">
+        <Link href={`/org/${org.slug}/servers`} className="transition-colors hover:text-disc-cyan">
           {org.server_count} server{org.server_count !== 1 ? "s" : ""}
         </Link>
         <span>{org.member_count} member{org.member_count !== 1 ? "s" : ""}</span>
@@ -125,7 +125,7 @@ function OrgCard({
         <div className="mt-2">
           <Link
             href={`/org/${org.slug}/servers`}
-            className="text-xs text-electric-blue/70 transition-colors hover:text-electric-blue"
+            className="text-xs text-disc-cyan/70 transition-colors hover:text-disc-cyan"
           >
             Manage Servers
           </Link>
@@ -168,7 +168,7 @@ function ShowList({ shows, title }: { shows: RecentShowSummary[]; title: string 
       <h2 className="mb-4 text-lg font-semibold">{title}</h2>
       <div className="flex flex-col gap-3">
         {shows.map((show) => (
-          <div key={show.id} className="glass-card rounded-xl p-4 transition-all duration-200 hover:border-electric-blue/20">
+          <div key={show.id} className="glass-card rounded-xl p-4 transition-all duration-200 hover:border-disc-cyan/20">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-medium">{show.name}</h3>
@@ -176,7 +176,7 @@ function ShowList({ shows, title }: { shows: RecentShowSummary[]; title: string 
               </div>
               <div className="flex items-center gap-2">
                 {show.connect_code && (
-                  <span className="rounded bg-white/5 px-2 py-0.5 font-mono text-xs text-electric-blue">
+                  <span className="rounded bg-white/5 px-2 py-0.5 font-mono text-xs text-disc-cyan">
                     {show.connect_code}
                   </span>
                 )}
@@ -287,7 +287,7 @@ function InlineCreateOrgForm({
           placeholder="Organization name"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
-          className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-electric-blue/30 focus:outline-none"
+          className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
           maxLength={100}
         />
         <input
@@ -295,13 +295,13 @@ function InlineCreateOrgForm({
           placeholder="slug"
           value={slug}
           onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-          className="w-36 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-electric-blue/30 focus:outline-none"
+          className="w-36 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
           maxLength={63}
         />
         <button
           type="submit"
           disabled={submitting || !name.trim() || !slug.trim()}
-          className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {submitting ? "..." : "Create"}
         </button>
@@ -351,7 +351,7 @@ function InlineJoinOrgForm({
         placeholder="Invite code"
         value={code}
         onChange={(e) => setCode(e.target.value)}
-        className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-mono text-white placeholder:text-text-secondary/50 focus:border-electric-blue/30 focus:outline-none"
+        className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-mono text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
         maxLength={8}
       />
       <button
@@ -453,8 +453,8 @@ export default function DashboardPage() {
     <div className="relative mx-auto max-w-4xl px-6 pt-28 pb-20">
       {/* Background glows */}
       <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="absolute top-0 left-1/2 h-[400px] w-[500px] -translate-x-1/2 rounded-full bg-electric-blue/5 blur-[120px]" />
-        <div className="absolute top-1/4 right-1/4 h-[300px] w-[300px] rounded-full bg-deep-purple/5 blur-[100px]" />
+        <div className="absolute top-0 left-1/2 h-[400px] w-[500px] -translate-x-1/2 rounded-full bg-disc-cyan/5 blur-[120px]" />
+        <div className="absolute top-1/4 right-1/4 h-[300px] w-[300px] rounded-full bg-disc-blue/5 blur-[100px]" />
       </div>
 
       <div className="relative z-10">
@@ -481,10 +481,10 @@ export default function DashboardPage() {
               </h1>
               <div className="flex gap-1.5">
                 {dashboard?.has_dj_profile && (
-                  <CapabilityBadge label="DJ" color="bg-electric-blue/10 text-electric-blue" />
+                  <CapabilityBadge label="DJ" color="bg-disc-cyan/10 text-disc-cyan" />
                 )}
                 {dashboard?.has_orgs && (
-                  <CapabilityBadge label="Server Owner" color="bg-deep-purple/10 text-deep-purple" />
+                  <CapabilityBadge label="Server Owner" color="bg-disc-blue/10 text-disc-blue" />
                 )}
                 {dashboard?.organizations.some((o) => o.role === "member") && (
                   <CapabilityBadge label="Team Member" color="bg-green-500/10 text-green-400" />
@@ -514,8 +514,8 @@ export default function DashboardPage() {
           {dashboard?.dj && (
             <div className="glass-card rounded-xl p-6">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-electric-blue/10 text-2xl">
-                  <svg className="h-7 w-7 text-electric-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-disc-cyan/10 text-2xl">
+                  <svg className="h-7 w-7 text-disc-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
                   </svg>
                 </div>
@@ -534,7 +534,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-electric-blue">{dashboard.dj.session_count}</div>
+                    <div className="text-2xl font-bold text-disc-cyan">{dashboard.dj.session_count}</div>
                     <div className="text-xs text-text-secondary">session{dashboard.dj.session_count !== 1 ? "s" : ""}</div>
                   </div>
                   {/* Social link icons */}
@@ -578,7 +578,7 @@ export default function DashboardPage() {
           {dashboard && !dashboard.has_dj_profile && (
             <SetupPromptCard
               icon={
-                <svg className="h-5 w-5 text-electric-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="h-5 w-5 text-disc-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
                 </svg>
               }
@@ -587,7 +587,7 @@ export default function DashboardPage() {
             >
               <Link
                 href="/settings/profile"
-                className="inline-block rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                className="inline-block rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
               >
                 Create DJ Profile
               </Link>
@@ -617,7 +617,7 @@ export default function DashboardPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <SetupPromptCard
                 icon={
-                  <svg className="h-5 w-5 text-deep-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-5 w-5 text-disc-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                   </svg>
                 }
@@ -659,7 +659,7 @@ export default function DashboardPage() {
               </div>
               <Link
                 href="/getting-started"
-                className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
               >
                 View Guide
               </Link>

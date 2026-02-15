@@ -65,7 +65,7 @@ export default function TableOfContents({ items }: TableOfContentsProps) {
                 item.indent ? "pl-6" : "pl-4"
               } ${
                 activeId === item.id
-                  ? "border-l-2 border-electric-blue text-white -ml-px"
+                  ? "border-l-2 border-disc-cyan text-white -ml-px"
                   : "text-text-secondary hover:text-white"
               }`}
             >

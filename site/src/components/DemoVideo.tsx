@@ -6,7 +6,7 @@ export default function DemoVideo() {
       <div className="mx-auto max-w-5xl">
         {/* Section Header */}
         <div className="mb-16 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-deep-purple">
+          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-blue">
             See It Live
           </p>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
@@ -20,7 +20,7 @@ export default function DemoVideo() {
         {/* Video Embed */}
         <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-bg-secondary shadow-2xl">
           {/* Glow effect behind the video */}
-          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-electric-blue/20 via-deep-purple/20 to-hot-pink/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100" />
+          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-disc-cyan/20 via-disc-blue/20 to-noteblock-amber/20 opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100" />
 
           <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-[#111]">
             <video className="h-full w-full" controls preload="metadata">

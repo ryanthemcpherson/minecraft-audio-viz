@@ -9,8 +9,8 @@ const communityLinks = [
     ),
     buttonText: "Join Discord",
     href: "https://discord.gg/mcav",
-    accent: "text-deep-purple",
-    borderHover: "hover:border-deep-purple/30",
+    accent: "text-disc-blue",
+    borderHover: "hover:border-disc-blue/30",
     glowClass: "hover:glow-purple",
   },
   {
@@ -23,8 +23,8 @@ const communityLinks = [
     ),
     buttonText: "View on GitHub",
     href: "https://github.com/ryanthemcpherson/minecraft-audio-viz",
-    accent: "text-electric-blue",
-    borderHover: "hover:border-electric-blue/30",
+    accent: "text-disc-cyan",
+    borderHover: "hover:border-disc-cyan/30",
     glowClass: "hover:glow-blue",
   },
   {
@@ -39,8 +39,8 @@ const communityLinks = [
     ),
     buttonText: "Pattern Gallery",
     href: "/patterns",
-    accent: "text-hot-pink",
-    borderHover: "hover:border-hot-pink/30",
+    accent: "text-noteblock-amber",
+    borderHover: "hover:border-noteblock-amber/30",
     glowClass: "hover:glow-pink",
   },
 ];
@@ -56,7 +56,7 @@ export default function Community() {
       <div className="mx-auto max-w-7xl">
         {/* Section Header */}
         <div className="mb-16 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-electric-blue">
+          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-cyan">
             Community
           </p>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">

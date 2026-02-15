@@ -25,7 +25,7 @@ export default function PublicDJProfilePage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center pt-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
       </div>
     );
   }
@@ -51,7 +51,7 @@ export default function PublicDJProfilePage() {
     <div className="min-h-screen pt-16">
       {/* Banner */}
       <div className="relative h-48 sm:h-64" style={bannerStyle}>
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#0a0a0a]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#08090d]" />
       </div>
 
       {/* Profile content */}
@@ -64,12 +64,12 @@ export default function PublicDJProfilePage() {
               alt={profile.dj_name}
               width={112}
               height={112}
-              className="h-28 w-28 rounded-full border-4 border-[#0a0a0a] object-cover"
+              className="h-28 w-28 rounded-full border-4 border-[#08090d] object-cover"
               unoptimized
             />
           ) : (
             <div
-              className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-[#0a0a0a] text-3xl font-bold"
+              className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-[#08090d] text-3xl font-bold"
               style={{ background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})` }}
             >
               {profile.dj_name.charAt(0).toUpperCase()}

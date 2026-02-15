@@ -15,8 +15,8 @@ export default function PatternsPage() {
       <section className="relative overflow-hidden pt-32 pb-16">
         {/* Background glow */}
         <div className="pointer-events-none absolute inset-0 z-0">
-          <div className="absolute top-1/4 left-1/2 h-[500px] w-[600px] -translate-x-1/2 rounded-full bg-electric-blue/5 blur-[120px]" />
-          <div className="absolute top-1/3 right-1/4 h-[400px] w-[400px] rounded-full bg-deep-purple/5 blur-[100px]" />
+          <div className="absolute top-1/4 left-1/2 h-[500px] w-[600px] -translate-x-1/2 rounded-full bg-disc-cyan/5 blur-[120px]" />
+          <div className="absolute top-1/3 right-1/4 h-[400px] w-[400px] rounded-full bg-disc-blue/5 blur-[100px]" />
         </div>
 
         <div className="relative z-10 mx-auto max-w-7xl px-6 text-center">

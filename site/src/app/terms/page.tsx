@@ -59,7 +59,7 @@ export default function TermsPage() {
                   href="https://opensource.org/licenses/MIT"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-electric-blue hover:underline"
+                  className="text-disc-cyan hover:underline"
                 >
                   MIT License
                 </a>. You are free to use, modify, and distribute the software in accordance
@@ -68,7 +68,7 @@ export default function TermsPage() {
                   href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/LICENSE"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-electric-blue hover:underline"
+                  className="text-disc-cyan hover:underline"
                 >
                   project repository
                 </a>.
@@ -151,7 +151,7 @@ export default function TermsPage() {
                   href="https://github.com/ryanthemcpherson/minecraft-audio-viz/issues"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-electric-blue hover:underline"
+                  className="text-disc-cyan hover:underline"
                 >
                   GitHub Issues
                 </a>.
@@ -224,7 +224,7 @@ export default function TermsPage() {
                   href="https://github.com/ryanthemcpherson/minecraft-audio-viz"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-electric-blue hover:underline"
+                  className="text-disc-cyan hover:underline"
                 >
                   GitHub repository
                 </a>.
@@ -258,7 +258,7 @@ export default function TermsPage() {
                     href="https://github.com/ryanthemcpherson/minecraft-audio-viz/issues"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-electric-blue hover:underline"
+                    className="text-disc-cyan hover:underline"
                   >
                     GitHub Issues
                   </a>
@@ -267,7 +267,7 @@ export default function TermsPage() {
                   <strong>Website:</strong>{" "}
                   <a
                     href="https://mcav.live"
-                    className="text-electric-blue hover:underline"
+                    className="text-disc-cyan hover:underline"
                   >
                     https://mcav.live
                   </a>

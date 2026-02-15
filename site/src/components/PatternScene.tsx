@@ -153,9 +153,9 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
   return (
     <>
       <ambientLight intensity={0.15} />
-      <pointLight position={[3, 4, 3]} intensity={1.2} distance={12} color="#00D4FF" />
-      <pointLight position={[-3, 3, -2]} intensity={0.8} distance={12} color="#8B5CF6" />
-      <pointLight position={[0, -2, 3]} intensity={0.5} distance={10} color="#FF006E" />
+      <pointLight position={[3, 4, 3]} intensity={1.2} distance={12} color="#00CCFF" />
+      <pointLight position={[-3, 3, -2]} intensity={0.8} distance={12} color="#5B6AFF" />
+      <pointLight position={[0, -2, 3]} intensity={0.5} distance={10} color="#FFAA00" />
       <fog attach="fog" args={["#050505", 6, 20]} />
 
       <group ref={groupRef}>
