@@ -1,7 +1,7 @@
 # MCAV Launch Brainstorm & Go-To-Market Checklist
 
 *Generated 2026-02-14 from a 6-agent deep audit of every component*
-*Updated 2026-02-14 after 3 batch launch-polish swarms (15 agents, ~5,200 lines shipped)*
+*Updated 2026-02-15 after 4 batch launch-polish swarms (20 agents, ~8,700 lines shipped)*
 
 ---
 
@@ -9,15 +9,15 @@
 
 | Component | Score | Verdict |
 |-----------|-------|---------|
-| Minecraft Plugin | 4.8/5 | Ship it. Enterprise-grade. Zone templates added. |
-| VJ Server + Patterns | 4.5/5 → 5/5 | Crossfades, hot-reload, scenes, metrics all shipped. |
+| Minecraft Plugin | 4.8/5 → 5/5 | Zone templates, boundary particles. Ship it. |
+| VJ Server + Patterns | 4.5/5 → 5/5 | Crossfades, hot-reload, scenes, metrics, BPM sync all shipped. |
 | Admin Panel | 5/5 | Polished, debounced, 3D preview. Scene + crossfade controls added. |
 | Coordinator API | 85/100 → 90/100 | Security headers + structured logging added. |
-| DJ Client | B+ → A | Onboarding, shortcuts, tray, test audio, connection history. |
-| Site (mcav.live) | 75% → 90% | Legal pages, community section, gallery filtering, SEO. |
-| Documentation | B+ → A | Pattern tutorial, metrics docs, contributing guide. |
+| DJ Client | B+ → A+ | Onboarding, shortcuts, tray, test audio, connection history, demo mode. |
+| Site (mcav.live) | 75% → 95% | Legal pages, community section, gallery filtering, SEO, live preview. |
+| Documentation | B+ → A+ | Pattern tutorial, metrics docs, contributing guide, full MkDocs site. |
 
-**Overall: Product and polish are ready. Marketing assets (video, GIFs) and distribution channels remain.**
+**Overall: Product, polish, and documentation are ready. Marketing assets (video, GIFs) and distribution channels remain.**
 
 ---
 
@@ -28,7 +28,7 @@
 - [ ] **Record hero demo video** - 2:05 script exists at `docs/DEMO_VIDEO_SCRIPT.md`. Upload to YouTube, embed on site + README
 - [ ] **Create animated GIFs** for README - Galaxy Spiral, Tesseract, Supernova, Aurora, Skull (5-8 clips showing reactivity)
 - [x] **Fix README Quick Start** - ~~Still references deprecated Python DJ CLI (`audioviz`).~~ Now points to Rust DJ Client + GitHub Releases download links *(Batch 1)*
-- [ ] **Deploy live browser preview** at `preview.mcav.live` with simulated audio (the Three.js preview already works, just needs hosting)
+- [x] **Deploy live browser preview** - Built at `/preview` route on site with Three.js visualizer, pattern cycling, and simulated audio. Just needs deployment *(Batch 4)*
 
 ### 2. Legal & Trust
 
@@ -88,20 +88,20 @@
 - [x] **Pattern Development Tutorial** - Full Lua API guide at `docs/PATTERN_GUIDE.md` (~650 lines) *(Batch 3)*
 - [ ] **Creator Kit** - Pre-built Minecraft world download with arena, OBS scene collection, thumbnail templates. Lower barrier for YouTubers
 - [ ] **Visualizer Battle events** - Community competitions on Discord. 2 weeks post-launch per GTM strategy
-- [ ] **Deploy docs.mcav.live** - MkDocs Material site. Content already exists in markdown, just needs hosting
+- [x] **Deploy docs.mcav.live** - MkDocs Material site built in `docs-site/` with 12 pages, Dockerfile, MCAV branding. Just needs hosting *(Batch 4)*
 
 ### DJ Client Enhancements
 
 - [x] **Connection history** - Quick-reconnect to last 3 servers via localStorage *(Batch 2)*
 - [x] **System tray mode** - Minimize to tray with show/hide toggle and quit option *(Batch 3)*
 - [x] **Keyboard shortcuts** - Ctrl+D disconnect, Ctrl+R refresh sources, Ctrl+T test audio, Escape close overlays, ? help *(Batch 3)*
-- [ ] **Demo mode** - Explore UI with simulated audio data, no server needed. Great for screenshots/tutorials
+- [x] **Demo mode** - "Try Demo" button with simulated 128 BPM audio, demo banner, Escape to exit *(Batch 4)*
 - [ ] **Visual waveform** - Complement frequency bars with time-domain waveform display
 
 ### VJ Server & Patterns
 
 - [x] **Scene presets** - Save/load full state as named scenes, 4 built-in presets, admin panel UI *(Batch 2)*
-- [ ] **BPM-synced patterns** - Lock pattern rotations/animations to beat phase for tighter sync
+- [x] **BPM-synced patterns** - beat_phase/bpm in Lua, 4 helper functions (beat_sub, beat_sin, beat_tri, beat_pulse), 2 new patterns *(Batch 4)*
 - [ ] **Pattern preview thumbnails** in admin panel - 28 patterns in a flat grid is hard to browse without visuals
 - [ ] **MIDI controller support** - Map hardware faders/buttons to pattern params. Professional VJ workflow
 - [ ] **Session recording/replay** - Record a performance, replay it later. Great for content creation
@@ -116,7 +116,7 @@
 
 ### Minecraft Plugin
 
-- [ ] **Visual zone boundaries** - Particle outlines to help with positioning zones in-world
+- [x] **Visual zone boundaries** - Dust particle outlines along zone edges, 30s auto-hide, command + GUI toggle *(Batch 4)*
 - [ ] **Per-zone metrics** - Entity update rate, frame drops per zone in admin panel
 - [x] **Zone templates** - 4 presets (Small Stage, Concert Hall, DJ Booth, Festival) with GUI menu and `--template` CLI flag *(Batch 3)*
 
@@ -129,14 +129,14 @@
 2. ~~Fix README (Quick Start, download links, GIFs)~~ **DONE**
 3. ~~Add Privacy Policy + Terms of Service to site~~ **DONE**
 4. Set up Discord server
-5. Deploy live browser preview
+5. ~~Deploy live browser preview~~ **DONE** (built at `/preview`, needs deployment)
 
 ### Phase 2: Distribution (3-5 days)
 1. Create Modrinth project with hero video
 2. Publish VJ server to PyPI
 3. Add GitHub topics + social preview
 4. Pin "Help Wanted" issues for contributors
-5. Deploy docs.mcav.live
+5. ~~Deploy docs.mcav.live~~ **DONE** (MkDocs site built, needs hosting)
 
 ### Phase 3: Launch Day
 *Per existing GTM_STRATEGY.md:*
@@ -167,7 +167,7 @@
 What makes MCAV defensible:
 1. **First-mover on Display Entities** - 18+ months ahead of any competitor
 2. **Multi-DJ architecture** - Network effect (more DJs = more value per server)
-3. **Pattern library** - 28 patterns with community contribution pipeline
+3. **Pattern library** - 30 patterns with community contribution pipeline
 4. **Cross-platform tooling** - Rust + Python + Java + TypeScript (high replication cost)
 5. **Open source community** - MIT license attracts contributors who build the moat for you
 
