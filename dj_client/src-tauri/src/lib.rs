@@ -4,6 +4,7 @@
 //! audio visualizations to Minecraft.
 
 pub mod audio;
+pub mod content_filter;
 pub mod patterns;
 pub mod protocol;
 pub mod state;
@@ -230,6 +231,8 @@ async fn connect_with_code(
     server_host: String,
     server_port: u16,
 ) -> Result<(), String> {
+    content_filter::validate_no_slurs(&dj_name, "DJ name")?;
+
     let config = DjClientConfig {
         server_host: server_host.clone(),
         server_port,
@@ -296,6 +299,8 @@ async fn connect_direct(
     server_host: String,
     server_port: u16,
 ) -> Result<(), String> {
+    content_filter::validate_no_slurs(&dj_name, "DJ name")?;
+
     let config = DjClientConfig {
         server_host: server_host.clone(),
         server_port,

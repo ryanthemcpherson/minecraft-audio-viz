@@ -8,6 +8,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.content_filter import validate_no_slurs
+
 # ---------------------------------------------------------------------------
 # Shared
 # ---------------------------------------------------------------------------
@@ -30,6 +32,11 @@ class RegisterServerRequest(BaseModel):
         description="Plaintext API key chosen by the server operator",
     )
 
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "name")
+
 
 class RegisterServerResponse(BaseModel):
     server_id: uuid.UUID
@@ -51,6 +58,11 @@ class CreateShowRequest(BaseModel):
     server_id: uuid.UUID
     name: str = Field(..., min_length=1, max_length=200)
     max_djs: int = Field(default=8, ge=1, le=64)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "name")
 
 
 class CreateShowResponse(BaseModel):
@@ -120,6 +132,11 @@ class RegisterRequest(BaseModel):
             raise ValueError("Invalid email format")
         return v.lower().strip()
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "display_name")
+
 
 class LoginRequest(BaseModel):
     email: str = Field(..., min_length=1, max_length=255)
@@ -145,6 +162,13 @@ class AuthResponse(BaseModel):
 
 class UpdateAccountRequest(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "display_name")
+        return v
 
 
 class ChangePasswordRequest(BaseModel):
@@ -211,6 +235,23 @@ class CreateOrgRequest(BaseModel):
     slug: str = Field(..., min_length=3, max_length=63)
     description: str | None = Field(None, max_length=500)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "name")
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "slug")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "description")
+        return v
+
 
 class CreateOrgResponse(BaseModel):
     id: uuid.UUID
@@ -234,6 +275,20 @@ class UpdateOrgRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
     avatar_url: str | None = Field(None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "name")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "description")
+        return v
 
 
 class AssignServerRequest(BaseModel):
@@ -384,6 +439,18 @@ class CreateDJProfileRequest(BaseModel):
     spotify_url: str | None = Field(None, max_length=500)
     website_url: str | None = Field(None, max_length=500)
 
+    @field_validator("dj_name")
+    @classmethod
+    def validate_dj_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "dj_name")
+
+    @field_validator("bio")
+    @classmethod
+    def validate_bio_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "bio")
+        return v
+
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v: str | None) -> str | None:
@@ -392,6 +459,8 @@ class CreateDJProfileRequest(BaseModel):
                 "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
                 "starting and ending with alphanumeric"
             )
+        if v is not None:
+            validate_no_slurs(v, "slug")
         return v
 
     @field_validator("color_palette")
@@ -438,6 +507,20 @@ class UpdateDJProfileRequest(BaseModel):
     spotify_url: str | None = Field(None, max_length=500)
     website_url: str | None = Field(None, max_length=500)
 
+    @field_validator("dj_name")
+    @classmethod
+    def validate_dj_name_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "dj_name")
+        return v
+
+    @field_validator("bio")
+    @classmethod
+    def validate_bio_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "bio")
+        return v
+
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v: str | None) -> str | None:
@@ -446,6 +529,8 @@ class UpdateDJProfileRequest(BaseModel):
                 "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
                 "starting and ending with alphanumeric"
             )
+        if v is not None:
+            validate_no_slurs(v, "slug")
         return v
 
     @field_validator("color_palette")

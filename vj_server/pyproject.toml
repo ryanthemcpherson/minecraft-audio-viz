@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.24.0",
     "python-dotenv>=1.0.0",
     "lupa>=1.14",
+    "better-profanity>=0.7.0",
 ]
 
 [project.optional-dependencies]

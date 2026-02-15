@@ -886,6 +886,25 @@ class VJServer:
                 code = data.get("code", "").upper()
                 dj_name = data.get("dj_name", "DJ")
 
+                # Slur filter on DJ name
+                try:
+                    from vj_server.content_filter import contains_slur as _contains_slur
+
+                    if _contains_slur(dj_name):
+                        logger.warning("DJ code auth rejected: DJ name failed content filter")
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "auth_error",
+                                    "error": "DJ name contains language that is not allowed",
+                                }
+                            )
+                        )
+                        await websocket.close(4005, "Content policy violation")
+                        return
+                except ImportError:
+                    pass  # better-profanity not installed — skip filter
+
                 # Validate connect code (locked to prevent race condition
                 # where two concurrent auths could both pass is_valid())
                 async with self._dj_lock:
@@ -1156,6 +1175,25 @@ class VJServer:
                 dj_id = data.get("dj_id", "")
                 dj_key = data.get("dj_key", "")
                 dj_name = data.get("dj_name", dj_id)
+
+                # Slur filter on DJ name
+                try:
+                    from vj_server.content_filter import contains_slur as _contains_slur
+
+                    if _contains_slur(dj_name):
+                        logger.warning("DJ auth rejected: DJ name failed content filter")
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "auth_error",
+                                    "error": "DJ name contains language that is not allowed",
+                                }
+                            )
+                        )
+                        await websocket.close(4005, "Content policy violation")
+                        return
+                except ImportError:
+                    pass  # better-profanity not installed — skip filter
 
                 # Verify credentials
                 if self.require_auth:
@@ -2796,6 +2834,23 @@ class VJServer:
                                 json.dumps({"type": "error", "message": "Scene name is required"})
                             )
                             continue
+
+                        # Slur filter on scene name
+                        try:
+                            from vj_server.content_filter import contains_slur as _contains_slur
+
+                            if _contains_slur(scene_name):
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "message": "Scene name contains language that is not allowed",
+                                        }
+                                    )
+                                )
+                                continue
+                        except ImportError:
+                            pass
 
                         try:
                             scene_data = self._capture_current_state()
