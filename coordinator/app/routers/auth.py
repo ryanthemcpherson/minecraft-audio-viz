@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 import secrets
 import time
+from typing import Any
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -19,6 +21,7 @@ from app.models.schemas import (
     ChangePasswordRequest,
     DiscordAuthorizeResponse,
     DJProfileResponse,
+    ExchangeCodeRequest,
     LoginRequest,
     LogoutRequest,
     OrgSummary,
@@ -36,26 +39,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _OAUTH_STATE_TTL = 600  # seconds
+_EXCHANGE_CODE_TTL = 60  # seconds
+
+# In-memory store for desktop OAuth exchange codes: code -> (AuthResponse dict, created_at)
+_desktop_exchange_codes: dict[str, tuple[dict[str, Any], float]] = {}
 
 
-def _create_oauth_state(jwt_secret: str) -> str:
+def _create_oauth_state(jwt_secret: str, *, desktop: bool = False) -> str:
     """Create a self-validating OAuth state token as a signed JWT."""
     now = int(time.time())
-    payload = {
+    payload: dict[str, Any] = {
         "nonce": secrets.token_urlsafe(16),
         "iat": now,
         "exp": now + _OAUTH_STATE_TTL,
     }
+    if desktop:
+        payload["desktop"] = True
     return pyjwt.encode(payload, jwt_secret, algorithm="HS256")
 
 
-def _validate_oauth_state(state: str, jwt_secret: str) -> bool:
-    """Validate an OAuth state JWT. Returns True if valid and not expired."""
+def _validate_oauth_state(state: str, jwt_secret: str) -> dict[str, Any] | None:
+    """Validate an OAuth state JWT. Returns decoded payload if valid, None otherwise."""
     try:
-        pyjwt.decode(state, jwt_secret, algorithms=["HS256"])
-        return True
+        return pyjwt.decode(state, jwt_secret, algorithms=["HS256"])
     except pyjwt.InvalidTokenError:
-        return False
+        return None
 
 
 def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
@@ -169,12 +177,13 @@ async def login(
     summary="Get Discord OAuth authorize URL",
 )
 async def discord_authorize(
+    desktop: bool = Query(False, description="Set to true for desktop app deep-link flow"),
     settings: Settings = Depends(get_settings),
 ) -> DiscordAuthorizeResponse:
     if not settings.discord_client_id:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
-    state = _create_oauth_state(settings.user_jwt_secret)
+    state = _create_oauth_state(settings.user_jwt_secret, desktop=desktop)
     url = discord_oauth.get_authorize_url(
         client_id=settings.discord_client_id,
         redirect_uri=settings.discord_redirect_uri,
@@ -190,7 +199,7 @@ async def discord_authorize(
 
 @router.get(
     "/discord/callback",
-    response_model=AuthResponse,
+    response_model=None,
     summary="Discord OAuth callback",
 )
 async def discord_callback(
@@ -198,11 +207,12 @@ async def discord_callback(
     state: str = Query(""),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> AuthResponse:
+) -> AuthResponse | HTMLResponse:
     if not settings.discord_client_id or not settings.discord_client_secret:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
-    if not state or not _validate_oauth_state(state, settings.user_jwt_secret):
+    state_payload = _validate_oauth_state(state, settings.user_jwt_secret)
+    if not state_payload:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     try:
@@ -238,7 +248,52 @@ async def discord_callback(
         await session.execute(select(UserModel).where(UserModel.id == result.user_id))
     ).scalar_one()
 
-    return _auth_response(result, user)
+    auth_resp = _auth_response(result, user)
+
+    # Desktop deep-link flow: store auth response behind a one-time exchange code
+    # and redirect to the desktop app via custom URL scheme.
+    if state_payload.get("desktop"):
+        exchange_code = secrets.token_urlsafe(32)
+        _desktop_exchange_codes[exchange_code] = (
+            auth_resp.model_dump(mode="json"),
+            time.time(),
+        )
+        scheme = settings.desktop_deep_link_scheme
+        redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
+        html = (
+            f"<html><head><meta http-equiv='refresh' content='0;url={redirect_url}'>"
+            f"</head><body><p>Redirecting to MCAV DJ Client...</p>"
+            f"<p><a href='{redirect_url}'>Click here if not redirected</a></p>"
+            f"</body></html>"
+        )
+        return HTMLResponse(content=html)
+
+    return auth_resp
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/exchange
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/exchange",
+    response_model=AuthResponse,
+    summary="Exchange a desktop OAuth code for tokens",
+)
+async def exchange_desktop_code(
+    body: ExchangeCodeRequest,
+) -> AuthResponse:
+    """Exchange a one-time code (from the desktop deep-link callback) for auth tokens."""
+    entry = _desktop_exchange_codes.pop(body.exchange_code, None)
+    if entry is None:
+        raise HTTPException(status_code=400, detail="Invalid or already used exchange code")
+
+    data, created_at = entry
+    if time.time() - created_at > _EXCHANGE_CODE_TTL:
+        raise HTTPException(status_code=400, detail="Exchange code expired")
+
+    return AuthResponse(**data)
 
 
 # ---------------------------------------------------------------------------

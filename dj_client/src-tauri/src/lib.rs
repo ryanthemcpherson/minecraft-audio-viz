@@ -1268,6 +1268,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
         .invoke_handler(tauri::generate_handler![
             list_audio_sources,
@@ -1355,6 +1356,26 @@ pub fn run() {
                         let _ = window_clone.hide();
                     }
                 });
+            }
+
+            // Deep-link: show window when a deep link arrives
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    log::info!("Deep link received: {:?}", event.urls());
+                    // Show and focus the main window
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                });
+
+                // Register protocol in debug builds (release/install handles this via OS)
+                #[cfg(debug_assertions)]
+                if let Err(e) = app.deep_link().register("mcav") {
+                    log::warn!("Failed to register deep link protocol: {}", e);
+                }
             }
 
             Ok(())

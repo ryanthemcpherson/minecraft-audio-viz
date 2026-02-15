@@ -189,6 +189,10 @@ class DiscordAuthorizeResponse(BaseModel):
     state: str
 
 
+class ExchangeCodeRequest(BaseModel):
+    exchange_code: str = Field(..., min_length=1, max_length=128)
+
+
 class OrgSummary(BaseModel):
     id: uuid.UUID
     name: str

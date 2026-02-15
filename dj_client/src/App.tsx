@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { check, type Update } from '@tauri-apps/plugin-updater';
@@ -7,6 +7,9 @@ import AudioSourceSelect from './components/AudioSourceSelect';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
 import BeatIndicator from './components/BeatIndicator';
+import AuthModal from './components/AuthModal';
+import ProfileChip from './components/ProfileChip';
+import { useAuth } from './hooks/useAuth';
 
 interface AudioSource {
   id: string;
@@ -52,6 +55,11 @@ const MCAV_LOGO_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAKCAYAAABrGwT5AAAA3ElEQVR4AWyRvQ3CMBCFLx4jBQ0FyhppaNiAggFgAApKCgaAASjYgIYma0QUNBQZA3PfiTOOlUgv9+79OJYSZOJpmiaWmIhJKufhtm2lRO77QVbGyMOYqjGECXJf94gZIBgs73CyMPzx3MhldZTdfC193yPZDiFf13W0LyNQnH32FoSjbe8HRiqxc6CJ+kplil6Cqye+U9Ib2iFwPGBlv5aXCC4XV2E/v27k7EZe9HxQUnVdZ6by0aSF5hMOyA/DUNmX1bQDEAGBEugO8or/f9alcngon+79pg6RLwAAAP//ucby7wAAAAZJREFUAwBHiZkQ43EK0gAAAABJRU5ErkJggg==';
 
 function App() {
+  // Auth state
+  const auth = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const lastAutoFilledName = useRef<string | null>(null);
+
   // Connection state
   const [serverHost, setServerHost] = useState('192.168.1.204');
   const [serverPort, setServerPort] = useState(9000);
@@ -153,9 +161,11 @@ function App() {
         }
       }
 
-      // Escape - Close welcome overlay, stop demo, or stop test audio
+      // Escape - Close auth modal, welcome overlay, stop demo, or stop test audio
       if (event.key === 'Escape') {
-        if (showWelcomeOverlay) {
+        if (showAuthModal) {
+          setShowAuthModal(false);
+        } else if (showWelcomeOverlay) {
           handleDismissWelcome();
         } else if (isDemoMode) {
           void handleStopDemo();
@@ -167,7 +177,25 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [status.connected, showWelcomeOverlay, isTestingAudio, isDemoMode, selectedSource]);
+  }, [status.connected, showWelcomeOverlay, showAuthModal, isTestingAudio, isDemoMode, selectedSource]);
+
+  // Auto-close auth modal when signed in
+  useEffect(() => {
+    if (auth.isSignedIn && showAuthModal) {
+      setShowAuthModal(false);
+    }
+  }, [auth.isSignedIn, showAuthModal]);
+
+  // Auto-fill DJ name from profile when signed in
+  useEffect(() => {
+    if (!auth.isSignedIn || !auth.user?.dj_profile?.dj_name) return;
+    const profileDjName = auth.user.dj_profile.dj_name;
+    // Only auto-fill if the field is empty or still holds the previous auto-filled value
+    if (!djName || djName === lastAutoFilledName.current) {
+      setDjName(profileDjName);
+      lastAutoFilledName.current = profileDjName;
+    }
+  }, [auth.isSignedIn, auth.user?.dj_profile?.dj_name]);
 
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
@@ -674,6 +702,17 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
+          {auth.isSignedIn && auth.user ? (
+            <ProfileChip user={auth.user} onSignOut={auth.signOut} />
+          ) : (
+            <button
+              className="btn-signin"
+              onClick={() => setShowAuthModal(true)}
+              type="button"
+            >
+              Sign In
+            </button>
+          )}
           <button
             className="help-link"
             onClick={() => setShowShortcutsHelp(prev => !prev)}
@@ -877,6 +916,21 @@ function App() {
             )}
 
             <section className="section">
+              {auth.isSignedIn && auth.user?.dj_profile && (
+                <div className="profile-card">
+                  {auth.user.avatar_url ? (
+                    <img className="profile-card-avatar" src={auth.user.avatar_url} alt="" />
+                  ) : (
+                    <span className="profile-card-avatar-initials">
+                      {auth.user.display_name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
+                    </span>
+                  )}
+                  <div className="profile-card-inner">
+                    <span className="profile-card-name">{auth.user.dj_profile.dj_name}</span>
+                    <span className="profile-card-sub">Signed in as {auth.user.display_name}</span>
+                  </div>
+                </div>
+              )}
               <label className="input-label">
                 Step 1 - DJ Name
                 <input
@@ -1078,6 +1132,10 @@ function App() {
           </>
         )}
       </main>
+
+      {showAuthModal && (
+        <AuthModal auth={auth} onClose={() => setShowAuthModal(false)} />
+      )}
     </div>
   );
 }

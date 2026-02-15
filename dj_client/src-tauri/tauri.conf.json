@@ -57,6 +57,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["mcav"]
+      }
+    },
     "shell": {
       "open": true
     },

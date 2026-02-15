@@ -69,8 +69,16 @@ class Settings(BaseSettings):
     r2_bucket_name: str = ""
     r2_public_url: str = ""
 
+    # Desktop deep link
+    desktop_deep_link_scheme: str = "mcav"
+
     # CORS
-    cors_origins: list[str] = ["https://mcav.live", "http://localhost:3000"]
+    cors_origins: list[str] = [
+        "https://mcav.live",
+        "http://localhost:3000",
+        "tauri://localhost",
+        "http://tauri.localhost",
+    ]
 
     model_config = SettingsConfigDict(
         env_prefix="MCAV_",
