@@ -19,7 +19,7 @@ const steps = [
     number: "02",
     title: "Process",
     description:
-      "5-band FFT analysis with Aubio-powered beat and onset detection. Sub-21ms latency keeps visualizations perfectly synced.",
+      "5-band FFT analysis with beat and onset detection in the Rust DJ client. Sub-21ms latency keeps visualizations perfectly synced.",
     icon: (
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <rect x="1" y="6" width="4" height="14" rx="1" />
@@ -104,7 +104,7 @@ export default function HowItWorks() {
             <path d="M0 4h16M13 1l4 3-4 3" stroke="currentColor" strokeWidth="1.5" />
           </svg>
           <span className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 font-mono">
-            Python FFT
+            Rust FFT
           </span>
           <svg width="20" height="8" viewBox="0 0 20 8" fill="none">
             <path d="M0 4h16M13 1l4 3-4 3" stroke="currentColor" strokeWidth="1.5" />

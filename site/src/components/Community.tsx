@@ -29,7 +29,7 @@ const communityLinks = [
   },
   {
     title: "Patterns",
-    description: "Browse 28+ community patterns",
+    description: "Browse 30+ community patterns",
     icon: (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M9 18V5l12-2v13" />
@@ -126,7 +126,7 @@ export default function Community() {
               <circle cx="6" cy="18" r="3" />
               <circle cx="18" cy="16" r="3" />
             </svg>
-            <span>28+ Patterns</span>
+            <span>30+ Patterns</span>
           </div>
           <div className="h-1 w-1 rounded-full bg-text-secondary/40" />
           <div className="flex items-center gap-2">

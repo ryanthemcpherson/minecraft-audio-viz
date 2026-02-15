@@ -30,7 +30,7 @@ export default function Hero() {
         {/* Badge */}
         <div className="animate-slide-up mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-text-secondary backdrop-blur-sm">
           <span className="inline-block h-2 w-2 rounded-full bg-disc-cyan animate-pulse" />
-          Now with 27+ visualization patterns
+          Now with 30+ visualization patterns
         </div>
 
         {/* Headline */}

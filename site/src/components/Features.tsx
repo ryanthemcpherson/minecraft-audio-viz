@@ -1,6 +1,6 @@
 const features = [
   {
-    title: "27+ Visualization Patterns",
+    title: "30+ Visualization Patterns",
     description:
       "From spirals and auroras to DNA helixes and wave terrain. Switch patterns live during a set with instant transitions.",
     icon: (
@@ -45,7 +45,7 @@ const features = [
   {
     title: "Beat Detection",
     description:
-      "Aubio-powered onset and tempo detection with sub-21ms latency. BPM tracking, beat phase, and drum hit detection built in.",
+      "Rust-powered FFT analysis with onset and tempo detection at sub-21ms latency. BPM tracking, beat phase, and drum hit detection built in.",
     icon: (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M22 12h-4l-3 9L9 3l-3 9H2" />

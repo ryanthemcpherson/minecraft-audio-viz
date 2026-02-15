@@ -19,7 +19,6 @@ const tocItems = [
   { id: "dj-setup", label: "For DJs" },
   { id: "download-dj-client", label: "Download DJ Client", indent: true },
   { id: "connect", label: "Connect", indent: true },
-  { id: "python-cli", label: "Python CLI Alternative", indent: true },
   { id: "troubleshooting", label: "Troubleshooting" },
   { id: "next-steps", label: "Next Steps" },
 ];
@@ -256,18 +255,19 @@ cp target/audioviz-plugin-*.jar /path/to/server/plugins/`}
 
                   <CodeBlock
                     title="Terminal"
-                    code={`# Install directly from GitHub
-pip install git+https://github.com/ryanthemcpherson/minecraft-audio-viz.git`}
+                    code={`# Clone the repo and install the VJ server
+git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
+cd minecraft-audio-viz/vj_server
+pip install -e .`}
                   />
 
                   <div className="border-t border-white/5 pt-6">
                     <p className="text-sm text-text-secondary mb-3">
-                      <strong className="text-white">For development</strong> — clone the repo first for access to all tools:
+                      <strong className="text-white">With auth support</strong> — install the optional bcrypt dependency for DJ authentication:
                     </p>
                     <CodeBlock
                       title="Terminal"
-                      code={`git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-cd minecraft-audio-viz
+                      code={`cd minecraft-audio-viz/vj_server
 pip install -e ".[full]"`}
                     />
                   </div>
@@ -302,11 +302,9 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                   />
 
                   <div className="callout-tip text-sm text-text-secondary">
-                    <strong className="text-white">Solo mode:</strong> If you&apos;re the only DJ (no remote DJs connecting), you can skip the VJ server and run directly:
-                    <CodeBlock
-                      title="Terminal"
-                      code={`audioviz --app spotify --host YOUR_MC_SERVER_IP`}
-                    />
+                    <strong className="text-white">Dev mode:</strong> For quick testing without authentication, add the{" "}
+                    <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">--no-auth</code> flag:{" "}
+                    <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">audioviz-vj --no-auth</code>
                   </div>
                 </div>
               </div>
@@ -470,33 +468,6 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                 </div>
               </div>
 
-              {/* Alternative: Python CLI */}
-              <div id="python-cli">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-text-secondary font-bold text-sm">
-                    alt
-                  </div>
-                  <h3 className="text-xl font-bold">Alternative: Python CLI</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    Prefer the command line? You can use the Python CLI directly instead of the DJ Client app.
-                  </p>
-
-                  <CodeBlock
-                    title="Terminal"
-                    code={`# Install the VJ server
-pip install git+https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-
-# Connect directly to a Minecraft server
-audioviz --app spotify --host 192.168.1.100
-
-# Or connect to a VJ server as a remote DJ
-audioviz --dj-relay --vj-server ws://SERVER:9000 --dj-name "DJ Spark"`}
-                  />
-                </div>
-              </div>
             </section>
 
             {/* ===== TROUBLESHOOTING ===== */}
@@ -520,14 +491,11 @@ audioviz --dj-relay --vj-server ws://SERVER:9000 --dj-name "DJ Spark"`}
                   </summary>
                   <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
                     <p className="mb-3">Make sure your audio application (Spotify, Chrome, etc.) is playing audio when you start the capture.</p>
-                    <CodeBlock
-                      title="Terminal"
-                      code={`# List all capturable audio applications
-audioviz --list-apps
-
-# List audio devices
-audioviz --list-devices`}
-                    />
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>The DJ Client auto-detects available audio sources when the app opens</li>
+                      <li>On Windows, per-app capture requires Windows 10 build 20348+ (Process Loopback API)</li>
+                      <li>Try selecting &quot;System Audio&quot; instead of a specific app if per-app capture fails</li>
+                    </ul>
                   </div>
                 </details>
 
@@ -574,7 +542,7 @@ audioviz --list-devices`}
                   </summary>
                   <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>Enable low-latency mode: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">audioviz --low-latency</code> (~20ms window)</li>
+                      <li>The DJ Client uses ultra-low-latency mode by default (~21ms window)</li>
                       <li>Reduce entity count for better server performance</li>
                       <li>Ensure the VJ server and Minecraft server are on the same network for minimal latency</li>
                       <li>Close resource-heavy applications on the audio capture machine</li>
@@ -611,7 +579,7 @@ audioviz --list-devices`}
                   </div>
                   <h3 className="font-bold mb-2">Pattern Gallery</h3>
                   <p className="text-sm text-text-secondary">
-                    Explore 27+ visualization patterns — spirals, auroras, DNA helixes, and more.
+                    Explore 29 visualization patterns — spirals, auroras, galaxies, and more.
                   </p>
                 </a>
 

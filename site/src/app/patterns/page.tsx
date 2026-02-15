@@ -5,7 +5,7 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Pattern Gallery | MCAV",
   description:
-    "Explore 27+ real-time visualization patterns — spirals, auroras, DNA helixes, spectrum analyzers, and more. Each preview runs the actual pattern engine.",
+    "Explore 30 real-time visualization patterns — spirals, auroras, DNA helixes, spectrum analyzers, and more. Each preview runs the actual pattern engine.",
 };
 
 export default function PatternsPage() {
@@ -24,7 +24,7 @@ export default function PatternsPage() {
             <span className="text-gradient">Pattern Gallery</span>
           </h1>
           <p className="animate-slide-up-delay-1 mx-auto mt-4 max-w-2xl text-lg text-text-secondary">
-            27+ visualization patterns — spirals, auroras, DNA helixes, and
+            30 visualization patterns — spirals, auroras, DNA helixes, and
             more. Each preview runs the actual pattern engine with simulated
             audio.
           </p>
