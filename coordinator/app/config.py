@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _logger = logging.getLogger(__name__)
@@ -79,6 +81,29 @@ class Settings(BaseSettings):
         "tauri://localhost",
         "http://tauri.localhost",
     ]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, v: object) -> list[str]:
+        """Parse CORS origins from env var — handles JSON arrays and comma-separated strings."""
+        if isinstance(v, list):
+            return v
+        if not isinstance(v, str):
+            return list(v)  # type: ignore[arg-type]
+        v = v.strip()
+        # Try JSON array first: '["https://mcav.live","http://localhost:3000"]'
+        if v.startswith("["):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed]
+            except json.JSONDecodeError:
+                pass
+            # Railway strips inner quotes: [https://mcav.live,http://localhost:3000]
+            inner = v[1:-1] if v.endswith("]") else v[1:]
+            return [item.strip() for item in inner.split(",") if item.strip()]
+        # Plain comma-separated: 'https://mcav.live,http://localhost:3000'
+        return [item.strip() for item in v.split(",") if item.strip()]
 
     model_config = SettingsConfigDict(
         env_prefix="MCAV_",
