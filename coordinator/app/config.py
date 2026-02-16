@@ -1,4 +1,7 @@
-"""Coordinator configuration via pydantic-settings."""
+"""Coordinator configuration via pydantic-settings.
+
+Deployed on Railway with auto-deploy from main branch.
+"""
 
 from __future__ import annotations
 
