@@ -9,30 +9,48 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.gui.builder.ItemBuilder;
 import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageZoneConfig;
+import com.audioviz.stages.StageZonePlacementSession;
 import com.audioviz.stages.StageZoneRole;
 import com.audioviz.zones.VisualizationZone;
+import com.audioviz.zones.ZoneBoundaryRenderer;
 import org.bukkit.ChatColor;
 import org.bukkit.DyeColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.Color;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Main stage configuration screen with a spatial zone grid layout.
  * Shows zones in their approximate spatial arrangement and provides
- * controls for move, rotate, activate/deactivate, and VJ access.
+ * controls for move, rotate, activate/deactivate, VJ access, and
+ * live 3D stage preview with zone role labels.
  */
 public class StageEditorMenu implements Menu {
 
     private final AudioVizPlugin plugin;
     private final MenuManager menuManager;
     private final Stage stage;
+
+    // Preview state
+    private boolean previewActive = false;
+    private final List<TextDisplay> roleLabels = new ArrayList<>();
+
+    // Move/rotate preview state
+    private boolean pendingMove = false;
+    private Location pendingMoveLocation = null;
+    private boolean pendingRotate = false;
+    private float pendingRotation = 0f;
 
     // Zone grid positions (rows 1-3, approximate spatial layout)
     // Row 1: LEFT_WING(10) ... MAIN_STAGE(13) ... RIGHT_WING(16)
@@ -47,9 +65,17 @@ public class StageEditorMenu implements Menu {
     private static final int SLOT_SKYBOX = 31;
     private static final int SLOT_BALCONY = 34;
 
+    // Preview button (header row)
+    private static final int SLOT_PREVIEW = 6;
+
     // Organization controls (row 4, embedded in separator)
     private static final int SLOT_PIN = 38;
+    private static final int SLOT_RELOCATE_ZONES = 39;
     private static final int SLOT_TAG = 40;
+
+    // Confirm/cancel slots (row 4, shown during pending move/rotate)
+    private static final int SLOT_CONFIRM = 42;
+    private static final int SLOT_CANCEL = 43;
 
     // Control buttons (row 5)
     private static final int SLOT_BACK = 45;
@@ -102,6 +128,19 @@ public class StageEditorMenu implements Menu {
             .glow()
             .build());
 
+        // Preview Stage button
+        inventory.setItem(SLOT_PREVIEW, new ItemBuilder(Material.ENDER_EYE)
+            .name(previewActive ? "&a\u25C9 Stage Preview: ON" : "&7\u25CB Stage Preview: OFF")
+            .lore(
+                "&7Toggle live 3D rendering of",
+                "&7all zones with distinct colors",
+                "&7and role name labels.",
+                "",
+                previewActive ? "&eClick to hide preview" : "&eClick to show preview"
+            )
+            .glow(previewActive)
+            .build());
+
         // Fill zone area with dark glass
         ItemStack darkFiller = ItemBuilder.glassPane(DyeColor.BLACK);
         for (int row = 1; row <= 3; row++) {
@@ -121,7 +160,7 @@ public class StageEditorMenu implements Menu {
         placeZoneItem(inventory, StageZoneRole.SKYBOX, SLOT_SKYBOX);
         placeZoneItem(inventory, StageZoneRole.BALCONY, SLOT_BALCONY);
 
-        // Row 4 - separator with pin/tag controls
+        // Row 4 - separator with pin/tag controls (or confirm/cancel during pending ops)
         ItemStack grayFiller = ItemBuilder.glassPane(DyeColor.GRAY);
         for (int i = 36; i < 45; i++) inventory.setItem(i, grayFiller);
 
@@ -138,6 +177,17 @@ public class StageEditorMenu implements Menu {
             .glow(stage.isPinned())
             .build());
 
+        // Relocate Zones
+        inventory.setItem(SLOT_RELOCATE_ZONES, new ItemBuilder(Material.COMPASS)
+            .name("&bRelocate Zones")
+            .lore(
+                "&7Walk to each zone's location",
+                "&7and confirm placement one-by-one.",
+                "",
+                "&eClick to start placement wizard"
+            )
+            .build());
+
         // Tag editor
         String tagDisplay = stage.getTag().isEmpty() ? "&7None" : "&f" + stage.getTag();
         inventory.setItem(SLOT_TAG, new ItemBuilder(Material.NAME_TAG)
@@ -151,30 +201,88 @@ public class StageEditorMenu implements Menu {
             )
             .build());
 
+        // Confirm/cancel buttons (visible during pending move or rotate)
+        if (pendingMove || pendingRotate) {
+            String action = pendingMove ? "Move" : "Rotation to " + (int) pendingRotation + "\u00B0";
+            inventory.setItem(SLOT_CONFIRM, new ItemBuilder(Material.LIME_CONCRETE)
+                .name("&a\u2714 Confirm " + action)
+                .lore(
+                    pendingMove
+                        ? "&7Apply move to your location"
+                        : "&7Apply rotation to " + (int) pendingRotation + "\u00B0",
+                    "",
+                    "&aClick to confirm"
+                )
+                .glow()
+                .build());
+
+            inventory.setItem(SLOT_CANCEL, new ItemBuilder(Material.RED_CONCRETE)
+                .name("&c\u2718 Cancel")
+                .lore(
+                    "&7Discard the pending " + (pendingMove ? "move" : "rotation"),
+                    "",
+                    "&cClick to cancel"
+                )
+                .build());
+        }
+
         // Control buttons (row 5)
         inventory.setItem(SLOT_BACK, ItemBuilder.backButton());
 
-        inventory.setItem(SLOT_MOVE, new ItemBuilder(Material.ENDER_PEARL)
-            .name("&bMove Stage")
-            .lore(
-                "&7Move the stage anchor to",
-                "&7your current location.",
-                "&7All zones will reposition.",
-                "",
-                "&eClick to move"
-            )
-            .build());
+        // Move button - shows pending state if active
+        if (pendingMove) {
+            inventory.setItem(SLOT_MOVE, new ItemBuilder(Material.ENDER_PEARL)
+                .name("&b\u21BB Move Stage &7(Pending)")
+                .lore(
+                    "&7Preview location set.",
+                    "&7Use &aConfirm &7or &cCancel",
+                    "&7in the row above.",
+                    "",
+                    "&eClick to update preview location"
+                )
+                .glow()
+                .build());
+        } else {
+            inventory.setItem(SLOT_MOVE, new ItemBuilder(Material.ENDER_PEARL)
+                .name("&bMove Stage")
+                .lore(
+                    "&7Move the stage anchor to",
+                    "&7your current location.",
+                    "&7Shows preview before applying.",
+                    "",
+                    "&eClick to preview move"
+                )
+                .build());
+        }
 
-        inventory.setItem(SLOT_ROTATE, new ItemBuilder(Material.COMPASS)
-            .name("&bRotate Stage")
-            .lore(
-                "&7Current: &f" + (int) stage.getRotation() + "\u00B0",
-                "",
-                "&eLeft-click: +15\u00B0",
-                "&eRight-click: -15\u00B0",
-                "&eShift-click: +/-45\u00B0"
-            )
-            .build());
+        // Rotate button - shows pending state if active
+        if (pendingRotate) {
+            inventory.setItem(SLOT_ROTATE, new ItemBuilder(Material.COMPASS)
+                .name("&b\u21BB Rotate Stage &7(Pending: " + (int) pendingRotation + "\u00B0)")
+                .lore(
+                    "&7Preview rotation: &f" + (int) pendingRotation + "\u00B0",
+                    "&7Current: &f" + (int) stage.getRotation() + "\u00B0",
+                    "",
+                    "&7Use &aConfirm &7or &cCancel above.",
+                    "",
+                    "&eLeft-click: +15\u00B0",
+                    "&eRight-click: -15\u00B0",
+                    "&eShift-click: +/-45\u00B0"
+                )
+                .glow()
+                .build());
+        } else {
+            inventory.setItem(SLOT_ROTATE, new ItemBuilder(Material.COMPASS)
+                .name("&bRotate Stage")
+                .lore(
+                    "&7Current: &f" + (int) stage.getRotation() + "\u00B0",
+                    "",
+                    "&eLeft-click: +15\u00B0",
+                    "&eRight-click: -15\u00B0",
+                    "&eShift-click: +/-45\u00B0"
+                )
+                .build());
+        }
 
         // Active toggle
         boolean active = stage.isActive();
@@ -268,7 +376,13 @@ public class StageEditorMenu implements Menu {
         boolean hasEntities = entityCount > 0;
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
-        Material material = hasEntities ? Material.LIME_CONCRETE : Material.YELLOW_CONCRETE;
+        // Active zone indicator: green wool for zones with entities, yellow concrete otherwise
+        Material material;
+        if (hasEntities) {
+            material = Material.LIME_WOOL;
+        } else {
+            material = Material.YELLOW_CONCRETE;
+        }
 
         List<String> lore = new ArrayList<>();
         lore.add("&7Role: &f" + role.getDisplayName());
@@ -284,9 +398,16 @@ public class StageEditorMenu implements Menu {
             lore.add("&7Render: &f" + config.getRenderMode());
             lore.add("&7Block: &f" + config.getBlockType());
         }
+
+        // Show active pattern name for zones with entities
+        if (hasEntities && config != null) {
+            lore.add("");
+            lore.add("&a\u25B6 Active: &f" + config.getPattern());
+        }
+
         lore.add("");
         lore.add("&eLeft-click to edit");
-        lore.add("&eRight-click to teleport");
+        lore.add("&eRight-click to highlight in world");
         lore.add("&cShift-click to remove");
 
         ItemBuilder builder = new ItemBuilder(material)
@@ -305,23 +426,42 @@ public class StageEditorMenu implements Menu {
         switch (slot) {
             case SLOT_BACK -> {
                 playClickSound(player);
+                cleanupPreview();
                 menuManager.openMenu(player, new StageListMenu(plugin, menuManager));
+            }
+
+            case SLOT_PREVIEW -> {
+                playClickSound(player);
+                togglePreview(player);
+                menuManager.refreshMenu(player);
             }
 
             case SLOT_MOVE -> {
                 playClickSound(player);
-                plugin.getStageManager().moveStage(stage, player.getLocation());
-                player.sendMessage(ChatColor.GREEN + "Stage moved to your location.");
+                handleMoveClick(player);
                 menuManager.refreshMenu(player);
             }
 
             case SLOT_ROTATE -> {
                 playClickSound(player);
-                float delta = click.isShiftClick() ? 45f : 15f;
-                if (click.isRightClick()) delta = -delta;
-                plugin.getStageManager().rotateStage(stage, stage.getRotation() + delta);
-                player.sendMessage(ChatColor.GREEN + "Stage rotated to " + (int) stage.getRotation() + "\u00B0");
+                handleRotateClick(player, click);
                 menuManager.refreshMenu(player);
+            }
+
+            case SLOT_CONFIRM -> {
+                if (pendingMove || pendingRotate) {
+                    playClickSound(player);
+                    confirmPendingAction(player);
+                    menuManager.refreshMenu(player);
+                }
+            }
+
+            case SLOT_CANCEL -> {
+                if (pendingMove || pendingRotate) {
+                    playClickSound(player);
+                    cancelPendingAction(player);
+                    menuManager.refreshMenu(player);
+                }
             }
 
             case SLOT_TOGGLE_ACTIVE -> {
@@ -374,6 +514,18 @@ public class StageEditorMenu implements Menu {
                 menuManager.refreshMenu(player);
             }
 
+            case SLOT_RELOCATE_ZONES -> {
+                playClickSound(player);
+                cleanupPreview();
+                player.closeInventory();
+                StageZonePlacementSession session =
+                    plugin.getZonePlacementManager().startSession(player, stage);
+                if (session == null) {
+                    // Couldn't start - reopen menu
+                    menuManager.openMenu(player, new StageEditorMenu(plugin, menuManager, stage));
+                }
+            }
+
             case SLOT_TAG -> {
                 if (click.isRightClick()) {
                     playClickSound(player);
@@ -391,6 +543,7 @@ public class StageEditorMenu implements Menu {
             case SLOT_DELETE -> {
                 if (click.isShiftClick()) {
                     player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.5f, 1f);
+                    cleanupPreview();
                     player.closeInventory();
                     player.sendMessage(ChatColor.RED + "Deleting stage: " + stage.getName());
                     plugin.getStageManager().deleteStage(stage.getName());
@@ -409,6 +562,184 @@ public class StageEditorMenu implements Menu {
             }
         }
     }
+
+    @Override
+    public void onClose(Player player) {
+        // Clean up pending actions but keep preview if explicitly toggled
+        if (pendingMove || pendingRotate) {
+            cancelPendingAction(player);
+        }
+        plugin.getZoneBoundaryRenderer().clearSelection();
+    }
+
+    // ==================== Preview ====================
+
+    private void togglePreview(Player player) {
+        ZoneBoundaryRenderer renderer = plugin.getZoneBoundaryRenderer();
+
+        if (previewActive) {
+            // Turn off preview
+            renderer.hideStage(stage.getName());
+            cleanupRoleLabels();
+            previewActive = false;
+            player.sendMessage(ChatColor.YELLOW + "Stage preview hidden.");
+        } else {
+            // Turn on preview - show all zones with distinct colors and floor planes
+            renderer.showStage(stage.getName());
+            spawnRoleLabels();
+            previewActive = true;
+            player.sendMessage(ChatColor.GREEN + "Stage preview active. All zones visible with labels.");
+        }
+    }
+
+    private void spawnRoleLabels() {
+        cleanupRoleLabels();
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+            VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+            if (zone == null) continue;
+
+            // Spawn a Text Display entity above the zone center
+            Location labelLoc = zone.getCenter().add(0, zone.getSize().getY() * 0.5 + 1.5, 0);
+
+            labelLoc.getWorld().spawn(labelLoc, TextDisplay.class, textDisplay -> {
+                textDisplay.setText(ChatColor.GOLD + role.getDisplayName());
+                textDisplay.setBillboard(Display.Billboard.CENTER);
+                textDisplay.setBackgroundColor(Color.fromARGB(160, 0, 0, 0));
+                textDisplay.setShadowed(true);
+                textDisplay.setSeeThrough(true);
+
+                // Make the text visible from a distance
+                textDisplay.setViewRange(64.0f);
+
+                roleLabels.add(textDisplay);
+            });
+        }
+    }
+
+    private void cleanupRoleLabels() {
+        for (TextDisplay label : roleLabels) {
+            if (label != null && !label.isDead()) {
+                label.remove();
+            }
+        }
+        roleLabels.clear();
+    }
+
+    private void cleanupPreview() {
+        if (previewActive) {
+            plugin.getZoneBoundaryRenderer().hideStage(stage.getName());
+            previewActive = false;
+        }
+        cleanupRoleLabels();
+        plugin.getZoneBoundaryRenderer().clearSelection();
+    }
+
+    // ==================== Move Preview ====================
+
+    private void handleMoveClick(Player player) {
+        Location newLoc = player.getLocation();
+
+        if (pendingRotate) {
+            // Cancel pending rotation if starting a move
+            pendingRotate = false;
+            pendingRotation = 0f;
+        }
+
+        pendingMove = true;
+        pendingMoveLocation = newLoc;
+
+        // Show preview: render stage boundaries at the new position as a green ghost
+        // We show the current boundaries in dim yellow and describe the new position
+        if (previewActive) {
+            // Re-show to refresh positions
+            plugin.getZoneBoundaryRenderer().showStage(stage.getName());
+        }
+
+        player.sendMessage(ChatColor.AQUA + "Move preview set to your location.");
+        player.sendMessage(ChatColor.GRAY + "  New anchor: " + formatLocation(newLoc));
+        player.sendMessage(ChatColor.GRAY + "  Use " + ChatColor.GREEN + "Confirm" +
+            ChatColor.GRAY + " or " + ChatColor.RED + "Cancel" + ChatColor.GRAY + " in the menu.");
+    }
+
+    // ==================== Rotate Preview ====================
+
+    private void handleRotateClick(Player player, ClickType click) {
+        if (pendingMove) {
+            // Cancel pending move if starting a rotation
+            pendingMove = false;
+            pendingMoveLocation = null;
+        }
+
+        float delta = click.isShiftClick() ? 45f : 15f;
+        if (click.isRightClick()) delta = -delta;
+
+        if (!pendingRotate) {
+            // Start a new rotation preview from current rotation
+            pendingRotate = true;
+            pendingRotation = stage.getRotation() + delta;
+        } else {
+            // Adjust the pending rotation
+            pendingRotation = pendingRotation + delta;
+        }
+
+        // Normalize to 0-360
+        pendingRotation = ((pendingRotation % 360) + 360) % 360;
+
+        player.sendMessage(ChatColor.AQUA + "Rotation preview: " + (int) pendingRotation + "\u00B0" +
+            ChatColor.GRAY + " (current: " + (int) stage.getRotation() + "\u00B0)");
+        player.sendMessage(ChatColor.GRAY + "  Use " + ChatColor.GREEN + "Confirm" +
+            ChatColor.GRAY + " or " + ChatColor.RED + "Cancel" + ChatColor.GRAY + " in the menu.");
+    }
+
+    // ==================== Confirm / Cancel ====================
+
+    private void confirmPendingAction(Player player) {
+        if (pendingMove && pendingMoveLocation != null) {
+            plugin.getStageManager().moveStage(stage, pendingMoveLocation);
+            player.sendMessage(ChatColor.GREEN + "Stage moved to " + formatLocation(pendingMoveLocation) + ".");
+
+            // Refresh preview if active
+            if (previewActive) {
+                plugin.getZoneBoundaryRenderer().hideStage(stage.getName());
+                plugin.getZoneBoundaryRenderer().showStage(stage.getName());
+                cleanupRoleLabels();
+                spawnRoleLabels();
+            }
+        } else if (pendingRotate) {
+            plugin.getStageManager().rotateStage(stage, pendingRotation);
+            player.sendMessage(ChatColor.GREEN + "Stage rotated to " + (int) stage.getRotation() + "\u00B0.");
+
+            // Refresh preview if active
+            if (previewActive) {
+                plugin.getZoneBoundaryRenderer().hideStage(stage.getName());
+                plugin.getZoneBoundaryRenderer().showStage(stage.getName());
+                cleanupRoleLabels();
+                spawnRoleLabels();
+            }
+        }
+
+        pendingMove = false;
+        pendingMoveLocation = null;
+        pendingRotate = false;
+        pendingRotation = 0f;
+    }
+
+    private void cancelPendingAction(Player player) {
+        if (pendingMove) {
+            player.sendMessage(ChatColor.YELLOW + "Move cancelled.");
+        } else if (pendingRotate) {
+            player.sendMessage(ChatColor.YELLOW + "Rotation cancelled.");
+        }
+        pendingMove = false;
+        pendingMoveLocation = null;
+        pendingRotate = false;
+        pendingRotation = 0f;
+    }
+
+    // ==================== Zone Click Handling ====================
 
     private void handleZoneClick(Player player, StageZoneRole role, ClickType click) {
         String zoneName = stage.getZoneName(role);
@@ -432,13 +763,19 @@ public class StageEditorMenu implements Menu {
             player.sendMessage(ChatColor.YELLOW + "Removed " + role.getDisplayName() + " zone.");
             menuManager.refreshMenu(player);
         } else if (click.isRightClick()) {
-            // Teleport
-            VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
-            if (zone != null) {
-                playClickSound(player);
-                player.teleport(zone.getCenter());
-                player.sendMessage(ChatColor.GREEN + "Teleported to " + role.getDisplayName());
+            // Quick-select: highlight this zone in the world
+            playClickSound(player);
+            ZoneBoundaryRenderer renderer = plugin.getZoneBoundaryRenderer();
+            renderer.setSelected(zoneName);
+
+            // Also show the zone if not already visible
+            if (!renderer.isShowing(zoneName)) {
+                renderer.show(zoneName, Long.MAX_VALUE);
+                renderer.setPersistent(zoneName, true);
             }
+
+            player.sendMessage(ChatColor.GREEN + "\u2192 Highlighting " + ChatColor.GOLD +
+                role.getDisplayName() + ChatColor.GREEN + " in world.");
         } else {
             // Open zone editor
             VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
@@ -448,6 +785,8 @@ public class StageEditorMenu implements Menu {
             }
         }
     }
+
+    // ==================== Tag Input ====================
 
     private void requestTag(Player player) {
         java.util.Set<String> existingTags = plugin.getStageManager().getAllTags();
@@ -475,6 +814,8 @@ public class StageEditorMenu implements Menu {
             });
         });
     }
+
+    // ==================== Helpers ====================
 
     private StageZoneRole getRoleAtSlot(int slot) {
         return switch (slot) {

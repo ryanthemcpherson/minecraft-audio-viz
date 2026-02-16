@@ -34,6 +34,9 @@ public class EntityPoolManager {
     // Track entity types for each entity
     private final Map<UUID, EntityType> entityTypes;
 
+    // Cache last applied material per entity to avoid redundant block data updates
+    private final Map<String, String> entityMaterialCache;
+
     // Limits to prevent memory issues
     private static final int MAX_ZONES = 100;
     private final int maxEntitiesPerZone;
@@ -48,6 +51,7 @@ public class EntityPoolManager {
         this.plugin = plugin;
         this.entityPools = new ConcurrentHashMap<>();
         this.entityTypes = new ConcurrentHashMap<>();
+        this.entityMaterialCache = new ConcurrentHashMap<>();
         this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
     }
 
@@ -101,7 +105,10 @@ public class EntityPoolManager {
                         entity.setInterpolationDuration(1); // 1 tick keeps motion smooth but snappier
                         entity.setInterpolationDelay(0);
                         entity.setTeleportDuration(1); // Smooth position changes over 1 tick
-                        entity.setTransformation(createTransformation(0, 0, 0, 0.5f));
+                        // Spawn invisible (scale 0) — entities become visible when
+                        // the first batch_update positions them properly. Prevents
+                        // a stack of blocks stuck at the zone origin corner.
+                        entity.setTransformation(createTransformation(0, 0, 0, 0f));
                         entity.setPersistent(false);
                     });
 
@@ -228,6 +235,19 @@ public class EntityPoolManager {
                 // Apply glow update
                 if (update.hasGlow()) {
                     entity.setGlowing(update.glow());
+                }
+
+                // Apply material update (only when changed, to avoid redundant block data updates)
+                if (update.hasMaterial() && update.material() != null && entity instanceof BlockDisplay blockDisplay) {
+                    String cacheKey = zoneName.toLowerCase() + ":" + update.entityId();
+                    String lastMaterial = entityMaterialCache.get(cacheKey);
+                    if (!update.material().equals(lastMaterial)) {
+                        Material mat = Material.matchMaterial(update.material());
+                        if (mat != null) {
+                            blockDisplay.setBlock(mat.createBlockData());
+                            entityMaterialCache.put(cacheKey, update.material());
+                        }
+                    }
                 }
             }
         });
@@ -428,6 +448,10 @@ public class EntityPoolManager {
     public void cleanupZone(String zoneName) {
         Map<String, Entity> pool = entityPools.remove(zoneName.toLowerCase());
         if (pool == null) return;
+
+        // Clear material cache entries for this zone
+        String prefix = zoneName.toLowerCase() + ":";
+        entityMaterialCache.keySet().removeIf(key -> key.startsWith(prefix));
 
         runEntityMutation(() -> {
             for (Entity entity : pool.values()) {

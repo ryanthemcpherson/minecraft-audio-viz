@@ -7,6 +7,7 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.gui.builder.ItemBuilder;
 import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageTemplate;
+import com.audioviz.stages.StageZonePlacementSession;
 import com.audioviz.stages.StageZoneRole;
 import org.bukkit.ChatColor;
 import org.bukkit.DyeColor;
@@ -170,7 +171,14 @@ public class StageTemplateMenu implements Menu {
                     player.sendMessage(ChatColor.GREEN + "Stage '" + stageName + "' created with " +
                         stage.getRoleToZone().size() + " zones!");
                     player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 1.2f);
-                    menuManager.openMenu(player, new StageEditorMenu(plugin, menuManager, stage));
+
+                    // Start zone placement wizard
+                    StageZonePlacementSession session =
+                        plugin.getZonePlacementManager().startSession(player, stage);
+                    if (session == null) {
+                        // Fallback to editor if placement couldn't start
+                        menuManager.openMenu(player, new StageEditorMenu(plugin, menuManager, stage));
+                    }
                 } else {
                     player.sendMessage(ChatColor.RED + "Failed to create stage.");
                     menuManager.openMenu(player, new StageListMenu(plugin, menuManager));
