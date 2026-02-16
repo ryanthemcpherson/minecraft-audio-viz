@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>MCAV | Control Center</title>
     <link rel="icon" type="image/x-icon" href="mcav.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="mcav-medium-square.png">
@@ -30,6 +30,10 @@
             </div>
             <div class="header-center">
                 <span class="zone-label">Stage:</span>
+                <select id="stage-select">
+                    <option value="">All Stages</option>
+                </select>
+                <span class="zone-label">Zone:</span>
                 <select id="zone-select">
                     <option value="main">main</option>
                 </select>
@@ -436,13 +440,13 @@
 
                     <!-- Zone Settings Panel -->
                     <div id="zone-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-zone">
-                        <!-- Available Stages -->
+                        <!-- Stages & Zones -->
                         <section class="mixer-section">
                             <div class="section-header">
-                                <h3 class="section-title">Available Stages</h3>
+                                <h3 class="section-title">Stages & Zones</h3>
                                 <button id="btn-refresh-zones" class="btn btn-secondary btn-sm">Refresh</button>
                             </div>
-                            <div id="zone-list" class="zone-list">
+                            <div id="stage-zone-list" class="stage-zone-list">
                                 <div class="zone-empty">Loading stages...</div>
                             </div>
                         </section>

@@ -153,6 +153,8 @@ class AdminApp {
         this._setupWebSocket();
         this._setupDJQueueDelegation();
         this._setupDJPendingDelegation();
+        this._updateTabIndicator();
+        window.addEventListener('resize', () => this._updateTabIndicator());
 
         // Start connection
         this.ws.connect();
@@ -967,6 +969,16 @@ class AdminApp {
                 }
                 if (data.zone !== undefined) {
                     this.state.currentZone = data.zone;
+                }
+                // Handle stage data from vj_state
+                if (data.stages) {
+                    this._handleStagesList({ stages: data.stages });
+                }
+                if (data.stage !== undefined) {
+                    this.state.selectedStage = data.stage || null;
+                    if (this.elements.stageSelect) {
+                        this.elements.stageSelect.value = data.stage || '';
+                    }
                 }
                 // Handle initial MC status from vj_state
                 if (data.minecraft_connected !== undefined) {
@@ -1950,13 +1962,27 @@ class AdminApp {
 
     _highlightActivePattern(patternId) {
         document.querySelectorAll('.pattern-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.pattern === patternId);
+            const isActive = btn.dataset.pattern === patternId;
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                btn.classList.remove('just-selected');
+                void btn.offsetWidth;
+                btn.classList.add('just-selected');
+                setTimeout(() => btn.classList.remove('just-selected'), 400);
+            }
         });
     }
 
     _highlightActivePreset(preset) {
         this.elements.presetButtons.forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.preset === preset);
+            const isActive = btn.dataset.preset === preset;
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                btn.classList.remove('just-selected');
+                void btn.offsetWidth;
+                btn.classList.add('just-selected');
+                setTimeout(() => btn.classList.remove('just-selected'), 400);
+            }
         });
     }
 
@@ -2017,6 +2043,9 @@ class AdminApp {
             tab.setAttribute('aria-selected', String(isActive));
         });
 
+        // Slide tab indicator
+        this._updateTabIndicator();
+
         // Update panels
         this.elements.tabPanels.forEach(panel => {
             panel.classList.toggle('active', panel.id === `${tabName}-panel`);
@@ -2043,6 +2072,16 @@ class AdminApp {
             const statsEl = document.getElementById('preview-stats');
             if (statsEl) statsEl.classList.add('hidden');
         }
+    }
+
+    _updateTabIndicator() {
+        const bar = document.getElementById('tab-bar');
+        const active = bar?.querySelector('.tab.active');
+        if (!bar || !active) return;
+        const barRect = bar.getBoundingClientRect();
+        const tabRect = active.getBoundingClientRect();
+        bar.style.setProperty('--tab-indicator-left', `${tabRect.left - barRect.left}px`);
+        bar.style.setProperty('--tab-indicator-width', `${tabRect.width}px`);
     }
 
     _setPattern(patternId) {
@@ -2744,12 +2783,13 @@ class AdminApp {
 
     _dismissToast(toast) {
         if (!toast || !toast.parentNode) return;
+        toast.classList.add('hiding');
         toast.classList.remove('show');
         setTimeout(() => {
             if (toast.parentNode) {
                 toast.parentNode.removeChild(toast);
             }
-        }, 300);
+        }, 200);
     }
 
     // === Service Status Indicators ===
@@ -2896,71 +2936,188 @@ class AdminApp {
         container._delegationSetup = true;
     }
 
-    // === Zone/Stage List ===
+    // === Stage/Zone Hierarchy List ===
 
-    _renderZoneList(zones) {
-        const container = this.elements.zoneList;
+    _renderStageZoneList() {
+        const container = this.elements.stageZoneList;
         if (!container) return;
 
         while (container.firstChild) {
             container.removeChild(container.firstChild);
         }
 
-        if (!zones || zones.length === 0) {
+        const stages = this.state.stages || [];
+        const allZones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+
+        // Group zones by stage
+        const stageZoneMap = new Map();
+        const standaloneZones = [];
+
+        allZones.forEach(zone => {
+            if (zone.stage) {
+                if (!stageZoneMap.has(zone.stage)) {
+                    stageZoneMap.set(zone.stage, []);
+                }
+                stageZoneMap.get(zone.stage).push(zone);
+            } else {
+                standaloneZones.push(zone);
+            }
+        });
+
+        // If filtering by a stage, only show that stage
+        const stagesToRender = selectedStage
+            ? stages.filter(s => s.name === selectedStage)
+            : stages;
+
+        if (stagesToRender.length === 0 && standaloneZones.length === 0 && allZones.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'zone-empty';
-            empty.textContent = 'No stages found';
+            empty.textContent = 'No stages or zones found';
             container.appendChild(empty);
             return;
         }
 
-        zones.forEach(zone => {
-            const item = document.createElement('div');
-            item.className = 'zone-item';
+        // Render each stage as an expandable container
+        stagesToRender.forEach(stage => {
+            const stageEl = document.createElement('div');
+            stageEl.className = 'stage-item';
+            if (stage.active) stageEl.classList.add('active');
 
-            const info = document.createElement('div');
-            info.className = 'zone-info';
+            const stageHeader = document.createElement('div');
+            stageHeader.className = 'stage-header';
 
-            const name = document.createElement('span');
-            name.className = 'zone-name';
-            name.textContent = zone.name;
+            const stageInfo = document.createElement('div');
+            stageInfo.className = 'stage-info';
 
-            const meta = document.createElement('span');
-            meta.className = 'zone-meta';
-            meta.textContent = `${zone.entity_count || 0} entities`;
+            const stageName = document.createElement('span');
+            stageName.className = 'stage-name';
+            stageName.textContent = stage.name;
 
-            info.appendChild(name);
-            info.appendChild(meta);
+            const stageMeta = document.createElement('span');
+            stageMeta.className = 'stage-meta';
+            const zoneCount = stage.zone_count || Object.keys(stage.zones || {}).length;
+            const totalEntities = stage.total_entities || 0;
+            stageMeta.textContent = `${stage.template || 'custom'} | ${zoneCount} zone${zoneCount !== 1 ? 's' : ''} | ${totalEntities} entities`;
 
-            const actions = document.createElement('div');
-            actions.className = 'zone-actions';
+            stageInfo.appendChild(stageName);
+            stageInfo.appendChild(stageMeta);
 
-            if (zone.name === this.state.zone.name) {
-                const badge = document.createElement('span');
-                badge.className = 'zone-badge-active';
-                badge.textContent = 'ACTIVE';
-                actions.appendChild(badge);
-            } else {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-small';
-                btn.textContent = 'Select';
-                btn.addEventListener('click', () => {
-                    this.state.zone.name = zone.name;
-                    if (this.elements.zoneSelect) {
-                        this.elements.zoneSelect.value = zone.name;
-                    }
-                    this._setZoneControlsLoading(true);
-                    this._requestZoneStatus();
-                    this.ws.send({ type: 'get_zones' });
-                    this._showToast(`Switched to stage "${zone.name}"`, 'info');
+            const expandIcon = document.createElement('span');
+            expandIcon.className = 'stage-expand-icon';
+            expandIcon.textContent = '\u25B6';
+
+            stageHeader.appendChild(expandIcon);
+            stageHeader.appendChild(stageInfo);
+            stageEl.appendChild(stageHeader);
+
+            // Zone sub-items
+            const zoneContainer = document.createElement('div');
+            zoneContainer.className = 'stage-zones hidden';
+
+            const stageZones = stageZoneMap.get(stage.name) || [];
+            // Also use zones from the stage object if no zone data from zones message
+            if (stageZones.length === 0 && stage.zones) {
+                Object.entries(stage.zones).forEach(([role, zoneInfo]) => {
+                    stageZones.push({
+                        name: zoneInfo.zone_name,
+                        stage: stage.name,
+                        stage_role: role,
+                        entity_count: zoneInfo.entity_count || 0,
+                        display_name: zoneInfo.display_name || role
+                    });
                 });
-                actions.appendChild(btn);
             }
 
-            item.appendChild(info);
-            item.appendChild(actions);
-            container.appendChild(item);
+            stageZones.forEach(zone => {
+                const zoneEl = this._createZoneItem(zone);
+                zoneContainer.appendChild(zoneEl);
+            });
+
+            if (stageZones.length === 0) {
+                const noZones = document.createElement('div');
+                noZones.className = 'zone-empty zone-empty-nested';
+                noZones.textContent = 'No zones in this stage';
+                zoneContainer.appendChild(noZones);
+            }
+
+            stageEl.appendChild(zoneContainer);
+
+            // Toggle expand/collapse on header click
+            stageHeader.addEventListener('click', () => {
+                const isHidden = zoneContainer.classList.contains('hidden');
+                zoneContainer.classList.toggle('hidden');
+                expandIcon.textContent = isHidden ? '\u25BC' : '\u25B6';
+                stageEl.classList.toggle('expanded', isHidden);
+            });
+
+            container.appendChild(stageEl);
         });
+
+        // Render standalone zones (not belonging to any stage)
+        if (!selectedStage && standaloneZones.length > 0) {
+            const standaloneHeader = document.createElement('div');
+            standaloneHeader.className = 'standalone-zones-header';
+            standaloneHeader.textContent = 'Standalone Zones';
+            container.appendChild(standaloneHeader);
+
+            standaloneZones.forEach(zone => {
+                const zoneEl = this._createZoneItem(zone);
+                container.appendChild(zoneEl);
+            });
+        }
+    }
+
+    _createZoneItem(zone) {
+        const item = document.createElement('div');
+        item.className = 'zone-item';
+        if (zone.name === this.state.zone.name) {
+            item.classList.add('active');
+        }
+
+        const info = document.createElement('div');
+        info.className = 'zone-info';
+
+        const name = document.createElement('span');
+        name.className = 'zone-name';
+        name.textContent = zone.display_name || zone.name;
+
+        const meta = document.createElement('span');
+        meta.className = 'zone-meta';
+        const rolePart = zone.stage_role ? `${zone.stage_role} | ` : '';
+        meta.textContent = `${rolePart}${zone.entity_count || 0} entities`;
+
+        info.appendChild(name);
+        info.appendChild(meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'zone-item-actions';
+
+        if (zone.name === this.state.zone.name) {
+            const badge = document.createElement('span');
+            badge.className = 'zone-badge-active';
+            badge.textContent = 'ACTIVE';
+            actions.appendChild(badge);
+        } else {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-small';
+            btn.textContent = 'Select';
+            btn.addEventListener('click', () => {
+                this.state.zone.name = zone.name;
+                if (this.elements.zoneSelect) {
+                    this.elements.zoneSelect.value = zone.name;
+                }
+                this._setZoneControlsLoading(true);
+                this._requestZoneStatus();
+                this.ws.send({ type: 'get_zones' });
+                this._showToast(`Switched to zone "${zone.name}"`, 'info');
+            });
+            actions.appendChild(btn);
+        }
+
+        item.appendChild(info);
+        item.appendChild(actions);
+        return item;
     }
 
     // === 3D Preview Methods ===
