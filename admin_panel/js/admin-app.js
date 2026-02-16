@@ -10,7 +10,6 @@ class AdminApp {
     constructor() {
         // WebSocket connection - use same host as the page was served from
         const wsHost = window.location.hostname || 'localhost';
-        console.log('[AdminApp] Connecting to WebSocket at:', wsHost, ':8766');
         this.ws = new WebSocketService({
             host: wsHost,
             port: 8766
@@ -49,6 +48,9 @@ class AdminApp {
             minecraftConnected: false,
             // Connect codes state
             connectCodes: [],
+            // Stage data
+            stages: [],
+            selectedStage: null,
             // Zone settings
             zone: {
                 name: 'main',
@@ -154,8 +156,6 @@ class AdminApp {
 
         // Start connection
         this.ws.connect();
-
-        console.log('Admin Panel initialized');
     }
 
     // === Initialization ===
@@ -266,9 +266,10 @@ class AdminApp {
         this.elements.djPendingSection = document.getElementById('dj-pending-section');
         this.elements.djPendingQueue = document.getElementById('dj-pending-queue');
 
-        // Zone/stage list
-        this.elements.zoneList = document.getElementById('zone-list');
+        // Stage/zone list
+        this.elements.stageZoneList = document.getElementById('stage-zone-list');
         this.elements.btnRefreshZones = document.getElementById('btn-refresh-zones');
+        this.elements.stageSelect = document.getElementById('stage-select');
 
         // Toast container
         this.elements.toastContainer = document.getElementById('toast-container');
@@ -494,9 +495,10 @@ class AdminApp {
             });
         }
 
-        // Refresh zones button
+        // Refresh stages/zones button
         if (this.elements.btnRefreshZones) {
             this.elements.btnRefreshZones.addEventListener('click', () => {
+                this.ws.send({ type: 'get_stages' });
                 this.ws.send({ type: 'get_zones' });
             });
         }
@@ -777,6 +779,15 @@ class AdminApp {
             this.elements.btnResetDefaults.addEventListener('click', () => this._resetZoneDefaults());
         }
 
+        // Stage selector
+        if (this.elements.stageSelect) {
+            this.elements.stageSelect.addEventListener('change', () => {
+                this.state.selectedStage = this.elements.stageSelect.value || null;
+                this._updateZoneSelector();
+                this._renderStageZoneList();
+            });
+        }
+
         // Zone selector
         if (this.elements.zoneSelect) {
             this.elements.zoneSelect.addEventListener('change', () => {
@@ -907,6 +918,7 @@ class AdminApp {
             this._showToast('Connected to server', 'success');
             // Request initial state
             this.ws.send({ type: 'get_particle_effects' });
+            this.ws.send({ type: 'get_stages' });
             this.ws.send({ type: 'get_zones' });
             this.ws.send({ type: 'get_zone', zone: this.state.zone.name });
             this.ws.send({ type: 'get_connect_codes' });
@@ -1077,6 +1089,10 @@ class AdminApp {
                 this._handleZonesList(data);
                 break;
 
+            case 'stages':
+                this._handleStagesList(data);
+                break;
+
             case 'connect_code_generated':
                 // Show the newly generated code in modal
                 this._showCodeModal(data.code, data.ttl_minutes || 30);
@@ -1188,25 +1204,78 @@ class AdminApp {
     }
 
     _handleZonesList(data) {
-        // Populate zone selector
-        if (data.zones && this.elements.zoneSelect) {
-            // Clear existing options
-            this.elements.zoneSelect.innerHTML = '';
+        const zones = data.zones || [];
+        this.state.allZones = zones;
 
-            // Add zone options
-            data.zones.forEach(zone => {
+        // Populate zone selector (filtered by selected stage if any)
+        this._updateZoneSelector();
+
+        // Render the stage/zone hierarchy in the Zone Settings tab
+        this._renderStageZoneList();
+    }
+
+    _handleStagesList(data) {
+        this.state.stages = data.stages || [];
+
+        // Populate stage selector dropdown
+        if (this.elements.stageSelect) {
+            while (this.elements.stageSelect.firstChild) {
+                this.elements.stageSelect.removeChild(this.elements.stageSelect.firstChild);
+            }
+
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = 'All Stages';
+            this.elements.stageSelect.appendChild(allOpt);
+
+            this.state.stages.forEach(stage => {
                 const option = document.createElement('option');
-                option.value = zone.name;
-                option.textContent = zone.name;
-                this.elements.zoneSelect.appendChild(option);
+                option.value = stage.name;
+                option.textContent = stage.name;
+                this.elements.stageSelect.appendChild(option);
             });
 
-            // Select current zone
-            this.elements.zoneSelect.value = this.state.zone.name;
+            if (this.state.selectedStage) {
+                this.elements.stageSelect.value = this.state.selectedStage;
+            }
         }
 
-        // Render the zone list in the Zone Settings tab
-        this._renderZoneList(data.zones || []);
+        // Re-render zone selector and hierarchy
+        this._updateZoneSelector();
+        this._renderStageZoneList();
+    }
+
+    _updateZoneSelector() {
+        if (!this.elements.zoneSelect) return;
+        const zones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+
+        while (this.elements.zoneSelect.firstChild) {
+            this.elements.zoneSelect.removeChild(this.elements.zoneSelect.firstChild);
+        }
+
+        const filtered = selectedStage
+            ? zones.filter(z => z.stage === selectedStage)
+            : zones;
+
+        filtered.forEach(zone => {
+            const option = document.createElement('option');
+            option.value = zone.name;
+            // Show role label if zone belongs to a stage
+            option.textContent = zone.stage_role
+                ? `${zone.name} (${zone.stage_role})`
+                : zone.name;
+            this.elements.zoneSelect.appendChild(option);
+        });
+
+        // Keep current zone selected if it's still in the list
+        const currentExists = filtered.some(z => z.name === this.state.zone.name);
+        if (currentExists) {
+            this.elements.zoneSelect.value = this.state.zone.name;
+        } else if (filtered.length > 0) {
+            this.elements.zoneSelect.value = filtered[0].name;
+            this.state.zone.name = filtered[0].name;
+        }
     }
 
     _handleParticleEffects(data) {
@@ -2957,8 +3026,6 @@ class AdminApp {
         }
 
         try {
-            console.log('[Preview] Initializing 3D preview');
-
             // Scene
             this._previewScene = new THREE.Scene();
             this._previewScene.background = new THREE.Color(0x0a0a0f);
@@ -3050,7 +3117,6 @@ class AdminApp {
 
             this._previewInitialized = true;
             this._previewLastFrameTime = performance.now();
-            console.log('[Preview] 3D preview initialized');
         } catch (error) {
             this._previewFailed = true;
             this._previewInitialized = false;
