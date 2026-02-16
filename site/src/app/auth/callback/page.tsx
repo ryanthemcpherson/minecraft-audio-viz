@@ -10,6 +10,18 @@ import {
 } from "@/lib/auth";
 import Link from "next/link";
 
+const COORDINATOR_URL = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
+
+/** Try to detect a desktop OAuth flow by decoding the state JWT payload. */
+function isDesktopOAuthState(state: string): boolean {
+  try {
+    const payload = JSON.parse(atob(state.split(".")[1]));
+    return !!payload.desktop;
+  } catch {
+    return false;
+  }
+}
+
 function CallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -40,6 +52,15 @@ function CallbackHandler() {
 
     // Mark as handled so we don't re-process on re-render
     handled.current = true;
+
+    // Desktop OAuth flow: the DJ client initiated this login.
+    // Redirect the browser directly to the coordinator callback so it can
+    // return HTML with a mcav:// deep-link redirect back to the DJ app.
+    if (isDesktopOAuthState(state)) {
+      const params = new URLSearchParams({ code, state });
+      window.location.href = `${COORDINATOR_URL}/api/v1/auth/discord/callback?${params}`;
+      return;
+    }
 
     // Strip OAuth params from the URL immediately so password managers
     // (1Password, etc.) save a clean "https://mcav.live/login" entry
