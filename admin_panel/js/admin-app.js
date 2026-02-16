@@ -158,6 +158,14 @@ class AdminApp {
 
         // Start connection
         this.ws.connect();
+
+        // Console branding
+        console.log(
+            '%c MCAV %c Control Center',
+            'background:#00D4FF;color:#060611;font-weight:700;padding:4px 8px;border-radius:4px 0 0 4px;font-family:monospace;font-size:14px',
+            'background:#151530;color:#00D4FF;font-weight:500;padding:4px 8px;border-radius:0 4px 4px 0;font-family:monospace;font-size:14px;border:1px solid rgba(0,212,255,0.3)'
+        );
+        console.log('%cKeys: B=Blackout  F=Freeze  T=Tap Tempo  1-8=Patterns', 'color:#7a7aa0;font-family:monospace;font-size:11px');
     }
 
     // === Initialization ===
@@ -918,6 +926,11 @@ class AdminApp {
             this.state.connected = true;
             this._setConnectionStatus('connected');
             this._showToast('Connected to server', 'success');
+
+            // Connection celebration glow
+            const app = document.getElementById('app');
+            app.classList.add('just-connected');
+            setTimeout(() => app.classList.remove('just-connected'), 900);
             // Request initial state
             this.ws.send({ type: 'get_particle_effects' });
             this.ws.send({ type: 'get_stages' });
@@ -1428,7 +1441,7 @@ class AdminApp {
         if (!this.state.djRoster || this.state.djRoster.length === 0) {
             const emptyEl = document.createElement('div');
             emptyEl.className = 'dj-empty';
-            emptyEl.textContent = 'No DJs connected';
+            emptyEl.textContent = 'No DJs in the booth \u2014 generate a connect code below';
             container.appendChild(emptyEl);
             return;
         }
@@ -1861,6 +1874,13 @@ class AdminApp {
         if (this.state.isBeat) {
             el.classList.add('active');
             setTimeout(() => el.classList.remove('active'), 100);
+
+            // Beat-reactive header glow
+            const header = document.getElementById('header');
+            if (header) {
+                header.classList.add('beat-pulse');
+                setTimeout(() => header.classList.remove('beat-pulse'), 120);
+            }
         }
     }
 
@@ -2180,6 +2200,7 @@ class AdminApp {
     _toggleBlackout() {
         this.state.blackout = !this.state.blackout;
         this.elements.btnBlackout.classList.toggle('active', this.state.blackout);
+        document.getElementById('app').classList.toggle('mode-blackout', this.state.blackout);
 
         this.ws.send({
             type: 'trigger_effect',
@@ -2191,6 +2212,7 @@ class AdminApp {
     _toggleFreeze() {
         this.state.freeze = !this.state.freeze;
         this.elements.btnFreeze.classList.toggle('active', this.state.freeze);
+        document.getElementById('app').classList.toggle('mode-freeze', this.state.freeze);
 
         this.ws.send({
             type: 'trigger_effect',
@@ -2201,6 +2223,13 @@ class AdminApp {
 
     _tapTempo() {
         const now = Date.now();
+
+        // Visual tap feedback
+        const tapBtn = this.elements.btnTapTempo;
+        if (tapBtn) {
+            tapBtn.classList.add('tapped');
+            setTimeout(() => tapBtn.classList.remove('tapped'), 100);
+        }
 
         // Clear old taps
         if (this.tapTimeout) {
@@ -2229,6 +2258,11 @@ class AdminApp {
             const bpm = Math.round(60000 / avgInterval);
 
             this.elements.tapBpm.textContent = `${bpm} BPM`;
+
+            // BPM display pulse
+            this.elements.tapBpm.classList.remove('pulse');
+            void this.elements.tapBpm.offsetWidth;
+            this.elements.tapBpm.classList.add('pulse');
         }
 
         // Reset after 2 seconds of no taps

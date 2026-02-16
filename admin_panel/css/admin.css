@@ -129,7 +129,7 @@ body {
     z-index: 10;
 }
 
-/* Subtle gradient line under header */
+/* Subtle gradient line under header - beat-reactive */
 #header::after {
     content: '';
     position: absolute;
@@ -144,6 +144,20 @@ body {
         rgba(0, 212, 255, 0.3) 80%,
         transparent
     );
+    transition: height 0.05s ease, opacity 0.05s ease;
+}
+
+/* Beat pulse on header line */
+#header.beat-pulse::after {
+    height: 3px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(0, 212, 255, 0.5) 15%,
+        rgba(0, 212, 255, 0.9) 50%,
+        rgba(0, 212, 255, 0.5) 85%,
+        transparent
+    );
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
 }
 
 .header-left {
@@ -744,6 +758,97 @@ body {
     50% { box-shadow: 0 0 30px rgba(255, 165, 2, 0.8), 0 0 60px rgba(255, 165, 2, 0.4), 0 0 80px rgba(255, 165, 2, 0.15); }
 }
 
+/* Keyboard shortcut hints on perf buttons */
+.btn-perf .perf-shortcut {
+    display: block;
+    font-size: 9px;
+    opacity: 0.35;
+    font-family: var(--font-mono);
+    margin-top: 2px;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* ============================================
+   Immersive Mode States
+   ============================================ */
+
+/* Blackout: darken the entire UI for dramatic effect */
+#app.mode-blackout {
+    position: relative;
+}
+
+#app.mode-blackout::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    z-index: 5;
+    animation: blackout-dim 0.3s var(--ease-out-quart);
+}
+
+#app.mode-blackout #zone-overview {
+    opacity: 0.5;
+    transition: opacity 0.3s var(--ease-out-quart);
+}
+
+@keyframes blackout-dim {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Freeze: blue frost tint over the UI */
+#app.mode-freeze::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(30, 80, 200, 0.08);
+    pointer-events: none;
+    z-index: 5;
+    animation: freeze-tint 0.4s var(--ease-out-quart);
+}
+
+#app.mode-freeze #header::after {
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(255, 165, 2, 0.4) 20%,
+        rgba(255, 165, 2, 0.7) 50%,
+        rgba(255, 165, 2, 0.4) 80%,
+        transparent
+    ) !important;
+    height: 2px;
+}
+
+@keyframes freeze-tint {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ============================================
+   Connection Celebration
+   ============================================ */
+
+#app.just-connected::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    animation: connection-celebrate 0.8s var(--ease-out-expo) forwards;
+}
+
+@keyframes connection-celebrate {
+    0% {
+        box-shadow: inset 0 0 80px rgba(0, 212, 255, 0.3);
+        opacity: 1;
+    }
+    100% {
+        box-shadow: inset 0 0 0 rgba(0, 212, 255, 0);
+        opacity: 0;
+    }
+}
+
 /* ============================================
    Tap Tempo & BPM Display
    ============================================ */
@@ -779,6 +884,24 @@ body {
 
 .btn-tap:active {
     transform: scale(0.95);
+}
+
+.btn-tap.tapped {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+    border-color: var(--accent-primary);
+    box-shadow: var(--glow-accent);
+    transform: scale(0.95);
+}
+
+/* BPM display pulses when tapping */
+.bpm-display.pulse {
+    animation: bpm-pulse 0.15s var(--ease-out-quart);
+}
+
+@keyframes bpm-pulse {
+    0% { transform: scale(1.08); }
+    100% { transform: scale(1); }
 }
 
 .bpm-display {
@@ -853,8 +976,11 @@ body {
     color: var(--text-muted);
     font-style: italic;
     text-align: center;
-    padding: var(--spacing-md);
+    padding: var(--spacing-lg) var(--spacing-md);
     font-size: var(--font-size-sm);
+    background: var(--bg-surface);
+    border-radius: var(--border-radius);
+    border: 1px dashed rgba(255, 255, 255, 0.06);
 }
 
 .btn-small {
