@@ -10,7 +10,6 @@ import logging
 import os
 from functools import lru_cache
 
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _logger = logging.getLogger(__name__)
@@ -77,25 +76,13 @@ class Settings(BaseSettings):
     # Desktop deep link
     desktop_deep_link_scheme: str = "mcav"
 
-    # CORS
-    cors_origins: list[str] = [
-        "https://mcav.live",
-        "http://localhost:3000",
-        "tauri://localhost",
-        "http://tauri.localhost",
-        "https://tauri.localhost",
-    ]
+    # CORS — stored as str to avoid pydantic-settings JSON-parsing env vars.
+    # Use get_cors_origins() to get the parsed list.
+    cors_origins: str = "https://mcav.live,http://localhost:3000,tauri://localhost,http://tauri.localhost,https://tauri.localhost"
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _parse_cors_origins(cls, v: object) -> list[str]:
-        """Parse CORS origins from env var — handles JSON arrays and comma-separated strings."""
-        if isinstance(v, list):
-            return v
-        if not isinstance(v, str):
-            return list(v)  # type: ignore[arg-type]
-        v = v.strip()
-        # Try JSON array first: '["https://mcav.live","http://localhost:3000"]'
+    def get_cors_origins(self) -> list[str]:
+        """Parse CORS origins — handles JSON arrays, bracket lists, and comma-separated strings."""
+        v = self.cors_origins.strip()
         if v.startswith("["):
             try:
                 parsed = json.loads(v)

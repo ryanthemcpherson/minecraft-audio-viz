@@ -75,7 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # downstream handlers raise 5xx errors.
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.get_cors_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
         max_age=3600,
