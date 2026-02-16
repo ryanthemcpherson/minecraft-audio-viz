@@ -964,12 +964,12 @@ body {
     font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.5px;
-    animation: live-pulse 1.5s ease-in-out infinite;
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
-@keyframes live-pulse {
+@keyframes pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.65; }
+    50% { opacity: 0.55; }
 }
 
 .dj-empty {
@@ -2928,7 +2928,7 @@ input:disabled + .toggle-slider {
     font-weight: 700;
     border-radius: var(--border-radius-lg);
     letter-spacing: 0.5px;
-    animation: live-pulse 1.5s ease-in-out infinite;
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
 .dj-stats {
@@ -3313,13 +3313,40 @@ input:disabled + .toggle-slider {
         overflow: visible;
     }
 
-    /* Sidebar goes on top as a collapsible strip */
+    /* Sidebar goes on top */
     #zone-overview {
         width: 100%;
         border-right: none;
         border-bottom: 1px solid var(--border-color);
-        overflow-y: visible;
+        overflow: visible;
         max-height: none;
+        flex-shrink: 0;
+    }
+
+    /* Restore sidebar labels hidden by 1024px tablet collapse */
+    #zone-overview .panel-title,
+    #zone-overview .section-title,
+    #zone-overview .status-label,
+    #zone-overview .status-value,
+    #zone-overview .meter-label,
+    #zone-overview .meter-value,
+    #zone-overview #beat-text,
+    #zone-overview .perf-label,
+    #zone-overview .bpm-display,
+    #zone-overview .tap-tempo,
+    #zone-overview .dj-name,
+    #zone-overview .dj-actions,
+    #zone-overview .live-badge,
+    #zone-overview .dj-empty {
+        display: revert;
+    }
+
+    #zone-overview .panel {
+        padding: var(--spacing-md);
+    }
+
+    #zone-overview #beat-display {
+        padding: var(--spacing-md);
     }
 
     /* Perf buttons side by side, full width */
@@ -3353,9 +3380,9 @@ input:disabled + .toggle-slider {
         padding: var(--spacing-md);
     }
 
-    /* Pattern grid 2 cols on mobile */
+    /* Pattern grid responsive on mobile */
     .pattern-grid {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     }
 
     .pattern-btn {
@@ -3363,8 +3390,9 @@ input:disabled + .toggle-slider {
         font-size: var(--font-size-sm);
     }
 
-    /* Fader bank scrollable horizontally */
+    /* Fader bank wraps on mobile */
     .fader-bank {
+        flex-wrap: wrap;
         gap: var(--spacing-md);
         overflow-x: auto;
         padding: var(--spacing-md) var(--spacing-sm);
@@ -3373,6 +3401,7 @@ input:disabled + .toggle-slider {
 
     .fader-track {
         height: 120px;
+        width: 40px;
     }
 
     .fader-input {
@@ -3398,27 +3427,42 @@ input:disabled + .toggle-slider {
     }
 
     .control-row input[type="range"]::-webkit-slider-thumb {
-        width: 22px;
-        height: 22px;
+        width: 28px;
+        height: 28px;
     }
 
     .control-row input[type="range"]::-moz-range-thumb {
-        width: 22px;
-        height: 22px;
+        width: 28px;
+        height: 28px;
     }
 
-    /* Header compact */
+    /* Header wraps on mobile */
     #header {
-        padding: 0 var(--spacing-md);
-        height: 48px;
+        flex-wrap: wrap;
+        height: auto;
+        padding: var(--spacing-sm) var(--spacing-md);
+        gap: var(--spacing-sm);
     }
 
     .header-subtitle {
         display: none;
     }
 
+    /* Restore zone/stage selectors - essential for VJs */
     .header-center {
-        display: none;
+        display: flex;
+        order: 3;
+        width: 100%;
+        padding-top: var(--spacing-xs);
+        border-top: 1px solid var(--border-subtle);
+    }
+
+    .header-brand {
+        gap: 8px;
+    }
+
+    .header-title-group h1 {
+        font-size: var(--font-size-lg);
     }
 
     /* Status bar compact */
@@ -3434,9 +3478,12 @@ input:disabled + .toggle-slider {
     }
 
     .tab {
-        padding: 12px var(--spacing-md);
+        padding: 14px var(--spacing-md);
         white-space: nowrap;
-        font-size: var(--font-size-xs);
+        font-size: var(--font-size-sm);
+        min-height: 44px;
+        display: flex;
+        align-items: center;
     }
 
     /* Render mode stack */
@@ -3480,6 +3527,66 @@ input:disabled + .toggle-slider {
 
     .preview-sidebar {
         max-height: 150px;
+    }
+
+    /* Toast: bottom-up for thumb reachability */
+    .toast-container {
+        left: var(--spacing-md);
+        right: var(--spacing-md);
+        top: auto;
+        bottom: 40px;
+    }
+
+    .toast {
+        max-width: 100%;
+        transform: translateY(100px);
+    }
+
+    .toast.show {
+        transform: translateY(0);
+    }
+
+    .toast.hiding {
+        transform: translateY(40px) scale(0.95);
+    }
+
+    /* Approve/deny buttons: larger touch targets */
+    .btn-approve,
+    .btn-deny {
+        padding: 8px 14px;
+        min-height: 36px;
+    }
+
+    .dj-pending-actions {
+        gap: var(--spacing-sm);
+    }
+
+    .btn-full {
+        min-height: 44px;
+    }
+
+    /* Banner panel: narrower labels */
+    #banner-panel .control-row > label:first-child {
+        min-width: 80px;
+    }
+
+    .sync-dashboard {
+        gap: var(--spacing-xs);
+    }
+
+    .control-row label {
+        width: 70px;
+    }
+
+    /* Safe area bottom */
+    @supports (padding: env(safe-area-inset-bottom)) {
+        #status-bar {
+            padding-bottom: max(4px, env(safe-area-inset-bottom));
+        }
+
+        .toast-container {
+            bottom: max(40px, calc(env(safe-area-inset-bottom) + 36px));
+        }
     }
 }
 
@@ -3687,104 +3794,6 @@ input:disabled + .toggle-slider {
     }
 }
 
-/* Mobile: stack layout vertically, sidebar becomes top bar */
-@media (max-width: 768px) {
-    body {
-        overflow: auto;
-        height: auto;
-    }
-
-    #app {
-        height: auto;
-        min-height: 100vh;
-    }
-
-    #main-content {
-        flex-direction: column;
-        overflow: visible;
-    }
-
-    #zone-overview {
-        width: 100%;
-        border-right: none;
-        border-bottom: 1px solid var(--border-color);
-        overflow: visible;
-        flex-shrink: 0;
-    }
-
-    /* Restore hidden labels on mobile */
-    #zone-overview .panel-title,
-    #zone-overview .section-title,
-    #zone-overview .status-label,
-    #zone-overview .status-value,
-    #zone-overview .meter-label,
-    #zone-overview .meter-value,
-    #zone-overview #beat-text,
-    #zone-overview .perf-label,
-    #zone-overview .bpm-display,
-    #zone-overview .tap-tempo,
-    #zone-overview .dj-name,
-    #zone-overview .dj-actions,
-    #zone-overview .live-badge,
-    #zone-overview .dj-empty {
-        display: revert;
-    }
-
-    #zone-overview .panel {
-        padding: var(--spacing-md);
-    }
-
-    #zone-overview #beat-indicator {
-        width: 48px;
-        height: 48px;
-    }
-
-    #zone-overview #beat-display {
-        padding: var(--spacing-md);
-    }
-
-    .fader-bank {
-        flex-wrap: wrap;
-        gap: var(--spacing-md);
-    }
-
-    .fader-track {
-        height: 120px;
-        width: 40px;
-    }
-
-    #work-area {
-        overflow: visible;
-    }
-
-    #tab-content {
-        overflow: visible;
-    }
-
-    .pattern-grid {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    }
-
-    .perf-buttons {
-        grid-template-columns: 1fr;
-    }
-
-    #header {
-        flex-wrap: wrap;
-        height: auto;
-        padding: var(--spacing-sm) var(--spacing-md);
-        gap: var(--spacing-sm);
-    }
-
-    .header-brand {
-        gap: 8px;
-    }
-
-    .header-title-group h1 {
-        font-size: var(--font-size-lg);
-    }
-}
-
 /* ============================================
    Voice Chat Controls
    ============================================ */
@@ -3817,7 +3826,7 @@ input:disabled + .toggle-slider {
 .voice-dot-streaming {
     background: var(--accent-secondary);
     box-shadow: 0 0 8px rgba(68, 189, 50, 0.5);
-    animation: voice-pulse 1.5s ease-in-out infinite;
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
 .voice-dot-available {
@@ -3828,11 +3837,6 @@ input:disabled + .toggle-slider {
 .voice-dot-unavailable {
     background: var(--accent-danger);
     box-shadow: 0 0 6px rgba(255, 71, 87, 0.3);
-}
-
-@keyframes voice-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
 }
 
 .voice-status-text {
@@ -3966,106 +3970,6 @@ input:disabled + .toggle-slider {
 .control-row input[type="range"],
 .transition-control .slider {
     touch-action: none;
-}
-
-/* Mobile: restore essential controls, improve touch targets */
-@media (max-width: 768px) {
-    /* Restore zone/stage selectors - essential for VJs */
-    .header-center {
-        display: flex;
-        order: 3;
-        width: 100%;
-        padding-top: var(--spacing-xs);
-        border-top: 1px solid var(--border-subtle);
-    }
-
-    /* Performance buttons MUST be side by side - emergency controls */
-    .perf-buttons {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    /* Larger slider thumbs for touch (44px touch zone via padding) */
-    .control-row input[type="range"]::-webkit-slider-thumb {
-        width: 28px;
-        height: 28px;
-    }
-
-    .control-row input[type="range"]::-moz-range-thumb {
-        width: 28px;
-        height: 28px;
-    }
-
-    /* Tab bar: readable text and proper tap targets */
-    .tab {
-        padding: 14px var(--spacing-md);
-        font-size: var(--font-size-sm);
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-    }
-
-    /* Toast: bottom-up on mobile for thumb reachability */
-    .toast-container {
-        left: var(--spacing-md);
-        right: var(--spacing-md);
-        top: auto;
-        bottom: 40px;
-    }
-
-    .toast {
-        max-width: 100%;
-        transform: translateY(100px);
-    }
-
-    .toast.show {
-        transform: translateY(0);
-    }
-
-    .toast.hiding {
-        transform: translateY(40px) scale(0.95);
-    }
-
-    /* Approve/deny buttons: larger touch targets */
-    .btn-approve,
-    .btn-deny {
-        padding: 8px 14px;
-        min-height: 36px;
-    }
-
-    .dj-pending-actions {
-        gap: var(--spacing-sm);
-    }
-
-    /* Connect code button full-width with 44px min touch target */
-    .btn-full {
-        min-height: 44px;
-    }
-
-    /* Banner panel: narrower labels */
-    #banner-panel .control-row > label:first-child {
-        min-width: 80px;
-    }
-
-    /* Sync dashboard: tighter wrap */
-    .sync-dashboard {
-        gap: var(--spacing-xs);
-    }
-
-    /* Control labels narrower to give sliders more room */
-    .control-row label {
-        width: 70px;
-    }
-
-    /* Safe area bottom for status bar */
-    @supports (padding: env(safe-area-inset-bottom)) {
-        #status-bar {
-            padding-bottom: max(4px, env(safe-area-inset-bottom));
-        }
-
-        .toast-container {
-            bottom: max(40px, calc(env(safe-area-inset-bottom) + 36px));
-        }
-    }
 }
 
 /* Small phone: further compaction */
