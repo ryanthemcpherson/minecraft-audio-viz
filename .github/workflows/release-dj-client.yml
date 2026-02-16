@@ -168,6 +168,25 @@ jobs:
           find dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle -name "*.tar.gz" -exec cp {} release-artifacts/ \; 2>/dev/null || true
           find dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle -name "*.zip" -exec cp {} release-artifacts/ \; 2>/dev/null || true
 
+      - name: Rename macOS updater artifacts to include arch
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd release-artifacts
+          if [ "${{ matrix.rust_target }}" = "aarch64-apple-darwin" ]; then
+            ARCH="aarch64"
+          else
+            ARCH="x64"
+          fi
+          for f in *.app.tar.gz.sig; do
+            [ -f "$f" ] || continue
+            mv "$f" "${f/.app./.app_${ARCH}.}"
+          done
+          for f in *.app.tar.gz; do
+            [ -f "$f" ] || continue
+            mv "$f" "${f/.app./.app_${ARCH}.}"
+          done
+
       - name: Cleanup macOS keychain
         if: runner.os == 'macOS' && always()
         run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
@@ -216,14 +235,14 @@ jobs:
           # Find signature files
           WIN_SIG=$(cat artifacts/dj-client-windows-x64/*.nsis.zip.sig 2>/dev/null || echo "")
           LINUX_SIG=$(cat artifacts/dj-client-linux-x64/*.AppImage.tar.gz.sig 2>/dev/null || echo "")
-          MAC_X64_SIG=$(cat artifacts/dj-client-macos-x64/*.app.tar.gz.sig 2>/dev/null || echo "")
-          MAC_ARM_SIG=$(cat artifacts/dj-client-macos-arm64/*.app.tar.gz.sig 2>/dev/null || echo "")
+          MAC_X64_SIG=$(cat artifacts/dj-client-macos-x64/*.app_x64.tar.gz.sig 2>/dev/null || echo "")
+          MAC_ARM_SIG=$(cat artifacts/dj-client-macos-arm64/*.app_aarch64.tar.gz.sig 2>/dev/null || echo "")
 
           # Find artifact filenames
           WIN_ZIP=$(ls artifacts/dj-client-windows-x64/*.nsis.zip 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
           LINUX_TGZ=$(ls artifacts/dj-client-linux-x64/*.AppImage.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
-          MAC_X64_TGZ=$(ls artifacts/dj-client-macos-x64/*.app.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
-          MAC_ARM_TGZ=$(ls artifacts/dj-client-macos-arm64/*.app.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
+          MAC_X64_TGZ=$(ls artifacts/dj-client-macos-x64/*.app_x64.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
+          MAC_ARM_TGZ=$(ls artifacts/dj-client-macos-arm64/*.app_aarch64.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
 
           # Build platforms JSON
           PLATFORMS="{}"
