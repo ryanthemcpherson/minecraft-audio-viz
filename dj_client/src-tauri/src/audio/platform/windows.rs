@@ -545,7 +545,7 @@ unsafe fn enumerate_sessions() -> Result<Vec<AudioSource>, String> {
             continue;
         }
 
-        if session2.IsSystemSoundsSession().is_ok() {
+        if session2.IsSystemSoundsSession() == S_OK {
             continue;
         }
 
