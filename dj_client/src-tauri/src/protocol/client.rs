@@ -328,7 +328,6 @@ impl DjClient {
         let heartbeat_interval = self.config.heartbeat_interval;
 
         // Writer task
-        let _tx_clone = tx.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {

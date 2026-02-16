@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "shell:default",
+    "store:default",
     "deep-link:default",
     "updater:default",
     "updater:allow-check",

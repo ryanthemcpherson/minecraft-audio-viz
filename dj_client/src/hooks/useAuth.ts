@@ -23,20 +23,24 @@ export function useAuth(): UseAuthReturn {
 
   const isSignedIn = user !== null;
 
-  // Restore session on mount
+  // Initialize token store, then restore session
   useEffect(() => {
-    if (!api.hasStoredTokens()) {
-      setIsLoading(false);
-      return;
-    }
+    api.initTokenStore().then(() => {
+      if (!api.hasTokens()) {
+        setIsLoading(false);
+        return;
+      }
 
-    api
-      .getProfile()
-      .then(setUser)
-      .catch(() => {
-        api.clearTokens();
-      })
-      .finally(() => setIsLoading(false));
+      api
+        .getProfile()
+        .then(setUser)
+        .catch(() => {
+          void api.clearTokens();
+        })
+        .finally(() => setIsLoading(false));
+    }).catch(() => {
+      setIsLoading(false);
+    });
   }, []);
 
   // Listen for deep-link callback (Discord OAuth desktop flow)

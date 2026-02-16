@@ -1,7 +1,23 @@
 /**
  * Coordinator API client for the DJ client.
- * All auth state is stored in localStorage.
+ *
+ * Auth tokens are stored securely via tauri-plugin-store (see token-store.ts).
+ * The authedFetch wrapper automatically refreshes expired tokens and retries
+ * once on 401 responses.
  */
+
+import {
+  initTokenStore,
+  getAccessToken,
+  getRefreshToken,
+  hasTokens,
+  isTokenExpiringSoon,
+  storeTokens,
+  clearTokens,
+} from './token-store';
+
+// Re-export for consumers
+export { initTokenStore, hasTokens, clearTokens };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,14 +82,18 @@ export interface DiscordAuthorizeResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Storage keys
+// API error with status code
 // ---------------------------------------------------------------------------
 
-const KEYS = {
-  accessToken: 'mcav.auth.accessToken',
-  refreshToken: 'mcav.auth.refreshToken',
-  expiresAt: 'mcav.auth.expiresAt',
-} as const;
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,36 +101,6 @@ const KEYS = {
 
 function getBaseUrl(): string {
   return localStorage.getItem('mcav.coordinatorUrl') || 'https://api.mcav.live';
-}
-
-function storeTokens(auth: AuthResponse): void {
-  localStorage.setItem(KEYS.accessToken, auth.access_token);
-  localStorage.setItem(KEYS.refreshToken, auth.refresh_token);
-  localStorage.setItem(
-    KEYS.expiresAt,
-    String(Date.now() + auth.expires_in * 1000),
-  );
-}
-
-export function clearTokens(): void {
-  localStorage.removeItem(KEYS.accessToken);
-  localStorage.removeItem(KEYS.refreshToken);
-  localStorage.removeItem(KEYS.expiresAt);
-}
-
-export function getStoredAccessToken(): string | null {
-  return localStorage.getItem(KEYS.accessToken);
-}
-
-export function hasStoredTokens(): boolean {
-  return !!localStorage.getItem(KEYS.accessToken);
-}
-
-function isTokenExpiringSoon(): boolean {
-  const expiresAt = localStorage.getItem(KEYS.expiresAt);
-  if (!expiresAt) return true;
-  // Refresh if less than 2 minutes remaining
-  return Date.now() > Number(expiresAt) - 120_000;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +128,7 @@ async function apiFetch<T>(
     } catch {
       detail = body;
     }
-    throw new Error(detail);
+    throw new ApiError(res.status, detail);
   }
 
   if (res.status === 204) return undefined as unknown as T;
@@ -149,25 +139,52 @@ async function authedFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  // Auto-refresh if token is expiring soon
+  // Pre-emptive refresh if token is expiring soon
   if (isTokenExpiringSoon()) {
     try {
       await refreshTokens();
     } catch {
-      // If refresh fails, try the request anyway — it might still work
+      // If refresh fails, try the request anyway
     }
   }
 
-  const token = localStorage.getItem(KEYS.accessToken);
+  const token = getAccessToken();
   if (!token) throw new Error('Not signed in');
 
-  return apiFetch<T>(path, {
+  const opts = {
     ...options,
     headers: {
       ...options.headers,
       Authorization: `Bearer ${token}`,
     },
-  });
+  };
+
+  try {
+    return await apiFetch<T>(path, opts);
+  } catch (e) {
+    // Retry once on 401 with a refreshed token
+    if (e instanceof ApiError && e.status === 401) {
+      try {
+        await refreshTokens();
+      } catch {
+        await clearTokens();
+        throw e;
+      }
+      const newToken = getAccessToken();
+      if (!newToken) {
+        await clearTokens();
+        throw e;
+      }
+      return await apiFetch<T>(path, {
+        ...options,
+        headers: {
+          ...options.headers,
+          Authorization: `Bearer ${newToken}`,
+        },
+      });
+    }
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +199,7 @@ export async function login(
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
-  storeTokens(auth);
+  await storeTokens(auth.access_token, auth.refresh_token, auth.expires_in);
   return auth;
 }
 
@@ -195,7 +212,7 @@ export async function register(
     method: 'POST',
     body: JSON.stringify({ email, password, display_name: displayName }),
   });
-  storeTokens(auth);
+  await storeTokens(auth.access_token, auth.refresh_token, auth.expires_in);
   return auth;
 }
 
@@ -214,19 +231,19 @@ export async function exchangeDesktopCode(
     method: 'POST',
     body: JSON.stringify({ exchange_code: code }),
   });
-  storeTokens(auth);
+  await storeTokens(auth.access_token, auth.refresh_token, auth.expires_in);
   return auth;
 }
 
 export async function refreshTokens(): Promise<AuthResponse> {
-  const refreshToken = localStorage.getItem(KEYS.refreshToken);
+  const refreshToken = getRefreshToken();
   if (!refreshToken) throw new Error('No refresh token');
 
   const auth = await apiFetch<AuthResponse>('/auth/refresh', {
     method: 'POST',
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
-  storeTokens(auth);
+  await storeTokens(auth.access_token, auth.refresh_token, auth.expires_in);
   return auth;
 }
 
@@ -235,7 +252,7 @@ export async function getProfile(): Promise<UserProfileResponse> {
 }
 
 export async function logout(): Promise<void> {
-  const refreshToken = localStorage.getItem(KEYS.refreshToken);
+  const refreshToken = getRefreshToken();
   if (refreshToken) {
     try {
       await apiFetch('/auth/logout', {
@@ -246,5 +263,5 @@ export async function logout(): Promise<void> {
       // Best-effort; clear tokens regardless
     }
   }
-  clearTokens();
+  await clearTokens();
 }
