@@ -100,7 +100,7 @@ export class ApiError extends Error {
 // ---------------------------------------------------------------------------
 
 function getBaseUrl(): string {
-  return localStorage.getItem('mcav.coordinatorUrl') || 'https://api.mcav.live';
+  return localStorage.getItem('mcav.coordinatorUrl') || 'https://api.mcav.live/api/v1';
 }
 
 // ---------------------------------------------------------------------------

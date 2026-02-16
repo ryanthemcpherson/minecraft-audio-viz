@@ -80,6 +80,7 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "tauri://localhost",
         "http://tauri.localhost",
+        "https://tauri.localhost",
     ]
 
     @field_validator("cors_origins", mode="before")
