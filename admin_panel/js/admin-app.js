@@ -79,6 +79,8 @@ class AdminApp {
                     trail: false
                 }
             },
+            // Band material overrides (per-band block types)
+            bandMaterials: [null, null, null, null, null],
             // Voice chat state
             voiceChat: {
                 available: false,
@@ -207,7 +209,7 @@ class AdminApp {
 
         // Scene presets
         this.elements.sceneNameInput = document.getElementById('scene-name-input');
-        this.elements.savesceneBtn = document.getElementById('save-scene-btn');
+        this.elements.saveSceneBtn = document.getElementById('save-scene-btn');
         this.elements.scenesGrid = document.getElementById('scenes-grid');
 
         // Visual sync controls
@@ -746,6 +748,24 @@ class AdminApp {
         this._setupToggle('zone-show-pattern', 'showPattern', sendZoneConfig);
         this._setupToggle('zone-show-bands', 'showBands', sendZoneConfig);
 
+        // Band material overrides
+        const sendBandMaterials = debounce(() => {
+            const materials = [];
+            for (let i = 0; i < 5; i++) {
+                const el = document.getElementById(`band-material-${i}`);
+                materials.push(el && el.value ? el.value : null);
+            }
+            this.state.bandMaterials = materials;
+            this.ws.send({ type: 'set_band_materials', materials });
+        }, 100);
+
+        for (let i = 0; i < 5; i++) {
+            const el = document.getElementById(`band-material-${i}`);
+            if (el) {
+                el.addEventListener('change', sendBandMaterials);
+            }
+        }
+
         // Zone action buttons
         if (this.elements.btnReinitPool) {
             this.elements.btnReinitPool.addEventListener('click', () => this._reinitPool());
@@ -765,6 +785,52 @@ class AdminApp {
                 this._requestZoneStatus();
             });
         }
+
+        // Collapsible mixer sections
+        document.querySelectorAll('.mixer-section.collapsible > .section-title').forEach(title => {
+            title.setAttribute('tabindex', '0');
+            title.setAttribute('role', 'button');
+            const isCollapsed = title.closest('.mixer-section').classList.contains('collapsed');
+            title.setAttribute('aria-expanded', String(!isCollapsed));
+            const toggle = () => {
+                const section = title.closest('.mixer-section');
+                section.classList.toggle('collapsed');
+                title.setAttribute('aria-expanded', String(!section.classList.contains('collapsed')));
+                this._saveSectionStates();
+            };
+            title.addEventListener('click', toggle);
+            title.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggle();
+                }
+            });
+        });
+        this._restoreSectionStates();
+    }
+
+    _saveSectionStates() {
+        const states = {};
+        document.querySelectorAll('.mixer-section.collapsible').forEach(section => {
+            const key = section.querySelector('.section-title')?.textContent.trim();
+            if (key) states[key] = section.classList.contains('collapsed');
+        });
+        try { localStorage.setItem('mcav-section-states', JSON.stringify(states)); } catch(e) {}
+    }
+
+    _restoreSectionStates() {
+        try {
+            const states = JSON.parse(localStorage.getItem('mcav-section-states'));
+            if (!states) return;
+            document.querySelectorAll('.mixer-section.collapsible').forEach(section => {
+                const key = section.querySelector('.section-title')?.textContent.trim();
+                if (key && key in states) {
+                    section.classList.toggle('collapsed', states[key]);
+                    const title = section.querySelector('.section-title');
+                    if (title) title.setAttribute('aria-expanded', String(!states[key]));
+                }
+            });
+        } catch(e) {}
     }
 
     _setZoneControlsLoading(loading) {
@@ -904,6 +970,10 @@ class AdminApp {
                 if (data.banner_profiles) {
                     this.state.bannerProfiles = data.banner_profiles;
                 }
+                // Handle band materials state
+                if (data.band_materials) {
+                    this._syncBandMaterials(data.band_materials);
+                }
                 // Handle visual sync state
                 if (data.visual_delay_ms !== undefined) {
                     this.state.visualDelayMs = data.visual_delay_ms;
@@ -959,6 +1029,12 @@ class AdminApp {
                     if (this.elements.transitionDurationValue) {
                         this.elements.transitionDurationValue.textContent = `${data.duration.toFixed(1)}s`;
                     }
+                }
+                break;
+
+            case 'band_materials_sync':
+                if (data.materials) {
+                    this._syncBandMaterials(data.materials);
                 }
                 break;
 
@@ -1756,6 +1832,17 @@ class AdminApp {
         }
     }
 
+    _syncBandMaterials(materials) {
+        if (!Array.isArray(materials) || materials.length !== 5) return;
+        this.state.bandMaterials = materials;
+        for (let i = 0; i < 5; i++) {
+            const el = document.getElementById(`band-material-${i}`);
+            if (el) {
+                el.value = materials[i] || '';
+            }
+        }
+    }
+
     _updateCurrentPreset(preset) {
         this.elements.currentPreset.textContent = preset || '--';
     }
@@ -2296,12 +2383,12 @@ class AdminApp {
         }
 
         if (this.elements.particleVizSection) {
-            this.elements.particleVizSection.style.display = showParticles ? 'block' : 'none';
+            this.elements.particleVizSection.classList.toggle('hidden', !showParticles);
         }
 
         // Show Bedrock notice when particles are enabled
         if (this.elements.bedrockNotice) {
-            this.elements.bedrockNotice.style.display = showParticles ? 'flex' : 'none';
+            this.elements.bedrockNotice.classList.toggle('hidden', !showParticles);
         }
     }
 
@@ -2334,7 +2421,7 @@ class AdminApp {
 
                 // Show/hide fixed color picker
                 if (this.elements.fixedColorRow) {
-                    this.elements.fixedColorRow.style.display = mode === 'fixed' ? 'flex' : 'none';
+                    this.elements.fixedColorRow.classList.toggle('hidden', mode !== 'fixed');
                 }
 
                 sendParticleVizConfig();
@@ -2430,7 +2517,7 @@ class AdminApp {
 
         // Show/hide distance slider based on channel type
         if (this.elements.voiceDistanceRow) {
-            this.elements.voiceDistanceRow.style.display = type === 'locational' ? 'flex' : 'none';
+            this.elements.voiceDistanceRow.classList.toggle('hidden', type !== 'locational');
         }
 
         this._sendVoiceConfig();
@@ -2561,7 +2648,7 @@ class AdminApp {
 
         // Show/hide distance row based on channel type
         if (distanceRow) {
-            distanceRow.style.display = vc.channelType === 'locational' ? 'flex' : 'none';
+            distanceRow.classList.toggle('hidden', vc.channelType !== 'locational');
         }
     }
 
@@ -2906,21 +2993,40 @@ class AdminApp {
             pointLight.position.set(0, 5, 0);
             this._previewScene.add(pointLight);
 
-            // Ground plane
-            const groundGeometry = new THREE.PlaneGeometry(30, 30);
-            const groundMaterial = new THREE.MeshStandardMaterial({
-                color: 0x12121a,
-                roughness: 0.9
-            });
-            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            this._previewScene.add(ground);
+            // Block texture manager and Minecraft environment
+            if (typeof BlockTextureManager !== 'undefined' && typeof MinecraftEnvironment !== 'undefined') {
+                this._textureManager = new BlockTextureManager();
+                this._textureManager.preload();
+                this._mcEnvironment = new MinecraftEnvironment(this._previewScene, this._textureManager);
+                this._mcEnvironment.build();
+            } else {
+                // Fallback: flat ground plane
+                const groundGeometry = new THREE.PlaneGeometry(30, 30);
+                const groundMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x12121a,
+                    roughness: 0.9
+                });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                this._previewScene.add(ground);
+            }
 
             // Grid helper
             const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-            gridHelper.position.y = 0.01;
+            gridHelper.position.y = 0.02;
             this._previewScene.add(gridHelper);
+
+            // Pre-create static band-color materials for reuse
+            this._bandColorMaterials = this._previewConfig.colors.map(color =>
+                new THREE.MeshStandardMaterial({
+                    color: color,
+                    roughness: 0.3,
+                    metalness: 0.2,
+                    emissive: new THREE.Color(color),
+                    emissiveIntensity: 0.2
+                })
+            );
 
             // Create initial blocks
             this._createPreviewBlocks(16);
@@ -3028,6 +3134,9 @@ class AdminApp {
                 this._previewShowGrid = e.target.checked;
                 if (this._previewBlockIndicators) {
                     this._previewBlockIndicators.setVisible(this._previewShowGrid);
+                }
+                if (this._mcEnvironment) {
+                    this._mcEnvironment.setVisible(this._previewShowGrid);
                 }
             });
         }
@@ -3224,8 +3333,24 @@ class AdminApp {
 
                     const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
                     const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
-                    if (block.userData.bandIndex !== bandIndex) {
-                        block.userData.bandIndex = bandIndex;
+                    block.userData.bandIndex = bandIndex;
+
+                    // Material texture swap: use block texture if entity has a material set
+                    const entityMaterial = entity.material || '';
+                    if (this._textureManager && entityMaterial && entityMaterial !== block.userData.currentMaterial) {
+                        const texMat = this._textureManager.getMaterial(entityMaterial);
+                        if (texMat) {
+                            block.material = texMat;
+                            block.userData.currentMaterial = entityMaterial;
+                        }
+                    } else if (!entityMaterial && block.userData.currentMaterial) {
+                        // Revert to static band-color material
+                        if (this._bandColorMaterials) {
+                            block.material = this._bandColorMaterials[bandIndex];
+                        }
+                        block.userData.currentMaterial = '';
+                    } else if (!entityMaterial && !block.userData.currentMaterial) {
+                        // No texture — update flat band color
                         block.material.color.setHex(config.colors[bandIndex]);
                         block.material.emissive.setHex(config.colors[bandIndex]);
                     }
@@ -3374,8 +3499,8 @@ class AdminApp {
                 const mode = btn.dataset.bannerMode;
                 const textSettings = document.getElementById('banner-text-settings');
                 const imageSettings = document.getElementById('banner-image-settings');
-                if (textSettings) textSettings.style.display = mode === 'text' ? '' : 'none';
-                if (imageSettings) imageSettings.style.display = mode === 'image' ? '' : 'none';
+                if (textSettings) textSettings.classList.toggle('hidden', mode !== 'text');
+                if (imageSettings) imageSettings.classList.toggle('hidden', mode !== 'image');
             });
         });
 
@@ -3384,7 +3509,7 @@ class AdminApp {
         if (colorModeSelect) {
             colorModeSelect.addEventListener('change', () => {
                 const fixedRow = document.getElementById('banner-fixed-color-row');
-                if (fixedRow) fixedRow.style.display = colorModeSelect.value === 'fixed' ? '' : 'none';
+                if (fixedRow) fixedRow.classList.toggle('hidden', colorModeSelect.value !== 'fixed');
             });
         }
 
@@ -3560,8 +3685,8 @@ class AdminApp {
         });
         const textSettings = document.getElementById('banner-text-settings');
         const imageSettings = document.getElementById('banner-image-settings');
-        if (textSettings) textSettings.style.display = p.banner_mode === 'image' ? 'none' : '';
-        if (imageSettings) imageSettings.style.display = p.banner_mode === 'image' ? '' : 'none';
+        if (textSettings) textSettings.classList.toggle('hidden', p.banner_mode === 'image');
+        if (imageSettings) imageSettings.classList.toggle('hidden', p.banner_mode !== 'image');
 
         // Set text fields
         const textStyle = document.getElementById('banner-text-style');
@@ -3571,7 +3696,7 @@ class AdminApp {
         if (colorMode) {
             colorMode.value = p.text_color_mode || 'frequency';
             const fixedRow = document.getElementById('banner-fixed-color-row');
-            if (fixedRow) fixedRow.style.display = colorMode.value === 'fixed' ? '' : 'none';
+            if (fixedRow) fixedRow.classList.toggle('hidden', colorMode.value !== 'fixed');
         }
 
         const fixedColor = document.getElementById('banner-text-fixed-color');
