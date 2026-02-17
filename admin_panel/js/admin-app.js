@@ -1287,6 +1287,24 @@ class AdminApp {
 
         this.state.allZones = zones;
 
+        // Enrich zones with entity counts from their current pattern's recommended_entities
+        // (server tracks these but Minecraft may report 0 before pool init)
+        const zonePatterns = this.state.zonePatterns || {};
+        const patterns = this.state.patterns || [];
+        if (patterns.length > 0) {
+            const patternMap = {};
+            patterns.forEach(p => { patternMap[p.id] = p; });
+            zones.forEach(z => {
+                if (!z.entity_count || z.entity_count === 0) {
+                    const pat = zonePatterns[z.name] || this.state.currentPattern;
+                    const info = pat && patternMap[pat];
+                    if (info && info.recommended_entities) {
+                        z.entity_count = info.recommended_entities;
+                    }
+                }
+            });
+        }
+
         // Derive stages from zone data
         if (zones.length > 0) {
             const stageNames = [...new Set(zones.map(z => z.stage).filter(Boolean))];
@@ -1865,19 +1883,36 @@ class AdminApp {
         this.state.currentPattern = data.pattern;
         this._updateCurrentPattern(data.pattern);
 
-        // Auto-set entity count to pattern's recommended count
-        const patternInfo = this.state.patterns.find(p => p.id === data.pattern);
-        if (patternInfo && patternInfo.recommended_entities) {
-            const rec = patternInfo.recommended_entities;
-            this.state.zone.entityCount = rec;
-            this._setSliderValue('zone-entity-count', 'val-entity-count', rec, v => `${v}`);
-            this._sendZoneConfig();
-        }
+        // Sync entity counts from pattern recommended_entities
+        // Server already applies these; we just mirror to the UI
+        const patternList = data.patterns || this.state.patterns || [];
+        if (data.patterns) this.state.patterns = patternList;
+        const patternMap = {};
+        patternList.forEach(p => { patternMap[p.id] = p; });
 
-        // Update per-zone pattern map
+        // Update per-zone pattern map and sync entity counts
         if (data.zone_patterns) {
             this.state.zonePatterns = data.zone_patterns;
+
+            // Update allZones entity counts to match each zone's pattern
+            (this.state.allZones || []).forEach(zone => {
+                const pat = data.zone_patterns[zone.name];
+                const info = pat && patternMap[pat];
+                if (info && info.recommended_entities) {
+                    zone.entity_count = info.recommended_entities;
+                }
+            });
+
+            this._renderStageZoneList();
             this._renderZoneChips();
+        }
+
+        // Update current zone's entity count slider
+        const currentPatInfo = patternMap[data.pattern];
+        if (currentPatInfo && currentPatInfo.recommended_entities) {
+            this.state.zone.entityCount = currentPatInfo.recommended_entities;
+            this._setSliderValue('zone-entity-count', 'val-entity-count',
+                currentPatInfo.recommended_entities, v => `${v}`);
         }
 
         // Highlight based on selected zones
@@ -3322,8 +3357,9 @@ class AdminApp {
 
             const stageMeta = document.createElement('span');
             stageMeta.className = 'stage-meta';
-            const zoneCount = stage.zone_count || Object.keys(stage.zones || {}).length;
-            const totalEntities = stage.total_entities || 0;
+            const stageZones2 = stageZoneMap.get(stage.name) || [];
+            const zoneCount = stageZones2.length || stage.zone_count || Object.keys(stage.zones || {}).length;
+            const totalEntities = stageZones2.reduce((sum, z) => sum + (z.entity_count || 0), 0) || stage.total_entities || 0;
             stageMeta.textContent = `${stage.template || 'custom'} | ${zoneCount} zone${zoneCount !== 1 ? 's' : ''} | ${totalEntities} entities`;
 
             stageInfo.appendChild(stageName);
