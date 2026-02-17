@@ -97,6 +97,7 @@ class AdminApp {
             },
             // 3D Preview state
             entities: [],
+            zoneEntities: {},               // zone_name → entity[] from server
             // Scene presets state
             scenes: [],
             currentScene: null
@@ -138,6 +139,12 @@ class AdminApp {
             dust: false
         };
         this._threeLoadInFlight = false;
+
+        // Multi-zone preview state
+        this._previewZoneGroups = {};       // zone_name → { group, blocks[], wireframe, sizeX/Y/Z }
+        this._previewStageCenter = { x: 0, y: 0, z: 0 };
+        this._previewStageBounds = null;    // { minX, minY, minZ, maxX, maxY, maxZ }
+        this._previewStageMode = false;
 
         // Preview config
         this._previewConfig = {
@@ -1305,6 +1312,11 @@ class AdminApp {
 
         // Render zone chips
         this._renderZoneChips();
+
+        // Rebuild 3D preview zone layout when zones change
+        if (this._previewInitialized) {
+            this._rebuildPreviewZoneLayout();
+        }
     }
 
     _handleStagesList(data) {
@@ -1711,6 +1723,11 @@ class AdminApp {
         this.state.frame = data.frame || 0;
         this.state.entities = data.entities || [];
 
+        // Store per-zone entities for multi-zone preview
+        if (data.zone_entities) {
+            this.state.zoneEntities = data.zone_entities;
+        }
+
         // Update zone_patterns from state broadcast (debounced)
         if (data.zone_patterns) {
             const newJson = JSON.stringify(data.zone_patterns);
@@ -1847,6 +1864,15 @@ class AdminApp {
     _handlePatternChanged(data) {
         this.state.currentPattern = data.pattern;
         this._updateCurrentPattern(data.pattern);
+
+        // Auto-set entity count to pattern's recommended count
+        const patternInfo = this.state.patterns.find(p => p.id === data.pattern);
+        if (patternInfo && patternInfo.recommended_entities) {
+            const rec = patternInfo.recommended_entities;
+            this.state.zone.entityCount = rec;
+            this._setSliderValue('zone-entity-count', 'val-entity-count', rec, v => `${v}`);
+            this._sendZoneConfig();
+        }
 
         // Update per-zone pattern map
         if (data.zone_patterns) {
@@ -3574,6 +3600,11 @@ class AdminApp {
 
             this._previewInitialized = true;
             this._previewLastFrameTime = performance.now();
+
+            // If zones are already loaded, build multi-zone layout
+            if ((this.state.allZones || []).length > 1) {
+                this._rebuildPreviewZoneLayout();
+            }
         } catch (error) {
             this._previewFailed = true;
             this._previewInitialized = false;
@@ -3635,6 +3666,256 @@ class AdminApp {
         }
     }
 
+    // === Multi-Zone Preview Methods ===
+
+    /** Compute stage centroid and bounding box from allZones */
+    _computeStageLayout() {
+        const zones = this.state.allZones || [];
+        if (zones.length === 0) {
+            this._previewStageCenter = { x: 0, y: 0, z: 0 };
+            this._previewStageBounds = null;
+            return;
+        }
+
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+        zones.forEach(zone => {
+            const ox = zone.origin?.x || 0;
+            const oy = zone.origin?.y || 0;
+            const oz = zone.origin?.z || 0;
+            const sx = zone.size?.x || 10;
+            const sy = zone.size?.y || 10;
+            const sz = zone.size?.z || 10;
+
+            minX = Math.min(minX, ox);
+            minY = Math.min(minY, oy);
+            minZ = Math.min(minZ, oz);
+            maxX = Math.max(maxX, ox + sx);
+            maxY = Math.max(maxY, oy + sy);
+            maxZ = Math.max(maxZ, oz + sz);
+        });
+
+        this._previewStageCenter = {
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2,
+            z: (minZ + maxZ) / 2
+        };
+        this._previewStageBounds = { minX, minY, minZ, maxX, maxY, maxZ };
+    }
+
+    /** Get wireframe color for a zone based on its role/name */
+    _getZoneWireframeColor(zone) {
+        const role = (zone.stage_role || zone.name || '').toLowerCase();
+        if (role.includes('main') || role.includes('center')) return 0x00D4FF;  // cyan
+        if (role.includes('left') || role.includes('wing_l')) return 0xFF9100;  // orange
+        if (role.includes('right') || role.includes('wing_r')) return 0x00E676; // green
+        if (role.includes('sky') || role.includes('ceiling')) return 0xD500F9;  // purple
+        if (role.includes('audience') || role.includes('floor')) return 0xFFD700; // gold
+        return 0x4488AA; // default teal
+    }
+
+    /** Create or get a THREE.Group for a specific zone */
+    _ensurePreviewZoneGroup(zoneName) {
+        if (this._previewZoneGroups[zoneName]) return this._previewZoneGroups[zoneName];
+
+        const zones = this.state.allZones || [];
+        const zone = zones.find(z => z.name === zoneName);
+        if (!zone) return null;
+
+        const group = new THREE.Group();
+        group.name = `zone-${zoneName}`;
+
+        // Position relative to stage center
+        const ox = (zone.origin?.x || 0) - this._previewStageCenter.x;
+        const oy = (zone.origin?.y || 0) - this._previewStageCenter.y;
+        const oz = (zone.origin?.z || 0) - this._previewStageCenter.z;
+        const sx = zone.size?.x || 10;
+        const sy = zone.size?.y || 10;
+        const sz = zone.size?.z || 10;
+
+        // Group origin = zone origin offset, with size/2 shift so wireframe is centered
+        group.position.set(ox + sx / 2, oy + sy / 2, oz + sz / 2);
+        group.rotation.y = -(zone.rotation || 0) * (Math.PI / 180);
+
+        // Wireframe box showing zone boundaries
+        const boxGeo = new THREE.BoxGeometry(sx, sy, sz);
+        const edgesGeo = new THREE.EdgesGeometry(boxGeo);
+        const wireColor = this._getZoneWireframeColor(zone);
+        const lineMat = new THREE.LineBasicMaterial({ color: wireColor, opacity: 0.35, transparent: true });
+        const wireframe = new THREE.LineSegments(edgesGeo, lineMat);
+        group.add(wireframe);
+        boxGeo.dispose();
+
+        this._previewScene.add(group);
+
+        const zoneGroup = {
+            group,
+            blocks: [],
+            wireframe,
+            sizeX: sx,
+            sizeY: sy,
+            sizeZ: sz,
+            zone
+        };
+        this._previewZoneGroups[zoneName] = zoneGroup;
+        return zoneGroup;
+    }
+
+    /** Ensure a zone group has enough blocks (pool up/down) */
+    _ensureZoneBlockCount(zoneGroup, count) {
+        while (zoneGroup.blocks.length < count) {
+            const block = this._createPreviewBlock(zoneGroup.blocks.length);
+            block.position.set(0, 0, 0);
+            block.visible = true;
+            zoneGroup.group.add(block);
+            zoneGroup.blocks.push(block);
+        }
+        // Hide excess blocks rather than destroying (pooling)
+        for (let i = 0; i < zoneGroup.blocks.length; i++) {
+            zoneGroup.blocks[i].visible = i < count;
+        }
+    }
+
+    /** Update a single block's material from entity data */
+    _updateBlockMaterial(block, entity, bands, config) {
+        const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
+        const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
+        block.userData.bandIndex = bandIndex;
+
+        const entityMaterial = entity.material || '';
+        if (this._textureManager && entityMaterial && entityMaterial !== block.userData.currentMaterial) {
+            const texMat = this._textureManager.getMaterial(entityMaterial);
+            if (texMat) {
+                block.material = texMat;
+                block.userData.currentMaterial = entityMaterial;
+            }
+        } else if (!entityMaterial && block.userData.currentMaterial) {
+            if (this._bandColorMaterials) {
+                block.material = this._bandColorMaterials[bandIndex];
+            }
+            block.userData.currentMaterial = '';
+        } else if (!entityMaterial && !block.userData.currentMaterial) {
+            block.material.color.setHex(config.colors[bandIndex]);
+            block.material.emissive.setHex(config.colors[bandIndex]);
+        }
+
+        const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
+        block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+    }
+
+    /** Rebuild all zone groups from scratch (on zone list change) */
+    _rebuildPreviewZoneLayout() {
+        if (!this._previewInitialized || !this._previewScene) return;
+
+        // Dispose old zone groups
+        for (const [name, zg] of Object.entries(this._previewZoneGroups)) {
+            zg.blocks.forEach(block => {
+                block.geometry.dispose();
+                if (block.material && block.material !== this._bandColorMaterials?.[block.userData.bandIndex]) {
+                    block.material.dispose();
+                }
+            });
+            zg.wireframe.geometry.dispose();
+            zg.wireframe.material.dispose();
+            this._previewScene.remove(zg.group);
+        }
+        this._previewZoneGroups = {};
+
+        // Recompute layout
+        this._computeStageLayout();
+
+        const zones = this.state.allZones || [];
+        const hasMultipleZones = zones.length > 1 && zones.some(z => z.origin);
+
+        if (hasMultipleZones) {
+            this._previewStageMode = true;
+            // Pre-create zone groups
+            zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
+            // Switch environment to stage mode
+            if (this._mcEnvironment) {
+                this._mcEnvironment.setVisible(false);
+                if (typeof MinecraftEnvironment !== 'undefined') {
+                    this._buildStageEnvironment();
+                }
+            }
+            // Frame camera to stage
+            this._frameStage();
+        } else {
+            this._previewStageMode = false;
+            // Restore single-zone environment
+            if (this._mcEnvironment) {
+                this._mcEnvironment.setVisible(true);
+            }
+            if (this._stageGround) {
+                this._previewScene.remove(this._stageGround);
+                this._stageGround.geometry.dispose();
+                this._stageGround.material.dispose();
+                this._stageGround = null;
+            }
+        }
+    }
+
+    /** Build minimal stage environment (ground plane) for multi-zone mode */
+    _buildStageEnvironment() {
+        // Remove existing stage ground if any
+        if (this._stageGround) {
+            this._previewScene.remove(this._stageGround);
+            this._stageGround.geometry.dispose();
+            this._stageGround.material.dispose();
+        }
+
+        const bounds = this._previewStageBounds;
+        if (!bounds) return;
+
+        const spanX = bounds.maxX - bounds.minX;
+        const spanZ = bounds.maxZ - bounds.minZ;
+        const groundSize = Math.max(spanX, spanZ) * 1.5;
+
+        const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x0a0a14,
+            roughness: 0.95,
+            transparent: true,
+            opacity: 0.6
+        });
+        this._stageGround = new THREE.Mesh(groundGeo, groundMat);
+        this._stageGround.rotation.x = -Math.PI / 2;
+        // Position at bottom of stage bounds, relative to stage center
+        this._stageGround.position.y = (bounds.minY - this._previewStageCenter.y) - 0.1;
+        this._stageGround.receiveShadow = true;
+        this._previewScene.add(this._stageGround);
+    }
+
+    /** Position camera to frame the entire stage */
+    _frameStage() {
+        if (!this._previewCamera || !this._previewStageBounds) return;
+
+        const bounds = this._previewStageBounds;
+        const spanX = bounds.maxX - bounds.minX;
+        const spanY = bounds.maxY - bounds.minY;
+        const spanZ = bounds.maxZ - bounds.minZ;
+        const maxSpan = Math.max(spanX, spanY, spanZ);
+
+        const distance = maxSpan * 1.2;
+        const angle = Math.PI / 4; // 45 degrees
+
+        this._previewCamera.position.set(
+            distance * Math.sin(angle),
+            distance * 0.6,
+            distance * Math.cos(angle)
+        );
+        this._previewCamera.lookAt(0, 0, 0);
+
+        // Update far plane and fog for large stages
+        this._previewCamera.far = Math.max(100, distance * 4);
+        this._previewCamera.updateProjectionMatrix();
+
+        if (this._previewScene.fog) {
+            this._previewScene.fog.far = Math.max(50, distance * 3);
+        }
+    }
+
     _setupPreviewControls() {
         // Reset camera button
         const resetBtn = document.getElementById('preview-reset-camera');
@@ -3658,7 +3939,7 @@ class AdminApp {
                 if (this._previewBlockIndicators) {
                     this._previewBlockIndicators.setVisible(this._previewShowGrid);
                 }
-                if (this._mcEnvironment) {
+                if (this._mcEnvironment && !this._previewStageMode) {
                     this._mcEnvironment.setVisible(this._previewShowGrid);
                 }
             });
@@ -3714,7 +3995,8 @@ class AdminApp {
             spherical.theta -= deltaX * 0.01;
             spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + deltaY * 0.01));
             this._previewCamera.position.setFromSpherical(spherical);
-            this._previewCamera.lookAt(0, 2, 0);
+            const lookY = this._previewStageMode ? 0 : 2;
+            this._previewCamera.lookAt(0, lookY, 0);
 
             previousMousePosition = { x: e.clientX, y: e.clientY };
         });
@@ -3727,12 +4009,16 @@ class AdminApp {
             const zoomSpeed = 0.001;
             const distance = this._previewCamera.position.length();
             const newDistance = distance * (1 + e.deltaY * zoomSpeed);
-            this._previewCamera.position.normalize().multiplyScalar(Math.max(5, Math.min(30, newDistance)));
+            const maxZoom = this._previewStageMode ? 200 : 30;
+            this._previewCamera.position.normalize().multiplyScalar(Math.max(5, Math.min(maxZoom, newDistance)));
         });
     }
 
     _resetPreviewCamera() {
-        if (this._previewCamera) {
+        if (!this._previewCamera) return;
+        if (this._previewStageMode && this._previewStageBounds) {
+            this._frameStage();
+        } else {
             this._previewCamera.position.set(12, 10, 12);
             this._previewCamera.lookAt(0, 2, 0);
         }
@@ -3787,7 +4073,7 @@ class AdminApp {
                 if (fpsEl) fpsEl.textContent = this._previewFps;
             }
 
-            // Smooth block animations
+            // Smooth block animations (legacy single-zone blocks)
             const lerpSpeed = 0.25;
             this._previewBlocks.forEach((block) => {
                 block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
@@ -3800,6 +4086,21 @@ class AdminApp {
                 block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
             });
 
+            // Smooth block animations (multi-zone blocks)
+            for (const zoneGroup of Object.values(this._previewZoneGroups)) {
+                for (const block of zoneGroup.blocks) {
+                    if (!block.visible) continue;
+                    block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
+                    block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
+                    block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
+
+                    const targetScale = block.userData.targetScale || 1;
+                    block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
+                    block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
+                    block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
+                }
+            }
+
             // Update particle system
             if (this._previewParticleSystem) {
                 this._previewParticleSystem.update(dt);
@@ -3811,7 +4112,8 @@ class AdminApp {
                 spherical.setFromVector3(this._previewCamera.position);
                 spherical.theta += 0.002;
                 this._previewCamera.position.setFromSpherical(spherical);
-                this._previewCamera.lookAt(0, 3, 0);
+                const lookY = this._previewStageMode ? 0 : 3;
+                this._previewCamera.lookAt(0, lookY, 0);
             }
 
             this._previewRenderer.render(this._previewScene, this._previewCamera);
@@ -3827,7 +4129,6 @@ class AdminApp {
         if (!this._previewInitialized || this._previewFailed) return;
 
         try {
-            const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
             const bands = Array.isArray(this.state.bands) ? this.state.bands : [0, 0, 0, 0, 0];
             const isBeat = !!this.state.isBeat;
             const beatIntensity = Number.isFinite(this.state.beatIntensity) ? this.state.beatIntensity : 0;
@@ -3835,52 +4136,22 @@ class AdminApp {
             // Update preview meters overlay
             this._updatePreviewMeters();
 
-            // Update block positions from entities
-            if (entities.length > 0) {
-                this._ensurePreviewBlockCount(entities.length);
+            // Multi-zone path: use zone_entities when available and stage mode is active
+            const zoneEntities = this.state.zoneEntities;
+            const hasZoneEntities = this._previewStageMode && zoneEntities && Object.keys(zoneEntities).length > 0;
 
-                const config = this._previewConfig;
-                this._previewBlocks.forEach((block, i) => {
-                    const entity = entities[i];
-                    if (!entity || typeof entity !== 'object') return;
-
-                    const x = Number.isFinite(entity.x) ? entity.x : 0.5;
-                    const y = Number.isFinite(entity.y) ? entity.y : 0.0;
-                    const z = Number.isFinite(entity.z) ? entity.z : 0.5;
-                    const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
-
-                    block.userData.targetX = (x * config.zoneSize) - config.centerOffset;
-                    block.userData.targetY = y * config.zoneSize;
-                    block.userData.targetZ = (z * config.zoneSize) - config.centerOffset;
-                    block.userData.targetScale = scale * 1.5;
-
-                    const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
-                    const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
-                    block.userData.bandIndex = bandIndex;
-
-                    // Material texture swap: use block texture if entity has a material set
-                    const entityMaterial = entity.material || '';
-                    if (this._textureManager && entityMaterial && entityMaterial !== block.userData.currentMaterial) {
-                        const texMat = this._textureManager.getMaterial(entityMaterial);
-                        if (texMat) {
-                            block.material = texMat;
-                            block.userData.currentMaterial = entityMaterial;
-                        }
-                    } else if (!entityMaterial && block.userData.currentMaterial) {
-                        // Revert to static band-color material
-                        if (this._bandColorMaterials) {
-                            block.material = this._bandColorMaterials[bandIndex];
-                        }
-                        block.userData.currentMaterial = '';
-                    } else if (!entityMaterial && !block.userData.currentMaterial) {
-                        // No texture — update flat band color
-                        block.material.color.setHex(config.colors[bandIndex]);
-                        block.material.emissive.setHex(config.colors[bandIndex]);
-                    }
-
-                    const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
-                    block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
-                });
+            if (hasZoneEntities) {
+                this._updatePreviewMultiZone(zoneEntities, bands);
+                // Hide legacy single-zone blocks
+                this._previewBlocks.forEach(b => { b.visible = false; });
+            } else {
+                // Legacy single-zone path
+                this._updatePreviewSingleZone(bands);
+                // Hide multi-zone blocks
+                for (const zg of Object.values(this._previewZoneGroups)) {
+                    zg.blocks.forEach(b => { b.visible = false; });
+                    zg.wireframe.visible = false;
+                }
             }
 
             // Update block indicators
@@ -3912,6 +4183,72 @@ class AdminApp {
             this._stopPreviewAnimation();
             this._showToast('3D Preview update failed; disabled for this session', 'warning');
         }
+    }
+
+    /** Update preview blocks for all zones simultaneously */
+    _updatePreviewMultiZone(zoneEntities, bands) {
+        const config = this._previewConfig;
+
+        for (const [zoneName, entities] of Object.entries(zoneEntities)) {
+            if (!Array.isArray(entities)) continue;
+
+            const zoneGroup = this._ensurePreviewZoneGroup(zoneName);
+            if (!zoneGroup) continue;
+
+            zoneGroup.wireframe.visible = true;
+            this._ensureZoneBlockCount(zoneGroup, entities.length);
+
+            const sx = zoneGroup.sizeX;
+            const sy = zoneGroup.sizeY;
+            const sz = zoneGroup.sizeZ;
+
+            for (let i = 0; i < entities.length; i++) {
+                const entity = entities[i];
+                const block = zoneGroup.blocks[i];
+                if (!entity || typeof entity !== 'object' || !block) continue;
+
+                const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+                const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+                const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+                const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
+
+                // Position in zone-local space (centered: -size/2 to +size/2)
+                block.userData.targetX = (x - 0.5) * sx;
+                block.userData.targetY = (y - 0.5) * sy;
+                block.userData.targetZ = (z - 0.5) * sz;
+                block.userData.targetScale = scale * 1.5;
+
+                this._updateBlockMaterial(block, entity, bands, config);
+            }
+        }
+    }
+
+    /** Legacy single-zone preview update */
+    _updatePreviewSingleZone(bands) {
+        const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
+        if (entities.length === 0) return;
+
+        this._ensurePreviewBlockCount(entities.length);
+        // Make sure legacy blocks are visible
+        this._previewBlocks.forEach(b => { b.visible = true; });
+
+        const config = this._previewConfig;
+        this._previewBlocks.forEach((block, i) => {
+            const entity = entities[i];
+            if (!entity || typeof entity !== 'object') return;
+
+            const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+            const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+            const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+            const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
+
+            block.userData.targetX = (x * config.zoneSize) - config.centerOffset;
+            block.userData.targetY = y * config.zoneSize;
+            block.userData.targetZ = (z * config.zoneSize) - config.centerOffset;
+            block.userData.targetScale = scale * 1.5;
+
+            this._updateBlockMaterial(block, entity, bands, config);
+        });
     }
 
     _updatePreviewMeters() {
