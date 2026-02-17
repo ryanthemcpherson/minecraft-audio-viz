@@ -34,7 +34,7 @@ pub struct AppStateWrapper(pub Arc<Mutex<AppState>>);
 /// Sequence counter for audio frames (shared between bridge task and get_audio_levels)
 static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct DirectMcRoute {
     host: String,
     port: u16,
@@ -56,11 +56,21 @@ pub(crate) fn is_local_host(host: &str) -> bool {
     false
 }
 
-fn resolve_direct_mc_route(conn_state: &protocol::ConnectionState) -> Option<DirectMcRoute> {
+fn resolve_direct_mc_route(
+    conn_state: &protocol::ConnectionState,
+    vj_server_host: &str,
+) -> Option<DirectMcRoute> {
     if conn_state.route_mode != "dual" || !conn_state.is_active {
         return None;
     }
-    let host = conn_state.mc_host.clone()?;
+    let raw_host = conn_state.mc_host.clone()?;
+    // MC plugin is co-located with VJ server; if server reported localhost,
+    // substitute the VJ server's address so the remote DJ can actually reach it.
+    let host = if is_local_host(&raw_host) {
+        vj_server_host.to_string()
+    } else {
+        raw_host
+    };
     let port = conn_state.mc_port?;
     let zone = conn_state
         .mc_zone
@@ -379,6 +389,14 @@ async fn run_bridge(
         let mut mc_target_key: Option<String> = None;
         let mut mc_pool_key: Option<String> = None;
         let mut next_mc_connect_attempt = Instant::now();
+        // Background task for MC connection so it never blocks the audio bridge
+        let mut mc_connect_task: Option<
+            tokio::task::JoinHandle<Result<(mpsc::Sender<Message>, mpsc::Sender<()>), String>>,
+        > = None;
+        let vj_server_host = {
+            let app_state = state_arc.lock();
+            app_state.server_host.clone()
+        };
         let mut last_phase_predicted_beat_at = 0.0_f64;
         let mut last_mc_send = Instant::now() - Duration::from_secs(1);
         let mut pattern_engine: Option<patterns::PatternEngine> = None;
@@ -435,10 +453,43 @@ async fn run_bridge(
                     };
 
                     // 1.5 Manage direct MC route (dual publish) based on stream_route policy.
-                    let desired_route = resolve_direct_mc_route(&conn_state);
+                    let desired_route = resolve_direct_mc_route(&conn_state, &vj_server_host);
                     let desired_target_key = desired_route
                         .as_ref()
                         .map(|r| format!("{}:{}:{}", r.host, r.port, r.zone));
+
+                    // Check if a background MC connect task has finished
+                    if let Some(task) = mc_connect_task.take() {
+                        if task.is_finished() {
+                            match task.await {
+                                Ok(Ok((direct_tx, direct_shutdown))) => {
+                                    mc_tx = Some(direct_tx);
+                                    mc_shutdown_tx = Some(direct_shutdown);
+                                    mc_target_key = desired_target_key.clone();
+                                    mc_pool_key = None;
+                                    if let Some(ref route) = desired_route {
+                                        log::info!(
+                                            "Direct MC dual-publish enabled -> {}:{} ({}, entities={})",
+                                            route.host, route.port, route.zone, route.entity_count
+                                        );
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    log::warn!("{}", e);
+                                    next_mc_connect_attempt =
+                                        Instant::now() + Duration::from_secs(2);
+                                }
+                                Err(e) => {
+                                    log::warn!("MC connect task panicked: {}", e);
+                                    next_mc_connect_attempt =
+                                        Instant::now() + Duration::from_secs(2);
+                                }
+                            }
+                        } else {
+                            // Still connecting — put it back
+                            mc_connect_task = Some(task);
+                        }
+                    }
 
                     if desired_route.is_none() {
                         if let Some(shutdown) = mc_shutdown_tx.take() {
@@ -448,26 +499,13 @@ async fn run_bridge(
                         mc_target_key = None;
                         mc_pool_key = None;
                     } else if (mc_target_key != desired_target_key || mc_tx.is_none())
+                        && mc_connect_task.is_none()
                         && Instant::now() >= next_mc_connect_attempt
                     {
-                        if let Some(route) = desired_route.as_ref() {
-                            match start_direct_mc_session(route).await {
-                                Ok((direct_tx, direct_shutdown)) => {
-                                    mc_tx = Some(direct_tx);
-                                    mc_shutdown_tx = Some(direct_shutdown);
-                                    mc_target_key = desired_target_key;
-                                    mc_pool_key = None;
-                                    log::info!(
-                                        "Direct MC dual-publish enabled -> {}:{} ({}, entities={})",
-                                        route.host, route.port, route.zone, route.entity_count
-                                    );
-                                }
-                                Err(e) => {
-                                    log::warn!("{}", e);
-                                    next_mc_connect_attempt =
-                                        Instant::now() + Duration::from_secs(2);
-                                }
-                            }
+                        if let Some(route) = desired_route.clone() {
+                            mc_connect_task = Some(tokio::spawn(async move {
+                                start_direct_mc_session(&route).await
+                            }));
                         }
                     }
 
@@ -1240,6 +1278,13 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
+            }
+            // Forward any deep link URLs from the second instance to the frontend
+            for arg in &args {
+                if arg.starts_with("mcav://") {
+                    log::info!("Single-instance: forwarding deep link to frontend: {}", arg);
+                    let _ = app.emit("deep-link-received", arg.clone());
+                }
             }
         }))
         .plugin(tauri_plugin_shell::init())

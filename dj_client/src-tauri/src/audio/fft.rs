@@ -110,9 +110,6 @@ pub struct BassLane {
     samples_since_onset: u32,
     /// Minimum samples between onsets (150ms cooldown)
     cooldown_samples: u32,
-
-    /// Source sample rate
-    sample_rate: f32,
 }
 
 impl BassLane {
@@ -154,7 +151,6 @@ impl BassLane {
             onset_threshold: 0.15,
             samples_since_onset: cooldown_samples, // start ready to fire
             cooldown_samples,
-            sample_rate,
         }
     }
 
@@ -242,7 +238,6 @@ impl BassLane {
 
 /// FFT analyzer for audio visualization
 pub struct FftAnalyzer {
-    config: AudioConfig,
     planner: FftPlanner<f32>,
     fft_size: usize,
     window: Vec<f32>,
@@ -313,7 +308,6 @@ impl FftAnalyzer {
         ];
 
         Self {
-            config: config.clone(),
             planner: FftPlanner::new(),
             fft_size,
             window,
