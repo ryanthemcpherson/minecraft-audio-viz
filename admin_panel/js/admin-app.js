@@ -800,9 +800,17 @@ class AdminApp {
         if (this.elements.stageSelect) {
             this.elements.stageSelect.addEventListener('change', () => {
                 this.state.selectedStage = this.elements.stageSelect.value || null;
+                // Auto-select all zones of the new stage
+                this.state.selectedZones.clear();
+                const zones = this.state.allZones || [];
+                const filtered = this.state.selectedStage
+                    ? zones.filter(z => z.stage === this.state.selectedStage)
+                    : zones;
+                filtered.forEach(z => this.state.selectedZones.add(z.name));
                 this._updateZoneSelector();
                 this._renderStageZoneList();
                 this._renderZoneChips();
+                this._updatePatternHighlightForZones();
             });
         }
 
@@ -1252,7 +1260,33 @@ class AdminApp {
 
     _handleZonesList(data) {
         const zones = data.zones || [];
+
+        // Derive stage name from zone name prefix if zone has no stage field.
+        // Zone names follow "{stage}_{role}", e.g. "stone_right_wing".
+        // Find common prefix shared by all zone names to extract the stage.
+        if (zones.length > 0 && !zones[0].stage) {
+            const names = zones.map(z => z.name);
+            let prefix = names[0];
+            for (let i = 1; i < names.length; i++) {
+                while (prefix && !names[i].startsWith(prefix + '_')) {
+                    const lastUnderscore = prefix.lastIndexOf('_');
+                    prefix = lastUnderscore > 0 ? prefix.substring(0, lastUnderscore) : '';
+                }
+            }
+            if (prefix) {
+                zones.forEach(z => { z.stage = prefix; });
+            }
+        }
+
         this.state.allZones = zones;
+
+        // Derive stages from zone data
+        if (zones.length > 0) {
+            const stageNames = [...new Set(zones.map(z => z.stage).filter(Boolean))];
+            if (stageNames.length > 0) {
+                this._handleStagesList({ stages: stageNames.map(n => ({ name: n })) });
+            }
+        }
 
         // Populate zone selector (filtered by selected stage if any)
         this._updateZoneSelector();
@@ -1282,17 +1316,17 @@ class AdminApp {
                 this.elements.stageSelect.removeChild(this.elements.stageSelect.firstChild);
             }
 
-            const allOpt = document.createElement('option');
-            allOpt.value = '';
-            allOpt.textContent = 'All Stages';
-            this.elements.stageSelect.appendChild(allOpt);
-
             this.state.stages.forEach(stage => {
                 const option = document.createElement('option');
                 option.value = stage.name;
-                option.textContent = stage.name;
+                option.textContent = this._formatStageName(stage.name);
                 this.elements.stageSelect.appendChild(option);
             });
+
+            // Auto-select first stage if none selected
+            if (!this.state.selectedStage && this.state.stages.length > 0) {
+                this.state.selectedStage = this.state.stages[0].name;
+            }
 
             if (this.state.selectedStage) {
                 this.elements.stageSelect.value = this.state.selectedStage;
@@ -2233,10 +2267,7 @@ class AdminApp {
 
             const nameSpan = document.createElement('span');
             nameSpan.className = 'zone-chip-name';
-            // Show role label if available, otherwise zone name
-            nameSpan.textContent = zone.stage_role
-                ? zone.stage_role.replace(/_/g, ' ')
-                : zone.name;
+            nameSpan.textContent = this._formatZoneDisplayName(zone.name, zone.stage);
             chip.appendChild(nameSpan);
 
             const patternSpan = document.createElement('span');
@@ -2288,6 +2319,28 @@ class AdminApp {
 
         this._renderZoneChips();
         this._updatePatternHighlightForZones();
+    }
+
+    /**
+     * Format a stage name for display: replace underscores, title case.
+     * e.g. "stone" → "Stone", "my_stage" → "My Stage"
+     */
+    _formatStageName(name) {
+        return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    /**
+     * Format a zone name for display: strip stage prefix, replace underscores, title case.
+     * e.g. "stone_right_wing" with stage "stone" → "Right Wing"
+     */
+    _formatZoneDisplayName(zoneName, stageName) {
+        let display = zoneName;
+        // Strip stage prefix if present
+        if (stageName && display.startsWith(stageName + '_')) {
+            display = display.slice(stageName.length + 1);
+        }
+        // Replace underscores with spaces, title case
+        return display.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
 
     _updatePatternHighlightForZones() {
