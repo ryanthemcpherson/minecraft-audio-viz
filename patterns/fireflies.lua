@@ -1,7 +1,7 @@
 -- Pattern metadata
 name = "Fireflies"
 description = "Swarm of synchronized flashing lights"
-recommended_entities = 64
+recommended_entities = 40
 category = "Organic"
 static_camera = false
 
@@ -76,14 +76,21 @@ function calculate(audio, config, dt)
         local glow_phase = ff.glow_phase
         local group = ff.group
 
-        -- Organic drifting motion
-        -- Perlin-like smooth random walk
+        -- Organic drifting motion (Perlin-like smooth random walk)
         local t = state.drift_time + i * 0.1
         local ax = math.sin(t * 0.5 + i) * 0.0002
         local ay = math.sin(t * 0.3 + i * 1.3) * 0.0001
         local az = math.cos(t * 0.4 + i * 0.7) * 0.0002
 
-        -- Update velocity with acceleration
+        -- Center bias: cubic pull toward center, strong near edges
+        local cx, cy, cz = 0.5 - x, 0.5 - y, 0.5 - z
+        local dx, dy, dz = math.abs(cx), math.abs(cy), math.abs(cz)
+        local bias = 0.008
+        ax = ax + cx * dx * dx * bias
+        ay = ay + cy * dy * dy * bias
+        az = az + cz * dz * dz * bias
+
+        -- Update velocity with drift + bias acceleration
         vx = decay(vx, 0.98, dt) + ax * (dt / 0.016)
         vy = decay(vy, 0.98, dt) + ay * (dt / 0.016)
         vz = decay(vz, 0.98, dt) + az * (dt / 0.016)
@@ -99,14 +106,13 @@ function calculate(audio, config, dt)
         y = y + vy * (dt / 0.016)
         z = z + vz * (dt / 0.016)
 
-        -- Soft boundaries - turn around near edges
-        if x < 0.15 or x > 0.85 then vx = vx * -0.5 end
-        if y < 0.15 or y > 0.85 then vy = vy * -0.5 end
-        if z < 0.15 or z > 0.85 then vz = vz * -0.5 end
-
-        x = clamp(x, 0.1, 0.9)
-        y = clamp(y, 0.1, 0.9)
-        z = clamp(z, 0.1, 0.9)
+        -- Hard boundary: clamp position and kill outward velocity
+        if x < 0.1 then x = 0.1; if vx < 0 then vx = 0 end end
+        if x > 0.9 then x = 0.9; if vx > 0 then vx = 0 end end
+        if y < 0.1 then y = 0.1; if vy < 0 then vy = 0 end end
+        if y > 0.9 then y = 0.9; if vy > 0 then vy = 0 end end
+        if z < 0.1 then z = 0.1; if vz < 0 then vz = 0 end end
+        if z > 0.9 then z = 0.9; if vz > 0 then vz = 0 end end
 
         -- Update glow phase
         glow_phase = glow_phase + (0.05 + math.random() * 0.02) * (dt / 0.016)
