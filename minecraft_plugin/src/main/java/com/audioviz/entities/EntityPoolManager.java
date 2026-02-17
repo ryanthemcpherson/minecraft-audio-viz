@@ -94,12 +94,23 @@ public class EntityPoolManager {
             }
 
             if (finalCount > currentCount) {
-                // Add more entities
+                // Add more entities — spawn at sibling positions so they
+                // emerge from existing blocks rather than flying from origin.
                 for (int i = currentCount; i < finalCount; i++) {
                     String entityId = "block_" + i;
                     if (pool.containsKey(entityId)) continue;
 
-                    BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
+                    // Spawn at sibling entity's position (block_N % oldCount)
+                    Location entitySpawnLoc = spawnLoc;
+                    if (currentCount > 0) {
+                        String siblingId = "block_" + (i % currentCount);
+                        Entity sibling = pool.get(siblingId);
+                        if (sibling != null && sibling.isValid()) {
+                            entitySpawnLoc = sibling.getLocation().clone();
+                        }
+                    }
+
+                    BlockDisplay display = entitySpawnLoc.getWorld().spawn(entitySpawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(finalMaterial.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
                         entity.setInterpolationDuration(2); // 2 ticks — completes 50% per tick, matching ~exponential decay
