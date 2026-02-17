@@ -278,7 +278,13 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             return;
         }
         if (args.length == 0) {
-            sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage <create|delete|list|info|activate|deactivate|move|rotate>");
+            // No subcommand: open the stage list GUI
+            if (sender instanceof Player player) {
+                plugin.getMenuManager().openMenu(player,
+                    new com.audioviz.gui.menus.StageListMenu(plugin, plugin.getMenuManager()));
+            } else {
+                sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage <create|delete|list|info|activate|deactivate|move|rotate>");
+            }
             return;
         }
 
@@ -291,12 +297,19 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.RED + "Only players can create stages.");
                     return;
                 }
-                if (args.length < 3) {
-                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage create <name> <template>");
-                    sender.sendMessage(ChatColor.GRAY + "Templates: " + String.join(", ", stageManager.getTemplateNames()));
+                // No args: open the wizard GUI
+                if (args.length < 2) {
+                    plugin.getMenuManager().openMenu(player,
+                        new com.audioviz.gui.menus.StageTemplateMenu(plugin, plugin.getMenuManager()));
                     return;
                 }
+                // With args: direct creation (name required, template optional → wizard picks it)
                 String stageName = args[1];
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /audioviz stage create [name] [template]");
+                    sender.sendMessage(ChatColor.GRAY + "Or just /audioviz stage create to open the wizard.");
+                    return;
+                }
                 String templateName = args[2];
 
                 if (stageManager.stageExists(stageName)) {
@@ -313,8 +326,12 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                 Stage stage = stageManager.createStage(stageName, player.getLocation(), templateName);
                 if (stage != null) {
                     sender.sendMessage(ChatColor.GREEN + "Created stage '" + stageName + "' from template '" + templateName + "'!");
-                    sender.sendMessage(ChatColor.GRAY + "Zones: " + stage.getRoleToZone().size() +
-                        " | Use '/audioviz stage activate " + stageName + "' to start");
+                    // Launch the zone placement wizard automatically
+                    var session = plugin.getZonePlacementManager().startSession(player, stage);
+                    if (session == null) {
+                        sender.sendMessage(ChatColor.GRAY + "Zones: " + stage.getRoleToZone().size() +
+                            " | Use '/audioviz stage activate " + stageName + "' to start");
+                    }
                 } else {
                     sender.sendMessage(ChatColor.RED + "Failed to create stage.");
                 }
@@ -701,7 +718,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone setsize <name> <x> <y> <z>" + ChatColor.WHITE + " - Set zone dimensions");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone info <name>" + ChatColor.WHITE + " - Show zone details");
         sender.sendMessage(ChatColor.AQUA + "/audioviz zone boundaries [on|off|<name>]" + ChatColor.WHITE + " - Toggle zone boundary particles");
-        sender.sendMessage(ChatColor.AQUA + "/audioviz stage create <name> <template>" + ChatColor.WHITE + " - Create stage from template");
+        sender.sendMessage(ChatColor.AQUA + "/audioviz stage create" + ChatColor.WHITE + " - Open stage creation wizard");
         sender.sendMessage(ChatColor.AQUA + "/audioviz stage delete <name>" + ChatColor.WHITE + " - Delete a stage");
         sender.sendMessage(ChatColor.AQUA + "/audioviz stage list" + ChatColor.WHITE + " - List all stages");
         sender.sendMessage(ChatColor.AQUA + "/audioviz stage info <name>" + ChatColor.WHITE + " - Show stage details");

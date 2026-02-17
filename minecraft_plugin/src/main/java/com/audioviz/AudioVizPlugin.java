@@ -108,6 +108,23 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         getCommand("audioviz").setExecutor(commandExecutor);
         getCommand("audioviz").setTabCompleter(commandExecutor);
 
+        // Register /stage shortcut (delegates to "audioviz stage <args>")
+        var stageCmd = getCommand("stage");
+        if (stageCmd != null) {
+            stageCmd.setExecutor((sender, cmd, label, args) -> {
+                String[] newArgs = new String[args.length + 1];
+                newArgs[0] = "stage";
+                System.arraycopy(args, 0, newArgs, 1, args.length);
+                return commandExecutor.onCommand(sender, cmd, label, newArgs);
+            });
+            stageCmd.setTabCompleter((sender, cmd, label, args) -> {
+                String[] newArgs = new String[args.length + 1];
+                newArgs[0] = "stage";
+                System.arraycopy(args, 0, newArgs, 1, args.length);
+                return commandExecutor.onTabComplete(sender, cmd, label, newArgs);
+            });
+        }
+
         // Detect Simple Voice Chat for audio streaming support
         // Delay by 1 tick so SVC has time to register its BukkitVoicechatService
         // (softdepend doesn't guarantee load order on Paper)

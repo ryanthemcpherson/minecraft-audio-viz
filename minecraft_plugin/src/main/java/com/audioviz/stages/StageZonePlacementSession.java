@@ -26,12 +26,11 @@ import java.util.List;
 
 /**
  * Per-player in-world placement session for positioning stage zones one-by-one.
- * The player walks to each zone's desired location, sees a particle outline preview,
- * and confirms placement before advancing to the next zone.
+ * Each zone is defined by two opposite corners (like WorldEdit selections).
  *
  * Controls:
- *   Left-click:  Lock zone origin to player position (outline stops following)
- *   Left-click again: Reposition (re-lock at new position)
+ *   Left-click:  Set corner 1, then corner 2
+ *   Left-click (after both set): Re-pick corner 1
  *   Right-click: Confirm placement, advance to next zone
  *   Sneak+Right-click: Skip zone (keep template default), advance
  *   Q (drop): Cancel entire placement
@@ -46,15 +45,23 @@ public class StageZonePlacementSession implements Listener {
     private final List<StageZoneRole> rolesToPlace;
 
     private int currentIndex = 0;
-    private Location currentOrigin = null;
-    private boolean originLocked = false;
     private BukkitTask renderTask;
     private final List<TextDisplay> roleLabels = new ArrayList<>();
 
+    // Two-corner placement state
+    private enum PlacementPhase { CORNER1, CORNER2, CONFIRMING }
+    private PlacementPhase phase = PlacementPhase.CORNER1;
+    private Location corner1 = null;
+    private Location corner2 = null;
+    private float currentRotation = 0f; // 0, 90, 180, 270
+
     // Particle colors
-    private static final Color COLOR_CURRENT_FOLLOWING = Color.fromRGB(0, 255, 100);
-    private static final Color COLOR_CURRENT_LOCKED = Color.fromRGB(100, 255, 50);
-    private static final Color COLOR_NOT_PLACED = Color.fromRGB(80, 80, 80);
+    private static final Color COLOR_CORNER1 = Color.fromRGB(255, 200, 0);      // Gold - corner 1 marker
+    private static final Color COLOR_PREVIEW = Color.fromRGB(0, 255, 100);       // Green - live preview
+    private static final Color COLOR_CONFIRMED = Color.fromRGB(100, 255, 50);    // Bright green - both set
+    private static final Color COLOR_NOT_PLACED = Color.fromRGB(80, 80, 80);     // Gray - unplaced
+    private static final Color COLOR_FRONT = Color.fromRGB(0, 200, 255);         // Cyan - front face
+    private static final Color COLOR_FRONT_ARROW = Color.fromRGB(0, 255, 255);   // Bright cyan - front arrow
 
     // Color palette for placed zones (matches ZoneBoundaryRenderer.ZONE_COLORS)
     private static final Color[] ZONE_COLORS = {
@@ -77,6 +84,10 @@ public class StageZonePlacementSession implements Listener {
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
         {0, 4}, {1, 5}, {2, 6}, {3, 7}
+    };
+    // Front face edges (Z=0 face): 0-1 (bottom), 4-5 (top), 0-4 (left), 1-5 (right)
+    private static final int[][] FRONT_EDGES = {
+        {0, 1}, {4, 5}, {0, 4}, {1, 5}
     };
 
     public StageZonePlacementSession(AudioVizPlugin plugin, Player player, Stage stage) {
@@ -104,24 +115,31 @@ public class StageZonePlacementSession implements Listener {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         renderTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::render, 0L, 5L);
 
-        // Initialize current origin to the zone's current position
-        initCurrentOrigin();
-
         // Send instructions
         player.sendMessage(Component.empty());
         player.sendMessage(Component.text("=== Zone Placement Wizard ===", NamedTextColor.GOLD, TextDecoration.BOLD));
-        player.sendMessage(Component.text("Place each zone in your stage one-by-one.", NamedTextColor.YELLOW));
+        player.sendMessage(Component.text("Define each zone by selecting two opposite corners.", NamedTextColor.YELLOW));
         player.sendMessage(Component.empty());
         player.sendMessage(Component.text("Controls:", NamedTextColor.YELLOW));
         player.sendMessage(Component.text("  Left-click: ", NamedTextColor.WHITE)
-            .append(Component.text("Lock zone at your position", NamedTextColor.GREEN)));
+            .append(Component.text("Set corner (1st, then 2nd)", NamedTextColor.GREEN)));
+        player.sendMessage(Component.text("  Sneak+Left-click: ", NamedTextColor.WHITE)
+            .append(Component.text("Rotate zone 90\u00B0", NamedTextColor.AQUA)));
         player.sendMessage(Component.text("  Right-click: ", NamedTextColor.WHITE)
-            .append(Component.text("Confirm & advance to next zone", NamedTextColor.GREEN)));
+            .append(Component.text("Confirm zone & advance", NamedTextColor.GREEN)));
         player.sendMessage(Component.text("  Sneak+Right-click: ", NamedTextColor.WHITE)
             .append(Component.text("Skip zone (keep default)", NamedTextColor.GRAY)));
         player.sendMessage(Component.text("  Q (drop): ", NamedTextColor.WHITE)
             .append(Component.text("Cancel placement", NamedTextColor.RED)));
         player.sendMessage(Component.empty());
+        player.sendMessage(Component.text("  The ", NamedTextColor.GRAY)
+            .append(Component.text("cyan", NamedTextColor.AQUA))
+            .append(Component.text(" face with arrow is the FRONT of the zone.", NamedTextColor.GRAY)));
+        player.sendMessage(Component.empty());
+
+        StageZoneRole firstRole = rolesToPlace.get(currentIndex);
+        player.sendMessage(Component.text("Placing: ", NamedTextColor.GREEN)
+            .append(Component.text(firstRole.getDisplayName(), NamedTextColor.GOLD)));
 
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 1.5f);
         updateActionBar();
@@ -148,21 +166,54 @@ public class StageZonePlacementSession implements Listener {
     }
 
     /**
+     * Apply the two corners to the zone (origin = min corner, size = delta).
+     */
+    private void applyCorners(StageZoneRole role) {
+        if (corner1 == null || corner2 == null) return;
+
+        String zoneName = stage.getZoneName(role);
+        if (zoneName == null) return;
+
+        VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+        if (zone == null) return;
+
+        // Compute origin (min corner) and size (abs delta)
+        double minX = Math.min(corner1.getX(), corner2.getX());
+        double minY = Math.min(corner1.getY(), corner2.getY());
+        double minZ = Math.min(corner1.getZ(), corner2.getZ());
+        double maxX = Math.max(corner1.getX(), corner2.getX());
+        double maxY = Math.max(corner1.getY(), corner2.getY());
+        double maxZ = Math.max(corner1.getZ(), corner2.getZ());
+
+        // Ensure minimum 1-block size on each axis
+        double sizeX = Math.max(1, maxX - minX);
+        double sizeY = Math.max(1, maxY - minY);
+        double sizeZ = Math.max(1, maxZ - minZ);
+
+        // When rotated, pivot around the center of the AABB so the box stays in place
+        double centerX = minX + sizeX / 2.0;
+        double centerZ = minZ + sizeZ / 2.0;
+        double radians = Math.toRadians(currentRotation);
+        double cosR = Math.cos(radians);
+        double sinR = Math.sin(radians);
+        double halfX = sizeX / 2.0;
+        double halfZ = sizeZ / 2.0;
+        double rotOriginX = centerX + (-halfX * cosR - (-halfZ) * sinR);
+        double rotOriginZ = centerZ + (-halfX * sinR + (-halfZ) * cosR);
+
+        Location origin = new Location(corner1.getWorld(), rotOriginX, minY, rotOriginZ);
+        zone.setOrigin(origin);
+        zone.setSize(sizeX, sizeY, sizeZ);
+        zone.setRotation(currentRotation);
+        plugin.getZoneManager().saveZones();
+    }
+
+    /**
      * Advance to the next zone role, or complete if all done.
      */
     private void advanceToNextZone() {
-        // Save current origin to the zone
         StageZoneRole currentRole = rolesToPlace.get(currentIndex);
-        if (currentOrigin != null) {
-            String zoneName = stage.getZoneName(currentRole);
-            if (zoneName != null) {
-                VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
-                if (zone != null) {
-                    zone.setOrigin(currentOrigin);
-                    plugin.getZoneManager().saveZones();
-                }
-            }
-        }
+        applyCorners(currentRole);
 
         // Spawn role label at the placed position
         spawnRoleLabel(currentRole);
@@ -173,8 +224,11 @@ public class StageZonePlacementSession implements Listener {
         if (currentIndex >= rolesToPlace.size()) {
             complete();
         } else {
-            originLocked = false;
-            initCurrentOrigin();
+            // Reset for next zone
+            phase = PlacementPhase.CORNER1;
+            corner1 = null;
+            corner2 = null;
+            currentRotation = 0f;
             updateActionBar();
 
             StageZoneRole nextRole = rolesToPlace.get(currentIndex);
@@ -187,9 +241,7 @@ public class StageZonePlacementSession implements Listener {
      * Complete the placement session - all zones placed.
      */
     private void complete() {
-        // Save stages
         plugin.getStageManager().saveStages();
-
         stop(false);
 
         player.sendMessage(Component.empty());
@@ -200,24 +252,6 @@ public class StageZonePlacementSession implements Listener {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             plugin.getMenuManager().openMenu(player, new StageEditorMenu(plugin, plugin.getMenuManager(), stage));
         });
-    }
-
-    /**
-     * Initialize currentOrigin to the zone's existing world position.
-     */
-    private void initCurrentOrigin() {
-        StageZoneRole role = rolesToPlace.get(currentIndex);
-        String zoneName = stage.getZoneName(role);
-        if (zoneName != null) {
-            VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
-            if (zone != null) {
-                currentOrigin = zone.getOrigin();
-            } else {
-                currentOrigin = stage.getWorldLocationForRole(role);
-            }
-        } else {
-            currentOrigin = stage.getWorldLocationForRole(role);
-        }
     }
 
     // ==================== Rendering ====================
@@ -239,37 +273,155 @@ public class StageZonePlacementSession implements Listener {
             VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
             if (zone == null) continue;
 
-            Vector size = zone.getSize();
-            float rotation = zone.getRotation();
-
             if (i == currentIndex) {
-                // Current zone being placed
-                Location origin;
-                if (!originLocked) {
-                    // Follow player position
-                    currentOrigin = player.getLocation().getBlock().getLocation();
-                    origin = currentOrigin;
-                } else {
-                    origin = currentOrigin;
-                }
-
-                Color color = originLocked ? COLOR_CURRENT_LOCKED : COLOR_CURRENT_FOLLOWING;
-                renderBox(origin, size, rotation, color, 1.2f, 0.5);
-                renderFloor(origin, size, rotation, color);
-                renderAxisIndicators(origin, rotation);
+                renderCurrentZone(zone);
             } else if (i < currentIndex) {
                 // Already placed zone
                 Color color = ZONE_COLORS[i % ZONE_COLORS.length];
-                Color dimColor = darken(color, 0.4);
-                renderBox(zone.getOrigin(), size, rotation, color, 0.7f, 0.7);
-                renderFloor(zone.getOrigin(), size, rotation, dimColor);
+                renderBox(zone.getOrigin(), zone.getSize(), zone.getRotation(), color, 0.7f, 0.7);
             } else {
                 // Not yet placed zone
-                renderBox(zone.getOrigin(), size, rotation, COLOR_NOT_PLACED, 0.5f, 1.0);
+                renderBox(zone.getOrigin(), zone.getSize(), zone.getRotation(), COLOR_NOT_PLACED, 0.5f, 1.0);
             }
         }
 
         updateActionBar();
+    }
+
+    /**
+     * Render the zone currently being placed based on the placement phase.
+     */
+    private void renderCurrentZone(VisualizationZone zone) {
+        Location playerBlock = player.getLocation().getBlock().getLocation();
+
+        switch (phase) {
+            case CORNER1 -> {
+                // Show a small marker at the player's feet
+                Particle.DustOptions dust = new Particle.DustOptions(COLOR_CORNER1, 1.5f);
+                Location marker = playerBlock.clone().add(0.5, 0.05, 0.5);
+                player.spawnParticle(Particle.DUST, marker, 3, 0.2, 0, 0.2, 0, dust);
+                // Also show the existing zone dimly
+                renderBox(zone.getOrigin(), zone.getSize(), zone.getRotation(), COLOR_NOT_PLACED, 0.4f, 1.2);
+            }
+            case CORNER2 -> {
+                // Corner 1 is set, stretch preview to player position
+                Location previewOrigin = computePreviewOrigin(corner1, playerBlock);
+                Vector previewSize = computePreviewSize(corner1, playerBlock);
+
+                renderBox(previewOrigin, previewSize, currentRotation, COLOR_PREVIEW, 1.2f, 0.5);
+                renderFloor(previewOrigin, previewSize, currentRotation, COLOR_PREVIEW);
+                renderFrontFace(previewOrigin, previewSize, currentRotation, 1.5f);
+                renderFrontArrow(previewOrigin, previewSize, currentRotation);
+                renderCornerMarker(corner1, COLOR_CORNER1);
+            }
+            case CONFIRMING -> {
+                // Both corners set, show finalized box
+                Location previewOrigin = computePreviewOrigin(corner1, corner2);
+                Vector previewSize = computePreviewSize(corner1, corner2);
+
+                renderBox(previewOrigin, previewSize, currentRotation, COLOR_CONFIRMED, 1.2f, 0.5);
+                renderFloor(previewOrigin, previewSize, currentRotation, COLOR_CONFIRMED);
+                renderFrontFace(previewOrigin, previewSize, currentRotation, 1.5f);
+                renderFrontArrow(previewOrigin, previewSize, currentRotation);
+                renderCornerMarker(corner1, COLOR_CORNER1);
+                renderCornerMarker(corner2, Color.fromRGB(0, 200, 255));
+            }
+        }
+    }
+
+    /**
+     * Compute the preview origin (center-based rotation-aware) for rendering.
+     */
+    private Location computePreviewOrigin(Location c1, Location c2) {
+        double minX = Math.min(c1.getX(), c2.getX());
+        double minY = Math.min(c1.getY(), c2.getY());
+        double minZ = Math.min(c1.getZ(), c2.getZ());
+        double sizeX = Math.max(1, Math.abs(c2.getX() - c1.getX()));
+        double sizeZ = Math.max(1, Math.abs(c2.getZ() - c1.getZ()));
+
+        double centerX = minX + sizeX / 2.0;
+        double centerZ = minZ + sizeZ / 2.0;
+
+        double radians = Math.toRadians(currentRotation);
+        double cosR = Math.cos(radians);
+        double sinR = Math.sin(radians);
+        double halfX = sizeX / 2.0;
+        double halfZ = sizeZ / 2.0;
+
+        double rotOriginX = centerX + (-halfX * cosR - (-halfZ) * sinR);
+        double rotOriginZ = centerZ + (-halfX * sinR + (-halfZ) * cosR);
+
+        return new Location(c1.getWorld(), rotOriginX, minY, rotOriginZ);
+    }
+
+    /**
+     * Compute the preview size from two corners.
+     */
+    private Vector computePreviewSize(Location c1, Location c2) {
+        return new Vector(
+            Math.max(1, Math.abs(c2.getX() - c1.getX())),
+            Math.max(1, Math.abs(c2.getY() - c1.getY())),
+            Math.max(1, Math.abs(c2.getZ() - c1.getZ()))
+        );
+    }
+
+    /**
+     * Render the front face (Z=0 face) in cyan to indicate orientation.
+     */
+    private void renderFrontFace(Location origin, Vector size, float rotation, float particleSize) {
+        Particle.DustOptions frontDust = new Particle.DustOptions(COLOR_FRONT, particleSize);
+        Location[] worldCorners = computeWorldCorners(origin, size, rotation);
+
+        for (int[] edge : FRONT_EDGES) {
+            drawLine(worldCorners[edge[0]], worldCorners[edge[1]], frontDust, 0.4);
+        }
+    }
+
+    /**
+     * Render an arrow pointing outward from the center of the front face.
+     */
+    private void renderFrontArrow(Location origin, Vector size, float rotation) {
+        Particle.DustOptions arrowDust = new Particle.DustOptions(COLOR_FRONT_ARROW, 1.5f);
+
+        // Center of front face in local coords: (0.5, 0.5, 0)
+        Location frontCenter = localToWorld(origin, size, rotation, 0.5, 0.5, 0);
+
+        // Arrow length scales with zone size
+        double arrowLength = Math.min(3.0, Math.max(size.getX(), size.getZ()) * 0.3);
+        double radians = Math.toRadians(rotation);
+        double cosR = Math.cos(radians);
+        double sinR = Math.sin(radians);
+
+        // Local -Z direction rotated
+        double dirX = sinR;
+        double dirZ = -cosR;
+
+        Location arrowEnd = frontCenter.clone().add(dirX * arrowLength, 0, dirZ * arrowLength);
+        drawLine(frontCenter, arrowEnd, arrowDust, 0.3);
+
+        // Arrowhead
+        double headLength = arrowLength * 0.3;
+        double headAngle = Math.toRadians(30);
+        for (int side = -1; side <= 1; side += 2) {
+            double hdx = -dirX * Math.cos(headAngle) - side * dirZ * Math.sin(headAngle);
+            double hdz = -dirZ * Math.cos(headAngle) + side * dirX * Math.sin(headAngle);
+            Location headEnd = arrowEnd.clone().add(hdx * headLength, 0, hdz * headLength);
+            drawLine(arrowEnd, headEnd, arrowDust, 0.2);
+        }
+    }
+
+    /**
+     * Render a small cross marker at a corner location.
+     */
+    private void renderCornerMarker(Location corner, Color color) {
+        if (corner == null) return;
+        Particle.DustOptions dust = new Particle.DustOptions(color, 1.5f);
+        Location center = corner.clone().add(0.5, 0.1, 0.5);
+        // Cross pattern
+        for (double d = -0.5; d <= 0.5; d += 0.2) {
+            player.spawnParticle(Particle.DUST, center.clone().add(d, 0, 0), 1, 0, 0, 0, 0, dust);
+            player.spawnParticle(Particle.DUST, center.clone().add(0, 0, d), 1, 0, 0, 0, 0, dust);
+        }
     }
 
     /**
@@ -299,33 +451,6 @@ public class StageZonePlacementSession implements Listener {
                 player.spawnParticle(Particle.DUST, point, 1, 0, 0, 0, 0, dust);
             }
         }
-    }
-
-    /**
-     * Render axis indicators at origin (Red=+X, Green=+Y, Blue=+Z).
-     */
-    private void renderAxisIndicators(Location origin, float rotation) {
-        double axisLength = 3.0;
-        double axisSpacing = 0.3;
-
-        double radians = Math.toRadians(rotation);
-        double cosR = Math.cos(radians);
-        double sinR = Math.sin(radians);
-
-        // +X axis (rotated)
-        Particle.DustOptions xDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.0f);
-        Location xEnd = origin.clone().add(cosR * axisLength, 0, sinR * axisLength);
-        drawLine(origin, xEnd, xDust, axisSpacing);
-
-        // +Y axis
-        Particle.DustOptions yDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.0f);
-        Location yEnd = origin.clone().add(0, axisLength, 0);
-        drawLine(origin, yEnd, yDust, axisSpacing);
-
-        // +Z axis (rotated)
-        Particle.DustOptions zDust = new Particle.DustOptions(Color.fromRGB(0, 100, 255), 1.0f);
-        Location zEnd = origin.clone().add(-sinR * axisLength, 0, cosR * axisLength);
-        drawLine(origin, zEnd, zDust, axisSpacing);
     }
 
     /**
@@ -384,18 +509,42 @@ public class StageZonePlacementSession implements Listener {
 
         StageZoneRole role = rolesToPlace.get(currentIndex);
         String progress = (currentIndex + 1) + "/" + rolesToPlace.size();
-        String status = originLocked ? "LOCKED" : "following";
-        String hint = originLocked ? "Right-click=Confirm" : "Left-click=Lock position";
+        String rotStr = (int) currentRotation + "\u00B0";
 
-        player.sendActionBar(Component.text(role.getDisplayName() + " (" + progress + ") [" + status + "] " + hint,
-            originLocked ? NamedTextColor.GREEN : NamedTextColor.AQUA));
+        String status;
+        String hint;
+        NamedTextColor color;
+
+        switch (phase) {
+            case CORNER1 -> {
+                status = "Set Corner 1";
+                hint = "Left-click to place";
+                color = NamedTextColor.AQUA;
+            }
+            case CORNER2 -> {
+                status = "Set Corner 2 [" + rotStr + "]";
+                hint = "Left-click | Sneak+L=Rotate";
+                color = NamedTextColor.YELLOW;
+            }
+            case CONFIRMING -> {
+                status = "Ready [" + rotStr + "]";
+                hint = "R-click=Confirm | Sneak+L=Rotate | L-click=Redo";
+                color = NamedTextColor.GREEN;
+            }
+            default -> {
+                status = "";
+                hint = "";
+                color = NamedTextColor.WHITE;
+            }
+        }
+
+        player.sendActionBar(Component.text(
+            role.getDisplayName() + " (" + progress + ") [" + status + "] " + hint, color));
     }
 
     // ==================== Labels ====================
 
     private void spawnRoleLabel(StageZoneRole role) {
-        if (currentOrigin == null) return;
-
         String zoneName = stage.getZoneName(role);
         if (zoneName == null) return;
 
@@ -426,6 +575,10 @@ public class StageZonePlacementSession implements Listener {
 
     // ==================== Helpers ====================
 
+    private Location getPlayerBlockLocation() {
+        return player.getLocation().getBlock().getLocation();
+    }
+
     private static Color darken(Color color, double factor) {
         int r = (int) (color.getRed() * (1 - factor));
         int g = (int) (color.getGreen() * (1 - factor));
@@ -452,12 +605,20 @@ public class StageZonePlacementSession implements Listener {
 
         event.setCancelled(true);
 
+        // Sneak+Left-click: Rotate 90 degrees (available once corner 1 is set)
+        if (isLeftClick && player.isSneaking() && phase != PlacementPhase.CORNER1) {
+            currentRotation = (currentRotation + 90) % 360;
+            player.sendMessage(Component.text("Rotated to " + (int) currentRotation + "\u00B0",
+                NamedTextColor.AQUA));
+            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, 1.0f + currentRotation / 360f);
+            return;
+        }
+
         if (isRightClick && player.isSneaking()) {
             // Sneak+Right-click: Skip zone, keep template default
             StageZoneRole role = rolesToPlace.get(currentIndex);
             player.sendMessage(Component.text("Skipped " + role.getDisplayName() + " (keeping default).",
                 NamedTextColor.GRAY));
-            // Don't update origin, just advance
             spawnRoleLabel(role);
             player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 0.8f);
 
@@ -465,31 +626,64 @@ public class StageZonePlacementSession implements Listener {
             if (currentIndex >= rolesToPlace.size()) {
                 complete();
             } else {
-                originLocked = false;
-                initCurrentOrigin();
+                phase = PlacementPhase.CORNER1;
+                corner1 = null;
+                corner2 = null;
+                currentRotation = 0f;
                 updateActionBar();
 
                 StageZoneRole nextRole = rolesToPlace.get(currentIndex);
                 player.sendMessage(Component.text("Now placing: ", NamedTextColor.GREEN)
                     .append(Component.text(nextRole.getDisplayName(), NamedTextColor.GOLD)));
             }
-        } else if (isLeftClick) {
-            // Left-click: Lock/reposition origin at player location
-            currentOrigin = player.getLocation().getBlock().getLocation();
-            originLocked = true;
+            return;
+        }
 
-            player.sendMessage(Component.text("Position locked at " +
-                formatLocation(currentOrigin) + ". Right-click to confirm.",
-                NamedTextColor.GREEN));
-            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.5f, 1.5f);
+        if (isLeftClick) {
+            Location blockLoc = getPlayerBlockLocation();
+
+            switch (phase) {
+                case CORNER1 -> {
+                    corner1 = blockLoc;
+                    phase = PlacementPhase.CORNER2;
+                    player.sendMessage(Component.text("Corner 1 set at " + formatLocation(corner1) +
+                        ". Walk to the opposite corner and left-click.", NamedTextColor.GREEN));
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.5f, 1.5f);
+                }
+                case CORNER2 -> {
+                    corner2 = blockLoc;
+                    phase = PlacementPhase.CONFIRMING;
+
+                        Vector boxSize = computePreviewSize(corner1, corner2);
+                    player.sendMessage(Component.text("Corner 2 set at " + formatLocation(corner2) +
+                        ". Size: " + formatSize(boxSize) +
+                        ". Sneak+Left-click to rotate. Right-click to confirm.",
+                        NamedTextColor.GREEN));
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.5f, 2.0f);
+                }
+                case CONFIRMING -> {
+                    // Redo: start over with corner 1
+                    corner1 = blockLoc;
+                    corner2 = null;
+                    currentRotation = 0f;
+                    phase = PlacementPhase.CORNER2;
+                    player.sendMessage(Component.text("Corner 1 reset to " + formatLocation(corner1) +
+                        ". Walk to the opposite corner and left-click.", NamedTextColor.YELLOW));
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.5f, 1.5f);
+                }
+            }
         } else {
             // Right-click (not sneaking): Confirm placement
-            if (!originLocked) {
-                // Auto-lock at current position first
-                currentOrigin = player.getLocation().getBlock().getLocation();
-                originLocked = true;
+            if (phase == PlacementPhase.CONFIRMING) {
+                advanceToNextZone();
+            } else if (phase == PlacementPhase.CORNER2) {
+                // Auto-set corner 2 at current position and confirm
+                corner2 = getPlayerBlockLocation();
+                phase = PlacementPhase.CONFIRMING;
+                advanceToNextZone();
+            } else {
+                player.sendMessage(Component.text("Set corner 1 first (left-click).", NamedTextColor.RED));
             }
-            advanceToNextZone();
         }
     }
 
@@ -510,5 +704,9 @@ public class StageZonePlacementSession implements Listener {
 
     private String formatLocation(Location loc) {
         return String.format("%.0f, %.0f, %.0f", loc.getX(), loc.getY(), loc.getZ());
+    }
+
+    private String formatSize(Vector size) {
+        return String.format("%.0fx%.0fx%.0f", size.getX(), size.getY(), size.getZ());
     }
 }

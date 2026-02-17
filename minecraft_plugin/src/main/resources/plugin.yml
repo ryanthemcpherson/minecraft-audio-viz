@@ -17,6 +17,10 @@ commands:
     description: Main AudioViz command
     usage: /<command> <subcommand>
     aliases: [av, viz, mcav]
+  stage:
+    description: Stage management shortcut
+    usage: /<command> <create|list|info|...>
+    aliases: [stages]
 
 permissions:
   audioviz.admin:
