@@ -10,6 +10,7 @@ import BeatIndicator from './components/BeatIndicator';
 import AuthModal from './components/AuthModal';
 import ProfileChip from './components/ProfileChip';
 import { useAuth } from './hooks/useAuth';
+import * as api from './lib/api';
 
 interface AudioSource {
   id: string;
@@ -37,13 +38,6 @@ interface AudioLevels {
   bpm: number;
 }
 
-interface ConnectionHistoryEntry {
-  host: string;
-  port: number;
-  djName: string;
-  timestamp: number;
-}
-
 interface VoiceStatus {
   available: boolean;
   streaming: boolean;
@@ -61,10 +55,9 @@ function App() {
   const lastAutoFilledName = useRef<string | null>(null);
 
   // Connection state
-  const [serverHost, setServerHost] = useState('192.168.1.204');
-  const [serverPort, setServerPort] = useState(9000);
   const [djName, setDjName] = useState('');
   const [connectCode, setConnectCode] = useState(['', '', '', '', '', '', '', '']);
+  const [showName, setShowName] = useState<string | null>(null);
 
   // Audio state
   const [audioSources, setAudioSources] = useState<AudioSource[]>([]);
@@ -100,7 +93,6 @@ function App() {
     error: null,
   });
   const [isConnecting, setIsConnecting] = useState(false);
-  const [showServerSettings, setShowServerSettings] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
@@ -113,9 +105,6 @@ function App() {
   // Test audio state
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
-
-  // Connection history state
-  const [connectionHistory, setConnectionHistory] = useState<ConnectionHistoryEntry[]>([]);
 
   // Keyboard shortcuts state
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
@@ -195,21 +184,10 @@ function App() {
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
     const storedName = localStorage.getItem('mcav.djName');
-    const storedHost = localStorage.getItem('mcav.serverHost');
-    const storedPort = localStorage.getItem('mcav.serverPort');
     const onboardingComplete = localStorage.getItem('mcav.onboardingComplete');
 
     if (storedName) {
       setDjName(storedName);
-    }
-    if (storedHost) {
-      setServerHost(storedHost);
-    }
-    if (storedPort) {
-      const parsedPort = parseInt(storedPort, 10);
-      if (!Number.isNaN(parsedPort)) {
-        setServerPort(parsedPort);
-      }
     }
 
     // Show welcome overlay if first run
@@ -219,17 +197,6 @@ function App() {
 
     loadAudioSources();
     checkForUpdates(false);
-
-    // Load connection history
-    const storedHistory = localStorage.getItem('mcav.connectionHistory');
-    if (storedHistory) {
-      try {
-        const parsed = JSON.parse(storedHistory);
-        setConnectionHistory(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        setConnectionHistory([]);
-      }
-    }
   }, []);
 
   useEffect(() => {
@@ -243,14 +210,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem('mcav.djName', djName);
   }, [djName]);
-
-  useEffect(() => {
-    localStorage.setItem('mcav.serverHost', serverHost);
-  }, [serverHost]);
-
-  useEffect(() => {
-    localStorage.setItem('mcav.serverPort', String(serverPort));
-  }, [serverPort]);
 
   useEffect(() => {
     if (selectedSource) {
@@ -271,7 +230,17 @@ function App() {
     }
   }, []);
 
-  // Listen for audio levels and status events pushed from the backend
+  // Always listen for dj-status so reconnection events reach the frontend.
+  // Without this, a brief disconnect removes all listeners and the UI stays
+  // stuck on DISCONNECTED even after the bridge task auto-reconnects.
+  useEffect(() => {
+    const unlisten = listen<ConnectionStatus>('dj-status', (event) => {
+      setStatus(event.payload);
+    });
+    return () => { unlisten.then((fn) => fn()).catch(() => {}); };
+  }, []);
+
+  // Listen for audio levels, voice, and preset events only while connected
   useEffect(() => {
     if (!status.connected) return;
 
@@ -281,12 +250,6 @@ function App() {
       listen<AudioLevels>('audio-levels', (event) => {
         setBands(event.payload.bands);
         setIsBeat(event.payload.is_beat);
-      })
-    );
-
-    unlisteners.push(
-      listen<ConnectionStatus>('dj-status', (event) => {
-        setStatus(event.payload);
       })
     );
 
@@ -421,6 +384,7 @@ function App() {
     }
 
     setIsConnecting(true);
+    setStatus(prev => ({ ...prev, error: null }));
     try {
       // Stop test audio if running
       if (isTestingAudio) {
@@ -429,6 +393,16 @@ function App() {
 
       // Format code as XXXX-XXXX
       const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
+
+      // Resolve connect code through the coordinator
+      const resolved = await api.resolveConnectCode(formattedCode);
+
+      // Parse host and port from the websocket URL
+      const wsUrl = new URL(resolved.websocket_url);
+      const serverHost = wsUrl.hostname;
+      const serverPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
+
+      setShowName(resolved.show_name);
 
       await invoke('connect_with_code', {
         code: formattedCode,
@@ -443,20 +417,24 @@ function App() {
       }
 
       setStatus(prev => ({ ...prev, connected: true }));
-
-      // Save to connection history
-      saveToConnectionHistory(serverHost, serverPort, djName.trim());
     } catch (e) {
       const errStr = String(e);
       let errorMessage = errStr;
 
-      // Better error messages
-      if (errStr.includes('timeout') || errStr.includes('timed out') || errStr.includes('connection refused')) {
-        errorMessage = "Can't reach server. Check that the VJ server is running and your firewall allows connections on this port.";
+      if (e instanceof api.ApiError) {
+        if (e.status === 404) {
+          errorMessage = 'Connect code not found. Check the code and try again.';
+        } else if (e.status === 409) {
+          errorMessage = 'Show is full — maximum DJ limit reached.';
+        } else if (e.status === 503) {
+          errorMessage = 'Server is currently offline. Try again later.';
+        } else {
+          errorMessage = e.message;
+        }
+      } else if (errStr.includes('timeout') || errStr.includes('timed out') || errStr.includes('connection refused')) {
+        errorMessage = "Can't reach server. Check that the VJ server is running.";
       } else if (errStr.includes('auth') || errStr.includes('invalid') || errStr.includes('unauthorized')) {
-        errorMessage = 'Invalid connect code. Ask your VJ operator for a new code.';
-      } else if (errStr.includes('connect')) {
-        errorMessage = 'Connection lost. Attempting to reconnect...';
+        errorMessage = 'Authentication failed. Ask your VJ operator for a new code.';
       }
 
       setStatus(prev => ({ ...prev, error: errorMessage }));
@@ -484,6 +462,7 @@ function App() {
         active_dj_name: null,
         error: null,
       });
+      setShowName(null);
       setBands([0, 0, 0, 0, 0]);
       setIsBeat(false);
       setVoiceEnabled(false);
@@ -534,30 +513,6 @@ function App() {
     const str = code.join('');
     if (str.length <= 4) return str;
     return `${str.slice(0, 4)}-${str.slice(4)}`;
-  };
-
-  const saveToConnectionHistory = (host: string, port: number, name: string) => {
-    const newEntry: ConnectionHistoryEntry = {
-      host,
-      port,
-      djName: name,
-      timestamp: Date.now(),
-    };
-
-    // Deduplicate by host+port, keep most recent
-    const filtered = connectionHistory.filter(
-      (entry) => !(entry.host === host && entry.port === port)
-    );
-
-    const updated = [newEntry, ...filtered].slice(0, 3);
-    setConnectionHistory(updated);
-    localStorage.setItem('mcav.connectionHistory', JSON.stringify(updated));
-  };
-
-  const loadHistoryEntry = (entry: ConnectionHistoryEntry) => {
-    setServerHost(entry.host);
-    setServerPort(entry.port);
-    setDjName(entry.djName);
   };
 
   const handleStartTest = async () => {
@@ -779,58 +734,7 @@ function App() {
           <>
             <section className="section hero-section">
               <p>Enter your DJ name, paste your connect code, pick audio, then connect.</p>
-              <button
-                className="btn btn-link"
-                onClick={() => setShowServerSettings(prev => !prev)}
-                type="button"
-              >
-                {showServerSettings ? 'Hide server settings' : 'Server settings'}
-              </button>
             </section>
-
-            {showServerSettings && (
-              <section className="section server-section">
-                <label className="input-label">
-                  Server
-                  <div className="server-inputs">
-                    <input
-                      type="text"
-                      value={serverHost}
-                      onChange={e => setServerHost(e.target.value)}
-                      placeholder="hostname"
-                      className="input server-host"
-                    />
-                    <span className="server-separator">:</span>
-                    <input
-                      type="number"
-                      value={serverPort}
-                      onChange={e => setServerPort(parseInt(e.target.value) || 9000)}
-                      placeholder="port"
-                      className="input server-port"
-                    />
-                  </div>
-                </label>
-
-                {connectionHistory.length > 0 && (
-                  <div className="connection-history">
-                    <span className="history-label">Recent Connections</span>
-                    <div className="history-list">
-                      {connectionHistory.map((entry, idx) => (
-                        <button
-                          key={idx}
-                          className="btn btn-history"
-                          onClick={() => loadHistoryEntry(entry)}
-                          type="button"
-                        >
-                          <span className="history-name">{entry.djName}</span>
-                          <span className="history-server">{entry.host}:{entry.port}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-            )}
 
             <section className="section">
               {auth.isSignedIn && auth.user?.dj_profile && (
@@ -940,6 +844,12 @@ function App() {
           </>
         ) : (
           <>
+            {showName && (
+              <section className="section" style={{ textAlign: 'center', padding: '10px 16px' }}>
+                <span className="input-label" style={{ margin: 0 }}>{showName}</span>
+              </section>
+            )}
+
             <section className="section">
               <FrequencyMeter bands={bands} />
             </section>
