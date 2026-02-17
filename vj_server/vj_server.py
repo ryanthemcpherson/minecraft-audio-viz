@@ -56,6 +56,7 @@ except ImportError:
 from python_client.viz_client import VizClient
 from vj_server.beat_predictor import BeatPredictor
 from vj_server.config import PRESETS as AUDIO_PRESETS
+from vj_server.coordinator_client import CoordinatorClient
 from vj_server.patterns import (
     AudioState,
     PatternConfig,
@@ -577,6 +578,11 @@ class VJServer:
         # Connect codes for DJ client authentication
         self._connect_codes: Dict[str, ConnectCode] = {}  # code -> ConnectCode
         self._code_cleanup_task: Optional[asyncio.Task] = None
+        self._code_show_ids: Dict[str, str] = {}  # code -> coordinator show_id
+
+        # Coordinator integration (for centralized connect codes)
+        self._coordinator: Optional["CoordinatorClient"] = None
+        self._coordinator_heartbeat_task: Optional[asyncio.Task] = None
 
         # Browser clients
         self._broadcast_clients: Set = set()
@@ -2350,7 +2356,13 @@ class VJServer:
                     elif msg_type == "generate_connect_code":
                         # Generate a new connect code for DJ client auth
                         ttl_minutes = data.get("ttl_minutes", 30)
-                        connect_code = ConnectCode.generate(ttl_minutes)
+
+                        # Try coordinator first (centralized codes)
+                        connect_code = await self._coordinator_create_show(ttl_minutes)
+                        if connect_code is None:
+                            # Fallback to local code generation
+                            connect_code = ConnectCode.generate(ttl_minutes)
+
                         self._connect_codes[connect_code.code] = connect_code
 
                         # Clean up expired codes
@@ -3238,6 +3250,78 @@ class VJServer:
 
         await self._broadcast_dj_roster()
 
+    # ------------------------------------------------------------------
+    # Coordinator integration
+    # ------------------------------------------------------------------
+
+    async def _init_coordinator(self):
+        """Register with the coordinator if configured."""
+        url = os.environ.get("COORDINATOR_URL")
+        api_key = os.environ.get("COORDINATOR_API_KEY")
+        if not url or not api_key:
+            logger.info(
+                "Coordinator integration disabled (set COORDINATOR_URL and COORDINATOR_API_KEY to enable)"
+            )
+            return
+
+        ws_url = os.environ.get("COORDINATOR_WS_URL")
+        if not ws_url:
+            ws_url = f"ws://localhost:{self.dj_port}"
+            logger.warning(
+                "COORDINATOR_WS_URL not set, using %s (DJs may not be able to reach this)", ws_url
+            )
+
+        server_name = os.environ.get("COORDINATOR_SERVER_NAME", "VJ Server")
+
+        self._coordinator = CoordinatorClient(url, api_key)
+        try:
+            await self._coordinator.register(server_name, ws_url)
+            logger.info(
+                "Coordinator integration active (server_id=%s)", self._coordinator.server_id
+            )
+            # Start periodic heartbeat
+            self._coordinator_heartbeat_task = asyncio.create_task(
+                self._coordinator_heartbeat_loop()
+            )
+        except Exception as exc:
+            logger.error("Failed to register with coordinator: %s", exc)
+            self._coordinator = None
+
+    async def _coordinator_heartbeat_loop(self):
+        """Send periodic heartbeats to the coordinator."""
+        while True:
+            await asyncio.sleep(120)  # every 2 minutes
+            if self._coordinator:
+                try:
+                    await self._coordinator.heartbeat()
+                except Exception as exc:
+                    logger.warning("Coordinator heartbeat failed: %s", exc)
+
+    async def _coordinator_create_show(self, ttl_minutes: int = 30) -> Optional[ConnectCode]:
+        """Create a show on the coordinator and return a local ConnectCode with the same code."""
+        if not self._coordinator:
+            return None
+        try:
+            show_info = await self._coordinator.create_show(
+                name="Live Show",
+                max_djs=8,
+            )
+            # Create a local ConnectCode with the coordinator-generated code
+            code = ConnectCode(
+                code=show_info.connect_code,
+                expires_at=time.time() + ttl_minutes * 60,
+            )
+            self._code_show_ids[show_info.connect_code] = show_info.show_id
+            logger.info(
+                "Created show on coordinator: code=%s show_id=%s",
+                show_info.connect_code,
+                show_info.show_id,
+            )
+            return code
+        except Exception as exc:
+            logger.error("Failed to create show on coordinator: %s", exc)
+            return None
+
     def _cleanup_expired_codes(self):
         """Remove expired or used connect codes."""
         expired = [code for code, obj in self._connect_codes.items() if not obj.is_valid()]
@@ -3975,8 +4059,13 @@ class VJServer:
                         asyncio.ensure_future(
                             self.viz_client.init_pool(self.zone, pending, "SEA_LANTERN")
                         )
-                logger.info(f"Crossfade complete: now on {self._pattern_name}")
-                return self._current_pattern.calculate_entities(audio_state)
+                entities = self._current_pattern.calculate_entities(audio_state)
+                logger.info(
+                    f"Crossfade complete: now on {self._pattern_name}, "
+                    f"entity_count={self.entity_count}, config_count={self._pattern_config.entity_count}, "
+                    f"pattern_returned={len(entities)}, pending_resize={pending if self._transition_pending_resize is None else 'done'}"
+                )
+                return entities
 
             # Calculate blend alpha using smoothstep easing
             t = elapsed / self._transition_duration
@@ -3987,7 +4076,13 @@ class VJServer:
             new_entities = self._current_pattern.calculate_entities(audio_state)
 
             # Blend the entities
-            return self._blend_entities(old_entities, new_entities, alpha)
+            blended = self._blend_entities(old_entities, new_entities, alpha)
+            if self._frame_count % 30 == 0:
+                logger.debug(
+                    f"Transition alpha={alpha:.2f}, old={len(old_entities)}, "
+                    f"new={len(new_entities)}, blended={len(blended)}"
+                )
+            return blended
 
         # No transition - just return current pattern
         return self._current_pattern.calculate_entities(audio_state)
@@ -4119,7 +4214,10 @@ class VJServer:
 
         try:
             # Sanitize entity data before forwarding to Minecraft
-            entities = _sanitize_entities(entities, max_count=self.entity_count * 2)
+            # During transitions, blended entity count may exceed self.entity_count
+            entities = _sanitize_entities(
+                entities, max_count=max(len(entities), self.entity_count * 2)
+            )
 
             particles = []
             if is_beat and beat_intensity > 0.2:
@@ -4530,6 +4628,9 @@ class VJServer:
             from vj_server.metrics import start_metrics_server
 
             metrics_server = await start_metrics_server(self, self.metrics_port)
+
+        # Register with coordinator if configured
+        await self._init_coordinator()
 
         logger.info("VJ Server ready. Waiting for DJ connections...")
 
