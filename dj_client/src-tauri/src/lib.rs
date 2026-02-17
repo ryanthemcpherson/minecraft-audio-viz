@@ -1234,6 +1234,14 @@ pub fn run() {
     env_logger::init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Second instance launched (e.g. by deep link) — focus the existing window
+            log::info!("Single-instance: second launch with args: {:?}", args);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1314,17 +1322,27 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Handle window close event - minimize to tray instead of quitting
-            if let Some(window) = app.get_webview_window("main") {
-                let window_clone = window.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        // Prevent default close behavior
-                        api.prevent_close();
-                        // Hide the window instead
-                        let _ = window_clone.hide();
-                    }
-                });
+            // Clean up on window close: stop capture and disconnect before exiting
+            {
+                let app_handle = app.handle().clone();
+                if let Some(window) = app.get_webview_window("main") {
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { .. } = event {
+                            let state = app_handle.state::<AppStateWrapper>();
+                            let mut app_state = state.0.lock();
+                            if let Some(mut capture) = app_state.audio_capture.take() {
+                                capture.stop();
+                            }
+                            app_state.voice_streamer = None;
+                            // Disconnect happens async; drop the lock first
+                            drop(app_state);
+                            let state_clone = app_handle.state::<AppStateWrapper>();
+                            tauri::async_runtime::block_on(async {
+                                let _ = disconnect(state_clone).await;
+                            });
+                        }
+                    });
+                }
             }
 
             // Deep-link: show window when a deep link arrives
