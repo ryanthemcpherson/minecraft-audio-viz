@@ -129,6 +129,12 @@ Examples:
         default=os.environ.get("ENABLE_LINK", "").lower() in ("1", "true", "yes"),
         help="Enable Ableton Link tempo sync (requires aalink package)",
     )
+    parser.add_argument(
+        "--entities",
+        type=int,
+        default=int(os.environ.get("ENTITY_COUNT", "100")),
+        help="Initial entity pool size (default: 100 or $ENTITY_COUNT)",
+    )
 
     args = parser.parse_args()
 
@@ -202,6 +208,7 @@ Examples:
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
         broadcast_port=args.broadcast_port,
+        entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,
         metrics_port=None if args.no_metrics else args.metrics_port,

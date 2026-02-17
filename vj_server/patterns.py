@@ -49,6 +49,8 @@ class VisualizationPattern(ABC):
 
     name: str = "Base"
     description: str = "Base pattern"
+    category: str = ""
+    static_camera: bool = False
     recommended_entities: Optional[int] = None
 
     def __init__(self, config: PatternConfig = None):
@@ -161,6 +163,18 @@ class LuaPattern(VisualizationPattern):
                 rec = g["start_blocks"]
                 if self.recommended_entities is None and isinstance(rec, (int, float)):
                     self.recommended_entities = max(1, min(256, int(rec)))
+            except (KeyError, IndexError):
+                pass
+            try:
+                cat = g["category"]
+                if cat:
+                    self.category = str(cat)
+            except (KeyError, IndexError):
+                pass
+            try:
+                sc = g["static_camera"]
+                if sc is not None:
+                    self.static_camera = bool(sc)
             except (KeyError, IndexError):
                 pass
         else:
@@ -334,6 +348,8 @@ def list_patterns() -> List[Dict[str, Any]]:
                     "id": key,
                     "name": pat.name,
                     "description": pat.description,
+                    "category": pat.category,
+                    "static_camera": pat.static_camera,
                     "recommended_entities": pat.recommended_entities or 64,
                 }
             )
@@ -344,6 +360,8 @@ def list_patterns() -> List[Dict[str, Any]]:
                     "id": key,
                     "name": key.replace("_", " ").title(),
                     "description": "",
+                    "category": "",
+                    "static_camera": False,
                     "recommended_entities": 64,
                 }
             )

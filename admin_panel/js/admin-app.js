@@ -1963,20 +1963,46 @@ class AdminApp {
             grid.removeChild(grid.firstChild);
         }
 
-        // Create pattern buttons using safe DOM methods
+        // Group patterns by category
+        const groups = {};
         this.state.patterns.forEach(pattern => {
-            const btn = document.createElement('button');
-            btn.className = 'pattern-btn';
-            btn.dataset.pattern = pattern.id;
-            btn.textContent = pattern.name; // Safe: textContent escapes HTML
-            btn.title = pattern.description || '';
+            const cat = pattern.category || 'Other';
+            if (!groups[cat]) groups[cat] = [];
+            groups[cat].push(pattern);
+        });
 
-            if (pattern.id === this.state.currentPattern) {
-                btn.classList.add('active');
-            }
+        // Render each category group
+        const sortedCategories = Object.keys(groups).sort((a, b) => {
+            if (a === 'Other') return 1;
+            if (b === 'Other') return -1;
+            return a.localeCompare(b);
+        });
 
-            btn.addEventListener('click', () => this._setPattern(pattern.id));
-            grid.appendChild(btn);
+        sortedCategories.forEach(category => {
+            const label = document.createElement('div');
+            label.className = 'pattern-category-label';
+            label.textContent = category;
+            grid.appendChild(label);
+
+            const groupGrid = document.createElement('div');
+            groupGrid.className = 'pattern-category-grid';
+
+            groups[category].forEach(pattern => {
+                const btn = document.createElement('button');
+                btn.className = 'pattern-btn';
+                btn.dataset.pattern = pattern.id;
+                btn.textContent = pattern.name;
+                btn.title = pattern.description || '';
+
+                if (pattern.id === this.state.currentPattern) {
+                    btn.classList.add('active');
+                }
+
+                btn.addEventListener('click', () => this._setPattern(pattern.id));
+                groupGrid.appendChild(btn);
+            });
+
+            grid.appendChild(groupGrid);
         });
     }
 
