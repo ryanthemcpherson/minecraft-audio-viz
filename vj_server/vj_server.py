@@ -3595,6 +3595,7 @@ class VJServer:
         instant_kick: bool = False,
         tempo_confidence: float = 0.0,
         beat_phase: float = 0.0,
+        zone_entities: Dict[str, List[dict]] | None = None,
     ):
         """Broadcast visualization state to browser clients."""
         if not self._broadcast_clients:
@@ -3653,6 +3654,7 @@ class VJServer:
                 },
                 "zone_patterns": self._get_zone_patterns_dict(),
                 "perf": self._latest_perf_snapshot,
+                **({"zone_entities": zone_entities} if zone_entities else {}),
             }
         )
 
@@ -4675,13 +4677,11 @@ class VJServer:
                     adjusted_bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
                 )
 
-                # Send to Minecraft - skip if active DJ is using direct mode and connected.
-                # In direct mode, the DJ app publishes directly (dual output path).
+                # Always send to Minecraft via the VJ server's full pattern engine.
+                # The server handles multi-zone patterns and transitions correctly;
+                # the DJ client's direct publish is a low-latency supplement for the
+                # DJ's own zone but the server remains the authoritative source.
                 should_send_to_mc = True
-                if dj and dj.direct_mode and dj.mc_connected:
-                    should_send_to_mc = False
-                elif dj and dj.direct_mode and not dj.mc_connected:
-                    should_send_to_mc = True
 
                 # Clean up expired effects
                 now = time.time()
@@ -4794,6 +4794,7 @@ class VJServer:
                     instant_kick,
                     tempo_confidence,
                     beat_phase,
+                    zone_entities=zone_entities if zone_entities else None,
                 )
                 broadcast_ms = (time.perf_counter() - broadcast_start) * 1000.0
 
