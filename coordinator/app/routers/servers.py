@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user_optional
 from app.models.db import User, VJServer
 from app.models.schemas import (
     HeartbeatResponse,
@@ -82,7 +82,7 @@ async def _authenticate_server(
 )
 async def register_server(
     body: RegisterServerRequest,
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_session),
 ) -> RegisterServerResponse:
     """Register a VJ server. Returns ``server_id`` and a ``jwt_secret`` that
