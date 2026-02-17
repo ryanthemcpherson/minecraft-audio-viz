@@ -313,8 +313,7 @@ class DJConnection:
     voice_streaming: bool = False  # Whether this DJ is sending voice audio
 
     # Frame buffer for visual delay (timestamped audio state ring buffer)
-    _frame_buffer: deque = field(default_factory=lambda: deque(maxlen=600))  # 10s @ 60fps
-    _frame_timestamps: list = field(default_factory=list)  # Sorted timestamps for bisect lookup
+    _frame_buffer: deque = field(default_factory=deque)  # (timestamp, data) pairs; trimmed manually
 
     # Jitter tracking
     _jitter_ms: float = 0.0  # Smoothed frame arrival jitter
@@ -1620,14 +1619,12 @@ class VJServer:
             "instant_kick": dj.instant_kick,
         }
         dj._frame_buffer.append((now, frame_data_snapshot))
-        dj._frame_timestamps.append(now)
 
         # Adaptive buffer trimming: keep only what's needed + margin
         effective_delay = self._get_effective_delay_ms(dj)
         max_frames = max(60, int(effective_delay / 16.0 * 2))
         while len(dj._frame_buffer) > max_frames:
             dj._frame_buffer.popleft()
-            dj._frame_timestamps.pop(0)
 
         # Feed beats to predictor when this is the active DJ
         if dj.dj_id == self._active_dj_id:
@@ -1773,19 +1770,19 @@ class VJServer:
     def _read_delayed_frame(self, dj: DJConnection, delay_ms: float) -> Optional[dict]:
         """Read a frame from the DJ's buffer at `now - delay_ms`.
 
-        Uses bisect for O(log n) lookup instead of linear scan.
+        Uses bisect for O(log n) lookup on timestamps extracted from the buffer.
         Returns an audio state dict matching the main loop's expected fields,
         or None if the buffer is empty or delay is zero (use live state).
         """
         if delay_ms <= 0 or not dj._frame_buffer:
             return None
 
-        target_time = time.time() - (delay_ms / 1000.0)
-        timestamps = dj._frame_timestamps
         buf = dj._frame_buffer
+        target_time = time.time() - (delay_ms / 1000.0)
 
-        if not timestamps:
-            return None
+        # Extract timestamps from buffer tuples for bisect lookup.
+        # Buffer is typically 60-100 entries, so this is cheap.
+        timestamps = [t for t, _ in buf]
 
         # bisect_left finds insertion point for target_time in sorted timestamps
         idx = bisect.bisect_left(timestamps, target_time)
@@ -1860,8 +1857,10 @@ class VJServer:
         beat_intensity: float,
         instant_bass: float,
         instant_kick: bool,
+        dt: float = 0.016,
     ) -> tuple:
         """Shape audio state for visuals: less wobble, higher contrast, snappier transients."""
+        dt_ratio = dt / 0.016
         shaped = [0.0] * 5
         for i in range(5):
             src = bands[i] if i < len(bands) else 0.0
@@ -1884,7 +1883,9 @@ class VJServer:
                 enhanced = min(1.0, enhanced + beat_punch)
 
             # Fast attack, controlled release: responsive but still smooth.
-            alpha = 0.85 if enhanced > prev else 0.42
+            # dt-aware so smoothing is consistent regardless of frame rate.
+            base_alpha = 0.85 if enhanced > prev else 0.42
+            alpha = 1.0 - (1.0 - base_alpha) ** dt_ratio
             out = prev + (enhanced - prev) * alpha
             shaped[i] = out
             self._visual_band_state[i] = out
@@ -3990,7 +3991,14 @@ class VJServer:
                         for zn, zs in self._zone_patterns.items():
                             if zs.pattern_name == pattern_key:
                                 try:
+                                    old_state = (
+                                        zs.pattern._entity_state.copy()
+                                        if hasattr(zs.pattern, "_entity_state")
+                                        else {}
+                                    )
                                     zs.pattern = get_pattern(pattern_key, zs.config)
+                                    if old_state:
+                                        zs.pattern.seed_entity_state(old_state)
                                     logger.info(
                                         f"[PATTERN RELOAD] Reloaded pattern '{pattern_key}' in zone '{zn}'"
                                     )
@@ -4325,7 +4333,7 @@ class VJServer:
                     "y": self._lerp(old_e.get("y", 0.5), new_e.get("y", 0.5), alpha),
                     "z": self._lerp(old_e.get("z", 0.5), new_e.get("z", 0.5), alpha),
                     "scale": self._lerp(old_e.get("scale", 0.5), new_e.get("scale", 0.5), alpha),
-                    "rotation": self._lerp(
+                    "rotation": self._lerp_angle(
                         old_e.get("rotation", 0.0), new_e.get("rotation", 0.0), alpha
                     ),
                     "band": new_e.get("band", old_e.get("band", 0)),
@@ -4344,7 +4352,7 @@ class VJServer:
                         "scale": self._lerp(
                             sibling.get("scale", 0.5), new_e.get("scale", 0.5), alpha
                         ),
-                        "rotation": self._lerp(
+                        "rotation": self._lerp_angle(
                             sibling.get("rotation", 0.0), new_e.get("rotation", 0.0), alpha
                         ),
                         "band": new_e.get("band", 0),
@@ -4367,7 +4375,7 @@ class VJServer:
                         "scale": self._lerp(
                             old_e.get("scale", 0.5), sibling.get("scale", 0.5), alpha
                         ),
-                        "rotation": self._lerp(
+                        "rotation": self._lerp_angle(
                             old_e.get("rotation", 0.0), sibling.get("rotation", 0.0), alpha
                         ),
                         "band": old_e.get("band", 0),
@@ -4399,6 +4407,12 @@ class VJServer:
     def _lerp(self, a: float, b: float, t: float) -> float:
         """Linear interpolation between a and b."""
         return a + (b - a) * t
+
+    @staticmethod
+    def _lerp_angle(a: float, b: float, t: float) -> float:
+        """Shortest-path angle interpolation (degrees)."""
+        delta = ((b - a + 180.0) % 360.0) - 180.0
+        return (a + delta * t) % 360.0
 
     async def _update_minecraft(
         self,
@@ -4628,12 +4642,15 @@ class VJServer:
         mc_frame_interval = 0.05  # 20 TPS-aligned Minecraft update pacing
         next_mc_send_at = time.monotonic()
         next_frame_at = time.perf_counter()
+        last_frame_start = time.perf_counter()
         consecutive_errors = 0
         max_consecutive_errors = 50  # After 50 errors in a row, slow down
 
         while self._running:
             try:
                 frame_start = time.perf_counter()
+                loop_dt = min(frame_start - last_frame_start, 0.05)  # Cap at 50ms
+                last_frame_start = frame_start
                 calc_ms = 0.0
                 effects_ms = 0.0
                 mc_ms = 0.0
@@ -4690,17 +4707,24 @@ class VJServer:
                     tempo_confidence = 0.0
                     beat_phase = 0.0
 
-                    # Decay fallback values
+                    # Decay fallback values (dt-aware for consistent fade rate)
+                    decay = 0.95 ** (loop_dt / 0.016)
                     for i in range(5):
-                        self._fallback_bands[i] *= 0.95
-                    self._fallback_peak *= 0.95
+                        self._fallback_bands[i] *= decay
+                    self._fallback_peak *= decay
 
                 # Apply band sensitivity
                 adjusted_bands = [
                     bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
                 ]
                 visual_bands, visual_peak, visual_beat_intensity = self._enhance_visual_state(
-                    adjusted_bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
+                    adjusted_bands,
+                    peak,
+                    is_beat,
+                    beat_intensity,
+                    instant_bass,
+                    instant_kick,
+                    dt=loop_dt,
                 )
 
                 # Always send to Minecraft via the VJ server's full pattern engine.

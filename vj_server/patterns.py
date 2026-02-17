@@ -240,13 +240,18 @@ class LuaPattern(VisualizationPattern):
                             scale = target_scale
                             rotation = target_rotation % 360.0
                         else:
+                            # dt-aware smoothing: effective_alpha adapts to actual frame time
+                            # so animation speed is consistent regardless of frame rate.
+                            dt_ratio = dt / 0.016
+
                             # Fast for larger moves, gentler for tiny changes to reduce wobble.
                             pos_delta = max(
                                 abs(target_x - prev["x"]),
                                 abs(target_y - prev["y"]),
                                 abs(target_z - prev["z"]),
                             )
-                            pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
+                            base_pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
+                            pos_alpha = 1.0 - (1.0 - base_pos_alpha) ** dt_ratio
                             x = prev["x"] + (target_x - prev["x"]) * pos_alpha
                             y = prev["y"] + (target_y - prev["y"]) * pos_alpha
                             z = prev["z"] + (target_z - prev["z"]) * pos_alpha
@@ -257,14 +262,16 @@ class LuaPattern(VisualizationPattern):
                             if abs(z - prev["z"]) < self._position_deadband:
                                 z = prev["z"]
 
-                            scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
+                            base_scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
+                            scale_alpha = 1.0 - (1.0 - base_scale_alpha) ** dt_ratio
                             scale = prev["scale"] + (target_scale - prev["scale"]) * scale_alpha
 
                             # Shortest-path angle smoothing.
                             current_rot = prev["rotation"] % 360.0
                             desired_rot = target_rotation % 360.0
                             delta_rot = ((desired_rot - current_rot + 180.0) % 360.0) - 180.0
-                            rotation = (current_rot + delta_rot * 0.52) % 360.0
+                            rot_alpha = 1.0 - (1.0 - 0.52) ** dt_ratio
+                            rotation = (current_rot + delta_rot * rot_alpha) % 360.0
 
                         self._entity_state[entity_id] = {
                             "x": x,

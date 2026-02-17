@@ -138,11 +138,11 @@ function calculate(audio, config, dt)
         -- Audio reactivity - fireflies respond to amplitude
         total_glow = total_glow + audio.amplitude * 0.2
 
-        -- Band based on group (groups 1-4 map to bands 1-4, 0-indexed: 1-4)
-        local band_idx = group  -- group is 1-4, band output is 0-indexed so we use group directly (1-4)
+        -- Band based on group (groups 1-4 map to bands 0-3, covering bass through high-mid)
+        local band_idx = group - 1  -- groups 1-4 → bands 0-3 (0-indexed output)
 
         local scale = config.base_scale * 0.5 + total_glow * 0.6
-        scale = scale + audio.bands[band_idx + 1] * 0.2
+        scale = scale + audio.bands[group] * 0.2  -- bands[1]=bass, [2]=low, [3]=mid, [4]=high-mid
 
         entities[#entities + 1] = {
             id = string.format("block_%d", i - 1),
