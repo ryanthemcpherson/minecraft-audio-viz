@@ -78,7 +78,7 @@ class Settings(BaseSettings):
 
     # CORS — stored as str to avoid pydantic-settings JSON-parsing env vars.
     # Use get_cors_origins() to get the parsed list.
-    cors_origins: str = "https://mcav.live,http://localhost:3000,tauri://localhost,http://tauri.localhost,https://tauri.localhost"
+    cors_origins: str = "https://mcav.live,http://localhost:3000,http://localhost:5173,tauri://localhost,http://tauri.localhost,https://tauri.localhost"
 
     def get_cors_origins(self) -> list[str]:
         """Parse CORS origins — handles JSON arrays, bracket lists, and comma-separated strings."""
