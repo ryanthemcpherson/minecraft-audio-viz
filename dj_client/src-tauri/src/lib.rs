@@ -910,7 +910,7 @@ async fn start_capture(
         voice_streamer.set_enabled(app_state.voice_config.enabled);
     }
 
-    let capture = AudioCaptureHandle::new_with_voice(source_id, Some(voice_streamer.clone()))
+    let capture = AudioCaptureHandle::new_with_voice(source_id.clone(), Some(voice_streamer.clone()))
         .map_err(|e| e.to_string())?;
 
     let mut app_state = state.0.lock();
@@ -920,6 +920,7 @@ async fn start_capture(
         capture.analyzer().lock().apply_preset(&preset);
     }
 
+    app_state.audio_source_id = source_id;
     app_state.audio_capture = Some(capture);
     app_state.voice_streamer = Some(voice_streamer);
 
@@ -934,6 +935,64 @@ async fn stop_capture(state: State<'_, AppStateWrapper>) -> Result<(), String> {
         capture.stop();
     }
     Ok(())
+}
+
+/// Change audio source while connected (hot-swap capture)
+#[tauri::command]
+async fn change_audio_source(
+    state: State<'_, AppStateWrapper>,
+    source_id: Option<String>,
+) -> Result<(), String> {
+    // Stop existing capture
+    {
+        let mut app_state = state.0.lock();
+        if let Some(mut capture) = app_state.audio_capture.take() {
+            capture.stop();
+        }
+    }
+
+    // Create new voice streamer
+    let voice_streamer = Arc::new(VoiceStreamer::new(48000, 2));
+
+    // Propagate voice config
+    {
+        let app_state = state.0.lock();
+        voice_streamer.set_enabled(app_state.voice_config.enabled);
+    }
+
+    // Start new capture
+    let capture = AudioCaptureHandle::new_with_voice(source_id.clone(), Some(voice_streamer.clone()))
+        .map_err(|e| e.to_string())?;
+
+    let mut app_state = state.0.lock();
+
+    // Apply active preset
+    if let Some(preset) = audio::get_preset(&app_state.active_preset) {
+        capture.analyzer().lock().apply_preset(&preset);
+    }
+
+    app_state.audio_source_id = source_id;
+    app_state.audio_capture = Some(capture);
+    app_state.voice_streamer = Some(voice_streamer);
+
+    Ok(())
+}
+
+/// Capture status response
+#[derive(Clone, serde::Serialize)]
+pub struct CaptureStatus {
+    pub active: bool,
+    pub source_id: Option<String>,
+}
+
+/// Get current capture status
+#[tauri::command]
+fn get_capture_status(state: State<'_, AppStateWrapper>) -> CaptureStatus {
+    let app_state = state.0.lock();
+    CaptureStatus {
+        active: app_state.audio_capture.is_some(),
+        source_id: app_state.audio_source_id.clone(),
+    }
 }
 
 /// Disconnect from VJ server
@@ -1186,6 +1245,8 @@ pub fn run() {
             connect_direct,
             start_capture,
             stop_capture,
+            change_audio_source,
+            get_capture_status,
             disconnect,
             get_status,
             get_audio_levels,
