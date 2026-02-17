@@ -264,6 +264,12 @@ function setupControls() {
         resetBtn.addEventListener('click', resetCamera);
     }
 
+    // Rescan stage button
+    const rescanBtn = document.getElementById('btn-rescan');
+    if (rescanBtn) {
+        rescanBtn.addEventListener('click', rescanStage);
+    }
+
     // Auto rotate checkbox
     const rotateChk = document.getElementById('chk-rotate');
     if (rotateChk) {
@@ -1082,6 +1088,14 @@ function handleStageBlocksResponse(data) {
     if (mcEnvironment && data.blocks && data.blocks.length > 0) {
         mcEnvironment.setVisible(false);
     }
+}
+
+function rescanStage() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    stageScanRequested = false;
+    disposeStageBlocks();
+    ws.send(JSON.stringify({ type: 'get_stages' }));
+    console.log('[Stage] Rescan requested');
 }
 
 function requestStageBlocks(stageName) {
