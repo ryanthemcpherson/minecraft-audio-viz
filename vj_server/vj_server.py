@@ -2721,6 +2721,27 @@ class VJServer:
                             except Exception as e:
                                 logger.warning(f"Failed to get zone: {e}")
 
+                    elif msg_type == "get_stages":
+                        # Forward to Minecraft and return stages
+                        if self.viz_client and self.viz_client.connected:
+                            try:
+                                result = await self.viz_client.send({"type": "get_stages"})
+                                if result:
+                                    await websocket.send(json.dumps(result))
+                                else:
+                                    await websocket.send(
+                                        json.dumps({"type": "stages", "stages": [], "count": 0})
+                                    )
+                            except Exception as e:
+                                logger.warning(f"Failed to get stages: {e}")
+                                await websocket.send(
+                                    json.dumps({"type": "stages", "stages": [], "count": 0})
+                                )
+                        else:
+                            await websocket.send(
+                                json.dumps({"type": "stages", "stages": [], "count": 0})
+                            )
+
                     elif msg_type == "trigger_effect":
                         # Handle effect triggers (blackout, freeze, flash, strobe, etc.)
                         effect = data.get("effect", "flash")
@@ -3708,6 +3729,7 @@ class VJServer:
 
         logger.info(f"Connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}...")
         self.viz_client = VizClient(self.minecraft_host, self.minecraft_port, enable_heartbeat=True)
+        self.viz_client.on("stage_zone_configs", self._handle_stage_zone_configs)
 
         try:
             # 10 second timeout for initial connection
@@ -4202,6 +4224,24 @@ class VJServer:
         if zone_name == self.zone:
             self.entity_count = zone_state.entity_count
             self._pattern_config.entity_count = zone_state.entity_count
+
+    async def _handle_stage_zone_configs(self, data: dict):
+        """Handle stage_zone_configs from MC plugin to apply patterns with correct entity counts."""
+        zones = data.get("zones", [])
+        stage_name = data.get("stage", "unknown")
+        logger.info(f"Received stage zone configs for stage '{stage_name}' ({len(zones)} zones)")
+
+        for zone_info in zones:
+            zone_name = zone_info.get("zone")
+            pattern_name = zone_info.get("pattern")
+            if not zone_name or not pattern_name:
+                continue
+
+            zs = self._get_zone_state(zone_name)
+            await self._set_pattern_for_zone(zs, zone_name, pattern_name)
+            logger.info(
+                f"Stage zone '{zone_name}': pattern={pattern_name}, entities={zs.entity_count}"
+            )
 
     def _calculate_entities_for_zone(
         self, zone_state: ZonePatternState, audio_state: "AudioState", zone_name: str = ""

@@ -272,11 +272,10 @@ class AdminApp {
         // Connect Code elements
         this.elements.btnGenerateCode = document.getElementById('btn-generate-code');
         this.elements.activeCodes = document.getElementById('active-codes');
-        this.elements.codeModal = document.getElementById('code-modal');
-        this.elements.modalCode = document.getElementById('modal-code');
-        this.elements.modalTtl = document.getElementById('modal-ttl');
+        this.elements.generatedCodeDisplay = document.getElementById('generated-code-display');
+        this.elements.generatedCodeText = document.getElementById('generated-code-text');
+        this.elements.generatedCodeTtl = document.getElementById('generated-code-ttl');
         this.elements.btnCopyCode = document.getElementById('btn-copy-code');
-        this.elements.btnCloseModal = document.getElementById('btn-close-modal');
 
         // Reconnect button
         this.elements.btnReconnect = document.getElementById('btn-reconnect');
@@ -557,39 +556,28 @@ class AdminApp {
         // Generate code button
         if (this.elements.btnGenerateCode) {
             this.elements.btnGenerateCode.addEventListener('click', () => {
+                // Show loading state
+                this.elements.btnGenerateCode.disabled = true;
+                this.elements.btnGenerateCode.classList.add('btn-loading');
+                this.elements.btnGenerateCode.textContent = 'Generating...';
                 this.ws.send({ type: 'generate_connect_code', ttl_minutes: 30 });
             });
         }
 
-        // Copy code button
+        // Copy code button (inline)
         if (this.elements.btnCopyCode) {
             this.elements.btnCopyCode.addEventListener('click', () => {
-                const code = this.elements.modalCode?.textContent || '';
+                const code = this.elements.generatedCodeText?.textContent || '';
                 this._copyToClipboard(code).then((ok) => {
                     if (ok) {
                         this.elements.btnCopyCode.textContent = 'Copied!';
                         this.elements.btnCopyCode.classList.add('btn-copy-success');
                         setTimeout(() => {
-                            this.elements.btnCopyCode.textContent = 'Copy Code';
+                            this.elements.btnCopyCode.textContent = 'Copy';
                             this.elements.btnCopyCode.classList.remove('btn-copy-success');
                         }, 2000);
                     }
                 });
-            });
-        }
-
-        // Close modal button
-        if (this.elements.btnCloseModal) {
-            this.elements.btnCloseModal.addEventListener('click', () => {
-                this._hideCodeModal();
-            });
-        }
-
-        // Click backdrop to close
-        const backdrop = this.elements.codeModal?.querySelector('.modal-backdrop');
-        if (backdrop) {
-            backdrop.addEventListener('click', () => {
-                this._hideCodeModal();
             });
         }
 
@@ -604,21 +592,30 @@ class AdminApp {
         }
     }
 
-    _showCodeModal(code, ttlMinutes = 30) {
-        if (this.elements.modalCode) {
-            this.elements.modalCode.textContent = code;
-        }
-        if (this.elements.modalTtl) {
-            this.elements.modalTtl.textContent = ttlMinutes;
-        }
-        if (this.elements.codeModal) {
-            this.elements.codeModal.classList.remove('hidden');
+    _resetGenerateButton() {
+        if (this.elements.btnGenerateCode) {
+            this.elements.btnGenerateCode.disabled = false;
+            this.elements.btnGenerateCode.classList.remove('btn-loading');
+            this.elements.btnGenerateCode.textContent = 'Generate Connect Code';
         }
     }
 
-    _hideCodeModal() {
-        if (this.elements.codeModal) {
-            this.elements.codeModal.classList.add('hidden');
+    _showGeneratedCode(code, ttlMinutes = 30) {
+        // Reset generate button
+        if (this.elements.btnGenerateCode) {
+            this.elements.btnGenerateCode.disabled = false;
+            this.elements.btnGenerateCode.classList.remove('btn-loading');
+            this.elements.btnGenerateCode.textContent = 'Generate Connect Code';
+        }
+        // Show inline code display
+        if (this.elements.generatedCodeText) {
+            this.elements.generatedCodeText.textContent = code;
+        }
+        if (this.elements.generatedCodeTtl) {
+            this.elements.generatedCodeTtl.textContent = ttlMinutes;
+        }
+        if (this.elements.generatedCodeDisplay) {
+            this.elements.generatedCodeDisplay.classList.remove('hidden');
         }
     }
 
@@ -978,6 +975,7 @@ class AdminApp {
             this.state.minecraftConnected = false;
             this._setConnectionStatus('disconnected');
             this._updateServiceIndicators();
+            this._resetGenerateButton();
         });
 
         this.ws.addEventListener('error', () => {
@@ -1160,8 +1158,8 @@ class AdminApp {
                 break;
 
             case 'connect_code_generated':
-                // Show the newly generated code in modal
-                this._showCodeModal(data.code, data.ttl_minutes || 30);
+                // Show the newly generated code inline
+                this._showGeneratedCode(data.code, data.ttl_minutes || 30);
                 break;
 
             case 'connect_codes':

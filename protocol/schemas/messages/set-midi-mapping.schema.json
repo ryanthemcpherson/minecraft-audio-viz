@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-midi-mapping.schema.json",
+  "title": "SetMidiMappingMessage",
+  "description": "Map a MIDI control (CC or note) to a visualization parameter.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_midi_mapping"
+    },
+    "v": {
+      "type": "string"
+    },
+    "mapping_type": {
+      "type": "string",
+      "enum": ["cc", "note"]
+    },
+    "number": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 127
+    },
+    "target": {
+      "type": "string"
+    },
+    "min_value": {
+      "type": "number"
+    },
+    "max_value": {
+      "type": "number"
+    }
+  },
+  "required": ["type", "mapping_type", "number", "target"]
+}

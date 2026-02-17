@@ -12,6 +12,9 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.util.Vector;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
@@ -153,7 +156,40 @@ public class StageManager {
             plugin.getDecoratorManager().activateDecorators(stage);
         }
 
+        // Broadcast zone configs to VJ server so it applies correct patterns and entity counts
+        broadcastStageZoneConfigs(stage);
+
         plugin.getLogger().info("Activated stage '" + stage.getName() + "'");
+    }
+
+    /**
+     * Broadcast stage zone configurations to connected WebSocket clients.
+     * This tells the VJ server which pattern each zone should use, allowing it
+     * to apply recommended_entities and resize pools accordingly.
+     */
+    private void broadcastStageZoneConfigs(Stage stage) {
+        if (plugin.getWebSocketServer() == null) return;
+
+        JsonObject message = new JsonObject();
+        message.addProperty("type", "stage_zone_configs");
+        message.addProperty("stage", stage.getName());
+
+        JsonArray zones = new JsonArray();
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+            StageZoneConfig config = stage.getZoneConfigs().getOrDefault(role, new StageZoneConfig());
+
+            JsonObject zoneObj = new JsonObject();
+            zoneObj.addProperty("zone", zoneName);
+            zoneObj.addProperty("pattern", config.getPattern());
+            zoneObj.addProperty("entity_count", config.getEntityCount());
+            zoneObj.addProperty("block_type", config.getBlockType());
+            zones.add(zoneObj);
+        }
+
+        message.add("zones", zones);
+        plugin.getWebSocketServer().broadcast(message);
     }
 
     /**

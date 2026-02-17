@@ -24,7 +24,15 @@ const CONFIG = {
 let scene, camera, renderer;
 let blocks = [];
 let ground, gridHelper;
-let autoRotate = true;
+let mcEnvironment = null;
+let autoRotate = false;
+
+// Scanned stage blocks
+let stageBlocksGroup = null;
+let stageCenter = { x: 0, y: 0, z: 0 };
+let textureManager = null;
+let zoneData = null;
+let stageScanRequested = false;
 
 // New systems
 let particleSystem = null;
@@ -152,21 +160,17 @@ function init() {
     pointLight.position.set(0, 5, 0);
     scene.add(pointLight);
 
-    // Ground plane
-    const groundGeometry = new THREE.PlaneGeometry(30, 30);
-    const groundMaterial = new THREE.MeshStandardMaterial({
-        color: 0x12121a,
-        roughness: 0.9
-    });
-    ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    // Block texture manager for scanned stage blocks
+    if (typeof BlockTextureManager !== 'undefined') {
+        textureManager = new BlockTextureManager();
+    }
 
-    // Grid helper
-    gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-    gridHelper.position.y = 0.01;
-    scene.add(gridHelper);
+    // Procedural environment as fallback (shown until scanned blocks arrive)
+    if (typeof BlockTextureManager !== 'undefined' && typeof MinecraftEnvironment !== 'undefined') {
+        const texMgr = textureManager || new BlockTextureManager();
+        mcEnvironment = new MinecraftEnvironment(scene, texMgr);
+        mcEnvironment.build();
+    }
 
     // Create visualization blocks
     createBlocks();
@@ -268,13 +272,19 @@ function setupControls() {
         });
     }
 
-    // Show block grid checkbox
+    // Show stage checkbox
     const blocksChk = document.getElementById('chk-blocks');
     if (blocksChk) {
         blocksChk.addEventListener('change', (e) => {
             showBlockGrid = e.target.checked;
             if (blockIndicators) {
                 blockIndicators.setVisible(showBlockGrid);
+            }
+            if (stageBlocksGroup) {
+                stageBlocksGroup.visible = showBlockGrid;
+            }
+            if (mcEnvironment) {
+                mcEnvironment.setVisible(showBlockGrid);
             }
         });
     }
@@ -526,6 +536,11 @@ function connectWebSocket() {
             if (statusText) statusText.textContent = 'Connected';
             console.log('WebSocket connected');
             reconnectAttempts = 0;  // Reset on successful connection
+            stageScanRequested = false;
+
+            // Request zone and stage data for scanned block rendering
+            ws.send(JSON.stringify({ type: 'get_zones' }));
+            ws.send(JSON.stringify({ type: 'get_stages' }));
         };
 
         ws.onmessage = (event) => {
@@ -539,6 +554,17 @@ function connectWebSocket() {
                     updateUIFromPreset(data.preset, data.settings);
                 } else if (data.type === 'voice_status') {
                     updateVoiceStatus(data);
+                } else if (data.type === 'zones') {
+                    handleZonesResponse(data.zones || []);
+                } else if (data.type === 'stages') {
+                    handleStagesResponse(data.stages || []);
+                } else if (data.type === 'stage_blocks') {
+                    handleStageBlocksResponse(data);
+                } else if (data.type === 'vj_state') {
+                    // Initial state broadcast — extract zone info if present
+                    if (data.zones && !zoneData) {
+                        handleZonesResponse(data.zones);
+                    }
                 }
             } catch (e) {
                 console.error('Parse error:', e);
@@ -811,7 +837,7 @@ function updateBlockTargets() {
         if (!entity) return;
 
         block.userData.targetX = (entity.x * zoneSize) - offset;
-        block.userData.targetY = entity.y * zoneSize;
+        block.userData.targetY = (entity.y * zoneSize) + 0.5;
         block.userData.targetZ = (entity.z * zoneSize) - offset;
         block.userData.targetScale = entity.scale * 1.5;
 
@@ -1020,6 +1046,149 @@ function updateVoiceStatus(data) {
     } else {
         dot.classList.add('voice-available');
         text.textContent = 'Voice: Off';
+    }
+}
+
+// === Stage Block Scanning ===
+
+function handleZonesResponse(zones) {
+    if (!zones || zones.length === 0) return;
+    zoneData = zones;
+    computeStageCenter(zones);
+    console.log(`[Stage] Received ${zones.length} zones, center:`, stageCenter);
+}
+
+function handleStagesResponse(stages) {
+    if (!stages || stages.length === 0) return;
+
+    // Find first active stage, or just use the first one
+    const stage = stages.find(s => s.active) || stages[0];
+    if (stage && stage.name && !stageScanRequested) {
+        stageScanRequested = true;
+        console.log(`[Stage] Requesting block scan for stage: ${stage.name}`);
+        requestStageBlocks(stage.name);
+    }
+}
+
+function handleStageBlocksResponse(data) {
+    if (data.error) {
+        console.warn('[Stage] Block scan error:', data.error);
+        return;
+    }
+    console.log(`[Stage] Received ${data.blocks ? data.blocks.length : 0} scanned blocks`);
+    renderStageBlocks(data);
+
+    // Hide procedural environment once real blocks are loaded
+    if (mcEnvironment && data.blocks && data.blocks.length > 0) {
+        mcEnvironment.setVisible(false);
+    }
+}
+
+function requestStageBlocks(stageName) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'scan_stage_blocks', stage: stageName }));
+    }
+}
+
+function computeStageCenter(zones) {
+    if (!zones || zones.length === 0) {
+        stageCenter = { x: 0, y: 0, z: 0 };
+        return;
+    }
+
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+    zones.forEach(zone => {
+        const ox = zone.origin?.x || 0;
+        const oy = zone.origin?.y || 0;
+        const oz = zone.origin?.z || 0;
+        const sx = zone.size?.x || 10;
+        const sy = zone.size?.y || 10;
+        const sz = zone.size?.z || 10;
+
+        minX = Math.min(minX, ox);
+        minY = Math.min(minY, oy);
+        minZ = Math.min(minZ, oz);
+        maxX = Math.max(maxX, ox + sx);
+        maxY = Math.max(maxY, oy + sy);
+        maxZ = Math.max(maxZ, oz + sz);
+    });
+
+    stageCenter = {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+        z: (minZ + maxZ) / 2
+    };
+}
+
+function renderStageBlocks(data) {
+    const { palette, blocks } = data;
+    if (!palette || !blocks || blocks.length === 0) return;
+
+    // Dispose previous stage blocks
+    disposeStageBlocks();
+
+    stageBlocksGroup = new THREE.Group();
+    stageBlocksGroup.name = 'stage-blocks';
+
+    const center = stageCenter;
+
+    // Group blocks by palette index
+    const blocksByMaterial = new Map();
+    for (const [x, y, z, palIdx] of blocks) {
+        if (!blocksByMaterial.has(palIdx)) {
+            blocksByMaterial.set(palIdx, []);
+        }
+        blocksByMaterial.get(palIdx).push({ x, y, z });
+    }
+
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+
+    for (const [palIdx, positions] of blocksByMaterial) {
+        const materialName = palette[palIdx];
+
+        // Try procedural texture material, fallback to color
+        let material = null;
+        if (textureManager) {
+            material = textureManager.getEnvironmentMaterial(materialName, 'side');
+        }
+        if (!material) {
+            material = BlockTextureManager.getBlockColor(materialName);
+        }
+
+        const mesh = new THREE.InstancedMesh(boxGeo, material, positions.length);
+        mesh.receiveShadow = true;
+
+        const matrix = new THREE.Matrix4();
+        for (let i = 0; i < positions.length; i++) {
+            const p = positions[i];
+            matrix.makeTranslation(
+                p.x + 0.5 - center.x,
+                p.y + 0.5 - center.y,
+                p.z + 0.5 - center.z
+            );
+            mesh.setMatrixAt(i, matrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+
+        stageBlocksGroup.add(mesh);
+    }
+
+    stageBlocksGroup.visible = showBlockGrid;
+    scene.add(stageBlocksGroup);
+}
+
+function disposeStageBlocks() {
+    if (stageBlocksGroup) {
+        stageBlocksGroup.traverse(child => {
+            if (child.isMesh) {
+                child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            }
+        });
+        scene.remove(stageBlocksGroup);
+        stageBlocksGroup = null;
     }
 }
 

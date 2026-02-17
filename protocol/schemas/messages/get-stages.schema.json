@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "get-stages.schema.json",
+  "title": "GetStagesMessage",
+  "description": "Request to list all stages and their zone mappings.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "get_stages"
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}
