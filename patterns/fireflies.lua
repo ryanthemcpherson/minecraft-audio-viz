@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Fireflies"
 description = "Swarm of synchronized flashing lights"
+recommended_entities = 64
 category = "Organic"
 static_camera = false
 

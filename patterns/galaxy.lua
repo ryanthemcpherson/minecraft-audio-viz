@@ -1,5 +1,6 @@
 name = "Galaxy"
 description = "Spiral galaxy - cosmic visualization"
+recommended_entities = 96
 category = "Epic"
 static_camera = false
 state = {}

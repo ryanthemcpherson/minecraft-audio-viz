@@ -1,5 +1,6 @@
 name = "Pyramid"
 description = "Egyptian pyramid - inverts on drops"
+recommended_entities = 64
 category = "Epic"
 static_camera = false
 state = {}

@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Expanding Sphere"
 description = "3D sphere that breathes and pulses"
+recommended_entities = 64
 category = "Original"
 static_camera = false
 

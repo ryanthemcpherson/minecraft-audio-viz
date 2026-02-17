@@ -1,5 +1,6 @@
 name = "Mandala"
 description = "Sacred geometry rings - frequency mapped"
+recommended_entities = 60
 category = "Cosmic"
 static_camera = false
 state = {}

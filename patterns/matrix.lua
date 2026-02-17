@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Fountain"
 description = "Upward spray with gravity arcs"
+recommended_entities = 64
 category = "Original"
 static_camera = false
 

@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Supernova"
 description = "Explosive burst on beats - 3D shockwave"
+recommended_entities = 64
 category = "Original"
 static_camera = false
 

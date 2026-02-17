@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Breathing Cube"
 description = "Rotating cube vertices - expands with beats"
+recommended_entities = 64
 category = "Original"
 static_camera = false
 

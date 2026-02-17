@@ -32,7 +32,7 @@ import threading
 import time
 import urllib.parse
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -602,6 +602,7 @@ class VJServer:
         self._transition_start = 0.0
         self._old_pattern: Optional[Any] = None
         self._old_pattern_name: Optional[str] = None
+        self._transition_pending_resize: Optional[int] = None  # Deferred entity count for shrink
 
         # Spectrograph
         self.spectrograph = TerminalSpectrograph() if show_spectrograph else None
@@ -2253,13 +2254,48 @@ class VJServer:
                             if self._transition_duration > 0 and pattern_name != self._pattern_name:
                                 self._old_pattern = self._current_pattern
                                 self._old_pattern_name = self._pattern_name
+                                # Freeze old pattern's entity count before shared config was mutated
+                                if old_count != self.entity_count:
+                                    self._old_pattern.config = replace(
+                                        self._old_pattern.config, entity_count=old_count
+                                    )
                                 self._current_pattern = get_pattern(
                                     pattern_name, self._pattern_config
                                 )
+                                # Seed new pattern with old pattern's entity positions
+                                # so entities transition from current positions, not origin.
+                                if (
+                                    hasattr(self._old_pattern, "_entity_state")
+                                    and self._old_pattern._entity_state
+                                ):
+                                    self._current_pattern.seed_entity_state(
+                                        self._old_pattern._entity_state
+                                    )
                                 self._pattern_name = pattern_name
                                 self._pattern_changes += 1
                                 self._transitioning = True
                                 self._transition_start = time.monotonic()
+                                self._transition_pending_resize = None
+
+                                if (
+                                    old_count != self.entity_count
+                                    and self.viz_client
+                                    and self.viz_client.connected
+                                ):
+                                    try:
+                                        if self.entity_count > old_count:
+                                            # Growing: spawn extra entities now (invisible at scale 0)
+                                            await self.viz_client.init_pool(
+                                                self.zone, self.entity_count, "SEA_LANTERN"
+                                            )
+                                        else:
+                                            # Shrinking: defer removal until transition completes
+                                            self._transition_pending_resize = self.entity_count
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Failed to resize pool for pattern '{pattern_name}': {e}"
+                                        )
+
                                 logger.info(
                                     f"Starting {self._transition_duration}s crossfade: {self._old_pattern_name} -> {pattern_name}"
                                 )
@@ -2273,16 +2309,20 @@ class VJServer:
                                 )
                                 self._transitioning = False
 
-                            if self.viz_client and self.viz_client.connected:
-                                try:
-                                    await self.viz_client.cleanup_zone(self.zone)
-                                    await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, "SEA_LANTERN"
-                                    )
-                                except Exception as e:
-                                    logger.warning(
-                                        f"Failed to apply recommended entity count for pattern '{pattern_name}': {e}"
-                                    )
+                                if (
+                                    old_count != self.entity_count
+                                    and self.viz_client
+                                    and self.viz_client.connected
+                                ):
+                                    try:
+                                        await self.viz_client.cleanup_zone(self.zone)
+                                        await self.viz_client.init_pool(
+                                            self.zone, self.entity_count, "SEA_LANTERN"
+                                        )
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Failed to apply recommended entity count for pattern '{pattern_name}': {e}"
+                                        )
                             await self._broadcast_pattern_change()
                             if old_count != self.entity_count:
                                 await self._broadcast_config_sync_to_djs()
@@ -3927,6 +3967,14 @@ class VJServer:
                 self._transitioning = False
                 self._old_pattern = None
                 self._old_pattern_name = None
+                # Deferred pool shrink: remove excess entities after merge animation
+                if self._transition_pending_resize is not None:
+                    pending = self._transition_pending_resize
+                    self._transition_pending_resize = None
+                    if self.viz_client and self.viz_client.connected:
+                        asyncio.ensure_future(
+                            self.viz_client.init_pool(self.zone, pending, "SEA_LANTERN")
+                        )
                 logger.info(f"Crossfade complete: now on {self._pattern_name}")
                 return self._current_pattern.calculate_entities(audio_state)
 
@@ -3954,11 +4002,14 @@ class VJServer:
     ) -> List[dict]:
         """
         Blend between old and new entity lists using alpha (0=old, 1=new).
-        Handles entities appearing/disappearing between patterns.
+        Split/merge: new-only entities emerge from a sibling's position (split),
+        old-only entities collapse into a sibling's position (merge).
         """
         # Build dictionaries by entity ID for fast lookup
         old_dict = {e.get("id", f"e{i}"): e for i, e in enumerate(old_entities)}
         new_dict = {e.get("id", f"e{i}"): e for i, e in enumerate(new_entities)}
+        old_count = len(old_entities)
+        new_count = len(new_entities)
 
         # All entity IDs from both patterns
         all_ids = set(old_dict.keys()) | set(new_dict.keys())
@@ -3983,17 +4034,69 @@ class VJServer:
                     "visible": True,
                 }
             elif new_e:
-                # Entity only in new pattern - fade in from scale 0
-                blended_e = new_e.copy()
-                blended_e["scale"] = new_e.get("scale", 0.5) * alpha
+                # Split: entity only in new pattern — emerge from a sibling's position
+                sibling_id = self._get_sibling_id(eid, old_count)
+                sibling = old_dict.get(sibling_id)
+                if sibling:
+                    blended_e = {
+                        "id": eid,
+                        "x": self._lerp(sibling.get("x", 0.5), new_e.get("x", 0.5), alpha),
+                        "y": self._lerp(sibling.get("y", 0.5), new_e.get("y", 0.5), alpha),
+                        "z": self._lerp(sibling.get("z", 0.5), new_e.get("z", 0.5), alpha),
+                        "scale": self._lerp(
+                            sibling.get("scale", 0.5), new_e.get("scale", 0.5), alpha
+                        ),
+                        "rotation": self._lerp(
+                            sibling.get("rotation", 0.0), new_e.get("rotation", 0.0), alpha
+                        ),
+                        "band": new_e.get("band", 0),
+                        "visible": True,
+                    }
+                else:
+                    # No sibling found — fade in
+                    blended_e = new_e.copy()
+                    blended_e["scale"] = new_e.get("scale", 0.5) * alpha
             else:
-                # Entity only in old pattern - fade out to scale 0
-                blended_e = old_e.copy()
-                blended_e["scale"] = old_e.get("scale", 0.5) * (1.0 - alpha)
+                # Merge: entity only in old pattern — collapse into a sibling's position
+                sibling_id = self._get_sibling_id(eid, new_count)
+                sibling = new_dict.get(sibling_id)
+                if sibling:
+                    blended_e = {
+                        "id": eid,
+                        "x": self._lerp(old_e.get("x", 0.5), sibling.get("x", 0.5), alpha),
+                        "y": self._lerp(old_e.get("y", 0.5), sibling.get("y", 0.5), alpha),
+                        "z": self._lerp(old_e.get("z", 0.5), sibling.get("z", 0.5), alpha),
+                        "scale": self._lerp(
+                            old_e.get("scale", 0.5), sibling.get("scale", 0.5), alpha
+                        ),
+                        "rotation": self._lerp(
+                            old_e.get("rotation", 0.0), sibling.get("rotation", 0.0), alpha
+                        ),
+                        "band": old_e.get("band", 0),
+                        "visible": True,
+                    }
+                else:
+                    # No sibling found — fade out
+                    blended_e = old_e.copy()
+                    blended_e["scale"] = old_e.get("scale", 0.5) * (1.0 - alpha)
 
             blended.append(blended_e)
 
         return blended
+
+    @staticmethod
+    def _get_sibling_id(eid: str, sibling_count: int) -> Optional[str]:
+        """Map an entity to its sibling in the other pattern via modulo wrapping."""
+        if sibling_count <= 0:
+            return None
+        # Extract index from "block_N" format
+        if eid.startswith("block_"):
+            try:
+                idx = int(eid[6:])
+                return f"block_{idx % sibling_count}"
+            except ValueError:
+                pass
+        return None
 
     def _lerp(self, a: float, b: float, t: float) -> float:
         """Linear interpolation between a and b."""

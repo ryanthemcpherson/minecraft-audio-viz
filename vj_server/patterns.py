@@ -88,6 +88,10 @@ class LuaPattern(VisualizationPattern):
         self._position_deadband = 0.0015
         self._load_lua(pattern_key)
 
+    def seed_entity_state(self, state: dict):
+        """Seed entity positions from another pattern's state for smooth transitions."""
+        self._entity_state = {k: dict(v) for k, v in state.items()}
+
     def _load_lua(self, pattern_key: str):
         try:
             from lupa import LuaRuntime

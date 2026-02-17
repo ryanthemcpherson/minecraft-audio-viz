@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Mushroom"
 description = "Psychedelic toadstool with spots, gills, and spores"
+recommended_entities = 96
 category = "Epic"
 static_camera = false
 
