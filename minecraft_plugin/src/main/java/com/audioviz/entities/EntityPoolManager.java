@@ -102,9 +102,9 @@ public class EntityPoolManager {
                     BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(finalMaterial.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(3); // 3 ticks (150ms) for smooth interpolation
+                        entity.setInterpolationDuration(2); // 2 ticks — completes 50% per tick, matching ~exponential decay
                         entity.setInterpolationDelay(0);
-                        entity.setTeleportDuration(3); // Smooth position changes over 3 ticks
+                        entity.setTeleportDuration(1); // Snap position quickly; server already smooths
                         // Spawn invisible (scale 0) — entities become visible when
                         // the first batch_update positions them properly. Prevents
                         // a stack of blocks stuck at the zone origin corner.
@@ -153,9 +153,9 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(Display.Billboard.CENTER);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(3);
+                    entity.setInterpolationDuration(2);
                     entity.setInterpolationDelay(0);
-                    entity.setTeleportDuration(3);
+                    entity.setTeleportDuration(1);
                     entity.setPersistent(false);
                 });
 
@@ -198,8 +198,9 @@ public class EntityPoolManager {
         // Record stats
         plugin.getEntityUpdateStats().recordUpdates(updates.size());
 
-        // Single scheduler call for ALL updates - major performance improvement
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        // Apply updates directly if on main thread (hot path from MessageQueue.processTick),
+        // otherwise schedule via runTask for thread safety.
+        Runnable applyUpdates = () -> {
             for (EntityUpdate update : updates) {
                 Entity entity = pool.get(update.entityId());
                 if (entity == null || !entity.isValid()) continue;
@@ -216,11 +217,7 @@ public class EntityPoolManager {
                     display.setInterpolationDuration(update.interpolationDuration());
                 }
 
-                // Apply transformation update unconditionally.
-                // The previous equals() check called display.getTransformation() which
-                // allocates a new Transformation + 4 JOML objects every call, then does
-                // deep equality across 4 components. For continuously animated entities
-                // the transform almost always changes, making the check pure overhead.
+                // Apply transformation update
                 if (update.hasTransform() && update.transformation() != null) {
                     display.setTransformation(update.transformation());
                     display.setInterpolationDelay(0); // Start interpolation immediately
@@ -250,7 +247,13 @@ public class EntityPoolManager {
                     }
                 }
             }
-        });
+        };
+
+        if (Bukkit.isPrimaryThread()) {
+            applyUpdates.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, applyUpdates);
+        }
     }
 
     /**
@@ -397,9 +400,9 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(mode);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(3);
+                    entity.setInterpolationDuration(2);
                     entity.setInterpolationDelay(0);
-                    entity.setTeleportDuration(3);
+                    entity.setTeleportDuration(1);
                     entity.setPersistent(false);
                 });
 
@@ -576,13 +579,18 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
         if (pool == null) return;
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Runnable apply = () -> {
             for (Entity entity : pool.values()) {
                 if (entity != null && entity.isValid()) {
                     entity.setGlowing(glow);
                 }
             }
-        });
+        };
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
     }
 
     /**
@@ -611,13 +619,18 @@ public class EntityPoolManager {
         int blockLight = Math.max(0, Math.min(15, brightness));
         int skyLight = Math.max(0, Math.min(15, brightness));
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Runnable apply = () -> {
             for (Entity entity : pool.values()) {
                 if (entity instanceof Display display) {
                     display.setBrightness(new Display.Brightness(blockLight, skyLight));
                 }
             }
-        });
+        };
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
     }
 
     /**

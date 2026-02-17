@@ -255,9 +255,13 @@ public class MessageQueue {
             // Convert to world coordinates using zone's localToWorld (respects rotation)
             Location loc = zone.localToWorld(nx, ny, nz);
 
+            // Check visibility — if hidden, force scale to 0 (handled in the same transform)
+            boolean visible = !entity.has("visible") || entity.get("visible").getAsBoolean();
+
             // Parse scale and rotation if present (clamped for safety)
-            float scale = InputSanitizer.sanitizeScale(
-                entity.has("scale") ? entity.get("scale").getAsFloat() : 0.5f);
+            float scale = !visible ? 0f
+                : InputSanitizer.sanitizeScale(
+                    entity.has("scale") ? entity.get("scale").getAsFloat() : 0.5f);
             float rotationY = InputSanitizer.sanitizeRotation(
                 entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0f);
 
