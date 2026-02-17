@@ -89,7 +89,9 @@ async def list_users(
     )
 
     if search:
-        pattern = f"%{search}%"
+        # Escape SQL wildcard characters in user input
+        escaped = search.replace("%", r"\%").replace("_", r"\_")
+        pattern = f"%{escaped}%"
         stmt = stmt.where(
             User.display_name.ilike(pattern)
             | User.email.ilike(pattern)
@@ -145,9 +147,12 @@ async def update_user(
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Prevent admin from removing their own admin access
-    if user.id == admin.id and body.is_admin is False:
-        raise HTTPException(status_code=400, detail="Cannot remove your own admin access")
+    # Prevent admin from removing their own admin access or deactivating themselves
+    if user.id == admin.id:
+        if body.is_admin is False:
+            raise HTTPException(status_code=400, detail="Cannot remove your own admin access")
+        if body.is_active is False:
+            raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
 
     if body.is_active is not None:
         user.is_active = body.is_active

@@ -70,6 +70,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     },
                 )
 
+        # Rate-limit admin endpoints
+        if request.url.path.startswith("/api/v1/admin/"):
+            if not _write_limiter.check(client_ip):
+                remaining = _write_limiter.remaining(client_ip)
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded. Try again in 60 seconds."},
+                    headers={
+                        "Retry-After": "60",
+                        "X-RateLimit-Limit": str(_write_limiter.max_requests),
+                        "X-RateLimit-Remaining": str(remaining),
+                    },
+                )
+
         # Rate-limit write operations on servers and orgs endpoints
         if request.method in _WRITE_METHODS and (
             request.url.path.startswith("/api/v1/servers/")
