@@ -23,7 +23,7 @@ use windows::Win32::Media::Audio::{
     AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
     AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
     AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IActivateAudioInterfaceAsyncOperation,
     IActivateAudioInterfaceCompletionHandler,
     PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, WAVEFORMATEX,
@@ -369,13 +369,15 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         cbSize: 0,
     };
 
-    // Initialize with loopback + auto-convert flags, 20ms buffer
+    // Initialize with auto-convert flags, 20ms buffer.
+    // NOTE: Do NOT pass AUDCLNT_STREAMFLAGS_LOOPBACK here — the Process Loopback
+    // activation already implies loopback capture for the target process. Passing
+    // the flag would override it with system-wide loopback (capturing all audio).
     let buffer_duration = REFTIMES_PER_SEC / 50;
     audio_client
         .Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_LOOPBACK
-                | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
                 | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
             buffer_duration,
             0,
