@@ -33,6 +33,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -99,6 +100,7 @@ public class MessageHandler {
             case "update_stage" -> handleUpdateStage(message);
             case "set_stage_zone_config" -> handleSetStageZoneConfig(message);
             case "get_stage_templates" -> handleGetStageTemplates();
+            case "scan_stage_blocks" -> handleScanStageBlocks(message);
             // DJ info
             case "dj_info" -> handleDjInfo(message);
             // Banner config
@@ -1381,6 +1383,116 @@ public class MessageHandler {
             templatesArray.add(templateJson);
         }
         response.add("templates", templatesArray);
+
+        return response;
+    }
+
+    // ========== Stage Block Scanner ==========
+
+    /**
+     * Scan all non-air blocks in the bounding box around a stage's zones.
+     * Returns palette-compressed block data for 3D preview rendering.
+     */
+    private JsonObject handleScanStageBlocks(JsonObject message) {
+        if (!message.has("stage")) {
+            return createError("Missing required field: stage");
+        }
+        String stageName = message.get("stage").getAsString();
+        if (!isValidZoneName(stageName)) {
+            return createError("Invalid stage name");
+        }
+
+        Stage stage = plugin.getStageManager().getStage(stageName);
+        if (stage == null) {
+            return createError("Stage not found: " + stageName);
+        }
+
+        // Compute union bounding box of all zones in the stage
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        org.bukkit.World world = null;
+
+        for (String zoneName : stage.getZoneNames()) {
+            VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+            if (zone == null) continue;
+
+            if (world == null) {
+                world = zone.getWorld();
+            }
+
+            int ox = (int) Math.floor(zone.getOrigin().getX());
+            int oy = (int) Math.floor(zone.getOrigin().getY());
+            int oz = (int) Math.floor(zone.getOrigin().getZ());
+            int ex = ox + (int) Math.ceil(zone.getSize().getX());
+            int ey = oy + (int) Math.ceil(zone.getSize().getY());
+            int ez = oz + (int) Math.ceil(zone.getSize().getZ());
+
+            minX = Math.min(minX, ox);
+            minY = Math.min(minY, oy);
+            minZ = Math.min(minZ, oz);
+            maxX = Math.max(maxX, ex);
+            maxY = Math.max(maxY, ey);
+            maxZ = Math.max(maxZ, ez);
+        }
+
+        if (world == null) {
+            return createError("No zones found for stage: " + stageName);
+        }
+
+        // Expand bounding box: +5 XZ, +3 below, +2 above
+        minX -= 5;
+        minZ -= 5;
+        maxX += 5;
+        maxZ += 5;
+        minY -= 3;
+        maxY += 2;
+
+        // Scan blocks - build palette and block array
+        LinkedHashMap<String, Integer> palette = new LinkedHashMap<>();
+        JsonArray blocksArray = new JsonArray();
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Material mat = world.getBlockAt(x, y, z).getType();
+                    if (mat == Material.AIR || mat == Material.CAVE_AIR || mat == Material.VOID_AIR) {
+                        continue;
+                    }
+
+                    String matName = mat.name();
+                    int paletteIdx = palette.computeIfAbsent(matName, k -> palette.size());
+
+                    JsonArray block = new JsonArray();
+                    block.add(x);
+                    block.add(y);
+                    block.add(z);
+                    block.add(paletteIdx);
+                    blocksArray.add(block);
+                }
+            }
+        }
+
+        // Build palette array
+        JsonArray paletteArray = new JsonArray();
+        for (String matName : palette.keySet()) {
+            paletteArray.add(matName);
+        }
+
+        // Build bounds object
+        JsonObject bounds = new JsonObject();
+        bounds.addProperty("minX", minX);
+        bounds.addProperty("minY", minY);
+        bounds.addProperty("minZ", minZ);
+        bounds.addProperty("maxX", maxX);
+        bounds.addProperty("maxY", maxY);
+        bounds.addProperty("maxZ", maxZ);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "stage_blocks");
+        response.addProperty("stage", stageName);
+        response.add("palette", paletteArray);
+        response.add("blocks", blocksArray);
+        response.add("bounds", bounds);
 
         return response;
     }

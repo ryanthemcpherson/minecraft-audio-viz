@@ -1155,6 +1155,10 @@ class AdminApp {
                 this._handleStagesList(data);
                 break;
 
+            case 'stage_blocks':
+                this._handleStageBlocks(data);
+                break;
+
             case 'connect_code_generated':
                 // Show the newly generated code in modal
                 this._showCodeModal(data.code, data.ttl_minutes || 30);
@@ -1367,6 +1371,114 @@ class AdminApp {
         this._updateZoneSelector();
         this._renderStageZoneList();
         this._renderZoneChips();
+    }
+
+    // ========== Stage Block Scanning ==========
+
+    _handleStageBlocks(data) {
+        if (data.error) {
+            this._showToast(data.error, 'error');
+            return;
+        }
+        this._stageBlockData = data;
+        this._renderStageBlocks(data);
+        this._showToast(`Scanned ${data.blocks.length} blocks`, 'success');
+    }
+
+    _renderStageBlocks(data) {
+        if (!this._previewInitialized || !this._previewScene) return;
+
+        // Dispose previous stage blocks group
+        this._disposeStageBlocks();
+        // Re-set data since dispose clears it
+        this._stageBlockData = data;
+        this._stageBlocksScanned = true;
+
+        const { palette, blocks } = data;
+        if (!palette || !blocks || blocks.length === 0) return;
+
+        this._stageBlocksGroup = new THREE.Group();
+        this._stageBlocksGroup.name = 'stage-blocks';
+
+        // Use the same center as zone positioning (preview stage center)
+        const center = this._previewStageCenter || { x: 0, y: 0, z: 0 };
+
+        // Group blocks by palette index
+        const blocksByMaterial = new Map();
+        for (const [x, y, z, palIdx] of blocks) {
+            if (!blocksByMaterial.has(palIdx)) {
+                blocksByMaterial.set(palIdx, []);
+            }
+            blocksByMaterial.get(palIdx).push({ x, y, z });
+        }
+
+        // Shared geometry for all instances
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+
+        for (const [palIdx, positions] of blocksByMaterial) {
+            const materialName = palette[palIdx];
+
+            // Try to get procedural texture material, fallback to color
+            let material = null;
+            if (this._textureManager) {
+                material = this._textureManager.getEnvironmentMaterial(materialName, 'side');
+            }
+            if (!material) {
+                material = BlockTextureManager.getBlockColor(materialName);
+            }
+
+            const mesh = new THREE.InstancedMesh(boxGeo, material, positions.length);
+            mesh.receiveShadow = true;
+
+            const matrix = new THREE.Matrix4();
+            for (let i = 0; i < positions.length; i++) {
+                const p = positions[i];
+                // Position block at world coords relative to stage center
+                // +0.5 offset centers the block geometry on its grid position
+                matrix.makeTranslation(
+                    p.x + 0.5 - center.x,
+                    p.y + 0.5 - center.y,
+                    p.z + 0.5 - center.z
+                );
+                mesh.setMatrixAt(i, matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+
+            this._stageBlocksGroup.add(mesh);
+        }
+
+        this._previewScene.add(this._stageBlocksGroup);
+    }
+
+    _disposeStageBlocks() {
+        if (this._stageBlocksGroup) {
+            this._stageBlocksGroup.traverse(child => {
+                if (child.isMesh) {
+                    child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                }
+            });
+            this._previewScene.remove(this._stageBlocksGroup);
+            this._stageBlocksGroup = null;
+        }
+        this._stageBlockData = null;
+        this._stageBlocksScanned = false;
+    }
+
+    _scanStageBlocks() {
+        if (!this.state.selectedStage) {
+            this._showToast('No stage selected', 'warning');
+            return;
+        }
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this._showToast('Not connected', 'error');
+            return;
+        }
+        this.ws.send(JSON.stringify({
+            type: 'scan_stage_blocks',
+            stage: this.state.selectedStage
+        }));
+        this._showToast('Scanning stage blocks...', 'info');
     }
 
     _updateZoneSelector() {
@@ -3844,6 +3956,9 @@ class AdminApp {
     _rebuildPreviewZoneLayout() {
         if (!this._previewInitialized || !this._previewScene) return;
 
+        // Dispose stage blocks on rebuild (allow re-scan)
+        this._disposeStageBlocks();
+
         // Dispose old zone groups
         for (const [name, zg] of Object.entries(this._previewZoneGroups)) {
             zg.blocks.forEach(block => {
@@ -3864,6 +3979,9 @@ class AdminApp {
         const zones = this.state.allZones || [];
         const hasMultipleZones = zones.length > 1 && zones.some(z => z.origin);
 
+        // Show/hide scan button based on stage mode
+        const scanBtn = document.getElementById('preview-scan-stage');
+
         if (hasMultipleZones) {
             this._previewStageMode = true;
             // Pre-create zone groups
@@ -3877,8 +3995,21 @@ class AdminApp {
             }
             // Frame camera to stage
             this._frameStage();
+
+            // Show scan button in stage mode
+            if (scanBtn) scanBtn.style.display = '';
+
+            // Auto-scan stage blocks on first multi-zone preview
+            if (!this._stageBlocksScanned && this.state.selectedStage
+                && this.ws && this.ws.readyState === WebSocket.OPEN
+                && this.state.mcStatus === 'connected') {
+                this._stageBlocksScanned = true;
+                this._scanStageBlocks();
+            }
         } else {
             this._previewStageMode = false;
+            // Hide scan button in single-zone mode
+            if (scanBtn) scanBtn.style.display = 'none';
             // Restore single-zone environment
             if (this._mcEnvironment) {
                 this._mcEnvironment.setVisible(true);
@@ -3979,6 +4110,12 @@ class AdminApp {
                     this._mcEnvironment.setVisible(this._previewShowGrid);
                 }
             });
+        }
+
+        // Scan stage blocks button
+        const scanBtn = document.getElementById('preview-scan-stage');
+        if (scanBtn) {
+            scanBtn.addEventListener('click', () => this._scanStageBlocks());
         }
 
         // Particles enabled checkbox

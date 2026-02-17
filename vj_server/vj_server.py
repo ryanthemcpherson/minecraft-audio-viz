@@ -2929,6 +2929,32 @@ class VJServer:
                                 )
                             )
 
+                    elif msg_type == "scan_stage_blocks":
+                        # Forward to Minecraft and relay block scan response
+                        stage = data.get("stage", "")
+                        if self.viz_client and self.viz_client.connected:
+                            result = await self.viz_client.scan_stage_blocks(stage)
+                            if result:
+                                await websocket.send(json.dumps(result))
+                            else:
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "stage_blocks",
+                                            "error": "Scan failed or timed out",
+                                        }
+                                    )
+                                )
+                        else:
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "stage_blocks",
+                                        "error": "Minecraft not connected",
+                                    }
+                                )
+                            )
+
                     elif msg_type == "subscribe_voice":
                         self._voice_subscribers.add(websocket)
                         logger.info(
