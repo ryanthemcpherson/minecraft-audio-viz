@@ -102,9 +102,9 @@ public class EntityPoolManager {
                     BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(finalMaterial.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(1); // 1 tick keeps motion smooth but snappier
+                        entity.setInterpolationDuration(3); // 3 ticks (150ms) for smooth interpolation
                         entity.setInterpolationDelay(0);
-                        entity.setTeleportDuration(1); // Smooth position changes over 1 tick
+                        entity.setTeleportDuration(3); // Smooth position changes over 3 ticks
                         // Spawn invisible (scale 0) — entities become visible when
                         // the first batch_update positions them properly. Prevents
                         // a stack of blocks stuck at the zone origin corner.
@@ -153,9 +153,9 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(Display.Billboard.CENTER);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(1);
+                    entity.setInterpolationDuration(3);
                     entity.setInterpolationDelay(0);
-                    entity.setTeleportDuration(1); // Smooth position changes over 1 tick
+                    entity.setTeleportDuration(3);
                     entity.setPersistent(false);
                 });
 
@@ -397,9 +397,9 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(mode);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(1);
+                    entity.setInterpolationDuration(3);
                     entity.setInterpolationDelay(0);
-                    entity.setTeleportDuration(1);
+                    entity.setTeleportDuration(3);
                     entity.setPersistent(false);
                 });
 

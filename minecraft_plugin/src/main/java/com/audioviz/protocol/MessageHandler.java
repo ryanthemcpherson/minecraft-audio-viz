@@ -245,9 +245,13 @@ public class MessageHandler {
                 EntityUpdate.Builder builder = EntityUpdate.builder(entityId)
                     .location(worldLoc);
 
-                // Add transformation if scale provided (clamped to [0, 4])
-                if (entity.has("scale")) {
-                    float scale = InputSanitizer.sanitizeScale(entity.get("scale").getAsFloat());
+                // Check visibility — if hidden, force scale to 0 in the same transform
+                boolean visible = !entity.has("visible") || entity.get("visible").getAsBoolean();
+
+                // Add transformation if scale provided or entity is hidden (clamped to [0, 4])
+                if (entity.has("scale") || !visible) {
+                    float scale = !visible ? 0f
+                        : InputSanitizer.sanitizeScale(entity.get("scale").getAsFloat());
                     float rotation = InputSanitizer.sanitizeRotation(
                         entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0);
                     float pivotOffset = (1.0f - scale) * 0.5f;
@@ -283,20 +287,9 @@ public class MessageHandler {
                 pool.batchUpdateEntities(zoneName, batchUpdates);
             }
 
-            // Handle visibility separately (needs scale-to-zero, different from batch)
-            // Collect all visibility changes and apply in a single scheduler call
-            List<Map.Entry<String, Boolean>> visibilityChanges = new ArrayList<>();
-            for (JsonElement elem : entities) {
-                JsonObject entity = elem.getAsJsonObject();
-                if (entity.has("visible") && entity.has("id")) {
-                    visibilityChanges.add(Map.entry(
-                        entity.get("id").getAsString(),
-                        entity.get("visible").getAsBoolean()));
-                }
-            }
-            if (!visibilityChanges.isEmpty()) {
-                pool.batchSetVisible(zoneName, visibilityChanges);
-            }
+            // Visibility is now handled inline above — hidden entities get scale=0
+            // in the same transform update, eliminating the separate scheduler call
+            // that previously caused 2-frame flicker.
         }
 
         // Process particle effects

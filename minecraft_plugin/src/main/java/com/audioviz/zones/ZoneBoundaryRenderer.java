@@ -1,6 +1,8 @@
 package com.audioviz.zones;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.stages.Stage;
+import com.audioviz.stages.StageZoneRole;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Particle;
@@ -9,6 +11,7 @@ import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -25,6 +28,12 @@ public class ZoneBoundaryRenderer {
 
     /** Zone name (lowercase) -> tick when boundaries should auto-hide. */
     private final Map<String, Long> activeZones = new ConcurrentHashMap<>();
+
+    /** Zones marked as persistent (won't auto-hide). */
+    private final Set<String> persistentZones = ConcurrentHashMap.newKeySet();
+
+    /** Currently selected zone name (rendered with a distinct color), or null. */
+    private volatile String selectedZone = null;
 
     /** How long boundaries stay visible before auto-hiding (ticks). 30 seconds = 600 ticks. */
     private static final long DEFAULT_TIMEOUT_TICKS = 600L;
@@ -131,6 +140,62 @@ public class ZoneBoundaryRenderer {
     }
 
     /**
+     * Mark a zone as persistent (won't auto-hide) or remove persistence.
+     */
+    public void setPersistent(String zoneName, boolean persistent) {
+        String key = zoneName.toLowerCase();
+        if (persistent) {
+            persistentZones.add(key);
+            // Ensure it's shown with infinite timeout
+            activeZones.put(key, Long.MAX_VALUE);
+        } else {
+            persistentZones.remove(key);
+        }
+    }
+
+    /**
+     * Set a zone as "selected" — rendered with a distinct highlight color.
+     */
+    public void setSelected(String zoneName) {
+        selectedZone = zoneName != null ? zoneName.toLowerCase() : null;
+    }
+
+    /**
+     * Clear the current selection highlight.
+     */
+    public void clearSelection() {
+        selectedZone = null;
+    }
+
+    /**
+     * Show all zones belonging to a stage with persistent boundaries.
+     */
+    public void showStage(String stageName) {
+        Stage stage = plugin.getStageManager().getStage(stageName);
+        if (stage == null) return;
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            String zoneName = entry.getValue();
+            show(zoneName, Long.MAX_VALUE);
+            setPersistent(zoneName, true);
+        }
+    }
+
+    /**
+     * Hide all zones belonging to a stage.
+     */
+    public void hideStage(String stageName) {
+        Stage stage = plugin.getStageManager().getStage(stageName);
+        if (stage == null) return;
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            String zoneName = entry.getValue();
+            hide(zoneName);
+            setPersistent(zoneName, false);
+        }
+    }
+
+    /**
      * Check if boundaries are currently visible for a zone.
      */
     public boolean isShowing(String zoneName) {
@@ -155,7 +220,7 @@ public class ZoneBoundaryRenderer {
         var iterator = activeZones.entrySet().iterator();
         while (iterator.hasNext()) {
             var entry = iterator.next();
-            if (currentTick >= entry.getValue()) {
+            if (currentTick >= entry.getValue() && !persistentZones.contains(entry.getKey())) {
                 iterator.remove();
                 continue;
             }
@@ -190,8 +255,14 @@ public class ZoneBoundaryRenderer {
             worldCorners[i] = zone.localToWorld(CORNERS[i][0], CORNERS[i][1], CORNERS[i][2]);
         }
 
-        Particle.DustOptions edgeDust = new Particle.DustOptions(Color.fromRGB(0, 200, 255), 0.8f);
-        Particle.DustOptions cornerDust = new Particle.DustOptions(Color.fromRGB(0, 255, 128), 1.3f);
+        // Use distinct colors for selected zones
+        boolean isSelected = zone.getName().equalsIgnoreCase(selectedZone);
+        Particle.DustOptions edgeDust = isSelected
+            ? new Particle.DustOptions(Color.fromRGB(255, 215, 0), 1.0f)   // Gold for selected
+            : new Particle.DustOptions(Color.fromRGB(0, 200, 255), 0.8f);
+        Particle.DustOptions cornerDust = isSelected
+            ? new Particle.DustOptions(Color.fromRGB(255, 255, 100), 1.5f)  // Bright gold corners
+            : new Particle.DustOptions(Color.fromRGB(0, 255, 128), 1.3f);
 
         // Draw 12 edges
         for (int[] edge : EDGES) {
