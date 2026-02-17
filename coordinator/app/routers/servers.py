@@ -1,4 +1,7 @@
-"""VJ server registration and heartbeat endpoints."""
+"""VJ server registration and heartbeat endpoints.
+
+Servers self-register with POST /servers/register (no user auth required).
+"""
 
 from __future__ import annotations
 
