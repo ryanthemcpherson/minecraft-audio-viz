@@ -89,6 +89,7 @@ class CoordinatorClient:
         data = json.dumps(body).encode("utf-8") if body else None
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", "mcav-vj-server/1.0")
         if auth:
             req.add_header("Authorization", f"Bearer {self._api_key}")
         try:
