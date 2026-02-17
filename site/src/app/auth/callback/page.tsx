@@ -15,7 +15,12 @@ const COORDINATOR_URL = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
 /** Try to detect a desktop OAuth flow by decoding the state JWT payload. */
 function isDesktopOAuthState(state: string): boolean {
   try {
-    const payload = JSON.parse(atob(state.split(".")[1]));
+    // JWT uses base64url encoding (- instead of +, _ instead of /).
+    // Convert to standard base64 so atob() can decode it.
+    let b64 = state.split(".")[1];
+    b64 = b64.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const payload = JSON.parse(atob(b64));
     return !!payload.desktop;
   } catch {
     return false;
