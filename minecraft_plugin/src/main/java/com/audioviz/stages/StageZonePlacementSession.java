@@ -85,9 +85,13 @@ public class StageZonePlacementSession implements Listener {
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
         {0, 4}, {1, 5}, {2, 6}, {3, 7}
     };
-    // Front face edges (Z=0 face): 0-1 (bottom), 4-5 (top), 0-4 (left), 1-5 (right)
-    private static final int[][] FRONT_EDGES = {
-        {0, 1}, {4, 5}, {0, 4}, {1, 5}
+    // Front face edges per rotation (which face of the unrotated AABB is "front")
+    // 0°: Z=0 (south), 90°: X=1 (east), 180°: Z=1 (north), 270°: X=0 (west)
+    private static final int[][][] FRONT_EDGES_BY_ROTATION = {
+        {{0, 1}, {4, 5}, {0, 4}, {1, 5}},  // 0°:   Z=0 face (corners 0,1,4,5)
+        {{1, 2}, {5, 6}, {1, 5}, {2, 6}},  // 90°:  X=1 face (corners 1,2,5,6)
+        {{2, 3}, {6, 7}, {2, 6}, {3, 7}},  // 180°: Z=1 face (corners 2,3,6,7)
+        {{0, 3}, {4, 7}, {0, 4}, {3, 7}},  // 270°: X=0 face (corners 0,3,4,7)
     };
 
     public StageZonePlacementSession(AudioVizPlugin plugin, Player player, Stage stage) {
@@ -124,7 +128,7 @@ public class StageZonePlacementSession implements Listener {
         player.sendMessage(Component.text("  Left-click: ", NamedTextColor.WHITE)
             .append(Component.text("Set corner (1st, then 2nd)", NamedTextColor.GREEN)));
         player.sendMessage(Component.text("  Sneak+Left-click: ", NamedTextColor.WHITE)
-            .append(Component.text("Rotate zone 90\u00B0", NamedTextColor.AQUA)));
+            .append(Component.text("Rotate front face", NamedTextColor.AQUA)));
         player.sendMessage(Component.text("  Right-click: ", NamedTextColor.WHITE)
             .append(Component.text("Confirm zone & advance", NamedTextColor.GREEN)));
         player.sendMessage(Component.text("  Sneak+Right-click: ", NamedTextColor.WHITE)
@@ -166,7 +170,13 @@ public class StageZonePlacementSession implements Listener {
     }
 
     /**
-     * Apply the two corners to the zone (origin = min corner, size = delta).
+     * Apply the two corners to the zone.
+     * Rotation only changes which face is "front" — the AABB stays fixed in world space.
+     * To achieve this, origin and size are adjusted so localToWorld() maps correctly:
+     *   0°:   origin=minCorner,           size=(aabbX, Y, aabbZ)  → front is -Z (south)
+     *   90°:  origin=(maxX, Y, minZ),     size=(aabbZ, Y, aabbX)  → front is +X (east)
+     *   180°: origin=(maxX, Y, maxZ),     size=(aabbX, Y, aabbZ)  → front is +Z (north)
+     *   270°: origin=(minX, Y, maxZ),     size=(aabbZ, Y, aabbX)  → front is -X (west)
      */
     private void applyCorners(StageZoneRole role) {
         if (corner1 == null || corner2 == null) return;
@@ -177,7 +187,7 @@ public class StageZonePlacementSession implements Listener {
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
 
-        // Compute origin (min corner) and size (abs delta)
+        // Compute AABB from two corners
         double minX = Math.min(corner1.getX(), corner2.getX());
         double minY = Math.min(corner1.getY(), corner2.getY());
         double minZ = Math.min(corner1.getZ(), corner2.getZ());
@@ -185,25 +195,44 @@ public class StageZonePlacementSession implements Listener {
         double maxY = Math.max(corner1.getY(), corner2.getY());
         double maxZ = Math.max(corner1.getZ(), corner2.getZ());
 
-        // Ensure minimum 1-block size on each axis
-        double sizeX = Math.max(1, maxX - minX);
-        double sizeY = Math.max(1, maxY - minY);
-        double sizeZ = Math.max(1, maxZ - minZ);
+        double aabbX = Math.max(1, maxX - minX);
+        double aabbY = Math.max(1, maxY - minY);
+        double aabbZ = Math.max(1, maxZ - minZ);
 
-        // When rotated, pivot around the center of the AABB so the box stays in place
-        double centerX = minX + sizeX / 2.0;
-        double centerZ = minZ + sizeZ / 2.0;
-        double radians = Math.toRadians(currentRotation);
-        double cosR = Math.cos(radians);
-        double sinR = Math.sin(radians);
-        double halfX = sizeX / 2.0;
-        double halfZ = sizeZ / 2.0;
-        double rotOriginX = centerX + (-halfX * cosR - (-halfZ) * sinR);
-        double rotOriginZ = centerZ + (-halfX * sinR + (-halfZ) * cosR);
+        // Adjust origin and swap dimensions so the world-space AABB stays fixed
+        int rot = ((int) currentRotation) % 360;
+        double originX, originZ, storedSizeX, storedSizeZ;
 
-        Location origin = new Location(corner1.getWorld(), rotOriginX, minY, rotOriginZ);
+        switch (rot) {
+            case 90 -> {
+                originX = minX + aabbX;
+                originZ = minZ;
+                storedSizeX = aabbZ;
+                storedSizeZ = aabbX;
+            }
+            case 180 -> {
+                originX = minX + aabbX;
+                originZ = minZ + aabbZ;
+                storedSizeX = aabbX;
+                storedSizeZ = aabbZ;
+            }
+            case 270 -> {
+                originX = minX;
+                originZ = minZ + aabbZ;
+                storedSizeX = aabbZ;
+                storedSizeZ = aabbX;
+            }
+            default -> { // 0°
+                originX = minX;
+                originZ = minZ;
+                storedSizeX = aabbX;
+                storedSizeZ = aabbZ;
+            }
+        }
+
+        Location origin = new Location(corner1.getWorld(), originX, minY, originZ);
         zone.setOrigin(origin);
-        zone.setSize(sizeX, sizeY, sizeZ);
+        zone.setSize(storedSizeX, aabbY, storedSizeZ);
         zone.setRotation(currentRotation);
         plugin.getZoneManager().saveZones();
     }
@@ -305,22 +334,24 @@ public class StageZonePlacementSession implements Listener {
             }
             case CORNER2 -> {
                 // Corner 1 is set, stretch preview to player position
+                // Box is always axis-aligned; rotation only changes front face
                 Location previewOrigin = computePreviewOrigin(corner1, playerBlock);
                 Vector previewSize = computePreviewSize(corner1, playerBlock);
 
-                renderBox(previewOrigin, previewSize, currentRotation, COLOR_PREVIEW, 1.2f, 0.5);
-                renderFloor(previewOrigin, previewSize, currentRotation, COLOR_PREVIEW);
+                renderBox(previewOrigin, previewSize, 0f, COLOR_PREVIEW, 1.2f, 0.5);
+                renderFloor(previewOrigin, previewSize, 0f, COLOR_PREVIEW);
                 renderFrontFace(previewOrigin, previewSize, currentRotation, 1.5f);
                 renderFrontArrow(previewOrigin, previewSize, currentRotation);
                 renderCornerMarker(corner1, COLOR_CORNER1);
             }
             case CONFIRMING -> {
                 // Both corners set, show finalized box
+                // Box is always axis-aligned; rotation only changes front face
                 Location previewOrigin = computePreviewOrigin(corner1, corner2);
                 Vector previewSize = computePreviewSize(corner1, corner2);
 
-                renderBox(previewOrigin, previewSize, currentRotation, COLOR_CONFIRMED, 1.2f, 0.5);
-                renderFloor(previewOrigin, previewSize, currentRotation, COLOR_CONFIRMED);
+                renderBox(previewOrigin, previewSize, 0f, COLOR_CONFIRMED, 1.2f, 0.5);
+                renderFloor(previewOrigin, previewSize, 0f, COLOR_CONFIRMED);
                 renderFrontFace(previewOrigin, previewSize, currentRotation, 1.5f);
                 renderFrontArrow(previewOrigin, previewSize, currentRotation);
                 renderCornerMarker(corner1, COLOR_CORNER1);
@@ -330,28 +361,13 @@ public class StageZonePlacementSession implements Listener {
     }
 
     /**
-     * Compute the preview origin (center-based rotation-aware) for rendering.
+     * Compute the preview origin (AABB min corner, no rotation applied).
      */
     private Location computePreviewOrigin(Location c1, Location c2) {
         double minX = Math.min(c1.getX(), c2.getX());
         double minY = Math.min(c1.getY(), c2.getY());
         double minZ = Math.min(c1.getZ(), c2.getZ());
-        double sizeX = Math.max(1, Math.abs(c2.getX() - c1.getX()));
-        double sizeZ = Math.max(1, Math.abs(c2.getZ() - c1.getZ()));
-
-        double centerX = minX + sizeX / 2.0;
-        double centerZ = minZ + sizeZ / 2.0;
-
-        double radians = Math.toRadians(currentRotation);
-        double cosR = Math.cos(radians);
-        double sinR = Math.sin(radians);
-        double halfX = sizeX / 2.0;
-        double halfZ = sizeZ / 2.0;
-
-        double rotOriginX = centerX + (-halfX * cosR - (-halfZ) * sinR);
-        double rotOriginZ = centerZ + (-halfX * sinR + (-halfZ) * cosR);
-
-        return new Location(c1.getWorld(), rotOriginX, minY, rotOriginZ);
+        return new Location(c1.getWorld(), minX, minY, minZ);
     }
 
     /**
@@ -366,36 +382,42 @@ public class StageZonePlacementSession implements Listener {
     }
 
     /**
-     * Render the front face (Z=0 face) in cyan to indicate orientation.
+     * Render the front face in cyan to indicate orientation.
+     * The box is axis-aligned; rotation selects which face is "front".
      */
     private void renderFrontFace(Location origin, Vector size, float rotation, float particleSize) {
         Particle.DustOptions frontDust = new Particle.DustOptions(COLOR_FRONT, particleSize);
-        Location[] worldCorners = computeWorldCorners(origin, size, rotation);
+        Location[] worldCorners = computeWorldCorners(origin, size, 0f);
 
-        for (int[] edge : FRONT_EDGES) {
+        int faceIndex = (((int) rotation) % 360) / 90;
+        int[][] frontEdges = FRONT_EDGES_BY_ROTATION[faceIndex];
+
+        for (int[] edge : frontEdges) {
             drawLine(worldCorners[edge[0]], worldCorners[edge[1]], frontDust, 0.4);
         }
     }
 
     /**
      * Render an arrow pointing outward from the center of the front face.
+     * The box is axis-aligned; rotation selects which face and outward direction.
      */
     private void renderFrontArrow(Location origin, Vector size, float rotation) {
         Particle.DustOptions arrowDust = new Particle.DustOptions(COLOR_FRONT_ARROW, 1.5f);
 
-        // Center of front face in local coords: (0.5, 0.5, 0)
-        Location frontCenter = localToWorld(origin, size, rotation, 0.5, 0.5, 0);
+        // Front face center and outward direction based on rotation
+        double cx, cz, dirX, dirZ;
+        int rot = ((int) rotation) % 360;
 
-        // Arrow length scales with zone size
+        switch (rot) {
+            case 90  -> { cx = 1;   cz = 0.5; dirX = 1;  dirZ = 0;  } // +X face (east)
+            case 180 -> { cx = 0.5; cz = 1;   dirX = 0;  dirZ = 1;  } // +Z face (north)
+            case 270 -> { cx = 0;   cz = 0.5; dirX = -1; dirZ = 0;  } // -X face (west)
+            default  -> { cx = 0.5; cz = 0;   dirX = 0;  dirZ = -1; } // -Z face (south)
+        }
+
+        Location frontCenter = localToWorld(origin, size, 0f, cx, 0.5, cz);
+
         double arrowLength = Math.min(3.0, Math.max(size.getX(), size.getZ()) * 0.3);
-        double radians = Math.toRadians(rotation);
-        double cosR = Math.cos(radians);
-        double sinR = Math.sin(radians);
-
-        // Local -Z direction rotated
-        double dirX = sinR;
-        double dirZ = -cosR;
-
         Location arrowEnd = frontCenter.clone().add(dirX * arrowLength, 0, dirZ * arrowLength);
         drawLine(frontCenter, arrowEnd, arrowDust, 0.3);
 
@@ -523,12 +545,12 @@ public class StageZonePlacementSession implements Listener {
             }
             case CORNER2 -> {
                 status = "Set Corner 2 [" + rotStr + "]";
-                hint = "Left-click | Sneak+L=Rotate";
+                hint = "Left-click | Sneak+L=Face";
                 color = NamedTextColor.YELLOW;
             }
             case CONFIRMING -> {
                 status = "Ready [" + rotStr + "]";
-                hint = "R-click=Confirm | Sneak+L=Rotate | L-click=Redo";
+                hint = "R-click=Confirm | Sneak+L=Face | L-click=Redo";
                 color = NamedTextColor.GREEN;
             }
             default -> {
@@ -605,10 +627,16 @@ public class StageZonePlacementSession implements Listener {
 
         event.setCancelled(true);
 
-        // Sneak+Left-click: Rotate 90 degrees (available once corner 1 is set)
+        // Sneak+Left-click: Cycle front face direction (available once corner 1 is set)
         if (isLeftClick && player.isSneaking() && phase != PlacementPhase.CORNER1) {
             currentRotation = (currentRotation + 90) % 360;
-            player.sendMessage(Component.text("Rotated to " + (int) currentRotation + "\u00B0",
+            String facing = switch (((int) currentRotation) % 360) {
+                case 90  -> "East (+X)";
+                case 180 -> "North (+Z)";
+                case 270 -> "West (-X)";
+                default  -> "South (-Z)";
+            };
+            player.sendMessage(Component.text("Front face: " + facing,
                 NamedTextColor.AQUA));
             player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, 1.0f + currentRotation / 360f);
             return;
