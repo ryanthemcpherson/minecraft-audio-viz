@@ -51,6 +51,9 @@ class AdminApp {
             // Stage data
             stages: [],
             selectedStage: null,
+            // Per-zone pattern state
+            selectedZones: new Set(),    // Currently selected zone names
+            zonePatterns: {},            // zone_name -> pattern_name from server
             // Zone settings
             zone: {
                 name: 'main',
@@ -98,6 +101,9 @@ class AdminApp {
             scenes: [],
             currentScene: null
         };
+
+        // Zone pattern change tracking (debounce chip re-rendering)
+        this._lastZonePatternsJson = '';
 
         // Tap tempo tracking
         this.tapTimes = [];
@@ -280,6 +286,7 @@ class AdminApp {
         this.elements.stageZoneList = document.getElementById('stage-zone-list');
         this.elements.btnRefreshZones = document.getElementById('btn-refresh-zones');
         this.elements.stageSelect = document.getElementById('stage-select');
+        this.elements.zoneChipBar = document.getElementById('zone-chip-bar');
 
         // Toast container
         this.elements.toastContainer = document.getElementById('toast-container');
@@ -795,10 +802,11 @@ class AdminApp {
                 this.state.selectedStage = this.elements.stageSelect.value || null;
                 this._updateZoneSelector();
                 this._renderStageZoneList();
+                this._renderZoneChips();
             });
         }
 
-        // Zone selector
+        // Zone selector (hidden, kept for Zone Settings tab compat)
         if (this.elements.zoneSelect) {
             this.elements.zoneSelect.addEventListener('change', () => {
                 this.state.zone.name = this.elements.zoneSelect.value;
@@ -806,6 +814,14 @@ class AdminApp {
                 this._requestZoneStatus();
             });
         }
+
+        // Zone quick-select buttons
+        document.querySelectorAll('.zone-quick-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.select;
+                this._quickSelectZones(action);
+            });
+        });
 
         // Collapsible mixer sections
         document.querySelectorAll('.mixer-section.collapsible > .section-title').forEach(title => {
@@ -982,6 +998,12 @@ class AdminApp {
                 }
                 if (data.zone !== undefined) {
                     this.state.currentZone = data.zone;
+                }
+                // Handle per-zone pattern state
+                if (data.zone_patterns) {
+                    this.state.zonePatterns = data.zone_patterns;
+                    this._renderZoneChips();
+                    this._updatePatternHighlightForZones();
                 }
                 // Handle stage data from vj_state
                 if (data.stages) {
@@ -1237,6 +1259,18 @@ class AdminApp {
 
         // Render the stage/zone hierarchy in the Zone Settings tab
         this._renderStageZoneList();
+
+        // Auto-select all zones if none currently selected
+        if (this.state.selectedZones.size === 0 && zones.length > 0) {
+            const selectedStage = this.state.selectedStage;
+            const filtered = selectedStage
+                ? zones.filter(z => z.stage === selectedStage)
+                : zones;
+            filtered.forEach(z => this.state.selectedZones.add(z.name));
+        }
+
+        // Render zone chips
+        this._renderZoneChips();
     }
 
     _handleStagesList(data) {
@@ -1265,9 +1299,10 @@ class AdminApp {
             }
         }
 
-        // Re-render zone selector and hierarchy
+        // Re-render zone selector, hierarchy, and chips
         this._updateZoneSelector();
         this._renderStageZoneList();
+        this._renderZoneChips();
     }
 
     _updateZoneSelector() {
@@ -1642,6 +1677,17 @@ class AdminApp {
         this.state.frame = data.frame || 0;
         this.state.entities = data.entities || [];
 
+        // Update zone_patterns from state broadcast (debounced)
+        if (data.zone_patterns) {
+            const newJson = JSON.stringify(data.zone_patterns);
+            if (newJson !== this._lastZonePatternsJson) {
+                this._lastZonePatternsJson = newJson;
+                this.state.zonePatterns = data.zone_patterns;
+                this._renderZoneChips();
+                this._updatePatternHighlightForZones();
+            }
+        }
+
         // Store latency, BPM, FPS, and sync metrics for throttled update
         if (data.ping_ms !== undefined) {
             this.state.latencyMs = data.ping_ms;
@@ -1767,12 +1813,23 @@ class AdminApp {
     _handlePatternChanged(data) {
         this.state.currentPattern = data.pattern;
         this._updateCurrentPattern(data.pattern);
-        this._highlightActivePattern(data.pattern);
+
+        // Update per-zone pattern map
+        if (data.zone_patterns) {
+            this.state.zonePatterns = data.zone_patterns;
+            this._renderZoneChips();
+        }
+
+        // Highlight based on selected zones
+        if (this.state.selectedZones.size > 0) {
+            this._updatePatternHighlightForZones();
+        } else {
+            this._highlightActivePattern(data.pattern);
+        }
 
         // Show transition status if transitioning
         if (data.transitioning && this.elements.transitionStatus) {
             this.elements.transitionStatus.classList.remove('hidden');
-            // Auto-hide after transition completes
             if (data.transition_duration) {
                 setTimeout(() => {
                     if (this.elements.transitionStatus) {
@@ -2131,7 +2188,137 @@ class AdminApp {
     }
 
     _setPattern(patternId) {
-        this.ws.send({ type: 'set_pattern', pattern: patternId });
+        const msg = { type: 'set_pattern', pattern: patternId };
+        const selected = Array.from(this.state.selectedZones);
+        if (selected.length > 0) {
+            msg.zones = selected;
+        }
+        this.ws.send(msg);
+    }
+
+    // --- Zone Chip Bar ---
+
+    _renderZoneChips() {
+        const bar = this.elements.zoneChipBar;
+        if (!bar) return;
+
+        while (bar.firstChild) {
+            bar.removeChild(bar.firstChild);
+        }
+
+        const zones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+        const filtered = selectedStage
+            ? zones.filter(z => z.stage === selectedStage)
+            : zones;
+
+        if (filtered.length === 0) {
+            const empty = document.createElement('span');
+            empty.className = 'zone-chip-empty';
+            empty.textContent = 'No zones';
+            empty.style.color = 'var(--text-muted)';
+            empty.style.fontSize = 'var(--font-size-xs)';
+            bar.appendChild(empty);
+            return;
+        }
+
+        filtered.forEach(zone => {
+            const chip = document.createElement('button');
+            chip.className = 'zone-chip';
+            chip.dataset.zone = zone.name;
+
+            if (this.state.selectedZones.has(zone.name)) {
+                chip.classList.add('selected');
+            }
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'zone-chip-name';
+            // Show role label if available, otherwise zone name
+            nameSpan.textContent = zone.stage_role
+                ? zone.stage_role.replace(/_/g, ' ')
+                : zone.name;
+            chip.appendChild(nameSpan);
+
+            const patternSpan = document.createElement('span');
+            patternSpan.className = 'zone-chip-pattern';
+            patternSpan.textContent = this.state.zonePatterns[zone.name] || '--';
+            chip.appendChild(patternSpan);
+
+            chip.addEventListener('click', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    // Multi-select toggle
+                    if (this.state.selectedZones.has(zone.name)) {
+                        this.state.selectedZones.delete(zone.name);
+                    } else {
+                        this.state.selectedZones.add(zone.name);
+                    }
+                } else {
+                    // Single-select: clear others, select this one
+                    this.state.selectedZones.clear();
+                    this.state.selectedZones.add(zone.name);
+                    // Also set as active zone for Zone Settings tab
+                    this.state.zone.name = zone.name;
+                    if (this.elements.zoneSelect) {
+                        this.elements.zoneSelect.value = zone.name;
+                    }
+                    this._setZoneControlsLoading(true);
+                    this._requestZoneStatus();
+                }
+                this._renderZoneChips();
+                this._updatePatternHighlightForZones();
+            });
+
+            bar.appendChild(chip);
+        });
+    }
+
+    _quickSelectZones(action) {
+        const zones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+        const filtered = selectedStage
+            ? zones.filter(z => z.stage === selectedStage)
+            : zones;
+
+        this.state.selectedZones.clear();
+
+        if (action === 'all') {
+            filtered.forEach(z => this.state.selectedZones.add(z.name));
+        }
+        // 'none' just clears
+
+        this._renderZoneChips();
+        this._updatePatternHighlightForZones();
+    }
+
+    _updatePatternHighlightForZones() {
+        const selected = Array.from(this.state.selectedZones);
+        if (selected.length === 0) {
+            // No zones selected: highlight global current pattern
+            this._highlightActivePattern(this.state.currentPattern);
+            return;
+        }
+
+        // Get unique patterns used by selected zones
+        const patternsInUse = new Set();
+        selected.forEach(zn => {
+            const p = this.state.zonePatterns[zn];
+            if (p) patternsInUse.add(p);
+        });
+
+        const allSame = patternsInUse.size === 1;
+
+        document.querySelectorAll('.pattern-btn').forEach(btn => {
+            const patternId = btn.dataset.pattern;
+            btn.classList.remove('active', 'partial');
+
+            if (patternsInUse.has(patternId)) {
+                if (allSame) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.add('partial');
+                }
+            }
+        });
     }
 
     _setPreset(preset) {

@@ -350,6 +350,25 @@ class DJConnection:
 
 
 @dataclass
+class ZonePatternState:
+    """Per-zone pattern state for independent zone patterns."""
+
+    pattern_name: str = "spectrum"
+    pattern: Any = None  # LuaPattern instance
+    config: Optional["PatternConfig"] = None
+    entity_count: int = 16
+    # Per-zone crossfade transition
+    transitioning: bool = False
+    transition_start: float = 0.0
+    transition_duration: float = 1.0
+    old_pattern: Any = None
+    old_pattern_name: Optional[str] = None
+    transition_pending_resize: Optional[int] = None
+    minecraft_pool_size: int = 0
+    last_entities: List[dict] = field(default_factory=list)
+
+
+@dataclass
 class DJAuthConfig:
     """DJ authentication configuration."""
 
@@ -599,16 +618,11 @@ class VJServer:
 
         # Pattern system
         self._pattern_config = PatternConfig(entity_count=entity_count)
-        self._current_pattern = get_pattern("spectrum", self._pattern_config)
-        self._pattern_name = "spectrum"
+        self._zone_patterns: Dict[str, ZonePatternState] = {}
+        self._default_transition_duration = 1.0  # Default crossfade duration for new zones
 
-        # Pattern crossfade transition system
-        self._transition_duration = 1.0  # Default 1 second crossfade
-        self._transitioning = False
-        self._transition_start = 0.0
-        self._old_pattern: Optional[Any] = None
-        self._old_pattern_name: Optional[str] = None
-        self._transition_pending_resize: Optional[int] = None  # Deferred entity count for shrink
+        # Initialize default zone pattern state
+        self._get_zone_state(zone)
 
         # Spectrograph
         self.spectrograph = TerminalSpectrograph() if show_spectrograph else None
@@ -621,7 +635,6 @@ class VJServer:
         self._blackout = False
         self._freeze = False
         self._active_effects = {}  # Active effects with end times
-        self._last_entities = []  # For freeze effect
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
         # Visual-state shaping for snappier motion with less low-level wobble.
         self._visual_band_state = [0.0] * 5
@@ -702,6 +715,109 @@ class VJServer:
         self._pattern_hot_reload_enabled = True  # Can be disabled via CLI arg
         self._pattern_hot_reload_task: Optional[asyncio.Task] = None
         self._pattern_file_mtimes: Dict[str, float] = {}  # filename -> mtime
+
+    # --- Per-zone pattern helpers & backward-compat properties ---
+
+    def _get_zone_state(self, zone_name: str) -> ZonePatternState:
+        """Get or create a ZonePatternState for the given zone."""
+        if zone_name not in self._zone_patterns:
+            config = PatternConfig(entity_count=self._pattern_config.entity_count)
+            pattern = get_pattern("spectrum", config)
+            self._zone_patterns[zone_name] = ZonePatternState(
+                pattern_name="spectrum",
+                pattern=pattern,
+                config=config,
+                entity_count=self._pattern_config.entity_count,
+                transition_duration=self._default_transition_duration,
+            )
+        return self._zone_patterns[zone_name]
+
+    @property
+    def _current_pattern(self):
+        """Backward-compat: delegates to active zone's pattern."""
+        return self._get_zone_state(self.zone).pattern
+
+    @_current_pattern.setter
+    def _current_pattern(self, value):
+        self._get_zone_state(self.zone).pattern = value
+
+    @property
+    def _pattern_name(self):
+        """Backward-compat: delegates to active zone's pattern name."""
+        return self._get_zone_state(self.zone).pattern_name
+
+    @_pattern_name.setter
+    def _pattern_name(self, value):
+        self._get_zone_state(self.zone).pattern_name = value
+
+    @property
+    def _transitioning(self):
+        """Backward-compat: delegates to active zone's transition state."""
+        return self._get_zone_state(self.zone).transitioning
+
+    @_transitioning.setter
+    def _transitioning(self, value):
+        self._get_zone_state(self.zone).transitioning = value
+
+    @property
+    def _transition_start(self):
+        return self._get_zone_state(self.zone).transition_start
+
+    @_transition_start.setter
+    def _transition_start(self, value):
+        self._get_zone_state(self.zone).transition_start = value
+
+    @property
+    def _transition_duration(self):
+        return self._get_zone_state(self.zone).transition_duration
+
+    @_transition_duration.setter
+    def _transition_duration(self, value):
+        self._get_zone_state(self.zone).transition_duration = value
+
+    @property
+    def _old_pattern(self):
+        return self._get_zone_state(self.zone).old_pattern
+
+    @_old_pattern.setter
+    def _old_pattern(self, value):
+        self._get_zone_state(self.zone).old_pattern = value
+
+    @property
+    def _old_pattern_name(self):
+        return self._get_zone_state(self.zone).old_pattern_name
+
+    @_old_pattern_name.setter
+    def _old_pattern_name(self, value):
+        self._get_zone_state(self.zone).old_pattern_name = value
+
+    @property
+    def _transition_pending_resize(self):
+        return self._get_zone_state(self.zone).transition_pending_resize
+
+    @_transition_pending_resize.setter
+    def _transition_pending_resize(self, value):
+        self._get_zone_state(self.zone).transition_pending_resize = value
+
+    @property
+    def _minecraft_pool_size(self):
+        return self._get_zone_state(self.zone).minecraft_pool_size
+
+    @_minecraft_pool_size.setter
+    def _minecraft_pool_size(self, value):
+        self._get_zone_state(self.zone).minecraft_pool_size = value
+
+    @property
+    def _last_entities(self):
+        return self._get_zone_state(self.zone).last_entities
+
+    @_last_entities.setter
+    def _last_entities(self, value):
+        self._get_zone_state(self.zone).last_entities = value
+
+    def _get_zone_patterns_dict(self) -> Dict[str, str]:
+        """Get a dict mapping zone_name -> pattern_name for all zones."""
+        return {zn: zs.pattern_name for zn, zs in self._zone_patterns.items()}
 
     @property
     def active_dj(self) -> Optional[DJConnection]:
@@ -2025,7 +2141,8 @@ class VJServer:
             "release": self._pattern_config.release,
             "beat_threshold": self._pattern_config.beat_threshold,
             "entity_count": self.entity_count,
-            "block_type": "SEA_LANTERN",  # Default, would need to get from zone config
+            "block_type": "SEA_LANTERN",
+            "zone_patterns": self._get_zone_patterns_dict(),
         }
 
     def _save_scene_to_file(self, name: str, scene_data: dict):
@@ -2086,7 +2203,7 @@ class VJServer:
             self._old_pattern = self._current_pattern
             self._old_pattern_name = self._pattern_name
             self._transitioning = True
-            self._transition_start = time.time()
+            self._transition_start = time.monotonic()
 
             # Load new pattern
             self._pattern_name = pattern_name
@@ -2120,8 +2237,17 @@ class VJServer:
                 # Reinit pattern with new count
                 self._current_pattern = get_pattern(self._pattern_name, self._pattern_config)
 
+        # Restore per-zone patterns if present
+        saved_zone_patterns = scene_data.get("zone_patterns")
+        if saved_zone_patterns and isinstance(saved_zone_patterns, dict):
+            for zn, pname in saved_zone_patterns.items():
+                if _lua_pattern_exists(pname):
+                    zs = self._get_zone_state(zn)
+                    await self._set_pattern_for_zone(zs, zn, pname)
+
         # Broadcast state to all connected clients
         await self._broadcast_config_to_browsers()
+        await self._broadcast_pattern_change()
 
         # Sync audio settings to DJs
         preset_name = scene_data.get("preset", "auto")
@@ -2179,6 +2305,7 @@ class VJServer:
                     "current_pattern": self._pattern_name,
                     "entity_count": self.entity_count,
                     "zone": self.zone,
+                    "zone_patterns": self._get_zone_patterns_dict(),
                     "dj_roster": self._get_dj_roster(),
                     "active_dj": self._active_dj_id,
                     "health_stats": self.get_health_stats(),
@@ -2229,6 +2356,7 @@ class VJServer:
                                     "current_pattern": self._pattern_name,
                                     "entity_count": self.entity_count,
                                     "zone": self.zone,
+                                    "zone_patterns": self._get_zone_patterns_dict(),
                                     "dj_roster": self._get_dj_roster(),
                                     "active_dj": self._active_dj_id,
                                     "health_stats": self.get_health_stats(),
@@ -2250,85 +2378,21 @@ class VJServer:
                     elif msg_type == "set_pattern":
                         pattern_name = data.get("pattern", "spectrum")
                         if _lua_pattern_exists(pattern_name):
-                            old_count = self.entity_count
-                            recommended = get_recommended_entity_count(pattern_name, old_count)
-                            if recommended != self.entity_count:
-                                self.entity_count = recommended
-                                self._pattern_config.entity_count = recommended
-
-                            # Start crossfade transition
-                            if self._transition_duration > 0 and pattern_name != self._pattern_name:
-                                self._old_pattern = self._current_pattern
-                                self._old_pattern_name = self._pattern_name
-                                # Freeze old pattern's entity count before shared config was mutated
-                                if old_count != self.entity_count:
-                                    self._old_pattern.config = replace(
-                                        self._old_pattern.config, entity_count=old_count
-                                    )
-                                self._current_pattern = get_pattern(
-                                    pattern_name, self._pattern_config
-                                )
-                                # Seed new pattern with old pattern's entity positions
-                                # so entities transition from current positions, not origin.
-                                if (
-                                    hasattr(self._old_pattern, "_entity_state")
-                                    and self._old_pattern._entity_state
-                                ):
-                                    self._current_pattern.seed_entity_state(
-                                        self._old_pattern._entity_state
-                                    )
-                                self._pattern_name = pattern_name
-                                self._pattern_changes += 1
-                                self._transitioning = True
-                                self._transition_start = time.monotonic()
-                                self._transition_pending_resize = None
-
-                                if (
-                                    old_count != self.entity_count
-                                    and self.viz_client
-                                    and self.viz_client.connected
-                                ):
-                                    try:
-                                        if self.entity_count > old_count:
-                                            # Growing: spawn extra entities now (invisible at scale 0)
-                                            await self.viz_client.init_pool(
-                                                self.zone, self.entity_count, "SEA_LANTERN"
-                                            )
-                                        else:
-                                            # Shrinking: defer removal until transition completes
-                                            self._transition_pending_resize = self.entity_count
-                                    except Exception as e:
-                                        logger.warning(
-                                            f"Failed to resize pool for pattern '{pattern_name}': {e}"
-                                        )
-
-                                logger.info(
-                                    f"Starting {self._transition_duration}s crossfade: {self._old_pattern_name} -> {pattern_name}"
-                                )
+                            target_zones = data.get("zones", None)
+                            if target_zones is None:
+                                # No zones specified: apply to all known zones (backward compat)
+                                zones_to_update = list(self._zone_patterns.keys()) or [self.zone]
                             else:
-                                # Instant switch (transition_duration = 0 or same pattern)
-                                if pattern_name != self._pattern_name:
-                                    self._pattern_changes += 1
-                                self._pattern_name = pattern_name
-                                self._current_pattern = get_pattern(
-                                    pattern_name, self._pattern_config
-                                )
-                                self._transitioning = False
-
-                                if (
-                                    old_count != self.entity_count
-                                    and self.viz_client
-                                    and self.viz_client.connected
-                                ):
-                                    try:
-                                        await self.viz_client.cleanup_zone(self.zone)
-                                        await self.viz_client.init_pool(
-                                            self.zone, self.entity_count, "SEA_LANTERN"
-                                        )
-                                    except Exception as e:
-                                        logger.warning(
-                                            f"Failed to apply recommended entity count for pattern '{pattern_name}': {e}"
-                                        )
+                                # Only allow zones that are already registered
+                                zones_to_update = [
+                                    zn for zn in target_zones if zn in self._zone_patterns
+                                ]
+                                if not zones_to_update:
+                                    zones_to_update = [self.zone]
+                            old_count = self.entity_count
+                            for zn in zones_to_update:
+                                zs = self._get_zone_state(zn)
+                                await self._set_pattern_for_zone(zs, zn, pattern_name)
                             await self._broadcast_pattern_change()
                             if old_count != self.entity_count:
                                 await self._broadcast_config_sync_to_djs()
@@ -2589,18 +2653,19 @@ class VJServer:
                             )
 
                     elif msg_type == "set_transition_duration":
-                        # Set pattern crossfade transition duration
+                        # Set pattern crossfade transition duration for all zones
                         duration = data.get("duration", 1.0)
-                        self._transition_duration = max(0.0, min(3.0, float(duration)))
-                        logger.info(
-                            f"Pattern transition duration set to {self._transition_duration}s"
-                        )
+                        clamped = max(0.0, min(3.0, float(duration)))
+                        self._default_transition_duration = clamped
+                        for zs in self._zone_patterns.values():
+                            zs.transition_duration = clamped
+                        logger.info(f"Pattern transition duration set to {clamped}s")
                         # Broadcast to all browsers
                         await self._broadcast_to_browsers(
                             json.dumps(
                                 {
                                     "type": "transition_duration_sync",
-                                    "duration": self._transition_duration,
+                                    "duration": clamped,
                                 }
                             )
                         )
@@ -3363,6 +3428,7 @@ class VJServer:
                 "patterns": list_patterns(),
                 "transitioning": self._transitioning,
                 "transition_duration": self._transition_duration if self._transitioning else 0,
+                "zone_patterns": self._get_zone_patterns_dict(),
             }
         )
         dead_clients = set()
@@ -3585,6 +3651,7 @@ class VJServer:
                     "tempo_confidence": round(tempo_confidence, 3),
                     "beat_phase": round(beat_phase, 3),
                 },
+                "zone_patterns": self._get_zone_patterns_dict(),
                 "perf": self._latest_perf_snapshot,
             }
         )
@@ -3645,6 +3712,10 @@ class VJServer:
             else:
                 logger.error("No zones available!")
                 return False
+
+        # Initialize per-zone pattern states for all discovered zones
+        for zn in zone_names:
+            self._get_zone_state(zn)
 
         try:
             await asyncio.wait_for(
@@ -3887,26 +3958,20 @@ class VJServer:
                     for pattern_key in changed_patterns:
                         logger.info(f"[PATTERN RELOAD] Detected change in '{pattern_key}.lua'")
 
-                        # If this is the active pattern, reload it
-                        if pattern_key == self._pattern_name:
-                            try:
-                                # Reload the active pattern
-                                self._current_pattern = get_pattern(
-                                    pattern_key, self._pattern_config
-                                )
-                                logger.info(
-                                    f"[PATTERN RELOAD] Reloaded active pattern '{pattern_key}'"
-                                )
-
-                                # If transitioning from this pattern, also reload old pattern
-                                if self._transitioning and self._old_pattern_name == pattern_key:
-                                    self._old_pattern = get_pattern(
-                                        pattern_key, self._pattern_config
+                        # Reload in any zone using this pattern
+                        for zn, zs in self._zone_patterns.items():
+                            if zs.pattern_name == pattern_key:
+                                try:
+                                    zs.pattern = get_pattern(pattern_key, zs.config)
+                                    logger.info(
+                                        f"[PATTERN RELOAD] Reloaded pattern '{pattern_key}' in zone '{zn}'"
                                     )
-                            except Exception as e:
-                                logger.error(
-                                    f"[PATTERN RELOAD] Failed to reload active pattern '{pattern_key}': {e}"
-                                )
+                                    if zs.transitioning and zs.old_pattern_name == pattern_key:
+                                        zs.old_pattern = get_pattern(pattern_key, zs.config)
+                                except Exception as e:
+                                    logger.error(
+                                        f"[PATTERN RELOAD] Failed to reload pattern '{pattern_key}' in zone '{zn}': {e}"
+                                    )
 
                     # Broadcast updated pattern list to browsers
                     await self._broadcast_pattern_list()
@@ -3920,18 +3985,18 @@ class VJServer:
                     for pattern_key in deleted_patterns:
                         logger.info(f"[PATTERN RELOAD] Pattern deleted: '{pattern_key}.lua'")
 
-                        # If deleted pattern was active, switch to fallback
-                        if pattern_key == self._pattern_name:
-                            fallback = "spectrum"
-                            logger.warning(
-                                f"[PATTERN RELOAD] Active pattern '{pattern_key}' was deleted, switching to '{fallback}'"
-                            )
-                            self._pattern_name = fallback
-                            self._current_pattern = get_pattern(fallback, self._pattern_config)
-                            self._transitioning = False
+                        # Switch any zone using deleted pattern to fallback
+                        for zn, zs in self._zone_patterns.items():
+                            if zs.pattern_name == pattern_key:
+                                fallback = "spectrum"
+                                logger.warning(
+                                    f"[PATTERN RELOAD] Pattern '{pattern_key}' deleted, zone '{zn}' switching to '{fallback}'"
+                                )
+                                zs.pattern_name = fallback
+                                zs.pattern = get_pattern(fallback, zs.config)
+                                zs.transitioning = False
 
-                            # Notify browsers of pattern change
-                            await self._broadcast_pattern_change()
+                        await self._broadcast_pattern_change()
 
                     await self._broadcast_pattern_list()
 
@@ -4021,6 +4086,116 @@ class VJServer:
                     e["scale"] = max(0.05, e.get("scale", 0.5) * (1.0 + explode_force * 0.5))
 
         return modified
+
+    async def _set_pattern_for_zone(
+        self, zone_state: ZonePatternState, zone_name: str, pattern_name: str
+    ):
+        """Set pattern on a specific zone with crossfade support."""
+        if not _lua_pattern_exists(pattern_name):
+            return
+
+        old_count = zone_state.entity_count
+        recommended = get_recommended_entity_count(pattern_name, old_count)
+        if recommended != zone_state.entity_count:
+            zone_state.entity_count = recommended
+            zone_state.config.entity_count = recommended
+
+        if zone_state.transition_duration > 0 and pattern_name != zone_state.pattern_name:
+            zone_state.old_pattern = zone_state.pattern
+            zone_state.old_pattern_name = zone_state.pattern_name
+            if old_count != zone_state.entity_count:
+                zone_state.old_pattern.config = replace(
+                    zone_state.old_pattern.config, entity_count=old_count
+                )
+            zone_state.pattern = get_pattern(pattern_name, zone_state.config)
+            if (
+                hasattr(zone_state.old_pattern, "_entity_state")
+                and zone_state.old_pattern._entity_state
+            ):
+                zone_state.pattern.seed_entity_state(zone_state.old_pattern._entity_state)
+            zone_state.pattern_name = pattern_name
+            self._pattern_changes += 1
+            zone_state.transitioning = True
+            zone_state.transition_start = time.monotonic()
+            zone_state.transition_pending_resize = None
+
+            if (
+                old_count != zone_state.entity_count
+                and self.viz_client
+                and self.viz_client.connected
+            ):
+                try:
+                    if zone_state.entity_count > old_count:
+                        await self.viz_client.init_pool(
+                            zone_name, zone_state.entity_count, "SEA_LANTERN"
+                        )
+                    else:
+                        zone_state.transition_pending_resize = zone_state.entity_count
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resize pool for pattern '{pattern_name}' in zone '{zone_name}': {e}"
+                    )
+
+            logger.info(
+                f"Starting {zone_state.transition_duration}s crossfade in zone '{zone_name}': "
+                f"{zone_state.old_pattern_name} -> {pattern_name}"
+            )
+        else:
+            if pattern_name != zone_state.pattern_name:
+                self._pattern_changes += 1
+            zone_state.pattern_name = pattern_name
+            zone_state.pattern = get_pattern(pattern_name, zone_state.config)
+            zone_state.transitioning = False
+
+            if (
+                old_count != zone_state.entity_count
+                and self.viz_client
+                and self.viz_client.connected
+            ):
+                try:
+                    await self.viz_client.cleanup_zone(zone_name)
+                    await self.viz_client.init_pool(
+                        zone_name, zone_state.entity_count, "SEA_LANTERN"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to apply entity count for pattern '{pattern_name}' in zone '{zone_name}': {e}"
+                    )
+
+        # Sync entity_count on the active zone to self.entity_count for backward compat
+        if zone_name == self.zone:
+            self.entity_count = zone_state.entity_count
+            self._pattern_config.entity_count = zone_state.entity_count
+
+    def _calculate_entities_for_zone(
+        self, zone_state: ZonePatternState, audio_state: "AudioState", zone_name: str = ""
+    ) -> List[dict]:
+        """Calculate entity positions for a specific zone, with crossfade support."""
+        if zone_state.transitioning:
+            elapsed = time.monotonic() - zone_state.transition_start
+
+            if elapsed >= zone_state.transition_duration:
+                zone_state.transitioning = False
+                zone_state.old_pattern = None
+                zone_state.old_pattern_name = None
+                if zone_state.transition_pending_resize is not None:
+                    pending = zone_state.transition_pending_resize
+                    zone_state.transition_pending_resize = None
+                    if self.viz_client and self.viz_client.connected:
+                        asyncio.ensure_future(
+                            self.viz_client.init_pool(
+                                zone_name or self.zone, pending, "SEA_LANTERN"
+                            )
+                        )
+                return zone_state.pattern.calculate_entities(audio_state)
+
+            t = elapsed / zone_state.transition_duration
+            alpha = self._smoothstep(t)
+            old_entities = zone_state.old_pattern.calculate_entities(audio_state)
+            new_entities = zone_state.pattern.calculate_entities(audio_state)
+            return self._blend_entities(old_entities, new_entities, alpha)
+
+        return zone_state.pattern.calculate_entities(audio_state)
 
     def _calculate_entities(
         self,
@@ -4213,8 +4388,22 @@ class VJServer:
             return
 
         try:
+            # Track the high-water mark of entities in the Minecraft pool.
+            # Hide any pool entities not covered by the current frame to
+            # prevent "ghost" blocks stuck at their last position.
+            entity_count = len(entities)
+            self._minecraft_pool_size = max(self._minecraft_pool_size, entity_count)
+            if entity_count < self._minecraft_pool_size:
+                covered_ids = {e.get("id") for e in entities}
+                for i in range(self._minecraft_pool_size):
+                    eid = f"block_{i}"
+                    if eid not in covered_ids:
+                        entities.append({"id": eid, "scale": 0})
+            # After a deferred pool shrink completes, lower the high-water mark
+            if not self._transitioning and self._transition_pending_resize is None:
+                self._minecraft_pool_size = self.entity_count
+
             # Sanitize entity data before forwarding to Minecraft
-            # During transitions, blended entity count may exceed self.entity_count
             entities = _sanitize_entities(
                 entities, max_count=max(len(entities), self.entity_count * 2)
             )
@@ -4245,6 +4434,67 @@ class VJServer:
             await self.viz_client.batch_update_fast(self.zone, entities, particles, audio)
         except Exception as e:
             logger.error(f"Minecraft update error: {e}")
+
+    async def _update_minecraft_zone(
+        self,
+        zone_name: str,
+        zone_state: Optional[ZonePatternState],
+        entities: List[dict],
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+        bpm: float = 0.0,
+        tempo_confidence: float = 0.0,
+        beat_phase: float = 0.0,
+    ):
+        """Send entities for a specific zone to Minecraft."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+        if zone_state is None:
+            return
+
+        try:
+            entity_count = len(entities)
+            zone_state.minecraft_pool_size = max(zone_state.minecraft_pool_size, entity_count)
+            if entity_count < zone_state.minecraft_pool_size:
+                covered_ids = {e.get("id") for e in entities}
+                for i in range(zone_state.minecraft_pool_size):
+                    eid = f"block_{i}"
+                    if eid not in covered_ids:
+                        entities.append({"id": eid, "scale": 0})
+            if not zone_state.transitioning and zone_state.transition_pending_resize is None:
+                zone_state.minecraft_pool_size = zone_state.entity_count
+
+            entities = _sanitize_entities(
+                entities, max_count=max(len(entities), zone_state.entity_count * 2)
+            )
+
+            particles = []
+            if is_beat and beat_intensity > 0.2:
+                particles.append(
+                    {
+                        "particle": "NOTE",
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "count": max(1, min(100, int(20 * beat_intensity))),
+                    }
+                )
+
+            safe_bands = [max(0.0, min(1.0, b)) for b in bands[:5]]
+            audio = {
+                "bands": safe_bands,
+                "amplitude": max(0.0, min(5.0, peak)),
+                "is_beat": bool(is_beat),
+                "beat_intensity": max(0.0, min(5.0, beat_intensity)),
+                "bpm": max(0.0, min(300.0, bpm)),
+                "tempo_confidence": max(0.0, min(1.0, tempo_confidence)),
+                "beat_phase": max(0.0, min(1.0, beat_phase)),
+            }
+            await self.viz_client.batch_update_fast(zone_name, entities, particles, audio)
+        except Exception as e:
+            logger.error(f"Minecraft update error for zone '{zone_name}': {e}")
 
     async def _relay_voice_audio(self, data: dict):
         """Relay a voice_audio message from the active DJ to Minecraft."""
@@ -4462,29 +4712,34 @@ class VJServer:
 
                 # Calculate entities only when needed (MC send tick or active browser previews).
                 need_entities = should_send_mc_this_frame or bool(self._broadcast_clients)
+                # Per-zone entity calculation
+                zone_entities: Dict[str, List[dict]] = {}
                 if need_entities:
-                    if self._freeze and self._last_entities:
-                        entities = self._last_entities
-                    elif self._blackout:
-                        entities = []
-                    else:
-                        calc_start = time.perf_counter()
-                        entities = self._calculate_entities(
-                            visual_bands,
-                            visual_peak,
-                            is_beat,
-                            visual_beat_intensity,
-                            bpm=dj.bpm if dj else 0.0,
-                            beat_phase=beat_phase,
-                        )
-                        calc_ms = (time.perf_counter() - calc_start) * 1000.0
-                        # Apply timed effects (flash, strobe, pulse, wave, etc.)
-                        effects_start = time.perf_counter()
-                        entities = self._apply_effects(entities, visual_bands)
-                        effects_ms = (time.perf_counter() - effects_start) * 1000.0
-                        self._last_entities = entities
-                else:
-                    entities = []
+                    audio_state = AudioState(
+                        bands=visual_bands,
+                        amplitude=visual_peak,
+                        is_beat=is_beat,
+                        beat_intensity=visual_beat_intensity,
+                        frame=self._frame_count,
+                        bpm=dj.bpm if dj else 0.0,
+                        beat_phase=beat_phase,
+                    )
+                    calc_start = time.perf_counter()
+                    for zone_name, zone_state in self._zone_patterns.items():
+                        if self._freeze and zone_state.last_entities:
+                            zone_entities[zone_name] = zone_state.last_entities
+                        elif self._blackout:
+                            zone_entities[zone_name] = []
+                        else:
+                            zents = self._calculate_entities_for_zone(
+                                zone_state, audio_state, zone_name
+                            )
+                            zents = self._apply_effects(zents, visual_bands)
+                            zone_state.last_entities = zents
+                            zone_entities[zone_name] = zents
+                    calc_ms = (time.perf_counter() - calc_start) * 1000.0
+                # For backward compat: entities for the active zone (used by browser broadcast)
+                entities = zone_entities.get(self.zone, [])
                 entities_count = len(entities)
 
                 # Update spectrograph
@@ -4511,16 +4766,20 @@ class VJServer:
 
                 if should_send_mc_this_frame:
                     mc_start = time.perf_counter()
-                    await self._update_minecraft(
-                        entities,
-                        visual_bands,
-                        visual_peak,
-                        is_beat,
-                        visual_beat_intensity,
-                        bpm=dj.bpm if dj else 0.0,
-                        tempo_confidence=tempo_confidence,
-                        beat_phase=beat_phase,
-                    )
+                    for zn, zents in zone_entities.items():
+                        zs = self._zone_patterns.get(zn)
+                        await self._update_minecraft_zone(
+                            zn,
+                            zs,
+                            zents,
+                            visual_bands,
+                            visual_peak,
+                            is_beat,
+                            visual_beat_intensity,
+                            bpm=dj.bpm if dj else 0.0,
+                            tempo_confidence=tempo_confidence,
+                            beat_phase=beat_phase,
+                        )
                     mc_ms = (time.perf_counter() - mc_start) * 1000.0
 
                 # Send to browser clients (always, for preview)

@@ -16,6 +16,11 @@
       "type": "string",
       "minLength": 1,
       "description": "Pattern identifier (e.g. bars, grid, circle, wave, dna_helix, etc.)"
+    },
+    "zones": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Optional list of zone names to apply the pattern to. If omitted, applies to all zones."
     }
   },
   "required": ["type", "pattern"]

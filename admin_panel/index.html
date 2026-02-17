@@ -33,8 +33,15 @@
                 <select id="stage-select">
                     <option value="">All Stages</option>
                 </select>
-                <span class="zone-label">Zone:</span>
-                <select id="zone-select">
+                <div id="zone-chip-bar" class="zone-chip-bar">
+                    <!-- Zone chips rendered by JS -->
+                </div>
+                <div class="zone-quick-select">
+                    <button class="zone-quick-btn" data-select="all" title="Select all zones">All</button>
+                    <button class="zone-quick-btn" data-select="none" title="Clear selection">None</button>
+                </div>
+                <!-- Hidden zone select kept for backward compat with Zone Settings tab -->
+                <select id="zone-select" class="hidden">
                     <option value="main">main</option>
                 </select>
             </div>

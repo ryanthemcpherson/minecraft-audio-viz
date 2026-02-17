@@ -240,6 +240,119 @@ body {
     box-shadow: var(--glow-accent);
 }
 
+/* Zone Chip Bar */
+.zone-chip-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: 500px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.zone-chip-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.zone-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: var(--border-radius-pill);
+    border: 1px solid var(--border-visible);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    user-select: none;
+    white-space: nowrap;
+    min-width: 60px;
+    text-align: center;
+    line-height: 1.3;
+}
+
+.zone-chip:hover {
+    border-color: rgba(0, 212, 255, 0.4);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.zone-chip.selected {
+    border-color: var(--accent-primary);
+    background: rgba(0, 212, 255, 0.12);
+    color: var(--accent-primary);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+}
+
+.zone-chip-name {
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+}
+
+.zone-chip-pattern {
+    font-size: var(--font-size-2xs);
+    color: var(--text-muted);
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.zone-chip.selected .zone-chip-pattern {
+    color: rgba(0, 212, 255, 0.6);
+}
+
+/* Zone Quick Select */
+.zone-quick-select {
+    display: flex;
+    gap: 2px;
+    margin-left: 4px;
+}
+
+.zone-quick-btn {
+    padding: 3px 8px;
+    border-radius: var(--border-radius-xs);
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.zone-quick-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: rgba(0, 212, 255, 0.08);
+}
+
+/* Pattern button partial state (some selected zones use this pattern) */
+.pattern-btn.partial {
+    border-color: rgba(0, 212, 255, 0.3);
+    background: rgba(0, 212, 255, 0.06);
+    color: var(--accent-primary);
+    opacity: 0.65;
+}
+
+.pattern-btn.partial::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+}
+
 /* Connection Status Wrapper */
 .connection-status-wrapper {
     display: flex;
@@ -4002,6 +4115,22 @@ input:disabled + .toggle-slider {
         font-size: var(--font-size-xs);
         padding: 4px 8px;
         max-width: 120px;
+    }
+
+    .zone-chip-bar {
+        max-width: 200px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+    }
+
+    .zone-chip {
+        padding: 3px 8px;
+        font-size: var(--font-size-2xs);
+        min-width: 50px;
+    }
+
+    .zone-quick-select {
+        display: none;
     }
 
     .zone-label {
