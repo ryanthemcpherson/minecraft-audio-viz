@@ -150,6 +150,7 @@ class UserResponse(BaseModel):
     discord_username: str | None
     avatar_url: str | None
     onboarding_completed: bool
+    is_admin: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -224,6 +225,7 @@ class UserProfileResponse(BaseModel):
     discord_username: str | None
     avatar_url: str | None
     onboarding_completed: bool
+    is_admin: bool = False
     user_type: str | None
     dj_profile: DJProfileResponse | None
     organizations: list[OrgSummary]
@@ -662,3 +664,72 @@ class UnifiedDashboard(BaseModel):
     dj: DJDashboardSection | None
     has_dj_profile: bool
     has_orgs: bool
+
+
+# ---------------------------------------------------------------------------
+# Admin dashboard schemas
+# ---------------------------------------------------------------------------
+
+
+class AdminUserRow(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    email: str | None
+    discord_username: str | None
+    avatar_url: str | None
+    is_active: bool
+    is_admin: bool
+    user_type: str | None
+    created_at: datetime
+    last_login_at: datetime | None
+    org_count: int
+    has_dj_profile: bool
+
+
+class AdminOrgRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    owner_name: str
+    member_count: int
+    server_count: int
+    is_active: bool
+    created_at: datetime
+
+
+class AdminServerRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    websocket_url: str
+    org_name: str | None
+    is_active: bool
+    last_heartbeat: datetime | None
+    active_show_count: int
+    created_at: datetime
+
+
+class AdminShowRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    server_name: str
+    connect_code: str | None
+    status: str
+    current_djs: int
+    max_djs: int
+    created_at: datetime
+    ended_at: datetime | None
+
+
+class AdminStats(BaseModel):
+    total_users: int
+    total_organizations: int
+    total_servers: int
+    total_shows: int
+    active_shows: int
+    users_last_30_days: int
+    dj_profiles: int
+
+
+class AdminUpdateUserRequest(BaseModel):
+    is_active: bool | None = None
+    is_admin: bool | None = None

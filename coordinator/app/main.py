@@ -21,6 +21,7 @@ from app.logging_config import configure_logging
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
 from app.routers import (
+    admin,
     auth,
     connect,
     dashboard,
@@ -93,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(tenants.router, prefix="/api/v1")
     application.include_router(uploads.router, prefix="/api/v1")
     application.include_router(dashboard.router, prefix="/api/v1")
+    application.include_router(admin.router, prefix="/api/v1")
 
     # -- Exception handlers ----------------------------------------------------
     @application.exception_handler(RateLimitExceeded)

@@ -66,6 +66,15 @@ async def get_current_user_optional(
         return None
 
 
+async def require_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Dependency that verifies the current user is a site admin."""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
 async def require_org_owner(
     org_id: uuid.UUID,
     user: User = Depends(get_current_user),

@@ -79,6 +79,7 @@ def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
             discord_username=user.discord_username,
             avatar_url=user.avatar_url,
             onboarding_completed=user.onboarding_completed_at is not None,
+            is_admin=user.is_admin,
         ),
     )
 
@@ -390,6 +391,7 @@ def _build_user_profile_response(user: User) -> UserProfileResponse:
         discord_username=user.discord_username,
         avatar_url=user.avatar_url,
         onboarding_completed=user.onboarding_completed_at is not None,
+        is_admin=user.is_admin,
         user_type=user.user_type,
         dj_profile=dj_profile,
         organizations=orgs,

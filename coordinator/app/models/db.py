@@ -52,6 +52,7 @@ class User(Base):
     discord_id: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     discord_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(
