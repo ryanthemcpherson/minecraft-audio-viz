@@ -3708,10 +3708,10 @@ class AdminApp {
                 this._previewScene.add(ground);
             }
 
-            // Grid helper
-            const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-            gridHelper.position.y = 0.02;
-            this._previewScene.add(gridHelper);
+            // Grid helper (only for single-zone fallback, hidden in stage mode)
+            this._previewGridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
+            this._previewGridHelper.position.y = 0.02;
+            this._previewScene.add(this._previewGridHelper);
 
             // Pre-create static band-color materials for reuse
             this._bandColorMaterials = this._previewConfig.colors.map(color =>
@@ -3880,16 +3880,19 @@ class AdminApp {
         const sy = zone.size?.y || 10;
         const sz = zone.size?.z || 10;
 
-        // Group origin = zone origin offset, with size/2 shift so wireframe is centered
-        group.position.set(ox + sx / 2, oy + sy / 2, oz + sz / 2);
+        // Group origin = zone origin (rotation pivot point)
+        // Minecraft rotates around the origin corner, not the center
+        group.position.set(ox, oy, oz);
         group.rotation.y = -(zone.rotation || 0) * (Math.PI / 180);
 
-        // Wireframe box showing zone boundaries
+        // Wireframe box showing zone boundaries, offset to (size/2) in local space
+        // so it covers (0,0,0) to (sx,sy,sz) before rotation
         const boxGeo = new THREE.BoxGeometry(sx, sy, sz);
         const edgesGeo = new THREE.EdgesGeometry(boxGeo);
         const wireColor = this._getZoneWireframeColor(zone);
         const lineMat = new THREE.LineBasicMaterial({ color: wireColor, opacity: 0.35, transparent: true });
         const wireframe = new THREE.LineSegments(edgesGeo, lineMat);
+        wireframe.position.set(sx / 2, sy / 2, sz / 2);
         group.add(wireframe);
         boxGeo.dispose();
 
@@ -3984,12 +3987,12 @@ class AdminApp {
             this._previewStageMode = true;
             // Pre-create zone groups
             zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
-            // Switch environment to stage mode
+            // Switch environment to stage mode — hide procedural env, grid, and ground
             if (this._mcEnvironment) {
                 this._mcEnvironment.setVisible(false);
-                if (typeof MinecraftEnvironment !== 'undefined') {
-                    this._buildStageEnvironment();
-                }
+            }
+            if (this._previewGridHelper) {
+                this._previewGridHelper.visible = false;
             }
             // Frame camera to stage
             this._frameStage();
@@ -4008,9 +4011,12 @@ class AdminApp {
             this._previewStageMode = false;
             // Hide scan button in single-zone mode
             if (scanBtn) scanBtn.style.display = 'none';
-            // Restore single-zone environment
+            // Restore single-zone environment and grid
             if (this._mcEnvironment) {
                 this._mcEnvironment.setVisible(true);
+            }
+            if (this._previewGridHelper) {
+                this._previewGridHelper.visible = true;
             }
             if (this._stageGround) {
                 this._previewScene.remove(this._stageGround);
@@ -4281,7 +4287,7 @@ class AdminApp {
             if (this._previewAutoRotate && this._previewCamera) {
                 const spherical = new THREE.Spherical();
                 spherical.setFromVector3(this._previewCamera.position);
-                spherical.theta += 0.002;
+                spherical.theta += 0.0005;
                 this._previewCamera.position.setFromSpherical(spherical);
                 const lookY = this._previewStageMode ? 0 : 3;
                 this._previewCamera.lookAt(0, lookY, 0);
@@ -4383,10 +4389,10 @@ class AdminApp {
                 const z = Number.isFinite(entity.z) ? entity.z : 0.5;
                 const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
 
-                // Position in zone-local space (centered: -size/2 to +size/2)
-                block.userData.targetX = (x - 0.5) * sx;
-                block.userData.targetY = (y - 0.5) * sy;
-                block.userData.targetZ = (z - 0.5) * sz;
+                // Position in zone-local space (0 to size, matching Minecraft's localToWorld)
+                block.userData.targetX = x * sx;
+                block.userData.targetY = y * sy;
+                block.userData.targetZ = z * sz;
                 block.userData.targetScale = scale * 1.5;
 
                 this._updateBlockMaterial(block, entity, bands, config);

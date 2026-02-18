@@ -34,6 +34,10 @@ let textureManager = null;
 let zoneData = null;
 let stageScanRequested = false;
 
+// Multi-zone support
+let zoneGroups = {};       // { zoneName: { group, blocks, wireframe, sizeX, sizeY, sizeZ, zone } }
+let zoneEntitiesData = null; // Per-zone entities from state broadcasts
+
 // New systems
 let particleSystem = null;
 let particleEntityRenderer = null;
@@ -108,13 +112,13 @@ function init() {
     // Scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0f);
-    scene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
+    scene.fog = new THREE.Fog(0x0a0a0f, 40, 100);
 
     // Camera
     const previewSection = document.querySelector('.preview-section');
     const aspect = previewSection ? previewSection.clientWidth / previewSection.clientHeight : window.innerWidth / window.innerHeight;
-    camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
-    camera.position.set(12, 10, 12);
+    camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 200);
+    camera.position.set(25, 20, 25);
     camera.lookAt(0, 2, 0);
 
     // Renderer
@@ -291,6 +295,10 @@ function setupControls() {
             }
             if (mcEnvironment) {
                 mcEnvironment.setVisible(showBlockGrid);
+            }
+            // Show/hide zone wireframes
+            for (const zg of Object.values(zoneGroups)) {
+                zg.group.visible = showBlockGrid;
             }
         });
     }
@@ -571,6 +579,10 @@ function connectWebSocket() {
                     if (data.zones && !zoneData) {
                         handleZonesResponse(data.zones);
                     }
+                    // Capture zone_entities from initial state
+                    if (data.zone_entities) {
+                        zoneEntitiesData = data.zone_entities;
+                    }
                 }
             } catch (e) {
                 console.error('Parse error:', e);
@@ -624,6 +636,11 @@ function updateAudioState(data) {
     audioState.frame = data.frame || 0;
     audioState.entities = data.entities || [];
     audioState.latencyMs = data.latency_ms || 0;
+
+    // Store per-zone entities for multi-zone positioning
+    if (data.zone_entities) {
+        zoneEntitiesData = data.zone_entities;
+    }
 
     // Use server-provided BPM if available (more accurate than local calculation)
     if (data.bpm && data.bpm >= 40 && data.bpm <= 240) {
@@ -829,40 +846,200 @@ function spawnAmbientParticles() {
 }
 
 function updateBlockTargets() {
-    const entities = audioState.entities;
-    if (!entities || entities.length === 0) return;
-
-    ensureBlockCount(entities.length);
-
-    const zoneSize = CONFIG.zoneSize;
-    const offset = CONFIG.centerOffset;
     const showBlocks = (viewMode === 'blocks' || viewMode === 'hybrid');
+    const hasZoneEntities = zoneEntitiesData && zoneData && Object.keys(zoneEntitiesData).length > 0;
 
-    blocks.forEach((block, i) => {
-        const entity = entities[i];
-        if (!entity) return;
+    if (hasZoneEntities) {
+        // Multi-zone path: position entities in per-zone groups with rotation
+        updateMultiZoneEntities(zoneEntitiesData, audioState.bands, showBlocks);
+        // Hide legacy single-zone blocks
+        blocks.forEach(b => { b.visible = false; });
+    } else {
+        // Legacy single-zone path
+        const entities = audioState.entities;
+        if (!entities || entities.length === 0) return;
 
-        block.userData.targetX = (entity.x * zoneSize) - offset;
-        block.userData.targetY = (entity.y * zoneSize) + 0.5;
-        block.userData.targetZ = (entity.z * zoneSize) - offset;
-        block.userData.targetScale = entity.scale * 1.5;
+        ensureBlockCount(entities.length);
 
-        // Hide blocks in particle-only mode
-        block.visible = showBlocks;
+        const zoneSize = CONFIG.zoneSize;
+        const offset = CONFIG.centerOffset;
 
-        const bandIndex = entity.band || 0;
-        if (block.userData.bandIndex !== bandIndex) {
-            block.userData.bandIndex = bandIndex;
-            block.material.color.setHex(CONFIG.colors[bandIndex]);
-            block.material.emissive.setHex(CONFIG.colors[bandIndex]);
+        blocks.forEach((block, i) => {
+            const entity = entities[i];
+            if (!entity) return;
+
+            block.userData.targetX = (entity.x * zoneSize) - offset;
+            block.userData.targetY = (entity.y * zoneSize) + 0.5;
+            block.userData.targetZ = (entity.z * zoneSize) - offset;
+            block.userData.targetScale = entity.scale * 1.5;
+
+            block.visible = showBlocks;
+
+            const bandIndex = entity.band || 0;
+            if (block.userData.bandIndex !== bandIndex) {
+                block.userData.bandIndex = bandIndex;
+                block.material.color.setHex(CONFIG.colors[bandIndex]);
+                block.material.emissive.setHex(CONFIG.colors[bandIndex]);
+            }
+
+            const bandValue = audioState.bands[bandIndex] || 0;
+            block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+        });
+
+        // Hide multi-zone blocks when in legacy mode
+        for (const zg of Object.values(zoneGroups)) {
+            zg.blocks.forEach(b => { b.visible = false; });
+            if (zg.wireframe) zg.wireframe.visible = false;
         }
-
-        const bandValue = audioState.bands[bandIndex] || 0;
-        block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
-    });
+    }
 
     // Update particle entity renderer (particles/hybrid modes)
     updateParticleEntities();
+}
+
+// === Multi-Zone Entity Positioning ===
+
+function getZoneWireframeColor(zone) {
+    const role = (zone.stage_role || zone.name || '').toLowerCase();
+    if (role.includes('main') || role.includes('center')) return 0x00D4FF;  // cyan
+    if (role.includes('left') || role.includes('wing_l')) return 0xFF9100;  // orange
+    if (role.includes('right') || role.includes('wing_r')) return 0x00E676; // green
+    if (role.includes('sky') || role.includes('ceiling')) return 0xD500F9;  // purple
+    if (role.includes('audience') || role.includes('floor')) return 0xFFD700; // gold
+    return 0x4488AA; // default teal
+}
+
+function ensureZoneGroup(zoneName) {
+    if (zoneGroups[zoneName]) return zoneGroups[zoneName];
+    if (!zoneData) return null;
+
+    const zone = zoneData.find(z => z.name === zoneName);
+    if (!zone) return null;
+
+    const group = new THREE.Group();
+    group.name = `zone-${zoneName}`;
+
+    // Position relative to stage center
+    const ox = (zone.origin?.x || 0) - stageCenter.x;
+    const oy = (zone.origin?.y || 0) - stageCenter.y;
+    const oz = (zone.origin?.z || 0) - stageCenter.z;
+    const sx = zone.size?.x || 10;
+    const sy = zone.size?.y || 10;
+    const sz = zone.size?.z || 10;
+
+    // Group origin = zone origin (rotation pivot point)
+    // Minecraft rotates around the origin corner, not the center
+    group.position.set(ox, oy, oz);
+    group.rotation.y = -(zone.rotation || 0) * (Math.PI / 180);
+
+    // Wireframe box offset to (size/2) in local space
+    // so it covers (0,0,0) to (sx,sy,sz) before rotation
+    const boxGeo = new THREE.BoxGeometry(sx, sy, sz);
+    const edgesGeo = new THREE.EdgesGeometry(boxGeo);
+    const wireColor = getZoneWireframeColor(zone);
+    const lineMat = new THREE.LineBasicMaterial({ color: wireColor, opacity: 0.35, transparent: true });
+    const wireframe = new THREE.LineSegments(edgesGeo, lineMat);
+    wireframe.position.set(sx / 2, sy / 2, sz / 2);
+    group.add(wireframe);
+    boxGeo.dispose();
+
+    scene.add(group);
+
+    const zoneGroup = {
+        group,
+        blocks: [],
+        wireframe,
+        sizeX: sx,
+        sizeY: sy,
+        sizeZ: sz,
+        zone
+    };
+    zoneGroups[zoneName] = zoneGroup;
+    return zoneGroup;
+}
+
+function ensureZoneBlockCount(zoneGroup, count) {
+    // Add blocks if needed
+    while (zoneGroup.blocks.length < count) {
+        const geometry = new THREE.BoxGeometry(CONFIG.blockSize, CONFIG.blockSize, CONFIG.blockSize);
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x6366f1,
+            emissive: 0x6366f1,
+            emissiveIntensity: 0.3,
+            roughness: 0.4,
+            metalness: 0.6,
+        });
+        const block = new THREE.Mesh(geometry, material);
+        block.castShadow = true;
+        block.receiveShadow = true;
+        block.userData = { targetX: 0, targetY: 0, targetZ: 0, targetScale: 1, bandIndex: -1 };
+        zoneGroup.group.add(block);
+        zoneGroup.blocks.push(block);
+    }
+    // Hide excess blocks (pooling)
+    for (let i = 0; i < zoneGroup.blocks.length; i++) {
+        zoneGroup.blocks[i].visible = i < count;
+    }
+}
+
+function updateMultiZoneEntities(zoneEntities, bands, showBlocks) {
+    for (const [zoneName, entities] of Object.entries(zoneEntities)) {
+        if (!Array.isArray(entities)) continue;
+
+        const zoneGroup = ensureZoneGroup(zoneName);
+        if (!zoneGroup) continue;
+
+        zoneGroup.wireframe.visible = showBlockGrid;
+        ensureZoneBlockCount(zoneGroup, entities.length);
+
+        const sx = zoneGroup.sizeX;
+        const sy = zoneGroup.sizeY;
+        const sz = zoneGroup.sizeZ;
+
+        for (let i = 0; i < entities.length; i++) {
+            const entity = entities[i];
+            const block = zoneGroup.blocks[i];
+            if (!entity || typeof entity !== 'object' || !block) continue;
+
+            const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+            const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+            const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+            const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
+
+            // Position in zone-local space (0 to size, matching Minecraft's localToWorld)
+            block.userData.targetX = x * sx;
+            block.userData.targetY = y * sy;
+            block.userData.targetZ = z * sz;
+            block.userData.targetScale = scale * 1.5;
+
+            block.visible = showBlocks;
+
+            const bandIndex = Math.max(0, Math.min(4, Math.round(entity.band || 0)));
+            if (block.userData.bandIndex !== bandIndex) {
+                block.userData.bandIndex = bandIndex;
+                block.material.color.setHex(CONFIG.colors[bandIndex]);
+                block.material.emissive.setHex(CONFIG.colors[bandIndex]);
+            }
+
+            const bandValue = bands[bandIndex] || 0;
+            block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+        }
+    }
+}
+
+function disposeZoneGroups() {
+    for (const [name, zg] of Object.entries(zoneGroups)) {
+        zg.blocks.forEach(block => {
+            block.geometry.dispose();
+            block.material.dispose();
+        });
+        if (zg.wireframe) {
+            zg.wireframe.geometry.dispose();
+            zg.wireframe.material.dispose();
+        }
+        scene.remove(zg.group);
+    }
+    zoneGroups = {};
 }
 
 function animate() {
@@ -882,7 +1059,7 @@ function animate() {
         if (fpsEl) fpsEl.textContent = currentFps;
     }
 
-    // Smooth block animations
+    // Smooth block animations (legacy single-zone blocks)
     const lerpSpeed = 0.25;
     blocks.forEach((block) => {
         block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
@@ -894,6 +1071,21 @@ function animate() {
         block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
         block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
     });
+
+    // Smooth block animations (multi-zone blocks)
+    for (const zg of Object.values(zoneGroups)) {
+        for (const block of zg.blocks) {
+            if (!block.visible) continue;
+            block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
+            block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
+            block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
+
+            const targetScale = block.userData.targetScale || 1;
+            block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
+            block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
+            block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
+        }
+    }
 
     // Update particle system (beat/ambient effects)
     if (particleSystem) {
@@ -933,7 +1125,7 @@ function onResize() {
 }
 
 function resetCamera() {
-    camera.position.set(12, 10, 12);
+    camera.position.set(25, 20, 25);
     camera.lookAt(0, 2, 0);
 }
 
@@ -1062,6 +1254,12 @@ function handleZonesResponse(zones) {
     zoneData = zones;
     computeStageCenter(zones);
     console.log(`[Stage] Received ${zones.length} zones, center:`, stageCenter);
+
+    // Dispose and recreate zone groups with new positions
+    disposeZoneGroups();
+    zones.forEach(zone => {
+        if (zone.name) ensureZoneGroup(zone.name);
+    });
 }
 
 function handleStagesResponse(stages) {
@@ -1094,6 +1292,10 @@ function rescanStage() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     stageScanRequested = false;
     disposeStageBlocks();
+    disposeZoneGroups();
+    zoneData = null;
+    zoneEntitiesData = null;
+    ws.send(JSON.stringify({ type: 'get_zones' }));
     ws.send(JSON.stringify({ type: 'get_stages' }));
     console.log('[Stage] Rescan requested');
 }
