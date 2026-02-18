@@ -1392,6 +1392,10 @@ public class MessageHandler {
     /**
      * Scan all non-air blocks in the bounding box around a stage's zones.
      * Returns palette-compressed block data for 3D preview rendering.
+     *
+     * World block access (getBlockAt) requires the main Bukkit thread, so the
+     * actual scan is scheduled via callSyncMethod and this method blocks until
+     * the result is ready (up to 15 seconds).
      */
     private JsonObject handleScanStageBlocks(JsonObject message) {
         if (!message.has("stage")) {
@@ -1407,6 +1411,24 @@ public class MessageHandler {
             return createError("Stage not found: " + stageName);
         }
 
+        // Schedule on main thread since world.getBlockAt() requires it
+        try {
+            return plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
+                return scanStageBlocksSync(stage, stageName);
+            }).get(15, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            plugin.getLogger().warning("Stage block scan timed out for: " + stageName);
+            return createError("Stage block scan timed out");
+        } catch (Exception e) {
+            plugin.getLogger().warning("Stage block scan failed for " + stageName + ": " + e.getMessage());
+            return createError("Scan failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Perform the actual block scan on the main Bukkit thread.
+     */
+    private JsonObject scanStageBlocksSync(Stage stage, String stageName) {
         // Compute union bounding box of all zones in the stage
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
         int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
@@ -1493,6 +1515,9 @@ public class MessageHandler {
         response.add("palette", paletteArray);
         response.add("blocks", blocksArray);
         response.add("bounds", bounds);
+
+        plugin.getLogger().info("Scanned stage '" + stageName + "': " +
+            blocksArray.size() + " blocks, " + palette.size() + " materials");
 
         return response;
     }
