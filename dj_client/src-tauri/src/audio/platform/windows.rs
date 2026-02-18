@@ -201,7 +201,9 @@ unsafe fn create_completion_handler(
         event,
     });
     let raw = Box::into_raw(handler);
-    std::mem::transmute(raw)
+    // Safety: CompletionHandler is #[repr(C)] with vtbl pointer as first field,
+    // matching the COM ABI layout. from_raw wraps without AddRef (ref_count starts at 1).
+    IActivateAudioInterfaceCompletionHandler::from_raw(raw as *mut std::ffi::c_void)
 }
 
 // --- End completion handler ---

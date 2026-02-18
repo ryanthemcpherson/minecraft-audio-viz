@@ -647,7 +647,7 @@ async fn start_capture(
 #[tauri::command]
 async fn stop_capture(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     let mut app_state = state.0.lock();
-    if let Some(mut capture) = app_state.audio_capture.take() {
+    if let Some(capture) = app_state.audio_capture.take() {
         capture.stop();
     }
     Ok(())
@@ -663,7 +663,7 @@ async fn change_audio_source(
     // Stop existing capture
     {
         let mut app_state = state.0.lock();
-        if let Some(mut capture) = app_state.audio_capture.take() {
+        if let Some(capture) = app_state.audio_capture.take() {
             capture.stop();
         }
     }
@@ -763,7 +763,7 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     }
 
     // Stop audio capture
-    if let Some(mut capture) = capture {
+    if let Some(capture) = capture {
         capture.stop();
     }
 
@@ -1071,7 +1071,7 @@ pub fn run() {
                         if let tauri::WindowEvent::CloseRequested { .. } = event {
                             let state = app_handle.state::<AppStateWrapper>();
                             let mut app_state = state.0.lock();
-                            if let Some(mut capture) = app_state.audio_capture.take() {
+                            if let Some(capture) = app_state.audio_capture.take() {
                                 capture.stop();
                             }
                             app_state.voice_streamer = None;

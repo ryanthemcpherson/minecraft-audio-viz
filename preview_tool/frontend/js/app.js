@@ -31,6 +31,7 @@ let autoRotate = false;
 let stageBlocksGroup = null;
 let stageCenter = { x: 0, y: 0, z: 0 };
 let textureManager = null;
+let bandColorMaterials = null; // Pre-created materials for each band color
 let zoneData = null;
 let stageScanRequested = false;
 
@@ -164,10 +165,22 @@ function init() {
     pointLight.position.set(0, 5, 0);
     scene.add(pointLight);
 
-    // Block texture manager for scanned stage blocks
+    // Block texture manager for entity and stage blocks
     if (typeof BlockTextureManager !== 'undefined') {
         textureManager = new BlockTextureManager();
+        textureManager.preload();
     }
+
+    // Pre-create band color materials for entity blocks
+    bandColorMaterials = CONFIG.colors.map(color =>
+        new THREE.MeshStandardMaterial({
+            color: color,
+            roughness: 0.3,
+            metalness: 0.2,
+            emissive: new THREE.Color(color),
+            emissiveIntensity: 0.2,
+        })
+    );
 
     // Procedural environment as fallback (shown until scanned blocks arrive)
     if (typeof BlockTextureManager !== 'undefined' && typeof MinecraftEnvironment !== 'undefined') {
@@ -228,12 +241,45 @@ function createBlock(index) {
     block.receiveShadow = true;
 
     block.userData.bandIndex = bandIndex;
+    block.userData.currentMaterial = '';
     block.userData.targetX = 0;
     block.userData.targetY = 0;
     block.userData.targetZ = 0;
     block.userData.targetScale = 1;
 
     return block;
+}
+
+/**
+ * Update a block's material based on entity data.
+ * Uses BlockTextureManager for Minecraft block textures when material is specified,
+ * falls back to band-colored materials otherwise.
+ */
+function updateBlockMaterial(block, entity, bands) {
+    const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
+    const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
+    block.userData.bandIndex = bandIndex;
+
+    const entityMaterial = entity.material || '';
+    if (textureManager && entityMaterial && entityMaterial !== block.userData.currentMaterial) {
+        const texMat = textureManager.getMaterial(entityMaterial);
+        if (texMat) {
+            block.material = texMat;
+            block.userData.currentMaterial = entityMaterial;
+        }
+    } else if (!entityMaterial && block.userData.currentMaterial) {
+        // Material removed — revert to band color
+        if (bandColorMaterials) {
+            block.material = bandColorMaterials[bandIndex];
+        }
+        block.userData.currentMaterial = '';
+    } else if (!entityMaterial && !block.userData.currentMaterial) {
+        block.material.color.setHex(CONFIG.colors[bandIndex]);
+        block.material.emissive.setHex(CONFIG.colors[bandIndex]);
+    }
+
+    const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
+    block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
 }
 
 function createBlocks() {
@@ -875,15 +921,7 @@ function updateBlockTargets() {
 
             block.visible = showBlocks;
 
-            const bandIndex = entity.band || 0;
-            if (block.userData.bandIndex !== bandIndex) {
-                block.userData.bandIndex = bandIndex;
-                block.material.color.setHex(CONFIG.colors[bandIndex]);
-                block.material.emissive.setHex(CONFIG.colors[bandIndex]);
-            }
-
-            const bandValue = audioState.bands[bandIndex] || 0;
-            block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+            updateBlockMaterial(block, entity, audioState.bands);
         });
 
         // Hide multi-zone blocks when in legacy mode
@@ -972,7 +1010,7 @@ function ensureZoneBlockCount(zoneGroup, count) {
         const block = new THREE.Mesh(geometry, material);
         block.castShadow = true;
         block.receiveShadow = true;
-        block.userData = { targetX: 0, targetY: 0, targetZ: 0, targetScale: 1, bandIndex: -1 };
+        block.userData = { targetX: 0, targetY: 0, targetZ: 0, targetScale: 1, bandIndex: -1, currentMaterial: '' };
         zoneGroup.group.add(block);
         zoneGroup.blocks.push(block);
     }
@@ -1014,15 +1052,7 @@ function updateMultiZoneEntities(zoneEntities, bands, showBlocks) {
 
             block.visible = showBlocks;
 
-            const bandIndex = Math.max(0, Math.min(4, Math.round(entity.band || 0)));
-            if (block.userData.bandIndex !== bandIndex) {
-                block.userData.bandIndex = bandIndex;
-                block.material.color.setHex(CONFIG.colors[bandIndex]);
-                block.material.emissive.setHex(CONFIG.colors[bandIndex]);
-            }
-
-            const bandValue = bands[bandIndex] || 0;
-            block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+            updateBlockMaterial(block, entity, bands);
         }
     }
 }

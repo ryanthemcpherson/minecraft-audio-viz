@@ -2575,23 +2575,43 @@ class AdminApp {
 
         const builtInScenes = ['Chill Lounge', 'EDM Stage', 'Rock Arena', 'Ambient'];
 
-        this.elements.scenesGrid.innerHTML = this.state.scenes.map(scene => {
+        this.elements.scenesGrid.replaceChildren();
+        this.state.scenes.forEach(scene => {
             const isBuiltIn = builtInScenes.includes(scene.name);
             const isActive = this.state.currentScene === scene.name;
-            const activeClass = isActive ? 'active' : '';
-            const builtInClass = isBuiltIn ? 'built-in' : '';
 
-            return `
-                <div class="scene-card ${activeClass} ${builtInClass}" data-scene="${scene.name}">
-                    ${!isBuiltIn ? `<button class="scene-card-delete" data-scene="${scene.name}">×</button>` : ''}
-                    <div class="scene-card-name">${scene.name}</div>
-                    <div class="scene-card-details">
-                        <div class="scene-card-pattern">${scene.pattern}</div>
-                        <div>${scene.preset} · ${scene.entity_count} blocks</div>
-                    </div>
-                </div>
-            `;
-        }).join('');
+            const card = document.createElement('div');
+            card.className = `scene-card${isActive ? ' active' : ''}${isBuiltIn ? ' built-in' : ''}`;
+            card.dataset.scene = scene.name;
+
+            if (!isBuiltIn) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'scene-card-delete';
+                deleteBtn.dataset.scene = scene.name;
+                deleteBtn.textContent = '\u00d7';
+                card.appendChild(deleteBtn);
+            }
+
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'scene-card-name';
+            nameDiv.textContent = scene.name;
+            card.appendChild(nameDiv);
+
+            const detailsDiv = document.createElement('div');
+            detailsDiv.className = 'scene-card-details';
+
+            const patternDiv = document.createElement('div');
+            patternDiv.className = 'scene-card-pattern';
+            patternDiv.textContent = scene.pattern;
+            detailsDiv.appendChild(patternDiv);
+
+            const infoDiv = document.createElement('div');
+            infoDiv.textContent = `${scene.preset} \u00b7 ${scene.entity_count} blocks`;
+            detailsDiv.appendChild(infoDiv);
+
+            card.appendChild(detailsDiv);
+            this.elements.scenesGrid.appendChild(card);
+        });
 
         // Add click handlers for scene cards
         this.elements.scenesGrid.querySelectorAll('.scene-card').forEach(card => {

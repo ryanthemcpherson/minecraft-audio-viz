@@ -24,6 +24,7 @@ import logging
 import math
 import os
 import posixpath
+import re
 import secrets
 import signal
 import socketserver
@@ -635,6 +636,13 @@ class VJServer:
         self._freeze = False
         self._active_effects = {}  # Active effects with end times
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
+        self._band_materials: List[Optional[str]] = [
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]  # Per-band block overrides
         # Visual-state shaping for snappier motion with less low-level wobble.
         self._visual_band_state = [0.0] * 5
         self._visual_deadzone = 0.03
@@ -2146,18 +2154,34 @@ class VJServer:
             "zone_patterns": self._get_zone_patterns_dict(),
         }
 
+    @staticmethod
+    def _sanitize_scene_name(name: str) -> str:
+        """Sanitize a scene name to prevent path traversal."""
+        sanitized = re.sub(r"[^a-zA-Z0-9_\- ]", "", name).strip()
+        if not sanitized:
+            raise ValueError("Invalid scene name")
+        return sanitized
+
     def _save_scene_to_file(self, name: str, scene_data: dict):
         """Save a scene to disk as JSON."""
+        name = self._sanitize_scene_name(name)
         scenes_dir = Path("configs/scenes")
         scenes_dir.mkdir(parents=True, exist_ok=True)
 
         scene_path = scenes_dir / f"{name}.json"
+        # Ensure resolved path stays within scenes_dir
+        if not scene_path.resolve().parent == scenes_dir.resolve():
+            raise ValueError("Invalid scene path")
         with open(scene_path, "w") as f:
             json.dump(scene_data, f, indent=2)
 
     def _load_scene_from_file(self, name: str) -> dict:
         """Load a scene from disk."""
-        scene_path = Path("configs/scenes") / f"{name}.json"
+        name = self._sanitize_scene_name(name)
+        scenes_dir = Path("configs/scenes")
+        scene_path = scenes_dir / f"{name}.json"
+        if not scene_path.resolve().parent == scenes_dir.resolve():
+            raise ValueError("Invalid scene path")
         if not scene_path.exists():
             raise FileNotFoundError(f"Scene '{name}' not found")
 
@@ -2166,7 +2190,11 @@ class VJServer:
 
     def _delete_scene_file(self, name: str):
         """Delete a scene file from disk."""
-        scene_path = Path("configs/scenes") / f"{name}.json"
+        name = self._sanitize_scene_name(name)
+        scenes_dir = Path("configs/scenes")
+        scene_path = scenes_dir / f"{name}.json"
+        if not scene_path.resolve().parent == scenes_dir.resolve():
+            raise ValueError("Invalid scene path")
         if not scene_path.exists():
             raise FileNotFoundError(f"Scene '{name}' not found")
         scene_path.unlink()
@@ -2312,6 +2340,7 @@ class VJServer:
                     "health_stats": self.get_health_stats(),
                     "minecraft_connected": mc_connected,
                     "pending_djs": pending_list,
+                    "band_materials": self._band_materials,
                     "visual_delay_ms": self._visual_delay_ms,
                     "visual_delay_mode": self._visual_delay_mode,
                     "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
@@ -2363,6 +2392,7 @@ class VJServer:
                                     "health_stats": self.get_health_stats(),
                                     "minecraft_connected": mc_status,
                                     "pending_djs": pending,
+                                    "band_materials": self._band_materials,
                                     "visual_delay_ms": self._visual_delay_ms,
                                     "visual_delay_mode": self._visual_delay_mode,
                                     "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
@@ -2605,6 +2635,24 @@ class VJServer:
                                 }
                             )
 
+                    elif msg_type == "set_band_materials":
+                        # Per-band block type overrides
+                        materials = data.get("materials", [None] * 5)
+                        if isinstance(materials, list) and len(materials) == 5:
+                            self._band_materials = [
+                                (m if isinstance(m, str) and m else None) for m in materials
+                            ]
+                            logger.info(f"Band materials set: {self._band_materials}")
+                            # Sync to all browser clients
+                            await self._broadcast_to_browsers(
+                                json.dumps(
+                                    {
+                                        "type": "band_materials_sync",
+                                        "materials": self._band_materials,
+                                    }
+                                )
+                            )
+
                     elif msg_type == "set_audio_setting":
                         # Apply audio settings locally (not forwarded to MC)
                         setting = data.get("setting")
@@ -2841,7 +2889,7 @@ class VJServer:
                     elif msg_type == "set_banner_profile":
                         dj_id = data.get("dj_id")
                         profile = data.get("profile", {})
-                        if dj_id:
+                        if dj_id and re.match(r"^[a-zA-Z0-9_\-]+$", dj_id):
                             self._dj_banner_profiles[dj_id] = profile
                             self._save_banner_profiles()
                             # If this DJ is currently active, push to Minecraft
@@ -2953,9 +3001,15 @@ class VJServer:
 
                     elif msg_type == "scan_stage_blocks":
                         # Forward to Minecraft and relay block scan response
+                        # Use longer timeout (30s) since scanning large stages is slow
                         stage = data.get("stage", "")
                         if self.viz_client and self.viz_client.connected:
-                            result = await self.viz_client.scan_stage_blocks(stage)
+                            saved_timeout = self.viz_client.connect_timeout
+                            self.viz_client.connect_timeout = 30.0
+                            try:
+                                result = await self.viz_client.scan_stage_blocks(stage)
+                            finally:
+                                self.viz_client.connect_timeout = saved_timeout
                             if result:
                                 await websocket.send(json.dumps(result))
                             else:
@@ -4828,6 +4882,18 @@ class VJServer:
                             zone_state.last_entities = zents
                             zone_entities[zone_name] = zents
                     calc_ms = (time.perf_counter() - calc_start) * 1000.0
+
+                    # Apply per-band material overrides to entities
+                    if any(self._band_materials):
+                        for zents in zone_entities.values():
+                            for ent in zents:
+                                if "material" not in ent:
+                                    band = ent.get("band", 0)
+                                    if 0 <= band < 5:
+                                        mat = self._band_materials[band]
+                                        if mat:
+                                            ent["material"] = mat
+
                 # For backward compat: entities for the active zone (used by browser broadcast)
                 entities = zone_entities.get(self.zone, [])
                 entities_count = len(entities)

@@ -100,8 +100,8 @@ pub struct AudioCaptureHandle {
     /// Command sender to control the audio thread
     command_tx: mpsc::Sender<AudioCommand>,
 
-    /// Handle to the audio thread
-    thread_handle: Option<JoinHandle<()>>,
+    /// Handle to the audio thread (wrapped in Mutex for Sync safety)
+    thread_handle: Mutex<Option<JoinHandle<()>>>,
 
     /// Latest analysis result (shared between threads)
     latest_result: Arc<Mutex<AnalysisResult>>,
@@ -113,12 +113,10 @@ pub struct AudioCaptureHandle {
     capture_mode: Arc<Mutex<CaptureMode>>,
 }
 
-// AudioCaptureHandle is now Send + Sync because it only contains:
+// AudioCaptureHandle is Send + Sync because all fields are:
 // - mpsc::Sender (Send + Sync)
-// - Option<JoinHandle> (Send)
-// - Arc<Mutex<AnalysisResult>> (Send + Sync)
-unsafe impl Send for AudioCaptureHandle {}
-unsafe impl Sync for AudioCaptureHandle {}
+// - Mutex<Option<JoinHandle>> (Send + Sync via Mutex)
+// - Arc<Mutex<...>> (Send + Sync)
 
 impl AudioCaptureHandle {
     /// Create new audio capture from source ID
@@ -162,7 +160,7 @@ impl AudioCaptureHandle {
 
         Ok(Self {
             command_tx,
-            thread_handle: Some(thread_handle),
+            thread_handle: Mutex::new(Some(thread_handle)),
             latest_result,
             analyzer,
             capture_mode,
@@ -185,9 +183,9 @@ impl AudioCaptureHandle {
     }
 
     /// Stop the audio capture
-    pub fn stop(&mut self) {
+    pub fn stop(&self) {
         let _ = self.command_tx.send(AudioCommand::Stop);
-        if let Some(handle) = self.thread_handle.take() {
+        if let Some(handle) = self.thread_handle.lock().take() {
             let _ = handle.join();
         }
     }
