@@ -35,6 +35,27 @@ pub enum CaptureError {
     ThreadError(String),
 }
 
+/// Capture mode indicator for UI feedback
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "mode")]
+pub enum CaptureMode {
+    /// Waiting for audio thread to report
+    #[serde(rename = "pending")]
+    Pending,
+    /// System-wide loopback capture
+    #[serde(rename = "system_loopback")]
+    SystemLoopback {
+        /// If this is a fallback from per-app capture, the reason
+        fallback_reason: Option<String>,
+    },
+    /// Per-process loopback capture (Windows only)
+    #[serde(rename = "process_loopback")]
+    ProcessLoopback { pid: u32, name: String },
+    /// Input device (microphone/line-in)
+    #[serde(rename = "input_device")]
+    InputDevice,
+}
+
 /// FFT analysis result (Send-safe)
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisResult {
@@ -87,6 +108,9 @@ pub struct AudioCaptureHandle {
 
     /// Shared FFT analyzer (for applying presets at runtime)
     analyzer: Arc<Mutex<FftAnalyzer>>,
+
+    /// Current capture mode (set by audio thread)
+    capture_mode: Arc<Mutex<CaptureMode>>,
 }
 
 // AudioCaptureHandle is now Send + Sync because it only contains:
@@ -116,6 +140,8 @@ impl AudioCaptureHandle {
         // once the device sample rate is known.
         let analyzer = Arc::new(Mutex::new(FftAnalyzer::new(AudioConfig::default())));
         let analyzer_clone = analyzer.clone();
+        let capture_mode = Arc::new(Mutex::new(CaptureMode::Pending));
+        let mode_clone = capture_mode.clone();
 
         // Spawn audio thread
         let thread_handle = thread::Builder::new()
@@ -127,6 +153,7 @@ impl AudioCaptureHandle {
                     result_clone,
                     voice_streamer,
                     analyzer_clone,
+                    mode_clone,
                 ) {
                     log::error!("Audio thread error: {}", e);
                 }
@@ -138,6 +165,7 @@ impl AudioCaptureHandle {
             thread_handle: Some(thread_handle),
             latest_result,
             analyzer,
+            capture_mode,
         })
     }
 
@@ -149,6 +177,11 @@ impl AudioCaptureHandle {
     /// Get the latest analysis result
     pub fn get_analysis(&self) -> AnalysisResult {
         self.latest_result.lock().clone()
+    }
+
+    /// Get the current capture mode
+    pub fn get_capture_mode(&self) -> CaptureMode {
+        self.capture_mode.lock().clone()
     }
 
     /// Stop the audio capture
@@ -215,6 +248,7 @@ fn run_audio_thread(
     result_out: Arc<Mutex<AnalysisResult>>,
     voice_streamer: Option<Arc<VoiceStreamer>>,
     shared_analyzer: Arc<Mutex<FftAnalyzer>>,
+    mode_out: Arc<Mutex<CaptureMode>>,
 ) -> Result<(), CaptureError> {
     let host = cpal::default_host();
 
@@ -229,6 +263,7 @@ fn run_audio_thread(
             // to capture system audio (loopback capture)
             log::info!("Using default output device for system audio loopback");
             is_loopback = true;
+            *mode_out.lock() = CaptureMode::SystemLoopback { fallback_reason: None };
             host.default_output_device()
                 .ok_or(CaptureError::NoOutputDevice)?
         }
@@ -237,6 +272,7 @@ fn run_audio_thread(
             let device_name = id.trim_start_matches("output:");
             log::info!("Using output device for loopback: {}", device_name);
             is_loopback = true;
+            *mode_out.lock() = CaptureMode::SystemLoopback { fallback_reason: None };
             host.output_devices()
                 .map_err(|e| CaptureError::ConfigError(e.to_string()))?
                 .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
@@ -244,6 +280,7 @@ fn run_audio_thread(
         }
         Some(id) if id.starts_with("input:") => {
             let device_name = id.trim_start_matches("input:");
+            *mode_out.lock() = CaptureMode::InputDevice;
             host.input_devices()
                 .map_err(|e| CaptureError::ConfigError(e.to_string()))?
                 .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
@@ -258,6 +295,7 @@ fn run_audio_thread(
                 .get(1)
                 .and_then(|p| p.parse::<u32>().ok())
                 .ok_or_else(|| CaptureError::SourceNotFound(format!("Invalid app source: {}", id)))?;
+            let app_name = parts.get(2).unwrap_or(&"unknown").to_string();
 
             if super::platform::windows::supports_process_loopback() {
                 log::info!("Using Process Loopback API for PID {}", pid);
@@ -276,6 +314,10 @@ fn run_audio_thread(
                             pid,
                             sample_rate,
                         );
+                        *mode_out.lock() = CaptureMode::ProcessLoopback {
+                            pid,
+                            name: app_name.clone(),
+                        };
 
                         // Resize buffer for actual sample rate
                         {
@@ -350,6 +392,9 @@ fn run_audio_thread(
                             pid,
                             e
                         );
+                        *mode_out.lock() = CaptureMode::SystemLoopback {
+                            fallback_reason: Some(e),
+                        };
                         is_loopback = true;
                         host.default_output_device()
                             .ok_or(CaptureError::NoOutputDevice)?
@@ -360,6 +405,12 @@ fn run_audio_thread(
                     "Process Loopback API not supported (Windows build < {}). Falling back to system loopback.",
                     20348
                 );
+                *mode_out.lock() = CaptureMode::SystemLoopback {
+                    fallback_reason: Some(format!(
+                        "Process Loopback API not supported (Windows build < {})",
+                        20348
+                    )),
+                };
                 is_loopback = true;
                 host.default_output_device()
                     .ok_or(CaptureError::NoOutputDevice)?
@@ -368,6 +419,9 @@ fn run_audio_thread(
         #[cfg(not(target_os = "windows"))]
         Some(id) if id.starts_with("app:") => {
             log::info!("Per-app capture not available on this platform, using system audio loopback");
+            *mode_out.lock() = CaptureMode::SystemLoopback {
+                fallback_reason: Some("Not available on this platform".to_string()),
+            };
             is_loopback = true;
             host.default_output_device()
                 .ok_or(CaptureError::NoOutputDevice)?
@@ -376,6 +430,7 @@ fn run_audio_thread(
             // Default: use loopback capture for system audio
             log::info!("Using default output device for system audio loopback");
             is_loopback = true;
+            *mode_out.lock() = CaptureMode::SystemLoopback { fallback_reason: None };
             host.default_output_device()
                 .ok_or(CaptureError::NoOutputDevice)?
         }

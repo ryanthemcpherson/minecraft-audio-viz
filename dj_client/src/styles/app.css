@@ -833,6 +833,61 @@ kbd {
   transition: width 0.05s linear;
 }
 
+/* Direct connect toggle */
+.direct-connect-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.direct-connect-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.direct-connect-fields {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.direct-connect-fields .input-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+  height: auto;
+}
+
+.direct-connect-fields .input-port {
+  max-width: 80px;
+}
+
+/* Capture mode feedback */
+.audio-source-connected {
+  padding: 8px 16px !important;
+}
+
+.capture-mode-warning {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  color: var(--accent-warm);
+  font-size: 12px;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.capture-mode-info {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
 /* Connection History */
 .connection-history {
   margin-top: 14px;

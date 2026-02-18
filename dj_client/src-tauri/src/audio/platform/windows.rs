@@ -14,7 +14,7 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use windows::core::{Interface, HRESULT, HSTRING, PCWSTR};
+use windows::core::{Interface, HRESULT};
 use windows::Win32::Foundation::{CloseHandle, E_FAIL, S_OK};
 use windows::Win32::Media::Audio::{
     eConsole, eRender, ActivateAudioInterfaceAsync, AudioSessionStateActive,
@@ -23,20 +23,29 @@ use windows::Win32::Media::Audio::{
     AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
     AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
     AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_LOOPBACK,
     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IActivateAudioInterfaceAsyncOperation,
     IActivateAudioInterfaceCompletionHandler,
-    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, WAVEFORMATEX,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
+    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
+    WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0,
+};
+use windows::Win32::Media::KernelStreaming::{
+    SPEAKER_FRONT_LEFT, SPEAKER_FRONT_RIGHT, WAVE_FORMAT_EXTENSIBLE,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    BLOB, IAgileObject,
 };
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+use windows::Win32::System::Com::StructuredStorage::{
+    PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+};
 use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
 use windows::Win32::System::SystemInformation::GetVersionExW;
 use windows::Win32::System::Threading::{
     CreateEventW, OpenProcess, SetEvent, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows::Win32::System::Variant::VT_BLOB;
 
 /// Minimum Windows build number that supports Process Loopback API
 const MIN_PROCESS_LOOPBACK_BUILD: u32 = 20348;
@@ -48,25 +57,35 @@ const REFTIMES_PER_SEC: i64 = 10_000_000;
 /// WAVE_FORMAT_IEEE_FLOAT tag value
 const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
 
+/// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT {00000003-0000-0010-8000-00aa00389b71}
+const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: windows::core::GUID = windows::core::GUID {
+    data1: 0x00000003,
+    data2: 0x0000,
+    data3: 0x0010,
+    data4: [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
+};
+
 /// Check if the current Windows build supports Process Loopback capture.
 ///
 /// Process Loopback requires Windows 10 Build 20348+ (21H2 / Windows Server 2022).
 pub fn supports_process_loopback() -> bool {
+    // Check registry first — GetVersionExW may report a stale build number
+    // without a proper application manifest declaring Windows 10 compatibility.
+    if let Some(build) = get_build_from_registry() {
+        log::info!("Windows build number (registry): {}", build);
+        return build >= MIN_PROCESS_LOOPBACK_BUILD;
+    }
+    // Fall back to GetVersionExW
     unsafe {
         let mut osvi = std::mem::zeroed::<windows::Win32::System::SystemInformation::OSVERSIONINFOW>();
         osvi.dwOSVersionInfoSize = std::mem::size_of::<windows::Win32::System::SystemInformation::OSVERSIONINFOW>() as u32;
         if GetVersionExW(&mut osvi).is_ok() {
             let build = osvi.dwBuildNumber;
-            log::info!("Windows build number: {}", build);
+            log::info!("Windows build number (GetVersionExW): {}", build);
             return build >= MIN_PROCESS_LOOPBACK_BUILD;
         }
-        // Fall back to registry
-        if let Some(build) = get_build_from_registry() {
-            log::info!("Windows build number (registry): {}", build);
-            return build >= MIN_PROCESS_LOOPBACK_BUILD;
-        }
-        false
     }
+    false
 }
 
 /// Read the CurrentBuildNumber from the registry as a fallback for version detection.
@@ -131,6 +150,7 @@ unsafe extern "system" fn ch_query_interface(
     let iid = &*riid;
     if *iid == IActivateAudioInterfaceCompletionHandler::IID
         || *iid == windows::core::IUnknown::IID
+        || *iid == IAgileObject::IID
     {
         (*this).ref_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         *ppv = this as *mut std::ffi::c_void;
@@ -210,32 +230,57 @@ impl Drop for ProcessLoopbackHandle {
 /// Start capturing audio from a specific process via the Process Loopback API.
 ///
 /// Returns a `ProcessLoopbackHandle` plus the sample rate and channel count.
+///
+/// Both the activation and capture loop run on a dedicated thread with guaranteed
+/// MTA COM initialization. This avoids conflicts with cpal or other libraries
+/// that may have initialized COM as STA on the calling thread (which causes
+/// ActivateAudioInterfaceAsync to fail with 0x8000000E / RPC_E_WRONG_THREAD).
 pub fn start_process_loopback(
     pid: u32,
     buffer: Arc<Mutex<super::super::capture::AudioBuffer>>,
     voice_streamer: Option<Arc<VoiceStreamer>>,
 ) -> Result<(ProcessLoopbackHandle, u32, u16), String> {
-    let (audio_client, sample_rate, channels) = unsafe { activate_process_loopback(pid)? };
-
     let (stop_tx, stop_rx) = std_mpsc::channel();
-
-    // Transfer IAudioClient across thread boundary using raw pointer
-    let client_ptr = unsafe {
-        let ptr = std::mem::transmute_copy::<IAudioClient, usize>(&audio_client);
-        std::mem::forget(audio_client);
-        ptr
-    };
+    let (init_tx, init_rx) = std_mpsc::channel::<Result<(u32, u16), String>>();
 
     let thread_handle = thread::Builder::new()
         .name(format!("process-loopback-{}", pid))
         .spawn(move || {
+            // Initialize COM as MTA FIRST — before anything else touches this thread.
+            // ActivateAudioInterfaceAsync requires MTA. If called from an STA thread,
+            // it returns E_ILLEGAL_METHOD_CALL (0x8000000E).
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+                // Use eprintln! for guaranteed visibility (env_logger defaults to error-only)
+                if hr.0 == 0 {
+                    eprintln!("[process-loopback] COM MTA initialized (S_OK)");
+                } else if hr.0 == 1 {
+                    eprintln!("[process-loopback] COM already MTA (S_FALSE)");
+                } else {
+                    eprintln!("[process-loopback] COM MTA init FAILED: HRESULT 0x{:08X}", hr.0 as u32);
+                    let _ = init_tx.send(Err(format!(
+                        "COM MTA initialization failed: HRESULT 0x{:08X}",
+                        hr.0 as u32
+                    )));
+                    return;
+                }
             }
 
-            let audio_client: IAudioClient =
-                unsafe { std::mem::transmute_copy::<usize, IAudioClient>(&client_ptr) };
+            // Activate the process loopback audio client on this clean MTA thread
+            let (audio_client, sample_rate, channels) =
+                match unsafe { activate_process_loopback(pid) } {
+                    Ok(result) => {
+                        let _ = init_tx.send(Ok((result.1, result.2)));
+                        result
+                    }
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e));
+                        unsafe { CoUninitialize(); }
+                        return;
+                    }
+                };
 
+            // Run the capture loop on this same thread — no cross-thread COM transfer needed
             if let Err(e) = run_process_capture_loop(
                 &audio_client,
                 channels as usize,
@@ -253,6 +298,11 @@ pub fn start_process_loopback(
         })
         .map_err(|e| format!("Failed to spawn process loopback thread: {}", e))?;
 
+    // Wait for the activation result from the dedicated MTA thread
+    let (sample_rate, channels) = init_rx
+        .recv()
+        .map_err(|_| "Process loopback thread died during activation".to_string())??;
+
     Ok((
         ProcessLoopbackHandle {
             stop_tx,
@@ -264,55 +314,70 @@ pub fn start_process_loopback(
 }
 
 /// Activate an IAudioClient for process loopback capture.
+///
+/// MUST be called from a thread with MTA COM initialization.
 unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16), String> {
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    // COM must already be initialized as MTA by the caller (start_process_loopback).
 
     let event = CreateEventW(None, true, false, None)
         .map_err(|e| format!("CreateEvent failed: {}", e))?;
 
     // Build activation parameters
-    let loopback_params = AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
-        TargetProcessId: pid,
-        ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-    };
-
-    let activation_params = AUDIOCLIENT_ACTIVATION_PARAMS {
+    let mut activation_params = AUDIOCLIENT_ACTIVATION_PARAMS {
         ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
         Anonymous: windows::Win32::Media::Audio::AUDIOCLIENT_ACTIVATION_PARAMS_0 {
-            ProcessLoopbackParams: loopback_params,
+            ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
+                TargetProcessId: pid,
+                ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
+            },
         },
     };
 
-    // Build PROPVARIANT with VT_BLOB pointing to our activation params.
-    // PROPVARIANT layout: vt(u16) + 6 reserved bytes + union data
-    // VT_BLOB has cbSize(u32) + pBlobData(*mut u8) in the union
-    let mut prop_bytes = vec![0u8; std::mem::size_of::<PROPVARIANT>()];
-    // VT_BLOB = 0x0041 = 65
-    prop_bytes[0] = 65;
-    prop_bytes[1] = 0;
-    // Union starts at offset 8
-    let blob_size = std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32;
-    prop_bytes[8..12].copy_from_slice(&blob_size.to_le_bytes());
-    // Pointer at offset 16 on 64-bit (8 + 4 cbSize + 4 padding for alignment)
-    let ptr_offset = if std::mem::size_of::<usize>() == 8 { 16 } else { 12 };
-    let ptr_val = &activation_params as *const _ as usize;
-    prop_bytes[ptr_offset..ptr_offset + std::mem::size_of::<usize>()]
-        .copy_from_slice(&ptr_val.to_le_bytes());
+    // Build PROPVARIANT with VT_BLOB using type-safe construction.
+    // This avoids fragile raw byte-offset poking and matches the wasapi-rs pattern.
+    // ManuallyDrop on the outer PROPVARIANT prevents PropVariantClear from running,
+    // which would try to CoTaskMemFree pBlobData (our stack-local activation_params).
+    let prop_variant = std::mem::ManuallyDrop::new(PROPVARIANT {
+        Anonymous: PROPVARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
+                vt: VT_BLOB,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: PROPVARIANT_0_0_0 {
+                    blob: BLOB {
+                        cbSize: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
+                        pBlobData: &mut activation_params as *mut _ as *mut u8,
+                    },
+                },
+            }),
+        },
+    });
 
-    let prop_variant: &PROPVARIANT = &*(prop_bytes.as_ptr() as *const PROPVARIANT);
+    eprintln!(
+        "[process-loopback] Activating PID={}, PROPVARIANT size={}, params_size={}, align={}",
+        pid,
+        std::mem::size_of::<PROPVARIANT>(),
+        std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>(),
+        std::mem::align_of::<PROPVARIANT>(),
+    );
 
     // Create completion handler
     let handler = create_completion_handler(event);
 
-    let device_id = HSTRING::from("VAD\\Process_Loopback");
-
+    // Use the SDK constant for the device ID
     let operation: IActivateAudioInterfaceAsyncOperation = ActivateAudioInterfaceAsync(
-        PCWSTR(device_id.as_ptr()),
+        VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
         &IAudioClient::IID,
-        Some(prop_variant),
+        Some(&*prop_variant as *const PROPVARIANT),
         &handler,
     )
-    .map_err(|e| format!("ActivateAudioInterfaceAsync failed: {}", e))?;
+    .map_err(|e| {
+        eprintln!("[process-loopback] ActivateAudioInterfaceAsync FAILED: {} (PID {})", e, pid);
+        format!("ActivateAudioInterfaceAsync failed: {} (PID {})", e, pid)
+    })?;
+
+    eprintln!("[process-loopback] ActivateAudioInterfaceAsync call succeeded, waiting for completion...");
 
     // Wait for completion (5 second timeout)
     let wait_result = WaitForSingleObject(event, 5000);
@@ -335,69 +400,75 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         ));
     }
 
+    eprintln!("[process-loopback] Audio interface activated successfully");
+
     let unknown = activated_interface.ok_or("No audio interface returned")?;
     let audio_client: IAudioClient = unknown
         .cast()
         .map_err(|e| format!("Failed to cast to IAudioClient: {}", e))?;
 
-    // Get the device's mix format
-    let mix_format_ptr = audio_client
-        .GetMixFormat()
-        .map_err(|e| format!("GetMixFormat failed: {}", e))?;
-
-    let mix_format = &*mix_format_ptr;
-    let sample_rate = mix_format.nSamplesPerSec;
-    let channels = mix_format.nChannels;
-    let bits_per_sample = mix_format.wBitsPerSample;
-
-    log::info!(
-        "Process loopback mix format: {}Hz, {} channels, {} bits",
-        sample_rate,
-        channels,
-        bits_per_sample
-    );
-
-    // Create desired format: f32
-    let block_align = channels * 4;
-    let desired_format = WAVEFORMATEX {
-        wFormatTag: WAVE_FORMAT_IEEE_FLOAT,
-        nChannels: channels,
-        nSamplesPerSec: sample_rate,
-        nAvgBytesPerSec: sample_rate * block_align as u32,
-        nBlockAlign: block_align,
-        wBitsPerSample: 32,
-        cbSize: 0,
+    // GetMixFormat may return E_NOTIMPL for process loopback clients.
+    // Use system default (48kHz stereo f32) as fallback.
+    let (sample_rate, channels) = match audio_client.GetMixFormat() {
+        Ok(mix_format_ptr) => {
+            let mix_format = &*mix_format_ptr;
+            let sr = mix_format.nSamplesPerSec;
+            let ch = mix_format.nChannels;
+            let bits = mix_format.wBitsPerSample;
+            eprintln!("[process-loopback] Mix format: {}Hz, {} ch, {} bits", sr, ch, bits);
+            windows::Win32::System::Com::CoTaskMemFree(Some(mix_format_ptr as *const _ as *const _));
+            (sr, ch)
+        }
+        Err(e) => {
+            eprintln!("[process-loopback] GetMixFormat returned {}, using 48kHz stereo fallback", e);
+            (48000u32, 2u16)
+        }
     };
 
-    // Initialize with auto-convert flags, 20ms buffer.
-    // NOTE: Do NOT pass AUDCLNT_STREAMFLAGS_LOOPBACK here — the Process Loopback
-    // activation already implies loopback capture for the target process. Passing
-    // the flag would override it with system-wide loopback (capturing all audio).
+    // Create desired format: 32-bit float via WAVEFORMATEXTENSIBLE.
+    // Process loopback clients may reject bare WAVEFORMATEX with WAVE_FORMAT_IEEE_FLOAT.
+    // WAVEFORMATEXTENSIBLE with SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT is universally accepted.
+    let block_align = (channels as u32 * 32) / 8; // 4 bytes per sample * channels
+    let desired_format = WAVEFORMATEXTENSIBLE {
+        Format: WAVEFORMATEX {
+            wFormatTag: WAVE_FORMAT_EXTENSIBLE as u16,
+            nChannels: channels,
+            nSamplesPerSec: sample_rate,
+            nAvgBytesPerSec: sample_rate * block_align,
+            nBlockAlign: block_align as u16,
+            wBitsPerSample: 32,
+            cbSize: (std::mem::size_of::<WAVEFORMATEXTENSIBLE>()
+                - std::mem::size_of::<WAVEFORMATEX>()) as u16,
+        },
+        Samples: WAVEFORMATEXTENSIBLE_0 { wValidBitsPerSample: 32 },
+        dwChannelMask: SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT,
+        SubFormat: KSDATAFORMAT_SUBTYPE_IEEE_FLOAT,
+    };
+
+    // Initialize with loopback + auto-convert flags, 20ms buffer.
+    // AUDCLNT_STREAMFLAGS_LOOPBACK is required — both wasapi-rs and Microsoft samples include it.
     let buffer_duration = REFTIMES_PER_SEC / 50;
     audio_client
         .Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+            AUDCLNT_STREAMFLAGS_LOOPBACK
+                | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
                 | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
             buffer_duration,
             0,
-            &desired_format,
+            &desired_format.Format,
             None,
         )
-        .map_err(|e| format!("IAudioClient::Initialize failed: {}", e))?;
+        .map_err(|e| format!("IAudioClient::Initialize failed: 0x{:08X}", e.code().0 as u32))?;
 
     audio_client
         .Start()
         .map_err(|e| format!("IAudioClient::Start failed: {}", e))?;
 
-    log::info!(
-        "Process loopback capture started for PID {} ({}Hz, {} ch)",
-        pid,
-        sample_rate,
-        channels
+    eprintln!(
+        "[process-loopback] Capture started for PID {} ({}Hz, {} ch)",
+        pid, sample_rate, channels
     );
-
-    CoTaskMemFree(Some(mix_format_ptr as *const _ as *const _));
 
     Ok((audio_client, sample_rate, channels as u16))
 }
