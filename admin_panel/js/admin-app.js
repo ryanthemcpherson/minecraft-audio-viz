@@ -1468,14 +1468,14 @@ class AdminApp {
             this._showToast('No stage selected', 'warning');
             return;
         }
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        if (!this.ws || !this.ws.isConnected) {
             this._showToast('Not connected', 'error');
             return;
         }
-        this.ws.send(JSON.stringify({
+        this.ws.send({
             type: 'scan_stage_blocks',
             stage: this.state.selectedStage
-        }));
+        });
         this._showToast('Scanning stage blocks...', 'info');
     }
 
@@ -3999,8 +3999,8 @@ class AdminApp {
 
             // Auto-scan stage blocks on first multi-zone preview
             if (!this._stageBlocksScanned && this.state.selectedStage
-                && this.ws && this.ws.readyState === WebSocket.OPEN
-                && this.state.mcStatus === 'connected') {
+                && this.ws && this.ws.isConnected
+                && this.state.minecraftConnected) {
                 this._stageBlocksScanned = true;
                 this._scanStageBlocks();
             }
