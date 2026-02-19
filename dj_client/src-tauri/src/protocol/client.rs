@@ -439,6 +439,21 @@ impl DjClient {
         Ok(())
     }
 
+    /// Send the DJ's block palette to the VJ server.
+    pub async fn send_palette(&self, materials: Vec<Option<String>>) -> Result<(), ClientError> {
+        let tx = self.tx.as_ref().ok_or(ClientError::NotConnected)?;
+        let msg = serde_json::json!({
+            "type": "set_my_palette",
+            "band_materials": materials
+        });
+        let json =
+            serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
+        tx.send(Message::Text(json.into()))
+            .await
+            .map_err(|e| ClientError::SendError(e.to_string()))?;
+        Ok(())
+    }
+
     /// Disconnect from server
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         if let Some(ref shutdown) = self.shutdown_tx {

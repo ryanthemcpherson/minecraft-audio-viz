@@ -42,6 +42,26 @@ def _serialize_color_palette(colors: list[str] | None) -> str | None:
     return json.dumps(colors)
 
 
+def _parse_block_palette(raw: str | None) -> list[str | None] | None:
+    """Deserialize block_palette from JSON string to list."""
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def _serialize_block_palette(blocks: list[str | None] | None) -> str | None:
+    """Serialize block_palette list to JSON string for storage."""
+    if blocks is None:
+        return None
+    return json.dumps(blocks)
+
+
 def _profile_response(profile: DJProfile) -> DJProfileResponse:
     return DJProfileResponse(
         id=profile.id,
@@ -52,6 +72,7 @@ def _profile_response(profile: DJProfile) -> DJProfileResponse:
         avatar_url=profile.avatar_url,
         banner_url=profile.banner_url,
         color_palette=_parse_color_palette(profile.color_palette),
+        block_palette=_parse_block_palette(profile.block_palette),
         slug=profile.slug,
         soundcloud_url=profile.soundcloud_url,
         spotify_url=profile.spotify_url,
@@ -102,6 +123,7 @@ async def create_profile(
         genres=body.genres,
         slug=body.slug,
         color_palette=_serialize_color_palette(body.color_palette),
+        block_palette=_serialize_block_palette(body.block_palette),
         soundcloud_url=body.soundcloud_url or None,
         spotify_url=body.spotify_url or None,
         website_url=body.website_url or None,
@@ -160,6 +182,8 @@ async def update_profile(
         profile.slug = body.slug
     if body.color_palette is not None:
         profile.color_palette = _serialize_color_palette(body.color_palette)
+    if body.block_palette is not None:
+        profile.block_palette = _serialize_block_palette(body.block_palette)
     if body.avatar_url is not None:
         profile.avatar_url = body.avatar_url
     if body.banner_url is not None:

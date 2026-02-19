@@ -366,6 +366,7 @@ class ZonePatternState:
     transition_pending_resize: Optional[int] = None
     minecraft_pool_size: int = 0
     last_entities: List[dict] = field(default_factory=list)
+    block_type: str = "SEA_LANTERN"
 
 
 @dataclass
@@ -643,6 +644,8 @@ class VJServer:
             None,
             None,
         ]  # Per-band block overrides
+        self._dj_palettes: Dict[str, list] = {}  # dj_id -> 5-element block palette
+        self._band_materials_source: str = "default"  # "default" | "dj_palette" | "admin"
         # Visual-state shaping for snappier motion with less low-level wobble.
         self._visual_band_state = [0.0] * 5
         self._visual_deadzone = 0.03
@@ -1535,6 +1538,28 @@ class VJServer:
                         if dj.dj_id == self._active_dj_id:
                             await self._relay_voice_audio(data)
 
+                    elif msg_type == "set_my_palette":
+                        palette = data.get("band_materials")
+                        if isinstance(palette, list) and len(palette) == 5:
+                            cleaned = [(m if isinstance(m, str) and m else None) for m in palette]
+                            self._dj_palettes[dj.dj_id] = cleaned
+                            logger.info(f"DJ {dj.dj_name} set block palette: {cleaned}")
+                            # If this DJ is currently active, apply immediately
+                            if dj.dj_id == self._active_dj_id:
+                                self._band_materials = list(cleaned)
+                                self._band_materials_source = "dj_palette"
+                                await self._broadcast_to_browsers(
+                                    json.dumps(
+                                        {
+                                            "type": "band_materials_sync",
+                                            "materials": self._band_materials,
+                                            "source": self._band_materials_source,
+                                        }
+                                    )
+                                )
+                        else:
+                            logger.warning(f"Invalid set_my_palette from DJ {dj.dj_id}")
+
                     elif msg_type == "going_offline":
                         logger.info(
                             f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully"
@@ -1567,6 +1592,7 @@ class VJServer:
                     if dj_id in self._djs:
                         dj_name = self._djs[dj_id].dj_name
                         del self._djs[dj_id]
+                        self._dj_palettes.pop(dj_id, None)
                         if dj_id in self._dj_queue:
                             self._dj_queue.remove(dj_id)
                         logger.info(f"[DJ DISCONNECT] {dj_name} ({dj_id})")
@@ -1920,6 +1946,15 @@ class VJServer:
         self._active_dj_id = dj_id
         self._beat_predictor.reset()
 
+        # Apply DJ's block palette (if set)
+        palette = self._dj_palettes.get(dj_id)
+        if palette and any(m is not None for m in palette):
+            self._band_materials = list(palette)
+            self._band_materials_source = "dj_palette"
+        else:
+            self._band_materials = [None, None, None, None, None]
+            self._band_materials_source = "default"
+
         logger.info(f"Active DJ: {self._djs[dj_id].dj_name}")
 
         # Take snapshot for notification (release lock during network IO)
@@ -1940,6 +1975,17 @@ class VJServer:
                 logger.debug(f"Failed to send stream route to DJ {did}: {e}")
 
         await self._broadcast_dj_roster()
+
+        # Broadcast band materials after DJ switch
+        await self._broadcast_to_browsers(
+            json.dumps(
+                {
+                    "type": "band_materials_sync",
+                    "materials": self._band_materials,
+                    "source": self._band_materials_source,
+                }
+            )
+        )
 
         # Send dj_info to Minecraft for stage decorators (billboard, transitions)
         await self._send_dj_info_to_minecraft(dj_id)
@@ -2150,7 +2196,7 @@ class VJServer:
             "release": self._pattern_config.release,
             "beat_threshold": self._pattern_config.beat_threshold,
             "entity_count": self.entity_count,
-            "block_type": "SEA_LANTERN",
+            "block_type": self._get_zone_state(self.zone).block_type,
             "zone_patterns": self._get_zone_patterns_dict(),
         }
 
@@ -2341,6 +2387,7 @@ class VJServer:
                     "minecraft_connected": mc_connected,
                     "pending_djs": pending_list,
                     "band_materials": self._band_materials,
+                    "band_materials_source": self._band_materials_source,
                     "visual_delay_ms": self._visual_delay_ms,
                     "visual_delay_mode": self._visual_delay_mode,
                     "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
@@ -2393,6 +2440,7 @@ class VJServer:
                                     "minecraft_connected": mc_status,
                                     "pending_djs": pending,
                                     "band_materials": self._band_materials,
+                                    "band_materials_source": self._band_materials_source,
                                     "visual_delay_ms": self._visual_delay_ms,
                                     "visual_delay_mode": self._visual_delay_mode,
                                     "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
@@ -2561,8 +2609,9 @@ class VJServer:
                                 try:
                                     # Cleanup old entities before reinitializing with new count
                                     await self.viz_client.cleanup_zone(self.zone)
+                                    zone_bt = self._get_zone_state(self.zone).block_type
                                     await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, "SEA_LANTERN"
+                                        self.zone, self.entity_count, zone_bt
                                     )
                                 except Exception as e:
                                     logger.warning(f"Failed to update Minecraft pool: {e}")
@@ -2578,8 +2627,9 @@ class VJServer:
                             # Re-init Minecraft pool in new zone
                             if self.viz_client and self.viz_client.connected:
                                 try:
+                                    zone_bt = self._get_zone_state(self.zone).block_type
                                     await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, "SEA_LANTERN"
+                                        self.zone, self.entity_count, zone_bt
                                     )
                                 except Exception as e:
                                     logger.warning(f"Failed to init Minecraft pool: {e}")
@@ -2642,6 +2692,7 @@ class VJServer:
                             self._band_materials = [
                                 (m if isinstance(m, str) and m else None) for m in materials
                             ]
+                            self._band_materials_source = "admin"
                             logger.info(f"Band materials set: {self._band_materials}")
                             # Sync to all browser clients
                             await self._broadcast_to_browsers(
@@ -2649,6 +2700,7 @@ class VJServer:
                                     {
                                         "type": "band_materials_sync",
                                         "materials": self._band_materials,
+                                        "source": self._band_materials_source,
                                     }
                                 )
                             )
@@ -3209,6 +3261,15 @@ class VJServer:
                                     # Sync to all DJs and browser clients
                                     await self._broadcast_config_sync_to_djs()
                                     await self._broadcast_config_to_browsers()
+                                # Sync block type to zone state
+                                new_block_type = config.get("block_type")
+                                if new_block_type:
+                                    zone_name = data.get("zone", self.zone)
+                                    zs = self._get_zone_state(zone_name)
+                                    zs.block_type = new_block_type
+                                    logger.info(
+                                        f"Block type synced for zone '{zone_name}': {new_block_type}"
+                                    )
                                 # Sync scale settings to pattern config
                                 if "base_scale" in config:
                                     self._pattern_config.base_scale = float(config["base_scale"])
@@ -3824,7 +3885,9 @@ class VJServer:
 
         try:
             await asyncio.wait_for(
-                self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN"),
+                self.viz_client.init_pool(
+                    self.zone, self.entity_count, self._get_zone_state(self.zone).block_type
+                ),
                 timeout=5.0,
             )
         except asyncio.TimeoutError:
@@ -4239,7 +4302,7 @@ class VJServer:
                 try:
                     if zone_state.entity_count > old_count:
                         await self.viz_client.init_pool(
-                            zone_name, zone_state.entity_count, "SEA_LANTERN"
+                            zone_name, zone_state.entity_count, zone_state.block_type
                         )
                     else:
                         zone_state.transition_pending_resize = zone_state.entity_count
@@ -4267,7 +4330,7 @@ class VJServer:
                 try:
                     await self.viz_client.cleanup_zone(zone_name)
                     await self.viz_client.init_pool(
-                        zone_name, zone_state.entity_count, "SEA_LANTERN"
+                        zone_name, zone_state.entity_count, zone_state.block_type
                     )
                 except Exception as e:
                     logger.warning(
@@ -4314,7 +4377,7 @@ class VJServer:
                     if self.viz_client and self.viz_client.connected:
                         asyncio.ensure_future(
                             self.viz_client.init_pool(
-                                zone_name or self.zone, pending, "SEA_LANTERN"
+                                zone_name or self.zone, pending, zone_state.block_type
                             )
                         )
                 return zone_state.pattern.calculate_entities(audio_state)
@@ -4361,8 +4424,9 @@ class VJServer:
                     pending = self._transition_pending_resize
                     self._transition_pending_resize = None
                     if self.viz_client and self.viz_client.connected:
+                        zone_bt = self._get_zone_state(self.zone).block_type
                         asyncio.ensure_future(
-                            self.viz_client.init_pool(self.zone, pending, "SEA_LANTERN")
+                            self.viz_client.init_pool(self.zone, pending, zone_bt)
                         )
                 entities = self._current_pattern.calculate_entities(audio_state)
                 logger.info(
@@ -4433,6 +4497,10 @@ class VJServer:
                     "band": new_e.get("band", old_e.get("band", 0)),
                     "visible": True,
                 }
+                # Prefer new pattern's material (new pattern takes over appearance)
+                mat = new_e.get("material") or old_e.get("material")
+                if mat:
+                    blended_e["material"] = mat
             elif new_e:
                 # Split: entity only in new pattern — emerge from a sibling's position
                 sibling_id = self._get_sibling_id(eid, old_count)
@@ -4456,6 +4524,10 @@ class VJServer:
                     # No sibling found — fade in
                     blended_e = new_e.copy()
                     blended_e["scale"] = new_e.get("scale", 0.5) * alpha
+                # Use new entity's material
+                mat = new_e.get("material")
+                if mat:
+                    blended_e["material"] = mat
             else:
                 # Merge: entity only in old pattern — collapse into a sibling's position
                 sibling_id = self._get_sibling_id(eid, new_count)
@@ -4479,6 +4551,10 @@ class VJServer:
                     # No sibling found — fade out
                     blended_e = old_e.copy()
                     blended_e["scale"] = old_e.get("scale", 0.5) * (1.0 - alpha)
+                # Keep old entity's material while fading out
+                mat = old_e.get("material")
+                if mat:
+                    blended_e["material"] = mat
 
             blended.append(blended_e)
 

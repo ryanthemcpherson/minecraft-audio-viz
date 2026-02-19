@@ -86,6 +86,7 @@ class AdminApp {
             },
             // Band material overrides (per-band block types)
             bandMaterials: [null, null, null, null, null],
+            bandMaterialsSource: 'default',
             // Voice chat state
             voiceChat: {
                 available: false,
@@ -780,6 +781,8 @@ class AdminApp {
             }
             this.state.bandMaterials = materials;
             this.ws.send({ type: 'set_band_materials', materials });
+            this.state.bandMaterialsSource = 'admin';
+            this._updateBandMaterialsSourceHint();
         }, 100);
 
         for (let i = 0; i < 5; i++) {
@@ -1046,6 +1049,10 @@ class AdminApp {
                 if (data.band_materials) {
                     this._syncBandMaterials(data.band_materials);
                 }
+                if (data.band_materials_source) {
+                    this.state.bandMaterialsSource = data.band_materials_source;
+                }
+                this._updateBandMaterialsSourceHint();
                 // Handle visual sync state
                 if (data.visual_delay_ms !== undefined) {
                     this.state.visualDelayMs = data.visual_delay_ms;
@@ -1108,6 +1115,10 @@ class AdminApp {
                 if (data.materials) {
                     this._syncBandMaterials(data.materials);
                 }
+                if (data.source) {
+                    this.state.bandMaterialsSource = data.source;
+                }
+                this._updateBandMaterialsSourceHint();
                 break;
 
             case 'visual_delay_sync':
@@ -2203,6 +2214,23 @@ class AdminApp {
             if (el) {
                 el.value = materials[i] || '';
             }
+        }
+    }
+
+    _updateBandMaterialsSourceHint() {
+        const el = document.getElementById('band-materials-source-hint');
+        if (!el) return;
+
+        if (this.state.bandMaterialsSource === 'dj_palette') {
+            const activeDj = this.state.djRoster?.find(d => d.dj_id === this.state.activeDJ);
+            const djName = activeDj ? activeDj.dj_name : 'DJ';
+            el.textContent = `Using ${djName}'s palette`;
+            el.style.color = '#4ecdc4';
+        } else if (this.state.bandMaterialsSource === 'admin') {
+            el.textContent = 'Manually overridden by admin';
+            el.style.color = '#ff6b6b';
+        } else {
+            el.textContent = '';
         }
     }
 
