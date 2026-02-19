@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-audio-frame.schema.json",
+  "title": "DjAudioFrameMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_audio_frame"
+    },
+    "v": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts": {
+      "type": "number"
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "peak": {
+      "type": "number",
+      "minimum": 0
+    },
+    "beat": {
+      "type": "boolean"
+    },
+    "beat_i": {
+      "type": "number",
+      "minimum": 0
+    },
+    "bpm": {
+      "type": "number",
+      "minimum": 0
+    },
+    "i_bass": {
+      "type": "number",
+      "minimum": 0
+    },
+    "i_kick": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "seq", "ts", "bands", "peak", "beat", "beat_i", "bpm"]
+}

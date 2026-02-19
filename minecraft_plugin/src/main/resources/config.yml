@@ -1,0 +1,25 @@
+# AudioViz Plugin Configuration
+
+# WebSocket server settings
+websocket:
+  # Port for the WebSocket server
+  port: 8765
+
+# Default visualization settings
+defaults:
+  # Default entity count when initializing pools
+  entity_count: 16
+
+  # Default block material for block displays
+  material: GLOWSTONE
+
+  # Entity interpolation duration (ticks)
+  interpolation_duration: 2
+
+# Performance settings
+performance:
+  # Maximum entities per zone
+  max_entities_per_zone: 100
+
+  # Batch update interval (ticks) - entities will be updated at most this often
+  min_update_interval: 1

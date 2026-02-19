@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hologram-config.schema.json",
+  "title": "HologramConfig",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "text_mode": {
+      "type": "string",
+      "enum": ["bars", "labels", "both"]
+    },
+    "max_lines": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    },
+    "line_spacing": {
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 2
+    },
+    "billboard": {
+      "type": "boolean"
+    },
+    "shadow": {
+      "type": "boolean"
+    },
+    "color_mode": {
+      "type": "string",
+      "enum": ["fixed", "frequency", "intensity", "rainbow"]
+    },
+    "fixed_color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "scale": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 10
+    },
+    "z_offset": {
+      "type": "number",
+      "minimum": -16,
+      "maximum": 16
+    }
+  }
+}

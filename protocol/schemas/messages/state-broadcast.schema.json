@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "state-broadcast.schema.json",
+  "title": "StateBroadcastMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "enum": ["state", "audio"]
+    },
+    "v": {
+      "type": "string"
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "amplitude": {
+      "type": "number",
+      "minimum": 0
+    },
+    "is_beat": {
+      "type": "boolean"
+    },
+    "beat_intensity": {
+      "type": "number",
+      "minimum": 0
+    },
+    "bpm": {
+      "type": "number",
+      "minimum": 0
+    },
+    "frame": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "latency_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "pattern": {
+      "type": "string"
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "../types/entity-update.schema.json"
+      }
+    },
+    "instant_bass": {
+      "type": "number",
+      "minimum": 0
+    },
+    "instant_kick": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "bands", "amplitude", "is_beat", "beat_intensity"]
+}

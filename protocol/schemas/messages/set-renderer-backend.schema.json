@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-renderer-backend.schema.json",
+  "title": "SetRendererBackendMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_renderer_backend"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "backend": {
+      "$ref": "../types/renderer-backend.schema.json"
+    },
+    "fallback_backend": {
+      "$ref": "../types/renderer-backend.schema.json"
+    }
+  },
+  "required": ["type", "zone", "backend"]
+}

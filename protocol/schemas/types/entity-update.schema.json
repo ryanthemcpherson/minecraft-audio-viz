@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "entity-update.schema.json",
+  "title": "EntityUpdate",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "x": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "y": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "z": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "scale": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "rotation": {
+      "type": "number"
+    },
+    "band": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "visible": {
+      "type": "boolean"
+    },
+    "text": {
+      "type": "string"
+    },
+    "material": {
+      "type": "string"
+    }
+  },
+  "required": ["id"]
+}

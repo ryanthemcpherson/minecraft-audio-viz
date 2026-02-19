@@ -1,0 +1,62 @@
+[package]
+name = "dj-client"
+version = "1.0.0"
+description = "AudioViz DJ Client - Connect to VJ servers and stream audio visualizations"
+authors = ["AudioViz Team"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "dj_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full", "sync", "rt-multi-thread", "macros"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+rustfft = "6"
+cpal = "0.15"
+log = "0.4"
+env_logger = "0.10"
+thiserror = "1"
+rand = "0.8"
+parking_lot = "0.12"
+
+# Windows-specific dependencies for WASAPI per-app capture
+# Currently disabled - using system audio capture via cpal instead
+# TODO: Re-enable for per-app capture feature
+# [target.'cfg(windows)'.dependencies]
+# windows = { version = "0.52", features = [
+#     "Win32_Foundation",
+#     "Win32_Media_Audio",
+#     "Win32_System_Com",
+#     "Win32_System_Ole",
+#     "Win32_System_ProcessStatus",
+#     "Win32_System_Threading"
+# ] }
+
+# macOS-specific dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
+# screencapturekit-rs = "0.2"  # For future macOS per-app capture
+
+# Linux-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+# libpulse-binding = "2"  # For future Linux per-app capture
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "renderer-backend.schema.json",
+  "title": "RendererBackend",
+  "type": "string",
+  "enum": ["display_entities", "particles", "hologram"]
+}

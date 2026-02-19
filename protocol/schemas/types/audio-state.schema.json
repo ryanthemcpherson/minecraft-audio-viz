@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audio-state.schema.json",
+  "title": "AudioState",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "bands": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "amplitude": {
+      "type": "number",
+      "minimum": 0
+    },
+    "is_beat": {
+      "type": "boolean"
+    },
+    "beat_intensity": {
+      "type": "number",
+      "minimum": 0
+    },
+    "bpm": {
+      "type": "number",
+      "minimum": 0
+    },
+    "frame": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": ["bands", "amplitude", "is_beat", "beat_intensity"]
+}

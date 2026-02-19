@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.eggs
+dist
+build
+*.egg
+
+# Java/Maven
+minecraft_plugin/target
+*.jar
+*.class
+
+# Node
+node_modules
+.npm
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.local.json
+
+# Documentation
+*.md
+!INSTALLATION.md
+docs/
+
+# Tests
+**/tests
+**/*.test.js
+**/*.test.py
+.pytest_cache
+.coverage
+
+# Temporary
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Scratchpad
+scratchpad/

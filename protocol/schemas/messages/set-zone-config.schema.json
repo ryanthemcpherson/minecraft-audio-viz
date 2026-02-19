@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-zone-config.schema.json",
+  "title": "SetZoneConfigMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_zone_config"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "entity_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "block_type": {
+          "type": "string"
+        },
+        "base_scale": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_scale": {
+          "type": "number",
+          "minimum": 0
+        },
+        "brightness": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "interpolation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "glow_on_beat": {
+          "type": "boolean"
+        },
+        "dynamic_brightness": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "y": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "z": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "rotation": {
+          "type": "number"
+        },
+        "show_bpm": {
+          "type": "boolean"
+        },
+        "show_pattern": {
+          "type": "boolean"
+        },
+        "show_bands": {
+          "type": "boolean"
+        },
+        "render_mode": {
+          "type": "string",
+          "enum": ["entities", "particles", "hybrid"]
+        },
+        "particle_viz": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "particle_type": {
+              "type": "string"
+            },
+            "density": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "color_mode": {
+              "type": "string"
+            },
+            "fixed_color": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "particle_size": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 10
+            },
+            "trail": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["type", "zone", "config"]
+}

@@ -1,0 +1,28 @@
+name: AudioViz
+version: ${project.version}
+main: com.audioviz.AudioVizPlugin
+api-version: '1.20'
+description: Discord audio visualization in Minecraft using Display Entities
+
+authors:
+  - AudioViz Team
+
+commands:
+  audioviz:
+    description: Main AudioViz command
+    usage: /<command> <subcommand>
+    aliases: [av, viz, mcav]
+
+permissions:
+  audioviz.admin:
+    description: Full access to AudioViz commands
+    default: op
+  audioviz.zone:
+    description: Manage visualization zones
+    default: op
+  audioviz.control:
+    description: Control visualizations
+    default: op
+  audioviz.menu:
+    description: Open the AudioViz control menu
+    default: true

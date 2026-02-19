@@ -1,0 +1,22 @@
+{
+  "djs": {
+    "dj_alice": {
+      "name": "DJ Alice",
+      "key_hash": "bcrypt:$2b$12$replace.with.generated.hash",
+      "priority": 1
+    },
+    "dj_bob": {
+      "name": "DJ Bob",
+      "key_hash": "bcrypt:$2b$12$replace.with.generated.hash",
+      "priority": 2
+    }
+  },
+  "vj_operators": {
+    "vj_main": {
+      "name": "Main VJ",
+      "key_hash": "bcrypt:$2b$12$replace.with.generated.hash",
+      "permissions": ["control", "kick_dj", "pattern", "crossfade"]
+    }
+  },
+  "_comment": "Copy to configs/dj_auth.json and generate real hashes with: python -m audio_processor.auth hash \"your_password\""
+}

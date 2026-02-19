@@ -1,0 +1,22 @@
+{
+  "name": "audioviz-frontend",
+  "version": "1.0.0",
+  "description": "AudioViz - Web frontends for Minecraft audio visualization",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:admin": "vite --config vite.config.admin.ts",
+    "dev:preview": "vite --config vite.config.preview.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts,.js"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "typescript": "^5.3.0",
+    "@types/node": "^20.10.0"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}

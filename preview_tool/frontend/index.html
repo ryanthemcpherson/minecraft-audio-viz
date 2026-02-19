@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCAV | Control Center</title>
+    <link rel="icon" type="image/x-icon" href="../../mcav.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../mcav.png">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon"></span>
+                    <h1>Audio Visualizer</h1>
+                </div>
+            </div>
+            <div class="header-center">
+                <div class="connection-status" id="connection-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="header-stat">
+                    <span class="stat-label">FPS</span>
+                    <span class="stat-value" id="fps-display">60</span>
+                </div>
+                <div class="header-stat">
+                    <span class="stat-label">Frame</span>
+                    <span class="stat-value" id="frame-count">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="app-main">
+            <!-- 3D Preview Section -->
+            <section class="preview-section">
+                <canvas id="visualizer"></canvas>
+
+                <!-- Audio Meters Overlay - 5 bands for ultra-low-latency mode -->
+                <div class="audio-meters" id="audio-meters">
+                    <div class="meter" data-band="0">
+                        <div class="meter-fill"><div class="meter-bar" id="band-0"></div></div>
+                        <span class="meter-label">Bass</span>
+                    </div>
+                    <div class="meter" data-band="1">
+                        <div class="meter-fill"><div class="meter-bar" id="band-1"></div></div>
+                        <span class="meter-label">Low</span>
+                    </div>
+                    <div class="meter" data-band="2">
+                        <div class="meter-fill"><div class="meter-bar" id="band-2"></div></div>
+                        <span class="meter-label">Mid</span>
+                    </div>
+                    <div class="meter" data-band="3">
+                        <div class="meter-fill"><div class="meter-bar" id="band-3"></div></div>
+                        <span class="meter-label">High</span>
+                    </div>
+                    <div class="meter" data-band="4">
+                        <div class="meter-fill"><div class="meter-bar" id="band-4"></div></div>
+                        <span class="meter-label">Air</span>
+                    </div>
+                </div>
+
+                <!-- Beat Indicator Overlay -->
+                <div class="beat-overlay" id="beat-overlay"></div>
+            </section>
+
+            <!-- Control Sidebar -->
+            <aside class="control-sidebar">
+                <!-- Pattern Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">Pattern</span>
+                    </div>
+                    <div class="panel-content">
+                        <select id="pattern-select" class="select-input">
+                            <option value="spectrum">Spectrum Bars</option>
+                        </select>
+                        <div class="slider-row">
+                            <span class="slider-label">Blocks</span>
+                            <input type="range" id="block-count" min="8" max="64" value="16" step="1" class="slider-input">
+                            <span class="slider-value" id="block-count-display">16</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Presets Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">Presets</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="preset-grid">
+                            <button class="preset-btn active" data-preset="auto">Auto</button>
+                            <button class="preset-btn" data-preset="edm">EDM</button>
+                            <button class="preset-btn" data-preset="chill">Chill</button>
+                            <button class="preset-btn" data-preset="rock">Rock</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Particle Effects Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">Particle Effects</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="particles-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="panel-content" id="particle-effects">
+                        <div class="effect-row">
+                            <label class="effect-toggle">
+                                <input type="checkbox" id="effect-bass-flame" checked>
+                                <span class="effect-name">Bass Flames</span>
+                            </label>
+                        </div>
+                        <div class="effect-row">
+                            <label class="effect-toggle">
+                                <input type="checkbox" id="effect-soul-fire" checked>
+                                <span class="effect-name">Soul Fire</span>
+                            </label>
+                        </div>
+                        <div class="effect-row">
+                            <label class="effect-toggle">
+                                <input type="checkbox" id="effect-beat-ring" checked>
+                                <span class="effect-name">Beat Ring</span>
+                            </label>
+                        </div>
+                        <div class="effect-row">
+                            <label class="effect-toggle">
+                                <input type="checkbox" id="effect-notes">
+                                <span class="effect-name">Musical Notes</span>
+                            </label>
+                        </div>
+                        <div class="effect-row">
+                            <label class="effect-toggle">
+                                <input type="checkbox" id="effect-dust">
+                                <span class="effect-name">Spectrum Dust</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audio Settings Panel -->
+                <div class="panel collapsible">
+                    <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span class="panel-title">Audio Settings</span>
+                        <span class="collapse-icon"></span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="slider-row">
+                            <span class="slider-label">Attack</span>
+                            <input type="range" id="attack-slider" min="10" max="90" value="35" step="5" class="slider-input">
+                            <span class="slider-value" id="attack-display">35%</span>
+                        </div>
+                        <div class="slider-row">
+                            <span class="slider-label">Release</span>
+                            <input type="range" id="release-slider" min="2" max="30" value="8" step="1" class="slider-input">
+                            <span class="slider-value" id="release-display">8%</span>
+                        </div>
+                        <div class="slider-row">
+                            <span class="slider-label">AGC Gain</span>
+                            <input type="range" id="agc-slider" min="1" max="12" value="8" step="0.5" class="slider-input">
+                            <span class="slider-value" id="agc-display">8x</span>
+                        </div>
+                        <div class="slider-row">
+                            <span class="slider-label">Beat Sens</span>
+                            <input type="range" id="beat-slider" min="50" max="200" value="100" step="10" class="slider-input">
+                            <span class="slider-value" id="beat-display">100%</span>
+                        </div>
+                        <div class="slider-row">
+                            <span class="slider-label">Beat Thresh</span>
+                            <input type="range" id="beat-thresh-slider" min="80" max="200" value="130" step="5" class="slider-input">
+                            <span class="slider-value" id="beat-thresh-display">1.3x</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Band Sensitivity Panel -->
+                <div class="panel collapsible collapsed">
+                    <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span class="panel-title">Band Sensitivity</span>
+                        <span class="collapse-icon"></span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="band-sens-grid">
+                            <div class="band-sens-row" data-band="0">
+                                <span class="band-name">Bass</span>
+                                <input type="range" id="sens-0" min="0" max="200" value="100" class="slider-input band-slider">
+                            </div>
+                            <div class="band-sens-row" data-band="1">
+                                <span class="band-name">Low</span>
+                                <input type="range" id="sens-1" min="0" max="200" value="100" class="slider-input band-slider">
+                            </div>
+                            <div class="band-sens-row" data-band="2">
+                                <span class="band-name">Mid</span>
+                                <input type="range" id="sens-2" min="0" max="200" value="100" class="slider-input band-slider">
+                            </div>
+                            <div class="band-sens-row" data-band="3">
+                                <span class="band-name">High</span>
+                                <input type="range" id="sens-3" min="0" max="200" value="100" class="slider-input band-slider">
+                            </div>
+                            <div class="band-sens-row" data-band="4">
+                                <span class="band-name">Air</span>
+                                <input type="range" id="sens-4" min="0" max="200" value="100" class="slider-input band-slider">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Camera Controls -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">Camera</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="camera-controls">
+                            <button id="btn-reset" class="btn btn-secondary">Reset View</button>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="chk-rotate" checked>
+                                <span>Auto Rotate</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="chk-blocks" checked>
+                                <span>Show Floor Grid</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-section">
+                <span class="status-item">
+                    <span class="status-icon block-icon"></span>
+                    <span id="block-status">Blocks: 0/64</span>
+                </span>
+                <span class="status-item">
+                    <span class="status-icon particle-icon"></span>
+                    <span id="particle-status">Particles: 0</span>
+                </span>
+            </div>
+            <div class="status-section center">
+                <div class="beat-indicator" id="beat-indicator">
+                    <span class="beat-dot"></span>
+                    <span class="beat-text">BEAT</span>
+                </div>
+                <div class="bpm-display">
+                    <span class="bpm-value" id="bpm-value">--</span>
+                    <span class="bpm-label">BPM</span>
+                </div>
+                <div class="volume-display">
+                    <span class="volume-label">Vol:</span>
+                    <div class="volume-bar">
+                        <div class="volume-fill" id="volume-fill"></div>
+                    </div>
+                    <span class="volume-value" id="volume">0%</span>
+                </div>
+            </div>
+            <div class="status-section right">
+                <span class="status-item">
+                    <span id="latency-display">Latency: --ms</span>
+                </span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Beat flash overlay -->
+    <div class="beat-flash"></div>
+
+    <!-- Three.js and custom scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/particles.js"></script>
+    <script src="js/block-indicators.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
