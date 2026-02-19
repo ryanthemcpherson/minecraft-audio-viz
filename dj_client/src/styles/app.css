@@ -361,18 +361,28 @@ kbd {
   font-size: 1.4rem;
 }
 
-.code-display {
-  margin-top: 10px;
-  text-align: center;
-  color: var(--accent-warm);
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 0.86rem;
-  letter-spacing: 0.1em;
-}
-
 .frequency-meter {
   display: flex;
   flex-direction: column;
+}
+
+.meter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bpm-display {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent-warm);
+  letter-spacing: 0.04em;
+  transition: text-shadow 0.1s ease;
+}
+
+.bpm-pulse {
+  text-shadow: 0 0 10px rgba(255, 159, 67, 0.7);
 }
 
 .meter-bars {
@@ -401,12 +411,17 @@ kbd {
   background: rgba(3, 12, 20, 0.85);
   overflow: hidden;
   border: 1px solid rgba(130, 189, 245, 0.2);
+  transition: border-color 0.15s ease;
+}
+
+.meter-beat .meter-bar:first-child .meter-track {
+  border-color: rgba(255, 145, 0, 0.5);
 }
 
 .meter-fill {
   height: 100%;
   border-radius: inherit;
-  transition: width 0.07s linear;
+  transition: width 0.07s linear, box-shadow 0.1s ease;
 }
 
 .meter-value {

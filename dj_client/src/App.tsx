@@ -74,6 +74,8 @@ function App() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [bands, setBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const [isBeat, setIsBeat] = useState(false);
+  const [bpm, setBpm] = useState(0);
+  const [beatIntensity, setBeatIntensity] = useState(0);
 
   // Audio preset state
   const [activePreset, setActivePreset] = useState(() => localStorage.getItem('mcav.preset') || 'auto');
@@ -274,6 +276,8 @@ function App() {
       listen<AudioLevels>('audio-levels', (event) => {
         setBands(event.payload.bands);
         setIsBeat(event.payload.is_beat);
+        setBpm(event.payload.bpm);
+        setBeatIntensity(event.payload.beat_intensity);
       })
     );
 
@@ -501,6 +505,8 @@ function App() {
       setShowName(null);
       setBands([0, 0, 0, 0, 0]);
       setIsBeat(false);
+      setBpm(0);
+      setBeatIntensity(0);
       setCaptureMode(null);
       setVoiceEnabled(false);
       setVoiceStatus({ available: false, streaming: false, channel_type: 'static', connected_players: 0 });
@@ -544,12 +550,6 @@ function App() {
     } catch (e) {
       console.error('Voice config error:', e);
     }
-  };
-
-  const formatCode = (code: string[]) => {
-    const str = code.join('');
-    if (str.length <= 4) return str;
-    return `${str.slice(0, 4)}-${str.slice(4)}`;
   };
 
   const handleStartTest = async () => {
@@ -821,10 +821,8 @@ function App() {
               <ConnectCode
                 value={connectCode}
                 onChange={setConnectCode}
+                label=""
               />
-              <div className="code-display">
-                {formatCode(connectCode) || 'XXXX-XXXX'}
-              </div>
               <label className="direct-connect-toggle">
                 <input
                   type="checkbox"
@@ -944,7 +942,7 @@ function App() {
             </section>
 
             <section className="section">
-              <FrequencyMeter bands={bands} />
+              <FrequencyMeter bands={bands} isBeat={isBeat} beatIntensity={beatIntensity} bpm={bpm} />
             </section>
 
             <section className="section preset-section">

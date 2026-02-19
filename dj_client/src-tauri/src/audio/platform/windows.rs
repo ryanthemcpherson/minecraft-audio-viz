@@ -54,9 +54,6 @@ const MIN_PROCESS_LOOPBACK_BUILD: u32 = 20348;
 #[allow(dead_code)]
 const REFTIMES_PER_SEC: i64 = 10_000_000;
 
-/// WAVE_FORMAT_IEEE_FLOAT tag value
-const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
-
 /// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT {00000003-0000-0010-8000-00aa00389b71}
 const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: windows::core::GUID = windows::core::GUID {
     data1: 0x00000003,
@@ -269,7 +266,7 @@ pub fn start_process_loopback(
             }
 
             // Activate the process loopback audio client on this clean MTA thread
-            let (audio_client, sample_rate, channels) =
+            let (audio_client, _sample_rate, channels) =
                 match unsafe { activate_process_loopback(pid) } {
                     Ok(result) => {
                         let _ = init_tx.send(Ok((result.1, result.2)));
