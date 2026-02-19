@@ -18,6 +18,7 @@ const nodeStubPlugin = {
     const stubs = [
       "os", "fs", "path", "child_process", "readline-sync",
       "crypto", "buffer", "stream", "util", "net", "tty",
+      "tmp", "process",
     ];
     const filter = new RegExp(`^(${stubs.join("|")})$`);
     build.onResolve({ filter }, (args) => ({
