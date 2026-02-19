@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     discord_client_secret: str = ""
     discord_redirect_uri: str = "https://mcav.live/auth/callback"
 
+    # Google OAuth
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "https://mcav.live/auth/callback"
+
     # URLs
     base_url: str = "https://mcav.live"
     coordinator_url: str = "https://api.mcav.live"

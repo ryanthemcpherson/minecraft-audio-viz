@@ -104,9 +104,22 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
           storeRefreshToken(res.refresh_token);
           if (res.expires_in) setExpiresIn(res.expires_in);
         })
-        .catch(() => {
-          // Silent failure — the 401 interceptor in api() will
-          // handle the next request that uses a stale token.
+        .catch((err) => {
+          console.warn("[MCAV] Token refresh failed, retrying in 5s:", err);
+          // Retry once after 5s before giving up
+          setTimeout(() => {
+            const retryToken = getStoredRefreshToken();
+            if (!retryToken) return;
+            refreshToken(retryToken)
+              .then((res) => {
+                setAccessToken(res.access_token);
+                storeRefreshToken(res.refresh_token);
+                if (res.expires_in) setExpiresIn(res.expires_in);
+              })
+              .catch((retryErr) => {
+                console.error("[MCAV] Token refresh retry failed:", retryErr);
+              });
+          }, 5000);
         });
     }, refreshMs);
 

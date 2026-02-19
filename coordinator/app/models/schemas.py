@@ -185,9 +185,13 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
-class DiscordAuthorizeResponse(BaseModel):
+class OAuthAuthorizeResponse(BaseModel):
     authorize_url: str
     state: str
+
+
+# Backwards-compat alias
+DiscordAuthorizeResponse = OAuthAuthorizeResponse
 
 
 class ExchangeCodeRequest(BaseModel):
@@ -210,6 +214,7 @@ class DJProfileResponse(BaseModel):
     avatar_url: str | None
     banner_url: str | None
     color_palette: list[str] | None
+    block_palette: list[str | None] | None
     slug: str | None
     soundcloud_url: str | None = None
     spotify_url: str | None = None
@@ -430,6 +435,7 @@ class JoinOrgResponse(BaseModel):
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$")
 HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+BLOCK_TYPE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 SOUNDCLOUD_URL_PATTERN = re.compile(r"^https?://(www\.)?soundcloud\.com/.+")
 SPOTIFY_URL_PATTERN = re.compile(r"^https?://open\.spotify\.com/(artist|user|playlist)/.+")
 WEBSITE_URL_PATTERN = re.compile(r"^https?://.+")
@@ -441,6 +447,7 @@ class CreateDJProfileRequest(BaseModel):
     genres: str | None = Field(None, max_length=500)
     slug: str | None = Field(None, min_length=3, max_length=30)
     color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+    block_palette: list[str | None] | None = Field(None, min_length=5, max_length=5)
     soundcloud_url: str | None = Field(None, max_length=500)
     spotify_url: str | None = Field(None, max_length=500)
     website_url: str | None = Field(None, max_length=500)
@@ -478,6 +485,15 @@ class CreateDJProfileRequest(BaseModel):
                     raise ValueError(f"Invalid hex color: {color}")
         return v
 
+    @field_validator("block_palette")
+    @classmethod
+    def validate_block_palette(cls, v: list[str | None] | None) -> list[str | None] | None:
+        if v is not None:
+            for item in v:
+                if item is not None and not BLOCK_TYPE_PATTERN.match(item):
+                    raise ValueError(f"Invalid block type: {item}")
+        return v
+
     @field_validator("soundcloud_url")
     @classmethod
     def validate_soundcloud_url(cls, v: str | None) -> str | None:
@@ -506,6 +522,7 @@ class UpdateDJProfileRequest(BaseModel):
     genres: str | None = Field(None, max_length=500)
     slug: str | None = Field(None, min_length=3, max_length=30)
     color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+    block_palette: list[str | None] | None = Field(None, min_length=5, max_length=5)
     avatar_url: str | None = Field(None, max_length=500)
     banner_url: str | None = Field(None, max_length=500)
     is_public: bool | None = None
@@ -546,6 +563,15 @@ class UpdateDJProfileRequest(BaseModel):
             for color in v:
                 if not HEX_COLOR_PATTERN.match(color):
                     raise ValueError(f"Invalid hex color: {color}")
+        return v
+
+    @field_validator("block_palette")
+    @classmethod
+    def validate_block_palette(cls, v: list[str | None] | None) -> list[str | None] | None:
+        if v is not None:
+            for item in v:
+                if item is not None and not BLOCK_TYPE_PATTERN.match(item):
+                    raise ValueError(f"Invalid block type: {item}")
         return v
 
     @field_validator("soundcloud_url")
