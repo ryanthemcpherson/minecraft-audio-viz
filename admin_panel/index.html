@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCAV | Control Center</title>
     <link rel="icon" type="image/x-icon" href="mcav.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="mcav.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="mcav-medium-square.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
         <header id="header">
             <div class="header-left">
                 <div class="header-brand">
-                    <img class="header-logo" src="mcav.png" alt="MCAV" draggable="false">
+                    <img class="header-logo" src="mcav-medium-square.png" alt="MCAV" draggable="false">
                     <div class="header-title-group">
                         <h1>MCAV</h1>
                         <span class="header-subtitle">Control Center</span>
@@ -179,17 +179,17 @@
             <!-- Main Work Area -->
             <main id="work-area">
                 <!-- Tab Bar -->
-                <nav id="tab-bar">
-                    <button class="tab active" data-tab="mixer">Live Mixer</button>
-                    <button class="tab" data-tab="zone">Zone Settings</button>
-                    <button class="tab" data-tab="preview">3D Preview</button>
-                    <button class="tab" data-tab="banner">DJ Banner</button>
+                <nav id="tab-bar" role="tablist">
+                    <button id="tab-mixer" class="tab active" data-tab="mixer" role="tab" aria-selected="true" aria-controls="mixer-panel">Live Mixer</button>
+                    <button id="tab-zone" class="tab" data-tab="zone" role="tab" aria-selected="false" aria-controls="zone-panel">Zone Settings</button>
+                    <button id="tab-preview" class="tab" data-tab="preview" role="tab" aria-selected="false" aria-controls="preview-panel">3D Preview</button>
+                    <button id="tab-banner" class="tab" data-tab="banner" role="tab" aria-selected="false" aria-controls="banner-panel">DJ Banner</button>
                 </nav>
 
                 <!-- Tab Content -->
                 <div id="tab-content">
                     <!-- Live Mixer Panel -->
-                    <div id="mixer-panel" class="tab-panel active">
+                    <div id="mixer-panel" class="tab-panel active" role="tabpanel" aria-labelledby="tab-mixer">
                         <!-- Pattern Quick-Switch -->
                         <section class="mixer-section">
                             <h3 class="section-title">Patterns</h3>
@@ -330,10 +330,48 @@
                                 </div>
                             </div>
                         </section>
+
+                        <!-- Voice Chat -->
+                        <section class="mixer-section" id="voice-chat-section">
+                            <h3 class="section-title">Voice Chat</h3>
+                            <div class="voice-status-bar" id="voice-status-bar">
+                                <div class="voice-status-indicator" id="voice-status-indicator">
+                                    <span class="voice-dot" id="voice-dot"></span>
+                                    <span class="voice-status-text" id="voice-status-text">Checking...</span>
+                                </div>
+                                <div class="voice-status-stats" id="voice-status-stats">
+                                    <span class="voice-stat" id="voice-players-stat"></span>
+                                </div>
+                            </div>
+                            <div class="voice-unavailable-msg hidden" id="voice-unavailable-msg">
+                                Simple Voice Chat not installed on server
+                            </div>
+                            <div class="voice-controls" id="voice-controls">
+                                <div class="control-row toggle-row">
+                                    <label>Stream to Voice</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="voice-stream-toggle">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row">
+                                    <label>Channel Type</label>
+                                    <select id="voice-channel-type" class="control-select">
+                                        <option value="static">Static (Everywhere)</option>
+                                        <option value="locational">Locational (3D Spatial)</option>
+                                    </select>
+                                </div>
+                                <div class="control-row" id="voice-distance-row" style="display: none;">
+                                    <label>Hearing Distance</label>
+                                    <input type="range" id="voice-distance" min="10" max="200" value="100">
+                                    <span class="control-value" id="val-voice-distance">100</span>
+                                </div>
+                            </div>
+                        </section>
                     </div>
 
                     <!-- Zone Settings Panel -->
-                    <div id="zone-panel" class="tab-panel">
+                    <div id="zone-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-zone">
                         <!-- Available Stages -->
                         <section class="mixer-section">
                             <div class="section-header">
@@ -557,7 +595,7 @@
                     </div>
 
                     <!-- 3D Preview Panel -->
-                    <div id="preview-panel" class="tab-panel">
+                    <div id="preview-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-preview">
                         <div class="preview-container">
                             <!-- Three.js Canvas -->
                             <div class="preview-canvas-wrapper">
@@ -659,7 +697,7 @@
                     </div>
 
                     <!-- DJ Banner Panel -->
-                    <div id="banner-panel" class="tab-panel">
+                    <div id="banner-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-banner">
                         <!-- DJ Selector -->
                         <section class="mixer-section">
                             <h3 class="section-title">DJ Banner Profile</h3>
@@ -807,8 +845,8 @@
         </div>
     </div>
 
-    <!-- Three.js for 3D Preview -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Three.js for 3D Preview (local copy to avoid CDN/network issues) -->
+    <script src="js/vendor/three-r128.min.js"></script>
     <script src="js/particles.js"></script>
     <script src="js/block-indicators.js"></script>
     <script type="module" src="js/admin-app.js"></script>

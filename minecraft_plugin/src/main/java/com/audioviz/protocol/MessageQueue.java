@@ -18,18 +18,21 @@ import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 /**
  * High-performance message queue for WebSocket messages.
  *
  * Features:
- * - Async JSON parsing on dedicated thread (off main thread)
+ * - Async JSON parsing on dedicated thread pool (off main thread)
  * - Tick-based batch processing (one scheduler call per tick)
  * - Entity update batching for efficient rendering
+ * - Backpressure: drops oldest messages when queue is full
  */
 public class MessageQueue {
 
@@ -42,22 +45,27 @@ public class MessageQueue {
     // Queue for batched entity updates (collected across messages)
     private final ConcurrentLinkedQueue<EntityUpdate> entityUpdateQueue;
 
-    // Dedicated thread for JSON parsing
+    // Dedicated thread pool for JSON parsing
     private final ExecutorService jsonExecutor;
 
     // Tick processor task
     private BukkitTask processorTask;
 
-    // Stats
-    private long messagesProcessed = 0;
-    private long batchesSent = 0;
+    // Stats (atomic for thread-safe access)
+    private final AtomicLong messagesProcessed = new AtomicLong(0);
+    private final AtomicLong batchesSent = new AtomicLong(0);
+    private final AtomicLong messagesDropped = new AtomicLong(0);
+    private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
+
+    // Backpressure limit
+    private static final int MAX_QUEUE_SIZE = 1000;
 
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
         this.messageHandler = messageHandler;
         this.messageQueue = new ConcurrentLinkedQueue<>();
         this.entityUpdateQueue = new ConcurrentLinkedQueue<>();
-        this.jsonExecutor = Executors.newSingleThreadExecutor(r -> {
+        this.jsonExecutor = Executors.newFixedThreadPool(2, r -> {
             Thread t = new Thread(r, "AudioViz-JSON-Parser");
             t.setDaemon(true);
             return t;
@@ -92,18 +100,29 @@ public class MessageQueue {
             jsonExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        plugin.getLogger().info("MessageQueue stopped. Processed " + messagesProcessed +
-                " messages in " + batchesSent + " batches");
+        long dropped = messagesDropped.get();
+        plugin.getLogger().info("MessageQueue stopped. Processed " + messagesProcessed.get() +
+                " messages in " + batchesSent.get() + " batches" +
+                (dropped > 0 ? " (" + dropped + " dropped)" : ""));
     }
 
     /**
      * Enqueue a raw JSON string for async parsing and processing.
      * Called from WebSocket thread - must be thread-safe and non-blocking.
+     *
+     * If the queue is full, the oldest message is dropped to apply backpressure.
      */
     public void enqueueRaw(String rawJson) {
         jsonExecutor.submit(() -> {
             try {
                 JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
+                if (messageQueue.size() >= MAX_QUEUE_SIZE) {
+                    messageQueue.poll(); // Drop oldest
+                    long dropped = messagesDropped.incrementAndGet();
+                    if (dropped % 100 == 1) {
+                        plugin.getLogger().warning("MessageQueue backpressure: dropped message (total dropped: " + dropped + ")");
+                    }
+                }
                 messageQueue.offer(json);
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Failed to parse JSON message", e);
@@ -115,6 +134,10 @@ public class MessageQueue {
      * Enqueue an already-parsed JSON object.
      */
     public void enqueue(JsonObject json) {
+        if (messageQueue.size() >= MAX_QUEUE_SIZE) {
+            messageQueue.poll(); // Drop oldest
+            messagesDropped.incrementAndGet();
+        }
         messageQueue.offer(json);
     }
 
@@ -129,7 +152,7 @@ public class MessageQueue {
         // Process all queued messages
         JsonObject msg;
         while ((msg = messageQueue.poll()) != null) {
-            messagesProcessed++;
+            messagesProcessed.incrementAndGet();
 
             String type = msg.has("type") ? msg.get("type").getAsString() : "unknown";
 
@@ -163,7 +186,7 @@ public class MessageQueue {
         for (Map.Entry<String, List<EntityUpdate>> entry : updatesByZone.entrySet()) {
             if (!entry.getValue().isEmpty()) {
                 plugin.getEntityPoolManager().batchUpdateEntities(entry.getKey(), entry.getValue());
-                batchesSent++;
+                batchesSent.incrementAndGet();
             }
         }
     }
@@ -183,9 +206,6 @@ public class MessageQueue {
         var zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
 
-        Location origin = zone.getOrigin();
-        var size = zone.getSize();
-
         for (JsonElement elem : entities) {
             JsonObject entity = elem.getAsJsonObject();
 
@@ -200,12 +220,8 @@ public class MessageQueue {
             double nz = InputSanitizer.sanitizeCoordinate(
                 entity.has("z") ? entity.get("z").getAsDouble() : 0.5);
 
-            // Convert to world coordinates
-            double worldX = origin.getX() + (nx * size.getX());
-            double worldY = origin.getY() + (ny * size.getY());
-            double worldZ = origin.getZ() + (nz * size.getZ());
-
-            Location loc = new Location(origin.getWorld(), worldX, worldY, worldZ);
+            // Convert to world coordinates using zone's localToWorld (respects rotation)
+            Location loc = zone.localToWorld(nx, ny, nz);
 
             // Parse scale and rotation if present (clamped for safety)
             float scale = InputSanitizer.sanitizeScale(
@@ -247,16 +263,56 @@ public class MessageQueue {
 
     /**
      * Process audio/beat information from a batch_update message.
-     * Triggers beat effects and updates particle visualization.
+     * Triggers beat effects, glow_on_beat, dynamic_brightness, and updates particle visualization.
      */
     private void processAudioInfo(JsonObject msg, String zoneName) {
-        boolean isBeat = msg.has("is_beat") && msg.get("is_beat").getAsBoolean();
-        double beatIntensity = InputSanitizer.sanitizeAmplitude(
-            msg.has("beat_intensity") ? msg.get("beat_intensity").getAsDouble() : 0.0);
+        boolean explicitBeat = msg.has("is_beat") && msg.get("is_beat").getAsBoolean();
+        double explicitBeatIntensity = InputSanitizer.sanitizeDouble(
+            msg.has("beat_intensity") ? msg.get("beat_intensity").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+        double bpm = InputSanitizer.sanitizeDouble(
+            msg.has("bpm") ? msg.get("bpm").getAsDouble() : 0.0,
+            0.0, 300.0, 0.0);
+        double tempoConfidence = InputSanitizer.sanitizeDouble(
+            msg.has("tempo_confidence") ? msg.get("tempo_confidence").getAsDouble()
+                : (msg.has("tempo_conf") ? msg.get("tempo_conf").getAsDouble() : 0.0),
+            0.0, 1.0, 0.0);
+        double beatPhase = InputSanitizer.sanitizeDouble(
+            msg.has("beat_phase") ? msg.get("beat_phase").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+
+        BeatProjectionUtil.BeatProjection projection = BeatProjectionUtil.projectBeat(
+            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase,
+            lastBeatTimestampByZone);
+        boolean isBeat = projection.isBeat();
+        double beatIntensity = projection.beatIntensity();
 
         // Trigger beat effects if this is a beat with sufficient intensity
         if (isBeat && beatIntensity > 0.2) {
             plugin.getBeatEventManager().processBeat(zoneName, BeatType.BEAT, beatIntensity);
+        }
+
+        // Apply zone-level glow_on_beat and dynamic_brightness settings
+        var zone = plugin.getZoneManager().getZone(zoneName);
+        if (zone != null) {
+            // Glow on beat: flash glow for all entities when beat detected
+            if (zone.isGlowOnBeat() && isBeat && beatIntensity > 0.3) {
+                plugin.getEntityPoolManager().setZoneGlow(zoneName, true);
+                // Schedule glow off after 3 ticks (150ms)
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    plugin.getEntityPoolManager().setZoneGlow(zoneName, false);
+                }, 3L);
+            }
+
+            // Dynamic brightness: scale brightness with audio amplitude
+            if (zone.isDynamicBrightness()) {
+                double amplitude = InputSanitizer.sanitizeAmplitude(
+                    msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0);
+                // Map amplitude (0-1) to brightness (3-15)
+                int brightness = (int) Math.round(3 + amplitude * 12);
+                brightness = Math.max(3, Math.min(15, brightness));
+                plugin.getEntityPoolManager().setZoneBrightness(zoneName, brightness);
+            }
         }
 
         // Update particle visualization audio state
@@ -269,9 +325,10 @@ public class MessageQueue {
             }
             double amplitude = InputSanitizer.sanitizeAmplitude(
                 msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0);
-            long frame = msg.has("frame") ? msg.get("frame").getAsLong() : messagesProcessed;
+            long frame = msg.has("frame") ? msg.get("frame").getAsLong() : messagesProcessed.get();
 
-            AudioState audioState = new AudioState(bands, amplitude, isBeat, beatIntensity, frame);
+            AudioState audioState = new AudioState(
+                bands, amplitude, isBeat, beatIntensity, tempoConfidence, beatPhase, frame);
             plugin.getParticleVisualizationManager().updateAudioState(audioState);
         }
     }
@@ -280,7 +337,9 @@ public class MessageQueue {
      * Get processing statistics.
      */
     public String getStats() {
-        return String.format("Messages: %d, Batches: %d, Queue: %d",
-                messagesProcessed, batchesSent, messageQueue.size());
+        long dropped = messagesDropped.get();
+        return String.format("Messages: %d, Batches: %d, Queue: %d%s",
+                messagesProcessed.get(), batchesSent.get(), messageQueue.size(),
+                dropped > 0 ? ", Dropped: " + dropped : "");
     }
 }

@@ -20,6 +20,7 @@ env:
   DEPLOY_PATH: /home/ryan/minecraft-audio-viz
   PLUGINS_DIR: /home/ryan/minecraft-server/plugins
   JAVA_VERSION: '21'
+  RCON_PORT: '25575'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -43,7 +44,7 @@ jobs:
         run: mvn clean package -DskipTests
 
       - name: Upload plugin JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: audioviz-plugin
           path: minecraft_plugin/target/audioviz-plugin-*.jar
@@ -59,7 +60,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -88,7 +89,7 @@ jobs:
           clean: true
 
       - name: Download plugin JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: audioviz-plugin
           path: ./plugin-jar/
@@ -116,6 +117,7 @@ jobs:
         run: |
           echo "=== Copying plugin JAR ==="
           mkdir -p "${{ env.PLUGINS_DIR }}"
+          rm -f "${{ env.PLUGINS_DIR }}"/audioviz-plugin-*.jar
           cp -v ./plugin-jar/audioviz-plugin-*.jar "${{ env.PLUGINS_DIR }}/"
 
       # --- Install Python dependencies ---
@@ -123,14 +125,16 @@ jobs:
         working-directory: ${{ env.DEPLOY_PATH }}
         run: |
           echo "=== Installing/updating Python dependencies ==="
+          python3 -m venv .venv || true
+          source .venv/bin/activate
           pip install -e ".[dev]" --quiet 2>&1 | tail -5
 
       # --- Run tests on server ---
       - name: Run tests on server
         working-directory: ${{ env.DEPLOY_PATH }}
-        continue-on-error: true
         run: |
           echo "=== Running Python tests on server ==="
+          source .venv/bin/activate
           pytest audio_processor/tests/ -v --tb=short
 
       # --- Restart Minecraft server ---
@@ -150,6 +154,31 @@ jobs:
             sudo journalctl -u minecraft.service --no-pager -n 30
             exit 1
           fi
+
+      # --- Verify plugin loaded ---
+      - name: Verify AudioViz plugin is active
+        env:
+          MCAV_RCON_PASSWORD: ${{ secrets.MCAV_RCON_PASSWORD }}
+        run: |
+          if [ -z "${MCAV_RCON_PASSWORD:-}" ]; then
+            echo "RCON secret not set; skipping plugin status check."
+            exit 0
+          fi
+
+          echo "=== Verifying AudioViz plugin via RCON ==="
+          for i in $(seq 1 12); do
+            PLUGINS_OUTPUT="$(mcrcon -H 127.0.0.1 -P "${{ env.RCON_PORT }}" -p "${MCAV_RCON_PASSWORD}" "plugins" 2>&1 || true)"
+            echo "Attempt $i: $PLUGINS_OUTPUT"
+            if echo "$PLUGINS_OUTPUT" | grep -qi "AudioViz"; then
+              echo "SUCCESS: AudioViz plugin is loaded"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "ERROR: AudioViz plugin not found in plugin list after retries"
+          sudo journalctl -u minecraft.service --no-pager -n 80
+          exit 1
 
       # --- Summary ---
       - name: Deploy summary

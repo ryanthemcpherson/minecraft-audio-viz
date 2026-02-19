@@ -65,7 +65,7 @@ export default function Footer() {
                     background:
                       "linear-gradient(to top, #00D4FF, #8B5CF6)",
                     animationDelay: `${i * 0.12}s`,
-                    animationDuration: `${1 + Math.random() * 0.5}s`,
+                    animationDuration: `${1 + (i * 0.07)}s`,
                     opacity: 0.5,
                   }}
                 />

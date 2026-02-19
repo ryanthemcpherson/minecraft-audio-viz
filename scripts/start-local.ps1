@@ -1,5 +1,10 @@
-# AudioViz - Local DJ Mode
-# Captures audio from Spotify and sends to local Minecraft server
+# AudioViz - Local DJ Mode (DEPRECATED)
+# The Python DJ CLI has been replaced by the Rust DJ Client (dj_client/).
+# This script is kept for reference only.
+
+Write-Warning "DEPRECATED: The Python DJ CLI (audioviz) has been replaced by the Rust DJ Client."
+Write-Warning "See dj_client/ for the new implementation."
+Write-Host ""
 
 param(
     [string]$App = "spotify",
@@ -14,20 +19,20 @@ Write-Host "AudioViz - Local DJ Mode" -ForegroundColor Cyan
 Write-Host "========================" -ForegroundColor Cyan
 Write-Host ""
 
-# Build command
-$cmd = "audioviz --app $App --host $Host --port $Port"
+# Build argument list
+$arguments = @("--app", $App, "--host", $Host, "--port", $Port)
 
 if ($Preview) {
-    $cmd += " --preview"
+    $arguments += "--preview"
     Write-Host "Browser preview enabled at http://localhost:8080" -ForegroundColor Green
 }
 
 if ($Compact) {
-    $cmd += " --compact"
+    $arguments += "--compact"
 }
 
 if ($LowLatency) {
-    $cmd += " --low-latency"
+    $arguments += "--low-latency"
     Write-Host "Low-latency mode enabled (~20ms)" -ForegroundColor Yellow
 }
 
@@ -38,4 +43,4 @@ Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
 # Run
-Invoke-Expression $cmd
+& audioviz @arguments

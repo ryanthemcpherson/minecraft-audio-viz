@@ -13,11 +13,11 @@ Write-Host "AudioViz - VJ Server Mode" -ForegroundColor Magenta
 Write-Host "=========================" -ForegroundColor Magenta
 Write-Host ""
 
-# Build command
-$cmd = "audioviz-vj --port $DJPort --minecraft-host $MinecraftHost --minecraft-port $MinecraftPort --broadcast-port $BrowserPort"
+# Build argument list
+$arguments = @("--port", $DJPort, "--minecraft-host", $MinecraftHost, "--minecraft-port", $MinecraftPort, "--broadcast-port", $BrowserPort)
 
 if ($NoAuth) {
-    $cmd += " --no-auth"
+    $arguments += "--no-auth"
     Write-Host "WARNING: Authentication disabled!" -ForegroundColor Red
 }
 
@@ -29,5 +29,5 @@ Write-Host "Waiting for DJ connections..." -ForegroundColor Gray
 Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
-# Run
-Invoke-Expression $cmd
+# Run (uses vj_server package)
+& python -m vj_server.cli @arguments

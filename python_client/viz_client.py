@@ -53,6 +53,10 @@ class VizClient:
         self._pending_responses: asyncio.Queue = asyncio.Queue()
         self._use_receive_loop: bool = False  # Set to True when receive loop is started
 
+        # Logging flags for batch_update_fast
+        self._audio_logged: bool = False
+        self._last_fast_error: float = 0.0
+
     async def connect(self) -> bool:
         """Connect to the AudioViz WebSocket server."""
         try:
@@ -148,16 +152,42 @@ class VizClient:
                         self._last_pong = time.time()
                         continue
 
+                    # Discard batch_updated responses from fire-and-forget
+                    # batch_update_fast() calls to prevent queue flooding
+                    if msg_type == "batch_updated":
+                        continue
+
                     # Queue response messages for send() to pick up
                     # (any message that's a response to a request)
                     if msg_type in (
                         "zones",
                         "zone",
                         "pool_initialized",
-                        "batch_updated",
                         "entity_updated",
                         "visibility_updated",
                         "zone_cleaned",
+                        "zone_config_updated",
+                        "glow_updated",
+                        "brightness_updated",
+                        "render_mode_updated",
+                        "renderer_backend_updated",
+                        "renderer_capabilities",
+                        "hologram_config_updated",
+                        "particle_viz_config_updated",
+                        "particle_effect_updated",
+                        "particle_config_updated",
+                        "banner_config_received",
+                        "stage_created",
+                        "stage_deleted",
+                        "stage_activated",
+                        "stage_deactivated",
+                        "stage_updated",
+                        "stage_zone_config_updated",
+                        "stage_templates",
+                        "stages",
+                        "stage",
+                        "voice_status",
+                        "ok",
                         "error",
                         "connected",
                     ):
@@ -207,7 +237,10 @@ class VizClient:
     def start_heartbeat(self):
         """Start the heartbeat task manually."""
         if self._heartbeat_task is None or self._heartbeat_task.done():
+            self._use_receive_loop = True
             self._last_pong = time.time()
+            if self._receive_task is None or self._receive_task.done():
+                self._receive_task = asyncio.create_task(self._receive_loop())
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     def stop_heartbeat(self):
@@ -367,7 +400,7 @@ class VizClient:
             message["is_beat"] = audio.get("is_beat", False)
             message["beat_intensity"] = audio.get("beat_intensity", 0.0)
             # Debug: log first time we send audio
-            if not hasattr(self, "_audio_logged"):
+            if not self._audio_logged:
                 self._audio_logged = True
                 logger.info(f"Sending audio data: bands={message['bands'][:2]}...")
 
@@ -378,7 +411,7 @@ class VizClient:
             self._connected = False
         except Exception as e:
             # Log unexpected errors but don't spam
-            if not hasattr(self, "_last_fast_error") or (time.time() - self._last_fast_error) > 5:
+            if self._last_fast_error == 0.0 or (time.time() - self._last_fast_error) > 5:
                 logger.warning(f"Fast update error: {e}")
                 self._last_fast_error = time.time()
             self._connected = False
@@ -431,6 +464,48 @@ class VizClient:
         """Remove all entities from a zone."""
         response = await self.send({"type": "cleanup_zone", "zone": zone_name})
         return response is not None and response.get("type") == "zone_cleaned"
+
+    async def send_voice_frame(self, pcm_base64: str, seq: int):
+        """Send a voice audio frame to the Minecraft plugin.
+
+        Args:
+            pcm_base64: Base64-encoded PCM audio (960 int16 samples at 48kHz mono)
+            seq: Sequence number for ordering
+        """
+        if not self.ws or not self._connected:
+            return
+        try:
+            await self.ws.send(
+                json.dumps(
+                    {
+                        "type": "voice_audio",
+                        "data": pcm_base64,
+                        "seq": seq,
+                    }
+                )
+            )
+        except Exception:
+            pass  # Fire and forget, don't spam logs
+
+    async def send_voice_config(self, config: dict) -> Optional[dict]:
+        """Send voice configuration and return voice_status response.
+
+        Args:
+            config: Dict with keys: enabled, channel_type, distance, zone
+
+        Returns:
+            Response dict from Minecraft plugin (typically voice_status), or None.
+        """
+        if not self.ws or not self._connected:
+            return None
+        message = {
+            "type": "voice_config",
+            "enabled": config.get("enabled", False),
+            "channel_type": config.get("channel_type", "static"),
+            "distance": config.get("distance", 100.0),
+            "zone": config.get("zone", "main"),
+        }
+        return await self.send(message)
 
     @property
     def connected(self) -> bool:

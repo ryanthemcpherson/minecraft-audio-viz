@@ -79,6 +79,15 @@ class AdminApp {
                     trail: false
                 }
             },
+            // Voice chat state
+            voiceChat: {
+                available: false,
+                streaming: false,
+                enabled: false,
+                channelType: 'static',
+                distance: 100,
+                connectedPlayers: 0
+            },
             // 3D Preview state
             entities: []
         };
@@ -98,6 +107,7 @@ class AdminApp {
         this._previewBlocks = [];
         this._previewParticleSystem = null;
         this._previewBlockIndicators = null;
+        this._previewFailed = false;
         this._previewAutoRotate = true;
         this._previewShowGrid = true;
         this._previewAnimationId = null;
@@ -114,6 +124,7 @@ class AdminApp {
             notes: false,
             dust: false
         };
+        this._threeLoadInFlight = false;
 
         // Preview config
         this._previewConfig = {
@@ -273,6 +284,20 @@ class AdminApp {
         this.elements.fixedColorRow = document.getElementById('fixed-color-row');
         this.elements.particleVizSize = document.getElementById('particle-viz-size');
         this.elements.particleVizTrail = document.getElementById('particle-viz-trail');
+
+        // Voice chat elements
+        this.elements.voiceChatSection = document.getElementById('voice-chat-section');
+        this.elements.voiceStatusBar = document.getElementById('voice-status-bar');
+        this.elements.voiceStatusIndicator = document.getElementById('voice-status-indicator');
+        this.elements.voiceDot = document.getElementById('voice-dot');
+        this.elements.voiceStatusText = document.getElementById('voice-status-text');
+        this.elements.voicePlayersStat = document.getElementById('voice-players-stat');
+        this.elements.voiceUnavailableMsg = document.getElementById('voice-unavailable-msg');
+        this.elements.voiceControls = document.getElementById('voice-controls');
+        this.elements.voiceStreamToggle = document.getElementById('voice-stream-toggle');
+        this.elements.voiceChannelType = document.getElementById('voice-channel-type');
+        this.elements.voiceDistance = document.getElementById('voice-distance');
+        this.elements.voiceDistanceRow = document.getElementById('voice-distance-row');
     }
 
     _setupEventListeners() {
@@ -392,6 +417,9 @@ class AdminApp {
 
         // Connect code event listeners
         this._setupConnectCodeListeners();
+
+        // Voice chat event listeners
+        this._setupVoiceChatListeners();
     }
 
     _setupConnectCodeListeners() {
@@ -714,6 +742,7 @@ class AdminApp {
             this.ws.send({ type: 'get_zone', zone: this.state.zone.name });
             this.ws.send({ type: 'get_connect_codes' });
             this.ws.send({ type: 'get_pending_djs' });
+            this.ws.send({ type: 'get_voice_status' });
         });
 
         this.ws.addEventListener('disconnected', () => {
@@ -884,6 +913,10 @@ class AdminApp {
 
             case 'banner_config_received':
                 this._showToast('Banner applied to Minecraft', 'success');
+                break;
+
+            case 'voice_status':
+                this._handleVoiceStatus(data);
                 break;
 
             case 'error':
@@ -1120,7 +1153,15 @@ class AdminApp {
                 badge.className = 'dj-badge-live';
                 badge.textContent = 'LIVE';
                 actionsDiv.appendChild(badge);
-            } else {
+            }
+            if (dj.direct_mode) {
+                const directBadge = document.createElement('span');
+                directBadge.className = 'dj-badge-direct';
+                directBadge.textContent = dj.mc_connected ? 'DIRECT: MC OK' : 'DIRECT: RELAY';
+                if (!dj.mc_connected) directBadge.classList.add('dj-badge-direct-relay');
+                actionsDiv.appendChild(directBadge);
+            }
+            if (!isActive) {
                 const goLiveBtn = document.createElement('button');
                 goLiveBtn.className = 'btn btn-go-live';
                 goLiveBtn.dataset.action = 'activate';
@@ -1229,7 +1270,9 @@ class AdminApp {
         this.state.entities = data.entities || [];
 
         // Store latency, BPM, and FPS for throttled update
-        if (data.latency_ms !== undefined) {
+        if (data.ping_ms !== undefined) {
+            this.state.latencyMs = data.ping_ms;
+        } else if (data.latency_ms !== undefined) {
             this.state.latencyMs = data.latency_ms;
         }
         if (data.fps !== undefined) {
@@ -1246,35 +1289,40 @@ class AdminApp {
         if (!this._meterUpdatePending) {
             this._meterUpdatePending = true;
             requestAnimationFrame(() => {
-                this._updateMeters();
-                this._updateBeatIndicator();
-                this._updateFrameCount();
+                try {
+                    this._updateMeters();
+                    this._updateBeatIndicator();
+                    this._updateFrameCount();
 
-                // Update latency display with warning if > 500ms
-                if (this.state.latencyMs !== undefined && this.elements.latencyDisplay) {
-                    this.elements.latencyDisplay.textContent = `Latency: ${this.state.latencyMs.toFixed(1)}ms`;
-                    this.elements.latencyDisplay.classList.toggle('warning', this.state.latencyMs > 500);
+                    // Update latency display with warning if > 500ms
+                    if (this.state.latencyMs !== undefined && this.elements.latencyDisplay) {
+                        this.elements.latencyDisplay.textContent = `Latency: ${this.state.latencyMs.toFixed(1)}ms`;
+                        this.elements.latencyDisplay.classList.toggle('warning', this.state.latencyMs > 500);
+                    }
+
+                    // Update queue depth display (only show when > 0)
+                    this._updateQueueDepthDisplay();
+
+                    // Update BPM if available
+                    if (this.state.bpmEstimate && this.elements.bpmEstimate) {
+                        this.elements.bpmEstimate.textContent = Math.round(this.state.bpmEstimate);
+                    }
+
+                    // Update FPS if available
+                    if (this.state.fps !== undefined && this.elements.fpsDisplay) {
+                        this.elements.fpsDisplay.textContent = `${Math.round(this.state.fps)} FPS`;
+                    }
+
+                    // Update 3D preview if initialized
+                    if (this._previewInitialized && !this._previewFailed) {
+                        this._updatePreviewFromAudioState();
+                    }
+                } catch (error) {
+                    console.error('[UI] Audio state update failed', error);
+                    this._showToast('Live UI update error (recovered)', 'warning', 2500);
+                } finally {
+                    this._meterUpdatePending = false;
                 }
-
-                // Update queue depth display (only show when > 0)
-                this._updateQueueDepthDisplay();
-
-                // Update BPM if available
-                if (this.state.bpmEstimate && this.elements.bpmEstimate) {
-                    this.elements.bpmEstimate.textContent = Math.round(this.state.bpmEstimate);
-                }
-
-                // Update FPS if available
-                if (this.state.fps !== undefined && this.elements.fpsDisplay) {
-                    this.elements.fpsDisplay.textContent = `${Math.round(this.state.fps)} FPS`;
-                }
-
-                // Update 3D preview if initialized
-                if (this._previewInitialized) {
-                    this._updatePreviewFromAudioState();
-                }
-
-                this._meterUpdatePending = false;
             });
         }
     }
@@ -1519,7 +1567,9 @@ class AdminApp {
     _switchTab(tabName) {
         // Update tab buttons
         this.elements.tabs.forEach(tab => {
-            tab.classList.toggle('active', tab.dataset.tab === tabName);
+            const isActive = tab.dataset.tab === tabName;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', String(isActive));
         });
 
         // Update panels
@@ -1534,7 +1584,11 @@ class AdminApp {
 
         // Handle preview animation based on tab visibility
         if (tabName === 'preview') {
-            this._startPreviewAnimation();
+            if (!this._previewFailed) {
+                this._startPreviewAnimation();
+            } else {
+                this._showToast('3D Preview unavailable on this browser/GPU', 'warning');
+            }
             // Show preview stats in header
             const statsEl = document.getElementById('preview-stats');
             if (statsEl) statsEl.classList.remove('hidden');
@@ -1978,6 +2032,176 @@ class AdminApp {
         });
     }
 
+    // === Voice Chat ===
+
+    _setupVoiceChatListeners() {
+        // Stream toggle
+        if (this.elements.voiceStreamToggle) {
+            this.elements.voiceStreamToggle.addEventListener('change', () => {
+                this._toggleVoiceStream();
+            });
+        }
+
+        // Channel type selector
+        if (this.elements.voiceChannelType) {
+            this.elements.voiceChannelType.addEventListener('change', () => {
+                this._setVoiceChannelType(this.elements.voiceChannelType.value);
+            });
+        }
+
+        // Distance slider - debounced
+        if (this.elements.voiceDistance) {
+            const sendVoiceDistance = debounce((val) => {
+                this._setVoiceDistance(val);
+            }, 50);
+
+            this.elements.voiceDistance.addEventListener('input', () => {
+                const val = parseInt(this.elements.voiceDistance.value);
+                const display = document.getElementById('val-voice-distance');
+                if (display) display.textContent = `${val}`;
+                this.state.voiceChat.distance = val;
+                sendVoiceDistance(val);
+            });
+        }
+
+        // Initialize UI as unavailable until we hear from server
+        this._updateVoiceChatUI();
+    }
+
+    _toggleVoiceStream() {
+        this.state.voiceChat.enabled = !this.state.voiceChat.enabled;
+        this._sendVoiceConfig();
+    }
+
+    _setVoiceChannelType(type) {
+        this.state.voiceChat.channelType = type;
+
+        // Show/hide distance slider based on channel type
+        if (this.elements.voiceDistanceRow) {
+            this.elements.voiceDistanceRow.style.display = type === 'locational' ? 'flex' : 'none';
+        }
+
+        this._sendVoiceConfig();
+    }
+
+    _setVoiceDistance(distance) {
+        this.state.voiceChat.distance = distance;
+        this._sendVoiceConfig();
+    }
+
+    _sendVoiceConfig() {
+        this.ws.send({
+            type: 'voice_config',
+            enabled: this.state.voiceChat.enabled,
+            channel_type: this.state.voiceChat.channelType,
+            distance: this.state.voiceChat.distance,
+            zone: this.state.zone.name || 'main'
+        });
+    }
+
+    _handleVoiceStatus(data) {
+        const wasStreaming = this.state.voiceChat.streaming;
+
+        this.state.voiceChat.available = data.available || false;
+        this.state.voiceChat.streaming = data.streaming || false;
+        this.state.voiceChat.connectedPlayers = data.connected_players || 0;
+
+        if (data.channel_type) {
+            this.state.voiceChat.channelType = data.channel_type;
+        }
+
+        // Sync enabled state from streaming status
+        if (data.streaming !== undefined) {
+            this.state.voiceChat.enabled = data.streaming;
+        }
+
+        this._updateVoiceChatUI();
+
+        // Notify on streaming state changes
+        if (data.streaming && !wasStreaming) {
+            this._showToast('Voice chat streaming started', 'success');
+        } else if (!data.streaming && wasStreaming) {
+            this._showToast('Voice chat streaming stopped', 'info');
+        }
+    }
+
+    _updateVoiceChatUI() {
+        const vc = this.state.voiceChat;
+        const dot = this.elements.voiceDot;
+        const statusText = this.elements.voiceStatusText;
+        const playersStat = this.elements.voicePlayersStat;
+        const unavailableMsg = this.elements.voiceUnavailableMsg;
+        const controls = this.elements.voiceControls;
+        const streamToggle = this.elements.voiceStreamToggle;
+        const channelType = this.elements.voiceChannelType;
+        const distanceSlider = this.elements.voiceDistance;
+        const distanceRow = this.elements.voiceDistanceRow;
+
+        // Update status dot and text
+        if (dot) {
+            dot.classList.remove('voice-dot-streaming', 'voice-dot-available', 'voice-dot-unavailable');
+            if (!vc.available) {
+                dot.classList.add('voice-dot-unavailable');
+            } else if (vc.streaming) {
+                dot.classList.add('voice-dot-streaming');
+            } else {
+                dot.classList.add('voice-dot-available');
+            }
+        }
+
+        if (statusText) {
+            if (!vc.available) {
+                statusText.textContent = 'Unavailable';
+            } else if (vc.streaming) {
+                statusText.textContent = 'Streaming';
+            } else {
+                statusText.textContent = 'Ready';
+            }
+        }
+
+        // Players stat
+        if (playersStat) {
+            if (vc.available && vc.connectedPlayers > 0) {
+                playersStat.textContent = `${vc.connectedPlayers} player${vc.connectedPlayers !== 1 ? 's' : ''}`;
+                playersStat.style.display = '';
+            } else {
+                playersStat.style.display = 'none';
+            }
+        }
+
+        // Show/hide unavailable message
+        if (unavailableMsg) {
+            unavailableMsg.classList.toggle('hidden', vc.available);
+        }
+
+        // Enable/disable controls based on availability
+        if (controls) {
+            controls.classList.toggle('voice-controls-disabled', !vc.available);
+        }
+
+        if (streamToggle) {
+            streamToggle.checked = vc.enabled;
+            streamToggle.disabled = !vc.available;
+        }
+
+        if (channelType) {
+            channelType.value = vc.channelType;
+            channelType.disabled = !vc.available;
+        }
+
+        if (distanceSlider) {
+            distanceSlider.value = vc.distance;
+            distanceSlider.disabled = !vc.available;
+            const display = document.getElementById('val-voice-distance');
+            if (display) display.textContent = `${vc.distance}`;
+        }
+
+        // Show/hide distance row based on channel type
+        if (distanceRow) {
+            distanceRow.style.display = vc.channelType === 'locational' ? 'flex' : 'none';
+        }
+    }
+
     // === Toast Notification System ===
 
     _showToast(message, type = 'info', duration = 4000) {
@@ -2012,17 +2236,17 @@ class AdminApp {
     // === Service Status Indicators ===
 
     _updateServiceIndicators() {
-        const pythonDot = this.elements.svcPython?.querySelector('.svc-dot');
-        const mcDot = this.elements.svcMinecraft?.querySelector('.svc-dot');
+        const pythonEl = this.elements.svcPython;
+        const mcEl = this.elements.svcMinecraft;
 
-        if (pythonDot) {
-            pythonDot.classList.toggle('connected', this.state.connected);
-            pythonDot.classList.toggle('disconnected', !this.state.connected);
+        if (pythonEl) {
+            pythonEl.classList.toggle('connected', this.state.connected);
+            pythonEl.classList.toggle('disconnected', !this.state.connected);
         }
 
-        if (mcDot) {
-            mcDot.classList.toggle('connected', this.state.minecraftConnected);
-            mcDot.classList.toggle('disconnected', !this.state.minecraftConnected);
+        if (mcEl) {
+            mcEl.classList.toggle('connected', this.state.minecraftConnected);
+            mcEl.classList.toggle('disconnected', !this.state.minecraftConnected);
         }
     }
 
@@ -2097,7 +2321,8 @@ class AdminApp {
             if (dj.direct_mode) {
                 const badge = document.createElement('span');
                 badge.className = 'dj-badge-direct';
-                badge.textContent = 'DIRECT';
+                badge.textContent = dj.mc_connected ? 'DIRECT: MC OK' : 'DIRECT: RELAY';
+                if (!dj.mc_connected) badge.classList.add('dj-badge-direct-relay');
                 meta.appendChild(badge);
             }
 
@@ -2221,8 +2446,47 @@ class AdminApp {
 
     // === 3D Preview Methods ===
 
-    _initPreview() {
-        if (this._previewInitialized) return;
+    _loadThreeScript(src) {
+        return new Promise((resolve, reject) => {
+            const existing = Array.from(document.scripts).find(s => s.src && s.src.includes(src));
+            if (existing && typeof THREE !== 'undefined') {
+                resolve(true);
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = () => resolve(true);
+            script.onerror = () => reject(new Error(`Failed to load ${src}`));
+            document.head.appendChild(script);
+        });
+    }
+
+    async _ensureThreeLoaded() {
+        if (typeof THREE !== 'undefined') return true;
+        if (this._threeLoadInFlight) return false;
+        this._threeLoadInFlight = true;
+        try {
+            // Prefer local vendor copy.
+            await this._loadThreeScript('js/vendor/three-r128.min.js');
+            if (typeof THREE !== 'undefined') return true;
+        } catch (_) {
+            // fall through to CDN
+        }
+
+        try {
+            await this._loadThreeScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+            return typeof THREE !== 'undefined';
+        } catch (_) {
+            return false;
+        } finally {
+            this._threeLoadInFlight = false;
+        }
+    }
+
+    async _initPreview() {
+        if (this._previewInitialized || this._previewFailed) return;
 
         const canvas = document.getElementById('preview-canvas');
         const wrapper = canvas?.parentElement;
@@ -2234,82 +2498,99 @@ class AdminApp {
         // Check if THREE is loaded
         if (typeof THREE === 'undefined') {
             console.warn('[Preview] Three.js not loaded');
-            return;
+            const loaded = await this._ensureThreeLoaded();
+            if (!loaded || typeof THREE === 'undefined') {
+                this._previewFailed = true;
+                this._showToast('Three.js failed to load; 3D Preview disabled', 'warning');
+                return;
+            }
         }
 
-        console.log('[Preview] Initializing 3D preview');
+        try {
+            console.log('[Preview] Initializing 3D preview');
 
-        // Scene
-        this._previewScene = new THREE.Scene();
-        this._previewScene.background = new THREE.Color(0x0a0a0f);
-        this._previewScene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
+            // Scene
+            this._previewScene = new THREE.Scene();
+            this._previewScene.background = new THREE.Color(0x0a0a0f);
+            this._previewScene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
 
-        // Camera
-        const aspect = wrapper.clientWidth / wrapper.clientHeight;
-        this._previewCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
-        this._previewCamera.position.set(12, 10, 12);
-        this._previewCamera.lookAt(0, 2, 0);
+            // Camera
+            const width = Math.max(1, wrapper.clientWidth);
+            const height = Math.max(1, wrapper.clientHeight);
+            const aspect = width / height;
+            this._previewCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
+            this._previewCamera.position.set(12, 10, 12);
+            this._previewCamera.lookAt(0, 2, 0);
 
-        // Renderer
-        this._previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-        this._previewRenderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
-        this._previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        this._previewRenderer.shadowMap.enabled = true;
+            // Renderer
+            this._previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            this._previewRenderer.setSize(width, height);
+            this._previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            this._previewRenderer.shadowMap.enabled = true;
 
-        // Lights
-        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
-        this._previewScene.add(ambientLight);
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            this._previewScene.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(10, 20, 10);
-        directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 2048;
-        directionalLight.shadow.mapSize.height = 2048;
-        this._previewScene.add(directionalLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            this._previewScene.add(directionalLight);
 
-        const pointLight = new THREE.PointLight(0x6366f1, 0.5, 20);
-        pointLight.position.set(0, 5, 0);
-        this._previewScene.add(pointLight);
+            const pointLight = new THREE.PointLight(0x6366f1, 0.5, 20);
+            pointLight.position.set(0, 5, 0);
+            this._previewScene.add(pointLight);
 
-        // Ground plane
-        const groundGeometry = new THREE.PlaneGeometry(30, 30);
-        const groundMaterial = new THREE.MeshStandardMaterial({
-            color: 0x12121a,
-            roughness: 0.9
-        });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        this._previewScene.add(ground);
+            // Ground plane
+            const groundGeometry = new THREE.PlaneGeometry(30, 30);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x12121a,
+                roughness: 0.9
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            this._previewScene.add(ground);
 
-        // Grid helper
-        const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-        gridHelper.position.y = 0.01;
-        this._previewScene.add(gridHelper);
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
+            gridHelper.position.y = 0.01;
+            this._previewScene.add(gridHelper);
 
-        // Create initial blocks
-        this._createPreviewBlocks(16);
+            // Create initial blocks
+            this._createPreviewBlocks(16);
 
-        // Initialize particle system
-        if (typeof ParticleSystem !== 'undefined') {
-            this._previewParticleSystem = new ParticleSystem(this._previewScene, 500);
+            // Initialize particle system
+            if (typeof ParticleSystem !== 'undefined') {
+                this._previewParticleSystem = new ParticleSystem(this._previewScene, 500);
+            }
+
+            // Initialize block indicators
+            if (typeof BlockIndicatorSystem !== 'undefined') {
+                this._previewBlockIndicators = new BlockIndicatorSystem(this._previewScene, 8);
+            }
+
+            // Setup preview controls
+            this._setupPreviewControls();
+            this._setupPreviewMouseControls();
+
+            // Handle window resize
+            window.addEventListener('resize', () => this._onPreviewResize());
+
+            this._previewInitialized = true;
+            this._previewLastFrameTime = performance.now();
+            console.log('[Preview] 3D preview initialized');
+        } catch (error) {
+            this._previewFailed = true;
+            this._previewInitialized = false;
+            this._previewRenderer = null;
+            this._previewScene = null;
+            this._previewCamera = null;
+            console.error('[Preview] Initialization failed', error);
+            this._showToast('3D Preview initialization failed; disabled for this session', 'warning');
         }
-
-        // Initialize block indicators
-        if (typeof BlockIndicatorSystem !== 'undefined') {
-            this._previewBlockIndicators = new BlockIndicatorSystem(this._previewScene, 8);
-        }
-
-        // Setup preview controls
-        this._setupPreviewControls();
-        this._setupPreviewMouseControls();
-
-        // Handle window resize
-        window.addEventListener('resize', () => this._onPreviewResize());
-
-        this._previewInitialized = true;
-        this._previewLastFrameTime = performance.now();
-        console.log('[Preview] 3D preview initialized');
     }
 
     _createPreviewBlock(index) {
@@ -2478,6 +2759,7 @@ class AdminApp {
     }
 
     _startPreviewAnimation() {
+        if (!this._previewInitialized || this._previewFailed) return;
         if (this._previewAnimationId) return;
         this._previewLastFrameTime = performance.now();
         this._animatePreview();
@@ -2495,110 +2777,130 @@ class AdminApp {
 
         if (!this._previewRenderer || !this._previewScene || !this._previewCamera) return;
 
-        const now = performance.now();
-        const dt = (now - this._previewLastFrameTime) / 1000;
-        this._previewLastFrameTime = now;
+        try {
+            const now = performance.now();
+            const dt = (now - this._previewLastFrameTime) / 1000;
+            this._previewLastFrameTime = now;
 
-        // FPS calculation
-        this._previewFrameCount++;
-        if (now - this._previewLastFpsUpdate >= 1000) {
-            this._previewFps = this._previewFrameCount;
-            this._previewFrameCount = 0;
-            this._previewLastFpsUpdate = now;
-            const fpsEl = document.getElementById('preview-stat-fps');
-            if (fpsEl) fpsEl.textContent = this._previewFps;
+            // FPS calculation
+            this._previewFrameCount++;
+            if (now - this._previewLastFpsUpdate >= 1000) {
+                this._previewFps = this._previewFrameCount;
+                this._previewFrameCount = 0;
+                this._previewLastFpsUpdate = now;
+                const fpsEl = document.getElementById('preview-stat-fps');
+                if (fpsEl) fpsEl.textContent = this._previewFps;
+            }
+
+            // Smooth block animations
+            const lerpSpeed = 0.25;
+            this._previewBlocks.forEach((block) => {
+                block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
+                block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
+                block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
+
+                const targetScale = block.userData.targetScale || 1;
+                block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
+                block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
+                block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
+            });
+
+            // Update particle system
+            if (this._previewParticleSystem) {
+                this._previewParticleSystem.update(dt);
+            }
+
+            // Auto rotate camera
+            if (this._previewAutoRotate && this._previewCamera) {
+                const spherical = new THREE.Spherical();
+                spherical.setFromVector3(this._previewCamera.position);
+                spherical.theta += 0.002;
+                this._previewCamera.position.setFromSpherical(spherical);
+                this._previewCamera.lookAt(0, 3, 0);
+            }
+
+            this._previewRenderer.render(this._previewScene, this._previewCamera);
+        } catch (error) {
+            console.error('[Preview] Render loop failed', error);
+            this._previewFailed = true;
+            this._stopPreviewAnimation();
+            this._showToast('3D Preview render error; disabled for this session', 'warning');
         }
-
-        // Smooth block animations
-        const lerpSpeed = 0.25;
-        this._previewBlocks.forEach((block) => {
-            block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
-            block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
-            block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
-
-            const targetScale = block.userData.targetScale || 1;
-            block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
-            block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
-            block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
-        });
-
-        // Update particle system
-        if (this._previewParticleSystem) {
-            this._previewParticleSystem.update(dt);
-        }
-
-        // Auto rotate camera
-        if (this._previewAutoRotate && this._previewCamera) {
-            const spherical = new THREE.Spherical();
-            spherical.setFromVector3(this._previewCamera.position);
-            spherical.theta += 0.002;
-            this._previewCamera.position.setFromSpherical(spherical);
-            this._previewCamera.lookAt(0, 3, 0);
-        }
-
-        this._previewRenderer.render(this._previewScene, this._previewCamera);
     }
 
     _updatePreviewFromAudioState() {
-        if (!this._previewInitialized) return;
+        if (!this._previewInitialized || this._previewFailed) return;
 
-        const entities = this.state.entities;
-        const bands = this.state.bands;
-        const isBeat = this.state.isBeat;
-        const beatIntensity = this.state.beatIntensity;
+        try {
+            const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
+            const bands = Array.isArray(this.state.bands) ? this.state.bands : [0, 0, 0, 0, 0];
+            const isBeat = !!this.state.isBeat;
+            const beatIntensity = Number.isFinite(this.state.beatIntensity) ? this.state.beatIntensity : 0;
 
-        // Update preview meters overlay
-        this._updatePreviewMeters();
+            // Update preview meters overlay
+            this._updatePreviewMeters();
 
-        // Update block positions from entities
-        if (entities && entities.length > 0) {
-            this._ensurePreviewBlockCount(entities.length);
+            // Update block positions from entities
+            if (entities.length > 0) {
+                this._ensurePreviewBlockCount(entities.length);
 
-            const config = this._previewConfig;
-            this._previewBlocks.forEach((block, i) => {
-                const entity = entities[i];
-                if (!entity) return;
+                const config = this._previewConfig;
+                this._previewBlocks.forEach((block, i) => {
+                    const entity = entities[i];
+                    if (!entity || typeof entity !== 'object') return;
 
-                block.userData.targetX = (entity.x * config.zoneSize) - config.centerOffset;
-                block.userData.targetY = entity.y * config.zoneSize;
-                block.userData.targetZ = (entity.z * config.zoneSize) - config.centerOffset;
-                block.userData.targetScale = entity.scale * 1.5;
+                    const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+                    const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+                    const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+                    const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
 
-                const bandIndex = entity.band || 0;
-                if (block.userData.bandIndex !== bandIndex) {
-                    block.userData.bandIndex = bandIndex;
-                    block.material.color.setHex(config.colors[bandIndex]);
-                    block.material.emissive.setHex(config.colors[bandIndex]);
-                }
+                    block.userData.targetX = (x * config.zoneSize) - config.centerOffset;
+                    block.userData.targetY = y * config.zoneSize;
+                    block.userData.targetZ = (z * config.zoneSize) - config.centerOffset;
+                    block.userData.targetScale = scale * 1.5;
 
-                const bandValue = bands[bandIndex] || 0;
-                block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
-            });
+                    const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
+                    const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
+                    if (block.userData.bandIndex !== bandIndex) {
+                        block.userData.bandIndex = bandIndex;
+                        block.material.color.setHex(config.colors[bandIndex]);
+                        block.material.emissive.setHex(config.colors[bandIndex]);
+                    }
+
+                    const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
+                    block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+                });
+            }
+
+            // Update block indicators
+            if (this._previewBlockIndicators && this._previewShowGrid) {
+                this._previewBlockIndicators.updateFromAudio(bands, isBeat, beatIntensity);
+            }
+
+            // Beat flash
+            const beatFlash = document.getElementById('preview-beat-flash');
+            if (beatFlash) {
+                beatFlash.classList.toggle('active', isBeat);
+            }
+
+            // Spawn particles on beat
+            if (isBeat && this._previewParticleEffects.enabled) {
+                this._spawnPreviewBeatParticles();
+            }
+
+            // Spawn ambient particles
+            if (this._previewParticleEffects.enabled) {
+                this._spawnPreviewAmbientParticles();
+            }
+
+            // Update stats
+            this._updatePreviewStats();
+        } catch (error) {
+            console.error('[Preview] Update failed', error);
+            this._previewFailed = true;
+            this._stopPreviewAnimation();
+            this._showToast('3D Preview update failed; disabled for this session', 'warning');
         }
-
-        // Update block indicators
-        if (this._previewBlockIndicators && this._previewShowGrid) {
-            this._previewBlockIndicators.updateFromAudio(bands, isBeat, beatIntensity);
-        }
-
-        // Beat flash
-        const beatFlash = document.getElementById('preview-beat-flash');
-        if (beatFlash) {
-            beatFlash.classList.toggle('active', isBeat);
-        }
-
-        // Spawn particles on beat
-        if (isBeat && this._previewParticleEffects.enabled) {
-            this._spawnPreviewBeatParticles();
-        }
-
-        // Spawn ambient particles
-        if (this._previewParticleEffects.enabled) {
-            this._spawnPreviewAmbientParticles();
-        }
-
-        // Update stats
-        this._updatePreviewStats();
     }
 
     _updatePreviewMeters() {

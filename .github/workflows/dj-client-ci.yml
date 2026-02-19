@@ -12,6 +12,10 @@ on:
       - 'dj_client/**'
       - '.github/workflows/dj-client-ci.yml'
 
+concurrency:
+  group: dj-client-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -115,16 +119,25 @@ jobs:
         working-directory: dj_client
         run: npm run build
 
+      - name: Disable updater artifacts when signing key is missing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            node -e "const fs=require('fs'); const path='dj_client/src-tauri/tauri.conf.json'; const conf=JSON.parse(fs.readFileSync(path,'utf8')); if (conf.bundle && conf.bundle.createUpdaterArtifacts) { conf.bundle.createUpdaterArtifacts=false; fs.writeFileSync(path, JSON.stringify(conf, null, 2)+'\n'); console.log('Disabled bundle.createUpdaterArtifacts for unsigned CI build'); }"
+          fi
+
       - name: Build Tauri app
         working-directory: dj_client
         run: npm run tauri build -- --target ${{ matrix.rust_target }}
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload artifacts (Linux)
         if: matrix.platform == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-linux-x64
           path: |
@@ -134,7 +147,7 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-windows-x64
           path: |
@@ -144,7 +157,7 @@ jobs:
 
       - name: Upload artifacts (macOS x64)
         if: matrix.platform == 'macos-latest' && matrix.rust_target == 'x86_64-apple-darwin'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-macos-x64
           path: |
@@ -153,7 +166,7 @@ jobs:
 
       - name: Upload artifacts (macOS ARM64)
         if: matrix.platform == 'macos-latest' && matrix.rust_target == 'aarch64-apple-darwin'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dj-client-macos-arm64
           path: |

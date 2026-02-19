@@ -55,6 +55,39 @@ updates:
       - "dependencies"
       - "rust"
 
+  # pip - coordinator
+  - package-ecosystem: "pip"
+    directory: "/coordinator"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+
+  # npm - site (Next.js)
+  - package-ecosystem: "npm"
+    directory: "/site"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+
+  # npm - worker (Cloudflare)
+  - package-ecosystem: "npm"
+    directory: "/worker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"

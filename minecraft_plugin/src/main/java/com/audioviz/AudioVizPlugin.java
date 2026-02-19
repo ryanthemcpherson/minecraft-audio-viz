@@ -1,5 +1,7 @@
 package com.audioviz;
 
+import com.audioviz.bedrock.BedrockPlayerListener;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.commands.AudioVizCommand;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
@@ -10,15 +12,19 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererRegistry;
 import com.audioviz.stages.StageManager;
+import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.logging.Level;
 
-public class AudioVizPlugin extends JavaPlugin {
+public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     private static AudioVizPlugin instance;
     private ZoneManager zoneManager;
@@ -33,6 +39,8 @@ public class AudioVizPlugin extends JavaPlugin {
     private RendererRegistry rendererRegistry;
     private StageManager stageManager;
     private StageDecoratorManager decoratorManager;
+    private BedrockSupport bedrockSupport;
+    private VoicechatIntegration voicechatIntegration;
 
     @Override
     public void onEnable() {
@@ -52,17 +60,23 @@ public class AudioVizPlugin extends JavaPlugin {
         this.beatEventManager = new BeatEventManager(this);
         this.zoneEditor = new ZoneEditor(this);
 
+        // Detect Geyser/Floodgate for Bedrock player support
+        this.bedrockSupport = new BedrockSupport(getLogger(), getConfig());
+        this.bedrockSupport.detect();
+
         // Initialize particle visualization manager (for Bedrock compatibility)
-        this.particleVisualizationManager = new ParticleVisualizationManager(this);
+        this.particleVisualizationManager = new ParticleVisualizationManager(this, bedrockSupport);
         this.particleVisualizationManager.start();
 
         // Initialize renderer backend registry (backend selection + capability reporting)
         this.rendererRegistry = new RendererRegistry(this);
 
         // Register event listeners
+        getServer().getPluginManager().registerEvents(this, this);
         getServer().getPluginManager().registerEvents(menuManager, this);
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
+        getServer().getPluginManager().registerEvents(new BedrockPlayerListener(bedrockSupport), this);
 
         // Initialize stage manager
         this.stageManager = new StageManager(this);
@@ -80,6 +94,29 @@ public class AudioVizPlugin extends JavaPlugin {
         getCommand("audioviz").setExecutor(commandExecutor);
         getCommand("audioviz").setTabCompleter(commandExecutor);
 
+        // Detect Simple Voice Chat for audio streaming support
+        // Delay by 1 tick so SVC has time to register its BukkitVoicechatService
+        // (softdepend doesn't guarantee load order on Paper)
+        getServer().getScheduler().runTask(this, () -> {
+            try {
+                var voicechatService = getServer().getServicesManager().load(
+                        Class.forName("de.maxhenkel.voicechat.api.BukkitVoicechatService"));
+                if (voicechatService != null) {
+                    voicechatIntegration = new VoicechatIntegration(this);
+                    var registerMethod = voicechatService.getClass().getMethod("registerPlugin",
+                            Class.forName("de.maxhenkel.voicechat.api.VoicechatPlugin"));
+                    registerMethod.invoke(voicechatService, voicechatIntegration);
+                    getLogger().info("Simple Voice Chat detected - audio streaming enabled");
+                } else {
+                    getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
+                }
+            } catch (ClassNotFoundException e) {
+                getLogger().info("Simple Voice Chat not installed - audio streaming disabled");
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "Failed to initialize Simple Voice Chat integration", e);
+            }
+        });
+
         // Start WebSocket server
         int wsPort = getConfig().getInt("websocket.port", 8765);
         try {
@@ -96,7 +133,7 @@ public class AudioVizPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         // Unregister all event listeners to prevent leaks on plugin reload
-        HandlerList.unregisterAll(this);
+        HandlerList.unregisterAll((org.bukkit.plugin.Plugin) this);
 
         // Clear menu manager sessions (prevent stale player references)
         if (menuManager != null) {
@@ -116,9 +153,26 @@ public class AudioVizPlugin extends JavaPlugin {
             decoratorManager.stop();
         }
 
-        // Cleanup entity pools
-        if (entityPoolManager != null) {
-            entityPoolManager.cleanupAll();
+        // Shutdown voice chat integration before WebSocket server
+        if (voicechatIntegration != null) {
+            try {
+                voicechatIntegration.shutdown();
+            } catch (Exception e) {
+                getLogger().warning("Error shutting down voice chat integration: " + e.getMessage());
+            }
+        }
+
+        // Stop WebSocket server - must complete BEFORE classloader closes the JAR
+        // otherwise background threads (WebSocketWorker, WebSocketSelector) crash
+        // with "zip file closed" when they try to load classes from the old JAR
+        if (webSocketServer != null) {
+            try {
+                // Full shutdown stops heartbeat tasks, message queue, and socket threads.
+                webSocketServer.shutdown();
+                getLogger().info("WebSocket server stopped");
+            } catch (Exception e) {
+                getLogger().warning("Error stopping WebSocket server: " + e.getMessage());
+            }
         }
 
         // Stop particle visualization manager
@@ -130,17 +184,28 @@ public class AudioVizPlugin extends JavaPlugin {
             rendererRegistry.clearAll();
         }
 
-        // Stop WebSocket server
-        if (webSocketServer != null) {
-            try {
-                webSocketServer.stop(1000);
-                getLogger().info("WebSocket server stopped");
-            } catch (InterruptedException e) {
-                getLogger().warning("Error stopping WebSocket server: " + e.getMessage());
-            }
+        // Cleanup entity pools synchronously - scheduling new tasks while disabled
+        // can throw IllegalPluginAccessException during reload.
+        if (entityPoolManager != null) {
+            entityPoolManager.cleanupAllSync();
         }
 
         getLogger().info("AudioViz plugin disabled!");
+    }
+
+    /**
+     * Clean up entity pools in zones belonging to an unloaded world
+     * to prevent stale entity references.
+     */
+    @EventHandler
+    public void onWorldUnload(WorldUnloadEvent event) {
+        String worldName = event.getWorld().getName();
+        for (var zone : zoneManager.getAllZones()) {
+            if (zone.getWorld().getName().equals(worldName)) {
+                getLogger().info("World '" + worldName + "' unloading, cleaning up zone '" + zone.getName() + "'");
+                entityPoolManager.cleanupZoneSync(zone.getName());
+            }
+        }
     }
 
     public static AudioVizPlugin getInstance() {
@@ -193,5 +258,13 @@ public class AudioVizPlugin extends JavaPlugin {
 
     public StageDecoratorManager getDecoratorManager() {
         return decoratorManager;
+    }
+
+    public BedrockSupport getBedrockSupport() {
+        return bedrockSupport;
+    }
+
+    public VoicechatIntegration getVoicechatIntegration() {
+        return voicechatIntegration;
     }
 }

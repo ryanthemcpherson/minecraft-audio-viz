@@ -1,7 +1,7 @@
 # Dockerfile for AudioViz VJ Server
 # Note: Audio capture requires Windows, this is for VJ server mode only
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app

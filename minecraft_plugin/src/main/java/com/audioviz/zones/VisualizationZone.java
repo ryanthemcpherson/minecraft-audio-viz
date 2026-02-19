@@ -17,6 +17,8 @@ public class VisualizationZone {
     private Location origin;
     private Vector size;
     private float rotation; // Y-axis rotation in degrees
+    private boolean glowOnBeat; // Flash glow effect on beat detection
+    private boolean dynamicBrightness; // Scale brightness with audio amplitude
 
     public VisualizationZone(String name, Location origin) {
         this.name = name;
@@ -24,6 +26,8 @@ public class VisualizationZone {
         this.origin = origin.clone();
         this.size = new Vector(10, 10, 10); // Default 10x10x10 zone
         this.rotation = 0f;
+        this.glowOnBeat = false;
+        this.dynamicBrightness = false;
     }
 
     public VisualizationZone(String name, UUID id, Location origin, Vector size, float rotation) {
@@ -32,6 +36,8 @@ public class VisualizationZone {
         this.origin = origin.clone();
         this.size = size.clone();
         this.rotation = rotation;
+        this.glowOnBeat = false;
+        this.dynamicBrightness = false;
     }
 
     public String getName() {
@@ -74,6 +80,22 @@ public class VisualizationZone {
         return origin.getWorld();
     }
 
+    public boolean isGlowOnBeat() {
+        return glowOnBeat;
+    }
+
+    public void setGlowOnBeat(boolean glowOnBeat) {
+        this.glowOnBeat = glowOnBeat;
+    }
+
+    public boolean isDynamicBrightness() {
+        return dynamicBrightness;
+    }
+
+    public void setDynamicBrightness(boolean dynamicBrightness) {
+        this.dynamicBrightness = dynamicBrightness;
+    }
+
     /**
      * Convert a local position (0-1 normalized) to world coordinates
      * taking into account zone origin, size, and rotation.
@@ -102,13 +124,17 @@ public class VisualizationZone {
 
     /**
      * Check if a world location is within this zone's bounds.
+     * Note: Uses axis-aligned bounding box only. When rotation != 0 the actual
+     * visualized area is rotated but this check is not, so results may be
+     * inaccurate for rotated zones. A proper check would inverse-rotate the
+     * query point before testing against the AABB.
      */
     public boolean contains(Location location) {
         if (!location.getWorld().equals(origin.getWorld())) {
             return false;
         }
 
-        // Simple AABB check (ignoring rotation for now)
+        // Simple AABB check (ignoring rotation)
         double dx = location.getX() - origin.getX();
         double dy = location.getY() - origin.getY();
         double dz = location.getZ() - origin.getZ();

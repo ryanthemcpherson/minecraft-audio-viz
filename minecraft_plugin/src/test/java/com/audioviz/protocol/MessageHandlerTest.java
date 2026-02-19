@@ -353,6 +353,84 @@ class MessageHandlerTest {
         verify(beatEventManager, never()).processBeat(anyString(), any(), anyDouble());
     }
 
+    @Test
+    @DisplayName("audio_state projects beat near phase edge with good tempo confidence")
+    void audioStatePhaseAssistProjectsBeat() {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("zone", "main");
+        msg.addProperty("is_beat", false);
+        msg.addProperty("bpm", 140.0);
+        msg.addProperty("tempo_confidence", 0.9);
+        msg.addProperty("beat_phase", 0.95);
+        msg.add("bands", fiveBands(0.4));
+
+        handler.handleMessage("audio_state", msg);
+
+        verify(beatEventManager, times(1)).processBeat(eq("main"), any(), anyDouble());
+    }
+
+    @Test
+    @DisplayName("audio_state phase assist suppressed when confidence is low")
+    void audioStatePhaseAssistSuppressedLowConfidence() {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("zone", "main");
+        msg.addProperty("is_beat", false);
+        msg.addProperty("bpm", 140.0);
+        msg.addProperty("tempo_confidence", 0.3);
+        msg.addProperty("beat_phase", 0.95);
+        msg.add("bands", fiveBands(0.4));
+
+        handler.handleMessage("audio_state", msg);
+
+        verify(beatEventManager, never()).processBeat(anyString(), any(), anyDouble());
+    }
+
+    @Test
+    @DisplayName("audio_state phase assist uses per-zone cooldown")
+    void audioStatePhaseAssistUsesCooldown() {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("zone", "main");
+        msg.addProperty("is_beat", false);
+        msg.addProperty("bpm", 150.0);
+        msg.addProperty("tempo_confidence", 0.9);
+        msg.addProperty("beat_phase", 0.94);
+        msg.add("bands", fiveBands(0.4));
+
+        handler.handleMessage("audio_state", msg);
+        handler.handleMessage("audio_state", msg);
+
+        verify(beatEventManager, times(1)).processBeat(eq("main"), any(), anyDouble());
+    }
+
+    @Test
+    @DisplayName("audio_state accepts tempo_conf alias and forwards phase metadata")
+    void audioStateTempoConfAliasAndPhaseForwarded() {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("zone", "main");
+        msg.addProperty("is_beat", false);
+        msg.addProperty("bpm", 128.0);
+        msg.addProperty("tempo_conf", 0.82);
+        msg.addProperty("beat_phase", 0.2);
+        msg.addProperty("amplitude", 0.6);
+        msg.add("bands", fiveBands(0.3));
+
+        handler.handleMessage("audio_state", msg);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(com.audioviz.patterns.AudioState.class);
+        verify(particleVizManager).updateAudioState(captor.capture());
+        var state = captor.getValue();
+        assertEquals(0.82, state.getTempoConfidence(), 1e-10);
+        assertEquals(0.2, state.getBeatPhase(), 1e-10);
+    }
+
+    private static JsonArray fiveBands(double value) {
+        JsonArray bands = new JsonArray();
+        for (int i = 0; i < 5; i++) {
+            bands.add(value);
+        }
+        return bands;
+    }
+
     // --- Error responses ---
 
     @Test

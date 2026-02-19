@@ -7,7 +7,6 @@ import uuid
 
 import jwt as pyjwt
 import pytest
-
 from app.services.user_jwt import (
     ISSUER,
     TOKEN_TYPE,
@@ -16,7 +15,7 @@ from app.services.user_jwt import (
     verify_user_token,
 )
 
-SECRET = "test-secret-key"
+SECRET = "test-secret-key"  # nosec B105
 
 
 class TestCreateUserToken:
@@ -35,9 +34,7 @@ class TestCreateUserToken:
         assert "exp" in decoded
 
     def test_custom_expiry(self) -> None:
-        token = create_user_token(
-            user_id=uuid.uuid4(), jwt_secret=SECRET, expiry_minutes=5
-        )
+        token = create_user_token(user_id=uuid.uuid4(), jwt_secret=SECRET, expiry_minutes=5)
         decoded = pyjwt.decode(token, SECRET, algorithms=["HS256"])
         assert decoded["exp"] - decoded["iat"] == 5 * 60
 
@@ -53,12 +50,10 @@ class TestVerifyUserToken:
     def test_wrong_secret_raises(self) -> None:
         token = create_user_token(user_id=uuid.uuid4(), jwt_secret=SECRET)
         with pytest.raises(pyjwt.InvalidTokenError):
-            verify_user_token(token, jwt_secret="wrong-secret")
+            verify_user_token(token, jwt_secret="wrong-secret")  # nosec B106
 
     def test_expired_token_raises(self) -> None:
-        token = create_user_token(
-            user_id=uuid.uuid4(), jwt_secret=SECRET, expiry_minutes=-1
-        )
+        token = create_user_token(user_id=uuid.uuid4(), jwt_secret=SECRET, expiry_minutes=-1)
         with pytest.raises(pyjwt.ExpiredSignatureError):
             verify_user_token(token, jwt_secret=SECRET)
 

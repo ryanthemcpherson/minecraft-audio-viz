@@ -36,7 +36,7 @@ public class EntityPoolManager {
 
     // Limits to prevent memory issues
     private static final int MAX_ZONES = 100;
-    private static final int MAX_ENTITIES_PER_ZONE = 1000;
+    private final int maxEntitiesPerZone;
 
     public enum EntityType {
         BLOCK_DISPLAY,
@@ -48,11 +48,13 @@ public class EntityPoolManager {
         this.plugin = plugin;
         this.entityPools = new ConcurrentHashMap<>();
         this.entityTypes = new ConcurrentHashMap<>();
+        this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
     }
 
     /**
      * Initialize a pool of block display entities for a zone.
      * Supports incremental resizing - adds or removes entities as needed instead of full cleanup.
+     * Always updates block material on all existing entities.
      */
     public void initializeBlockPool(String zoneName, int count, Material material) {
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
@@ -66,23 +68,26 @@ public class EntityPoolManager {
             plugin.getLogger().warning("Cannot initialize pool: max zones limit reached (" + MAX_ZONES + ")");
             return;
         }
-        if (count > MAX_ENTITIES_PER_ZONE) {
-            plugin.getLogger().warning("Entity count capped from " + count + " to " + MAX_ENTITIES_PER_ZONE);
-            count = MAX_ENTITIES_PER_ZONE;
+        if (count > maxEntitiesPerZone) {
+            plugin.getLogger().warning("Entity count capped from " + count + " to " + maxEntitiesPerZone + " (performance.max_entities_per_zone)");
+            count = maxEntitiesPerZone;
         }
 
         final int finalCount = count;
+        final Material finalMaterial = material;
         Map<String, Entity> pool = entityPools.computeIfAbsent(zoneName.toLowerCase(), k -> new ConcurrentHashMap<>());
         final int currentCount = pool.size();
 
-        // If counts match, nothing to do
-        if (currentCount == finalCount) {
-            return;
-        }
-
-        // Incremental resize on the main thread
+        // Schedule on main thread for entity operations
         Bukkit.getScheduler().runTask(plugin, () -> {
             Location spawnLoc = zone.getOrigin().clone();
+
+            // Update material on all existing entities
+            for (Entity entity : pool.values()) {
+                if (entity instanceof BlockDisplay display && entity.isValid()) {
+                    display.setBlock(finalMaterial.createBlockData());
+                }
+            }
 
             if (finalCount > currentCount) {
                 // Add more entities
@@ -91,7 +96,7 @@ public class EntityPoolManager {
                     if (pool.containsKey(entityId)) continue;
 
                     BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
-                        entity.setBlock(material.createBlockData());
+                        entity.setBlock(finalMaterial.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
                         entity.setInterpolationDuration(2); // 2 ticks - responsive interpolation
                         entity.setInterpolationDelay(0);
@@ -104,7 +109,7 @@ public class EntityPoolManager {
                     entityTypes.put(display.getUniqueId(), EntityType.BLOCK_DISPLAY);
                 }
                 plugin.getLogger().info("Added " + (finalCount - currentCount) + " block displays for zone '" + zoneName + "' (now " + finalCount + ")");
-            } else {
+            } else if (finalCount < currentCount) {
                 // Remove excess entities
                 for (int i = finalCount; i < currentCount; i++) {
                     String entityId = "block_" + i;
@@ -116,6 +121,8 @@ public class EntityPoolManager {
                 }
                 plugin.getLogger().info("Removed " + (currentCount - finalCount) + " block displays from zone '" + zoneName + "' (now " + finalCount + ")");
             }
+
+            plugin.getLogger().info("Block material set to " + finalMaterial.name() + " for zone '" + zoneName + "' (" + pool.size() + " entities)");
         });
     }
 
@@ -173,6 +180,9 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
         if (pool == null) return;
 
+        // Record stats
+        plugin.getEntityUpdateStats().recordUpdates(updates.size());
+
         // Single scheduler call for ALL updates - major performance improvement
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (EntityUpdate update : updates) {
@@ -216,6 +226,7 @@ public class EntityPoolManager {
 
     /**
      * Update entity position with interpolation.
+     * Note: Creates an individual scheduler task. For bulk updates, prefer batchUpdateEntities().
      */
     public void updateEntityPosition(String zoneName, String entityId, double x, double y, double z) {
         Entity entity = getEntity(zoneName, entityId);
@@ -266,7 +277,37 @@ public class EntityPoolManager {
     }
 
     /**
+     * Batch update visibility for multiple entities in a single scheduler task.
+     *
+     * @param zoneName The zone containing the entities
+     * @param changes List of (entityId, visible) pairs
+     */
+    public void batchSetVisible(String zoneName, List<Map.Entry<String, Boolean>> changes) {
+        if (changes == null || changes.isEmpty()) return;
+
+        Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
+        if (pool == null) return;
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            for (Map.Entry<String, Boolean> change : changes) {
+                Entity entity = pool.get(change.getKey());
+                if (entity == null || !(entity instanceof Display display)) continue;
+
+                Transformation current = display.getTransformation();
+                float scale = change.getValue() ? 0.5f : 0f;
+                display.setTransformation(new Transformation(
+                    current.getTranslation(),
+                    current.getLeftRotation(),
+                    new Vector3f(scale, scale, scale),
+                    current.getRightRotation()
+                ));
+            }
+        });
+    }
+
+    /**
      * Set entity visibility by scaling to 0.
+     * Note: Creates an individual scheduler task. For bulk updates, prefer batchSetVisible().
      */
     public void setEntityVisible(String zoneName, String entityId, boolean visible) {
         Entity entity = getEntity(zoneName, entityId);
@@ -304,8 +345,8 @@ public class EntityPoolManager {
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
 
-        if (count > MAX_ENTITIES_PER_ZONE) {
-            count = MAX_ENTITIES_PER_ZONE;
+        if (count > maxEntitiesPerZone) {
+            count = maxEntitiesPerZone;
         }
 
         Map<String, Entity> pool = entityPools.computeIfAbsent(zoneName.toLowerCase(), k -> new ConcurrentHashMap<>());
@@ -375,7 +416,7 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.remove(zoneName.toLowerCase());
         if (pool == null) return;
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        runEntityMutation(() -> {
             for (Entity entity : pool.values()) {
                 if (entity != null && entity.isValid()) {
                     entityTypes.remove(entity.getUniqueId());
@@ -393,6 +434,34 @@ public class EntityPoolManager {
     public void cleanupAll() {
         for (String zoneName : new ArrayList<>(entityPools.keySet())) {
             cleanupZone(zoneName);
+        }
+    }
+
+    /**
+     * Cleanup all entities in a zone synchronously.
+     * Intended for plugin shutdown, where scheduling new tasks may be illegal.
+     */
+    public void cleanupZoneSync(String zoneName) {
+        Map<String, Entity> pool = entityPools.remove(zoneName.toLowerCase());
+        if (pool == null) return;
+
+        for (Entity entity : pool.values()) {
+            if (entity != null && entity.isValid()) {
+                entityTypes.remove(entity.getUniqueId());
+                entity.remove();
+            }
+        }
+
+        plugin.getLogger().info("Synchronously cleaned up entity pool for zone '" + zoneName + "'");
+    }
+
+    /**
+     * Cleanup all entity pools synchronously.
+     * Intended for plugin shutdown.
+     */
+    public void cleanupAllSync() {
+        for (String zoneName : new ArrayList<>(entityPools.keySet())) {
+            cleanupZoneSync(zoneName);
         }
     }
 
@@ -550,5 +619,18 @@ public class EntityPoolManager {
             // Set glow
             entity.setGlowing(glow);
         });
+    }
+
+    /**
+     * Execute entity mutations on the main thread when possible.
+     * During plugin shutdown, fall back to direct execution to avoid
+     * IllegalPluginAccessException from scheduling APIs.
+     */
+    private void runEntityMutation(Runnable task) {
+        if (!plugin.isEnabled() || Bukkit.isPrimaryThread()) {
+            task.run();
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, task);
     }
 }

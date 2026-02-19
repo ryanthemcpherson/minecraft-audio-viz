@@ -8,6 +8,9 @@
 - [ ] Java (minecraft_plugin)
 - [ ] DJ Client (dj_client)
 - [ ] Admin Panel / Preview
+- [ ] Site (site/)
+- [ ] Coordinator (coordinator/)
+- [ ] Worker (worker/)
 - [ ] CI/CD / DevOps
 
 ## Testing

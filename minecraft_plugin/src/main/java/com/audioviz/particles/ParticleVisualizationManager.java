@@ -1,14 +1,18 @@
 package com.audioviz.particles;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.zones.VisualizationZone;
+import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Particle;
+import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
@@ -25,6 +29,7 @@ public class ParticleVisualizationManager {
 
     private final AudioVizPlugin plugin;
     private final Logger logger;
+    private final BedrockSupport bedrockSupport;
 
     // Per-zone configuration
     private final Map<String, ParticleVizConfig> zoneConfigs = new ConcurrentHashMap<>();
@@ -40,9 +45,10 @@ public class ParticleVisualizationManager {
     private static final int MAX_PARTICLES_PER_TICK_PER_ZONE = 200;
     private static final int MAX_PARTICLES_PER_TICK_GLOBAL = 500;
 
-    public ParticleVisualizationManager(AudioVizPlugin plugin) {
+    public ParticleVisualizationManager(AudioVizPlugin plugin, BedrockSupport bedrockSupport) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
+        this.bedrockSupport = bedrockSupport;
     }
 
     /**
@@ -231,30 +237,70 @@ public class ParticleVisualizationManager {
     }
 
     /**
-     * Spawn a single particle.
+     * Spawn a single particle. When Bedrock fallback is active and Bedrock players are online,
+     * particles are sent per-player so only Bedrock players see them.
      */
     private void spawnParticle(Location loc, Particle type, Color color, float size, boolean trail, double intensity) {
+        boolean bedrockTargeted = bedrockSupport != null
+            && bedrockSupport.needsParticleFallback()
+            && bedrockSupport.hasBedrockPlayersOnline();
+
         try {
             if (type == Particle.DUST) {
-                Particle.DustOptions dust = new Particle.DustOptions(color, size);
-                loc.getWorld().spawnParticle(Particle.DUST, loc, 1, 0, 0, 0, 0, dust);
+                float effectiveSize = bedrockTargeted ? size * bedrockSupport.getParticleSize() / 1.5f : size;
+                Particle.DustOptions dust = new Particle.DustOptions(color, effectiveSize);
+                if (bedrockTargeted) {
+                    spawnForBedrockPlayers(loc, Particle.DUST, 1, 0, 0, 0, 0, dust);
+                } else {
+                    loc.getWorld().spawnParticle(Particle.DUST, loc, 1, 0, 0, 0, 0, dust);
+                }
             } else if (type == Particle.DUST_COLOR_TRANSITION) {
-                // Fade from bright to darker
                 Color darker = Color.fromRGB(
                     (int)(color.getRed() * 0.5),
                     (int)(color.getGreen() * 0.5),
                     (int)(color.getBlue() * 0.5)
                 );
-                Particle.DustTransition transition = new Particle.DustTransition(color, darker, size);
-                loc.getWorld().spawnParticle(Particle.DUST_COLOR_TRANSITION, loc, 1, 0, 0, 0, 0, transition);
+                float effectiveSize = bedrockTargeted ? size * bedrockSupport.getParticleSize() / 1.5f : size;
+                Particle.DustTransition transition = new Particle.DustTransition(color, darker, effectiveSize);
+                if (bedrockTargeted) {
+                    spawnForBedrockPlayers(loc, Particle.DUST_COLOR_TRANSITION, 1, 0, 0, 0, 0, transition);
+                } else {
+                    loc.getWorld().spawnParticle(Particle.DUST_COLOR_TRANSITION, loc, 1, 0, 0, 0, 0, transition);
+                }
             } else {
-                // Non-colored particles
                 double speed = trail ? 0.05 * intensity : 0.01;
-                loc.getWorld().spawnParticle(type, loc, 1, 0.02, 0.02, 0.02, speed);
+                if (bedrockTargeted) {
+                    spawnForBedrockPlayers(loc, type, 1, 0.02, 0.02, 0.02, speed, null);
+                } else {
+                    loc.getWorld().spawnParticle(type, loc, 1, 0.02, 0.02, 0.02, speed);
+                }
             }
         } catch (Exception e) {
-            // Log particle spawn errors (rate-limited to avoid spam)
             logger.fine("Particle spawn error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Send particles only to Bedrock players (per-player targeting).
+     * Java players never see these particles.
+     */
+    private <T> void spawnForBedrockPlayers(Location loc, Particle type, int count,
+                                             double offX, double offY, double offZ,
+                                             double speed, T data) {
+        int maxDist = bedrockSupport.getMaxRenderDistance();
+        double maxDistSq = (double) maxDist * maxDist;
+
+        for (UUID uuid : bedrockSupport.getBedrockPlayers()) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player == null || !player.isOnline()) continue;
+            if (!player.getWorld().equals(loc.getWorld())) continue;
+            if (player.getLocation().distanceSquared(loc) > maxDistSq) continue;
+
+            if (data != null) {
+                player.spawnParticle(type, loc, count, offX, offY, offZ, speed, data);
+            } else {
+                player.spawnParticle(type, loc, count, offX, offY, offZ, speed);
+            }
         }
     }
 
@@ -275,6 +321,10 @@ public class ParticleVisualizationManager {
 
         Color color = getColorForBand(1, intensity, config.getColorMode(), config, audio); // Bass color
 
+        boolean bedrockTargeted = bedrockSupport != null
+            && bedrockSupport.needsParticleFallback()
+            && bedrockSupport.hasBedrockPlayersOnline();
+
         try {
             // Ring burst
             for (int i = 0; i < count; i++) {
@@ -285,10 +335,22 @@ public class ParticleVisualizationManager {
                 Location loc = new Location(center.getWorld(), x, center.getY(), z);
 
                 if (config.getParticleType() == Particle.DUST) {
-                    Particle.DustOptions dust = new Particle.DustOptions(color, config.getParticleSize() * 1.5f);
-                    center.getWorld().spawnParticle(Particle.DUST, loc, 1, 0, 0.1, 0, 0.02, dust);
+                    float burstSize = config.getParticleSize() * 1.5f;
+                    if (bedrockTargeted) {
+                        burstSize = burstSize * bedrockSupport.getParticleSize() / 1.5f;
+                    }
+                    Particle.DustOptions dust = new Particle.DustOptions(color, burstSize);
+                    if (bedrockTargeted) {
+                        spawnForBedrockPlayers(loc, Particle.DUST, 1, 0, 0.1, 0, 0.02, dust);
+                    } else {
+                        center.getWorld().spawnParticle(Particle.DUST, loc, 1, 0, 0.1, 0, 0.02, dust);
+                    }
                 } else {
-                    center.getWorld().spawnParticle(config.getParticleType(), loc, 1, 0, 0.1, 0, 0.05);
+                    if (bedrockTargeted) {
+                        spawnForBedrockPlayers(loc, config.getParticleType(), 1, 0, 0.1, 0, 0.05, null);
+                    } else {
+                        center.getWorld().spawnParticle(config.getParticleType(), loc, 1, 0, 0.1, 0, 0.05);
+                    }
                 }
                 incrementZoneParticleCount(zoneName);
             }

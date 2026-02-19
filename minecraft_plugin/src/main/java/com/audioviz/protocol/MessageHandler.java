@@ -1,6 +1,7 @@
 package com.audioviz.protocol;
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.decorators.BannerConfig;
 import com.audioviz.decorators.DJInfo;
 import com.audioviz.effects.BeatEffectConfig;
@@ -17,6 +18,7 @@ import com.audioviz.stages.StageManager;
 import com.audioviz.stages.StageTemplate;
 import com.audioviz.stages.StageZoneConfig;
 import com.audioviz.stages.StageZoneRole;
+import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.zones.VisualizationZone;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -27,10 +29,14 @@ import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Handles WebSocket protocol messages and dispatches to appropriate handlers.
@@ -38,9 +44,25 @@ import java.util.Map;
 public class MessageHandler {
 
     private final AudioVizPlugin plugin;
+    private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
+
+    /** Valid zone/stage name: 1-64 alphanumeric characters, underscores, and hyphens. */
+    private static final Pattern VALID_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
+    private static final int MAX_NAME_LENGTH = 64;
 
     public MessageHandler(AudioVizPlugin plugin) {
         this.plugin = plugin;
+    }
+
+    /**
+     * Validate a zone or stage name from WebSocket input.
+     * Must be non-null, non-empty, max 64 chars, and match [a-zA-Z0-9_-]+.
+     */
+    private static boolean isValidZoneName(String name) {
+        return name != null
+            && !name.isEmpty()
+            && name.length() <= MAX_NAME_LENGTH
+            && VALID_NAME_PATTERN.matcher(name).matches();
     }
 
     /**
@@ -81,6 +103,10 @@ public class MessageHandler {
             case "dj_info" -> handleDjInfo(message);
             // Banner config
             case "banner_config" -> handleBannerConfig(message);
+            // Voice chat
+            case "voice_audio" -> handleVoiceAudio(message);
+            case "voice_config" -> handleVoiceConfig(message);
+            case "get_voice_status" -> handleGetVoiceStatus();
             default -> createError("Unknown message type: " + type);
         };
     }
@@ -110,6 +136,9 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
         if (zone == null) {
@@ -129,7 +158,12 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
-        int count = message.has("count") ? message.get("count").getAsInt() : 16;
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in init_pool: " + zoneName);
+            return createError("Invalid zone name");
+        }
+        int count = message.has("count") ? message.get("count").getAsInt() :
+            plugin.getConfig().getInt("defaults.entity_count", 16);
         String materialName = message.has("material") ? message.get("material").getAsString() : "GLOWSTONE";
 
         Material material = Material.matchMaterial(materialName);
@@ -173,6 +207,10 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in batch_update: " + zoneName);
+            return createError("Invalid zone name");
+        }
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
         if (zone == null) {
@@ -189,6 +227,7 @@ public class MessageHandler {
 
             for (JsonElement elem : entities) {
                 JsonObject entity = elem.getAsJsonObject();
+                if (!entity.has("id")) continue;
                 String entityId = entity.get("id").getAsString();
 
                 // Get position (local coordinates 0-1, clamped for safety)
@@ -244,13 +283,18 @@ public class MessageHandler {
             }
 
             // Handle visibility separately (needs scale-to-zero, different from batch)
+            // Collect all visibility changes and apply in a single scheduler call
+            List<Map.Entry<String, Boolean>> visibilityChanges = new ArrayList<>();
             for (JsonElement elem : entities) {
                 JsonObject entity = elem.getAsJsonObject();
-                if (entity.has("visible")) {
-                    String entityId = entity.get("id").getAsString();
-                    boolean visible = entity.get("visible").getAsBoolean();
-                    pool.setEntityVisible(zoneName, entityId, visible);
+                if (entity.has("visible") && entity.has("id")) {
+                    visibilityChanges.add(Map.entry(
+                        entity.get("id").getAsString(),
+                        entity.get("visible").getAsBoolean()));
                 }
+            }
+            if (!visibilityChanges.isEmpty()) {
+                pool.batchSetVisible(zoneName, visibilityChanges);
             }
         }
 
@@ -277,6 +321,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or id");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         String entityId = message.get("id").getAsString();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -328,6 +375,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or visible");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         boolean visible = message.get("visible").getAsBoolean();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -361,6 +411,10 @@ public class MessageHandler {
             return createError("Missing required field: zone");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in cleanup_zone: " + zoneName);
+            return createError("Invalid zone name");
+        }
         plugin.getEntityPoolManager().cleanupZone(zoneName);
         plugin.getParticleVisualizationManager().removeZoneConfig(zoneName);
         plugin.getRendererRegistry().removeZone(zoneName);
@@ -412,6 +466,8 @@ public class MessageHandler {
         json.add("size", size);
 
         json.addProperty("rotation", zone.getRotation());
+        json.addProperty("glow_on_beat", zone.isGlowOnBeat());
+        json.addProperty("dynamic_brightness", zone.isDynamicBrightness());
 
         return json;
     }
@@ -425,6 +481,10 @@ public class MessageHandler {
             return createError("Missing required field: zone or config");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            plugin.getLogger().warning("Invalid zone name in set_zone_config: " + zoneName);
+            return createError("Invalid zone name");
+        }
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
 
         if (zone == null) {
@@ -471,6 +531,16 @@ public class MessageHandler {
             plugin.getEntityPoolManager().setZoneInterpolation(zoneName, interpolation);
         }
 
+        // Update glow_on_beat setting
+        if (config.has("glow_on_beat")) {
+            zone.setGlowOnBeat(config.get("glow_on_beat").getAsBoolean());
+        }
+
+        // Update dynamic_brightness setting
+        if (config.has("dynamic_brightness")) {
+            zone.setDynamicBrightness(config.get("dynamic_brightness").getAsBoolean());
+        }
+
         // Store config for reference
         // These are forwarded to Python processor which uses them for pattern generation
         JsonObject response = new JsonObject();
@@ -489,6 +559,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or glow");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         boolean glow = message.get("glow").getAsBoolean();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -525,6 +598,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or brightness");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         int brightness = message.get("brightness").getAsInt();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -560,6 +636,9 @@ public class MessageHandler {
             return createError("Missing required field: zone or mode");
         }
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         String mode = message.get("mode").getAsString();
 
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
@@ -610,6 +689,9 @@ public class MessageHandler {
         }
 
         String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
         if (!plugin.getZoneManager().zoneExists(zoneName)) {
             return createError("Zone not found: " + zoneName);
         }
@@ -691,6 +773,16 @@ public class MessageHandler {
         hologramProvider.addProperty("implemented", rendererRegistry.isHologramBackendImplemented());
         providers.add("hologram", hologramProvider);
         response.add("providers", providers);
+
+        // Bedrock support status
+        BedrockSupport bedrockSupport = plugin.getBedrockSupport();
+        JsonObject bedrock = new JsonObject();
+        bedrock.addProperty("geyser_present", bedrockSupport.isGeyserPresent());
+        bedrock.addProperty("floodgate_present", bedrockSupport.isFloodgatePresent());
+        bedrock.addProperty("geyser_display_entity", bedrockSupport.isGeyserDisplayEntityPresent());
+        bedrock.addProperty("particle_fallback_active", bedrockSupport.needsParticleFallback());
+        bedrock.addProperty("bedrock_players_online", bedrockSupport.getBedrockPlayers().size());
+        response.add("bedrock", bedrock);
 
         return response;
     }
@@ -811,9 +903,16 @@ public class MessageHandler {
         }
 
         // Enable/disable the effect for beat type
-        BeatType beatType = message.has("beat_type") ?
-            BeatType.valueOf(message.get("beat_type").getAsString().toUpperCase()) :
-            BeatType.BEAT;
+        BeatType beatType;
+        if (message.has("beat_type")) {
+            try {
+                beatType = BeatType.valueOf(message.get("beat_type").getAsString().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return createError("Unknown beat type: " + message.get("beat_type").getAsString());
+            }
+        } else {
+            beatType = BeatType.BEAT;
+        }
 
         if (enabled) {
             config.addEffect(beatType, effect);
@@ -878,9 +977,26 @@ public class MessageHandler {
         }
         String zoneName = message.get("zone").getAsString();
 
-        boolean isBeat = message.has("is_beat") && message.get("is_beat").getAsBoolean();
-        double beatIntensity = InputSanitizer.sanitizeAmplitude(
-            message.has("beat_intensity") ? message.get("beat_intensity").getAsDouble() : 0.0);
+        boolean explicitBeat = message.has("is_beat") && message.get("is_beat").getAsBoolean();
+        double explicitBeatIntensity = InputSanitizer.sanitizeDouble(
+            message.has("beat_intensity") ? message.get("beat_intensity").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+        double bpm = InputSanitizer.sanitizeDouble(
+            message.has("bpm") ? message.get("bpm").getAsDouble() : 0.0,
+            0.0, 300.0, 0.0);
+        double tempoConfidence = InputSanitizer.sanitizeDouble(
+            message.has("tempo_confidence") ? message.get("tempo_confidence").getAsDouble()
+                : (message.has("tempo_conf") ? message.get("tempo_conf").getAsDouble() : 0.0),
+            0.0, 1.0, 0.0);
+        double beatPhase = InputSanitizer.sanitizeDouble(
+            message.has("beat_phase") ? message.get("beat_phase").getAsDouble() : 0.0,
+            0.0, 1.0, 0.0);
+
+        BeatProjectionUtil.BeatProjection projection = BeatProjectionUtil.projectBeat(
+            zoneName, explicitBeat, explicitBeatIntensity, bpm, tempoConfidence, beatPhase,
+            lastBeatTimestampByZone);
+        boolean isBeat = projection.isBeat();
+        double beatIntensity = projection.beatIntensity();
 
         // Trigger beat effects if this is a beat
         if (isBeat && beatIntensity > 0) {
@@ -900,7 +1016,8 @@ public class MessageHandler {
                 message.has("amplitude") ? message.get("amplitude").getAsDouble() : 0.0);
             long frame = message.has("frame") ? message.get("frame").getAsLong() : 0;
 
-            AudioState audioState = new AudioState(bands, amplitude, isBeat, beatIntensity, frame);
+            AudioState audioState = new AudioState(
+                bands, amplitude, isBeat, beatIntensity, tempoConfidence, beatPhase, frame);
             plugin.getParticleVisualizationManager().updateAudioState(audioState);
 
             // Forward audio state to decorator manager
@@ -993,7 +1110,15 @@ public class MessageHandler {
             return createError("Missing required field: name or template");
         }
         String name = message.get("name").getAsString();
+        if (!isValidZoneName(name)) {
+            plugin.getLogger().warning("Invalid stage name in create_stage: " + name);
+            return createError("Invalid stage name");
+        }
         String templateName = message.get("template").getAsString();
+        if (!isValidZoneName(templateName)) {
+            plugin.getLogger().warning("Invalid template name in create_stage: " + templateName);
+            return createError("Invalid template name");
+        }
 
         StageManager stageManager = plugin.getStageManager();
 
@@ -1041,6 +1166,10 @@ public class MessageHandler {
             return createError("Missing required field: name");
         }
         String name = message.get("name").getAsString();
+        if (!isValidZoneName(name)) {
+            plugin.getLogger().warning("Invalid stage name in delete_stage: " + name);
+            return createError("Invalid stage name");
+        }
 
         if (!plugin.getStageManager().deleteStage(name)) {
             return createError("Stage not found: " + name);
@@ -1161,6 +1290,10 @@ public class MessageHandler {
             return createError("Missing required field: stage, role, or config");
         }
         String stageName = message.get("stage").getAsString();
+        if (!isValidZoneName(stageName)) {
+            plugin.getLogger().warning("Invalid stage name in set_stage_zone_config: " + stageName);
+            return createError("Invalid stage name");
+        }
         String roleName = message.get("role").getAsString();
 
         Stage stage = plugin.getStageManager().getStage(stageName);
@@ -1317,6 +1450,124 @@ public class MessageHandler {
         json.addProperty("glow_on_beat", config.isGlowOnBeat());
         json.addProperty("intensity_multiplier", config.getIntensityMultiplier());
         return json;
+    }
+
+    // ========== Voice Chat Handlers ==========
+
+    /** Expected byte count for a voice audio frame: 960 samples * 2 bytes per int16 */
+    private static final int VOICE_FRAME_BYTES = 1920;
+
+    /** Expected sample count per voice audio frame (20ms at 48kHz mono) */
+    private static final int VOICE_FRAME_SAMPLES = 960;
+
+    /**
+     * Handle incoming audio frames for voice chat streaming.
+     * Supports two codecs:
+     * <ul>
+     *   <li>{@code "opus"} - data is already Opus-encoded, sent directly to channels</li>
+     *   <li>{@code "pcm"} - data is raw PCM (960 int16 samples, little-endian), encoded to Opus first</li>
+     * </ul>
+     * Defaults to {@code "pcm"} if the codec field is not present (backward compatibility).
+     */
+    private JsonObject handleVoiceAudio(JsonObject message) {
+        VoicechatIntegration voiceChat = plugin.getVoicechatIntegration();
+        if (voiceChat == null || !voiceChat.isAvailable()) {
+            // Silent drop - voice chat not available, don't spam errors for high-frequency messages
+            JsonObject response = new JsonObject();
+            response.addProperty("type", "ok");
+            return response;
+        }
+
+        if (!message.has("data")) {
+            return createError("Missing required field: data");
+        }
+
+        // Determine codec: "opus" or "pcm" (default for backward compatibility)
+        String codec = message.has("codec") ? message.get("codec").getAsString() : "pcm";
+
+        try {
+            String base64Data = message.get("data").getAsString();
+            byte[] rawBytes = Base64.getDecoder().decode(base64Data);
+
+            if ("opus".equals(codec)) {
+                // Data is already Opus-encoded - queue directly
+                voiceChat.queueOpusFrame(rawBytes);
+            } else {
+                // PCM fallback: decode to int16 samples, encode to Opus, then queue
+                if (rawBytes.length != VOICE_FRAME_BYTES) {
+                    return createError("Invalid PCM voice frame size: expected " + VOICE_FRAME_BYTES +
+                            " bytes, got " + rawBytes.length);
+                }
+
+                short[] samples = new short[VOICE_FRAME_SAMPLES];
+                ByteBuffer buffer = ByteBuffer.wrap(rawBytes).order(ByteOrder.LITTLE_ENDIAN);
+                for (int i = 0; i < VOICE_FRAME_SAMPLES; i++) {
+                    samples[i] = buffer.getShort();
+                }
+
+                voiceChat.queuePcmFrame(samples);
+            }
+
+        } catch (IllegalArgumentException e) {
+            return createError("Invalid base64 data: " + e.getMessage());
+        }
+
+        // Silent response for high-frequency message
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    /**
+     * Handle voice chat configuration changes.
+     * Updates channel type, distance, zone, and enabled state.
+     * Broadcasts the resulting voice_status to all connected WebSocket clients.
+     */
+    private JsonObject handleVoiceConfig(JsonObject message) {
+        VoicechatIntegration voiceChat = plugin.getVoicechatIntegration();
+        if (voiceChat == null) {
+            return createError("Simple Voice Chat is not installed");
+        }
+
+        boolean enabled = message.has("enabled") ? message.get("enabled").getAsBoolean() : true;
+        String channelType = message.has("channel_type") ? message.get("channel_type").getAsString() : "static";
+        double distance = message.has("distance") ? message.get("distance").getAsDouble() : 100.0;
+        String zone = message.has("zone") ? message.get("zone").getAsString() : "main";
+
+        // Validate channel type
+        if (!"static".equals(channelType) && !"locational".equals(channelType)) {
+            return createError("Invalid channel_type: " + channelType + ". Use 'static' or 'locational'");
+        }
+
+        // Validate distance
+        if (distance <= 0 || distance > 1000) {
+            return createError("Invalid distance: must be between 0 and 1000");
+        }
+
+        voiceChat.setConfig(enabled, channelType, distance, zone);
+
+        // Broadcast voice_status to ALL connected WebSocket clients
+        JsonObject status = voiceChat.getStatus();
+        if (plugin.getWebSocketServer() != null) {
+            plugin.getWebSocketServer().broadcast(status);
+        }
+
+        // Also return voice_status as the direct response to the sender
+        return status;
+    }
+
+    private JsonObject handleGetVoiceStatus() {
+        VoicechatIntegration voiceChat = plugin.getVoicechatIntegration();
+        if (voiceChat == null) {
+            JsonObject status = new JsonObject();
+            status.addProperty("type", "voice_status");
+            status.addProperty("available", false);
+            status.addProperty("streaming", false);
+            status.addProperty("channel_type", "static");
+            status.addProperty("connected_players", 0);
+            return status;
+        }
+        return voiceChat.getStatus();
     }
 
     private JsonObject createError(String message) {

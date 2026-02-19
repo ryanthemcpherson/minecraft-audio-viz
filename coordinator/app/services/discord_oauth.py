@@ -25,9 +25,7 @@ class DiscordUser:
     avatar: str | None
 
 
-def get_authorize_url(
-    *, client_id: str, redirect_uri: str, state: str
-) -> str:
+def get_authorize_url(*, client_id: str, redirect_uri: str, state: str) -> str:
     """Build the Discord OAuth2 authorization URL."""
     params = {
         "client_id": client_id,

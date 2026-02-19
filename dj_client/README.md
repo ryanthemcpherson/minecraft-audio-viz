@@ -34,12 +34,19 @@ A lightweight, cross-platform desktop application for DJs to connect to AudioViz
    npm run tauri dev
    ```
 
-4. **Build for production:**
+4. **Build for production (local, unsigned):**
    ```bash
-   npm run tauri build
+   npm run tauri:build
    ```
 
-5. **Run automated tests:**
+5. **Build for production (signed release artifacts):**
+   ```bash
+   # Required for updater signatures:
+   # TAURI_SIGNING_PRIVATE_KEY + optional TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+   npm run tauri:build:signed
+   ```
+
+6. **Run automated tests:**
    ```bash
    npm test
    ```
@@ -124,6 +131,13 @@ Built binaries are available in the `target/release` folder:
 - Windows: `dj-client.exe` (~3MB) or `.msi` installer
 - macOS: `AudioViz DJ.app` or `.dmg`
 - Linux: AppImage or `.deb`
+
+## Auto Updates
+
+- The app checks GitHub release metadata at startup and periodically while running.
+- Update endpoint is configured in `dj_client/src-tauri/tauri.conf.json`.
+- Signed updater artifacts require `TAURI_SIGNING_PRIVATE_KEY` during release builds.
+- For local packaging without signing, use `npm run tauri:build` (`--no-sign`).
 
 ## License
 

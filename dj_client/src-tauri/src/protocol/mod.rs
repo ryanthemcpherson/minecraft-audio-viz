@@ -3,5 +3,5 @@
 mod client;
 mod messages;
 
-pub use client::{DjClient, DjClientConfig};
+pub use client::{ConnectionState, DjClient, DjClientConfig};
 pub use messages::*;

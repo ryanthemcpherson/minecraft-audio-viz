@@ -76,6 +76,7 @@ NUL
 # Rust/Cargo
 dj_client/src-tauri/target/
 dj_client/src-tauri/Cargo.lock
+!dj_client/src-tauri/Cargo.lock
 
 # Node.js / Frontend
 dj_client/node_modules/
@@ -127,3 +128,6 @@ worker/dist/
 
 # Additional env
 .env.production.local
+
+# Test databases
+coordinator/test.db

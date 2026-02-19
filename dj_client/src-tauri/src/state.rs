@@ -2,7 +2,9 @@
 
 use crate::audio::AudioCaptureHandle;
 use crate::protocol::DjClient;
+use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// Connection status
@@ -11,6 +13,8 @@ pub struct ConnectionStatus {
     pub connected: bool,
     pub is_active: bool,
     pub latency_ms: f32,
+    pub route_mode: String,
+    pub mc_connected: bool,
     pub queue_position: usize,
     pub total_djs: usize,
     pub active_dj_name: Option<String>,
@@ -60,6 +64,18 @@ pub struct AppState {
 
     /// Shutdown signal sender for the bridge task
     pub bridge_shutdown_tx: Option<mpsc::Sender<()>>,
+
+    /// Voice audio streamer (shared with audio capture thread)
+    pub voice_streamer: Option<Arc<VoiceStreamer>>,
+
+    /// Voice streaming configuration
+    pub voice_config: VoiceConfig,
+
+    /// Voice streaming status (updated from server)
+    pub voice_status: VoiceStatus,
+
+    /// Currently active audio preset name
+    pub active_preset: String,
 }
 
 impl Default for AppState {
@@ -79,6 +95,10 @@ impl Default for AppState {
             server_port: 9000,
             audio_source_id: None,
             bridge_shutdown_tx: None,
+            voice_streamer: None,
+            voice_config: VoiceConfig::default(),
+            voice_status: VoiceStatus::default(),
+            active_preset: "auto".to_string(),
         }
     }
 }
@@ -94,6 +114,8 @@ mod tests {
         assert!(!status.connected);
         assert!(!status.is_active);
         assert_eq!(status.latency_ms, 0.0);
+        assert_eq!(status.route_mode, "");
+        assert!(!status.mc_connected);
         assert_eq!(status.queue_position, 0);
         assert_eq!(status.total_djs, 0);
         assert!(status.active_dj_name.is_none());
@@ -114,5 +136,10 @@ mod tests {
         assert_eq!(state.server_host, "192.168.1.204");
         assert_eq!(state.server_port, 9000);
         assert!(state.bridge_shutdown_tx.is_none());
+        assert!(state.voice_streamer.is_none());
+        assert!(!state.voice_config.enabled);
+        assert_eq!(state.voice_config.channel_type, "static");
+        assert!(!state.voice_status.available);
+        assert_eq!(state.active_preset, "auto");
     }
 }

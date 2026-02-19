@@ -51,8 +51,8 @@ class BlockIndicatorSystem {
                 );
 
                 // Assign band based on position (diagonal gradient)
-                const bandIndex = Math.floor(((x + z) / (this.gridSize * 2 - 2)) * 6);
-                cube.userData.bandIndex = Math.min(5, bandIndex);
+                const bandIndex = Math.floor(((x + z) / (this.gridSize * 2 - 2)) * 5);
+                cube.userData.bandIndex = Math.max(0, Math.min(4, bandIndex));
                 cube.userData.gridX = x;
                 cube.userData.gridZ = z;
                 cube.userData.intensity = 0;
@@ -94,8 +94,8 @@ class BlockIndicatorSystem {
 
         // Update each indicator based on its assigned band
         this.indicators.forEach((cube, index) => {
-            const bandIndex = cube.userData.bandIndex;
-            const bandValue = bands[bandIndex] || 0;
+            const bandIndex = Math.max(0, Math.min(4, Number(cube.userData.bandIndex) || 0));
+            const bandValue = Number(bands?.[bandIndex]) || 0;
 
             // Calculate target intensity
             const threshold = 0.15;
@@ -113,7 +113,7 @@ class BlockIndicatorSystem {
             cube.userData.intensity += (cube.userData.targetIntensity - cube.userData.intensity) * lerpSpeed;
 
             const intensity = cube.userData.intensity;
-            const bandColor = this.bandColors[bandIndex];
+            const bandColor = this.bandColors[bandIndex] || this.inactiveColor;
 
             // Update material
             const glowIntensity = intensity * (1 + this.beatPulse * 0.5);

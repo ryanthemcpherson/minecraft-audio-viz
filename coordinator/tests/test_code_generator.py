@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from app.services.code_generator import (
     MUSIC_WORDS,
     SAFE_CHARS,

@@ -83,6 +83,18 @@ let lastFpsUpdate = 0;
 let currentFps = 60;
 let lastFrameTime = 0;
 
+// Debounce helper for slider WebSocket messages
+const WS_DEBOUNCE_MS = 50;
+const _debounceTimers = {};
+function debouncedWsSend(key, payload) {
+    if (_debounceTimers[key]) clearTimeout(_debounceTimers[key]);
+    _debounceTimers[key] = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(payload));
+        }
+    }, WS_DEBOUNCE_MS);
+}
+
 // Initialize
 function init() {
     // Scene
@@ -108,6 +120,22 @@ function init() {
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
+
+    // Handle WebGL context loss and restoration
+    canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        console.warn('[WebGL] Context lost');
+        const statusText = document.querySelector('#connection-status .status-text');
+        if (statusText) statusText.textContent = 'WebGL Lost';
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+        console.info('[WebGL] Context restored');
+        const statusText = document.querySelector('#connection-status .status-text');
+        if (statusText) statusText.textContent = 'Reconnecting...';
+        // Re-initialise renderer state after context restore
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+    });
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
@@ -353,6 +381,57 @@ function setupMouseControls() {
         const newDistance = distance * (1 + e.deltaY * zoomSpeed);
         camera.position.normalize().multiplyScalar(Math.max(5, Math.min(30, newDistance)));
     });
+
+    // Touch event support for mobile
+    let lastTouchDistance = 0;
+
+    canvas.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            isDragging = true;
+            previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            isDragging = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            lastTouchDistance = Math.hypot(dx, dy);
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1 && isDragging) {
+            const deltaX = e.touches[0].clientX - previousMousePosition.x;
+            const deltaY = e.touches[0].clientY - previousMousePosition.y;
+
+            const spherical = new THREE.Spherical();
+            spherical.setFromVector3(camera.position);
+            spherical.theta -= deltaX * 0.01;
+            spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + deltaY * 0.01));
+            camera.position.setFromSpherical(spherical);
+            camera.lookAt(0, 2, 0);
+
+            previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const touchDistance = Math.hypot(dx, dy);
+
+            if (lastTouchDistance > 0) {
+                const scale = lastTouchDistance / touchDistance;
+                const distance = camera.position.length();
+                camera.position.normalize().multiplyScalar(Math.max(5, Math.min(30, distance * scale)));
+            }
+            lastTouchDistance = touchDistance;
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        isDragging = false;
+        if (e.touches.length < 2) {
+            lastTouchDistance = 0;
+        }
+    });
 }
 
 function setupParticleToggles() {
@@ -458,6 +537,8 @@ function connectWebSocket() {
                     updatePatternList(data.patterns, data.current || data.pattern);
                 } else if (data.type === 'preset_changed') {
                     updateUIFromPreset(data.preset, data.settings);
+                } else if (data.type === 'voice_status') {
+                    updateVoiceStatus(data);
                 }
             } catch (e) {
                 console.error('Parse error:', e);
@@ -856,21 +937,15 @@ function setPattern(patternId) {
 }
 
 function setBlockCount(count) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_block_count', count: count }));
-    }
+    debouncedWsSend('block_count', { type: 'set_block_count', count: count });
 }
 
 function setAudioSetting(setting, value) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_audio_setting', setting: setting, value: value }));
-    }
+    debouncedWsSend('audio_' + setting, { type: 'set_audio_setting', setting: setting, value: value });
 }
 
 function setBandSensitivity(bandIndex, sensitivity) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_band_sensitivity', band: bandIndex, sensitivity: sensitivity }));
-    }
+    debouncedWsSend('band_' + bandIndex, { type: 'set_band_sensitivity', band: bandIndex, sensitivity: sensitivity });
 }
 
 function setPreset(presetName) {
@@ -926,6 +1001,34 @@ function updateUIFromPreset(presetName, settings) {
         }
     }
 }
+
+function updateVoiceStatus(data) {
+    const dot = document.getElementById('voice-header-dot');
+    const text = document.getElementById('voice-header-text');
+
+    if (!dot || !text) return;
+
+    // Remove all state classes
+    dot.classList.remove('voice-streaming', 'voice-available', 'voice-na');
+
+    if (!data.available) {
+        dot.classList.add('voice-na');
+        text.textContent = 'Voice: N/A';
+    } else if (data.streaming) {
+        dot.classList.add('voice-streaming');
+        text.textContent = 'Voice: Streaming';
+    } else {
+        dot.classList.add('voice-available');
+        text.textContent = 'Voice: Off';
+    }
+}
+
+// Close WebSocket cleanly when leaving the page
+window.addEventListener('beforeunload', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+    }
+});
 
 // Start when DOM is ready
 document.addEventListener('DOMContentLoaded', init);

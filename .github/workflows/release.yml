@@ -11,14 +11,37 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Verify CI passed on this commit before releasing
+  # ---------------------------------------------------------------------------
+  ci-gate:
+    name: Verify CI Status
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI status for commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${GITHUB_SHA}"
+          echo "Checking CI status for commit ${SHA}..."
+          CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name == "CI Passed")] | first | .conclusion // "not_found"')
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "ERROR: CI has not passed on this commit (status: ${CONCLUSION})."
+            echo "Push to main and wait for CI to pass before tagging a release."
+            exit 1
+          fi
+          echo "CI passed on commit ${SHA}."
+
   build-python:
     name: Build Python Package
+    needs: [ci-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -29,13 +52,14 @@ jobs:
         run: python -m build
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: python-dist
           path: dist/
 
   build-plugin:
     name: Build Minecraft Plugin
+    needs: [ci-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -52,13 +76,14 @@ jobs:
         run: mvn clean package -DskipTests
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: minecraft-plugin
           path: minecraft_plugin/target/audioviz-plugin-*.jar
 
   build-dj-client:
     name: Build DJ Client (${{ matrix.platform }})
+    needs: [ci-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -139,7 +164,7 @@ jobs:
           cp dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg release-artifacts/ || true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: release-artifacts/
@@ -153,40 +178,40 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download Python artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-dist
           path: dist/
 
       - name: Download Plugin artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: minecraft-plugin
           path: plugin/
 
       - name: Download DJ Client Windows
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dj-client-windows-x64
           path: dj-client/windows/
         continue-on-error: true
 
       - name: Download DJ Client Linux
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dj-client-linux-x64
           path: dj-client/linux/
         continue-on-error: true
 
       - name: Download DJ Client macOS x64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dj-client-macos-x64
           path: dj-client/macos-x64/
         continue-on-error: true
 
       - name: Download DJ Client macOS ARM64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dj-client-macos-arm64
           path: dj-client/macos-arm64/

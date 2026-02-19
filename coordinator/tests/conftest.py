@@ -11,6 +11,11 @@ from typing import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from app.config import Settings
+from app.database import get_session
+from app.main import create_app
+from app.middleware.rate_limit import get_auth_limiter, get_connect_limiter, get_write_limiter
+from app.models.db import Base
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -18,16 +23,10 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.config import Settings
-from app.database import get_session
-from app.main import create_app
-from app.middleware.rate_limit import get_auth_limiter, get_connect_limiter
-from app.models.db import Base
-
-
 # ---------------------------------------------------------------------------
 # Event-loop fixture (session-scoped)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -41,6 +40,7 @@ def event_loop():
 # Settings override
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def settings() -> Settings:
     return Settings(
@@ -50,7 +50,7 @@ def settings() -> Settings:
         rate_limit_register_per_hour=5,
         rate_limit_auth_per_minute=100,  # relaxed for tests
         cors_origins=["http://localhost:3000"],
-        user_jwt_secret="test-user-jwt-secret",
+        user_jwt_secret="test-user-jwt-secret",  # nosec B106
         user_jwt_expiry_minutes=60,
         refresh_token_expiry_days=30,
     )
@@ -59,6 +59,7 @@ def settings() -> Settings:
 # ---------------------------------------------------------------------------
 # Async engine + session wired to in-memory SQLite
 # ---------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture()
 async def db_session(settings: Settings) -> AsyncIterator[AsyncSession]:
@@ -82,6 +83,7 @@ async def db_session(settings: Settings) -> AsyncIterator[AsyncSession]:
 # httpx AsyncClient wired to the FastAPI app
 # ---------------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture()
 async def client(settings: Settings, db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     app = create_app(settings=settings)
@@ -95,6 +97,7 @@ async def client(settings: Settings, db_session: AsyncSession) -> AsyncIterator[
     # Reset rate limiters between tests so they don't bleed across test cases
     get_connect_limiter().reset()
     get_auth_limiter().reset()
+    get_write_limiter().reset()
 
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:

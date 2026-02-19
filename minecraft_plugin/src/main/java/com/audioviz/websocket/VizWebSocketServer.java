@@ -56,7 +56,8 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final long METRICS_LOG_INTERVAL_TICKS = 6000L; // 5 minutes
 
     public VizWebSocketServer(AudioVizPlugin plugin, int port) {
-        super(new InetSocketAddress("0.0.0.0", port));  // Bind to all interfaces
+        super(new InetSocketAddress(
+            plugin.getConfig().getString("websocket.address", "0.0.0.0"), port));
         this.plugin = plugin;
         this.messageHandler = new MessageHandler(plugin);
         this.messageQueue = new MessageQueue(plugin, messageHandler);
@@ -176,12 +177,43 @@ public class VizWebSocketServer extends WebSocketServer {
         return prefix.contains("\"type\":\"batch_update\"") ||
                prefix.contains("\"type\": \"batch_update\"") ||
                prefix.contains("\"type\":\"audio_state\"") ||
-               prefix.contains("\"type\": \"audio_state\"");
+               prefix.contains("\"type\": \"audio_state\"") ||
+               prefix.contains("\"type\":\"voice_audio\"") ||
+               prefix.contains("\"type\": \"voice_audio\"");
     }
 
     @Override
     public void onError(WebSocket conn, Exception ex) {
-        String address = conn != null ? conn.getRemoteSocketAddress().toString() : "server";
+        // Guard against null address during shutdown/reload
+        String address = "server";
+        try {
+            if (conn != null && conn.getRemoteSocketAddress() != null) {
+                address = conn.getRemoteSocketAddress().toString();
+            }
+        } catch (Exception ignored) {}
+
+        // Suppress "zip file closed" errors during plugin reload - these are expected
+        if (ex instanceof IllegalStateException && ex.getMessage() != null
+                && ex.getMessage().contains("zip file closed")) {
+            plugin.getLogger().warning("WebSocket closed during plugin reload (expected)");
+            return;
+        }
+
+        // Downgrade common network errors to WARNING (connection reset, broken pipe, EOF)
+        String msg = ex.getMessage() != null ? ex.getMessage().toLowerCase() : "";
+        if (ex instanceof java.io.IOException && (
+                msg.contains("connection reset") ||
+                msg.contains("broken pipe") ||
+                msg.contains("end of stream") ||
+                msg.contains("socket closed"))) {
+            plugin.getLogger().warning("WebSocket network error from " + address + ": " + ex.getMessage());
+            return;
+        }
+        if (ex instanceof java.io.EOFException) {
+            plugin.getLogger().warning("WebSocket EOF from " + address + ": " + ex.getMessage());
+            return;
+        }
+
         plugin.getLogger().log(Level.SEVERE, "WebSocket error from " + address + ": " + ex.getMessage(), ex);
     }
 
@@ -322,8 +354,16 @@ public class VizWebSocketServer extends WebSocketServer {
         }
 
         messageQueue.stop();
+
+        // Close all active connections before stopping the server
+        for (org.java_websocket.WebSocket conn : new java.util.ArrayList<>(getConnections())) {
+            try {
+                conn.close(1001, "Server shutting down");
+            } catch (Exception ignored) {}
+        }
+
         try {
-            stop(1000);  // Stop with 1 second timeout
+            stop(3000);  // Stop with 3 second timeout for clean thread shutdown
         } catch (InterruptedException e) {
             plugin.getLogger().warning("WebSocket server shutdown interrupted");
         }

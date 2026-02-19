@@ -38,9 +38,25 @@ class InMemoryRateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._buckets: dict[str, _BucketEntry] = defaultdict(_BucketEntry)
+        self._call_count: int = 0
+
+    def _cleanup_stale(self) -> None:
+        """Remove buckets whose timestamps have all expired."""
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        stale_keys = [
+            k for k, v in self._buckets.items() if not v.timestamps or v.timestamps[-1] <= cutoff
+        ]
+        for k in stale_keys:
+            del self._buckets[k]
 
     def check(self, key: str) -> bool:
         """Return ``True`` if the request is allowed, ``False`` otherwise."""
+        self._call_count += 1
+        # Periodically purge stale entries to prevent unbounded memory growth
+        if self._call_count % 100 == 0:
+            self._cleanup_stale()
+
         entry = self._buckets[key]
         now = time.monotonic()
 

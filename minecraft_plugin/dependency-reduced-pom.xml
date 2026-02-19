@@ -16,7 +16,7 @@
     <plugins>
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.11.0</version>
+        <version>3.15.0</version>
         <configuration>
           <source>${java.version}</source>
           <target>${java.version}</target>
@@ -24,7 +24,7 @@
       </plugin>
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.2.5</version>
+        <version>3.5.4</version>
         <configuration>
           <argLine>--add-opens java.base/java.lang=ALL-UNNAMED
                         --add-opens java.base/java.lang.reflect=ALL-UNNAMED
@@ -33,7 +33,7 @@
       </plugin>
       <plugin>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>3.5.1</version>
+        <version>3.6.1</version>
         <executions>
           <execution>
             <phase>package</phase>
@@ -55,7 +55,7 @@
       <plugin>
         <groupId>com.github.spotbugs</groupId>
         <artifactId>spotbugs-maven-plugin</artifactId>
-        <version>4.8.6.6</version>
+        <version>4.9.8.2</version>
         <configuration>
           <effort>Max</effort>
           <threshold>Medium</threshold>
@@ -64,7 +64,7 @@
             <plugin>
               <groupId>com.h3xstream.findsecbugs</groupId>
               <artifactId>findsecbugs-plugin</artifactId>
-              <version>1.13.0</version>
+              <version>1.14.0</version>
             </plugin>
           </plugins>
         </configuration>
@@ -87,7 +87,7 @@
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>
-      <version>5.10.2</version>
+      <version>6.0.2</version>
       <scope>test</scope>
       <exclusions>
         <exclusion>
@@ -107,7 +107,7 @@
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-engine</artifactId>
-      <version>5.10.2</version>
+      <version>6.0.2</version>
       <scope>test</scope>
       <exclusions>
         <exclusion>
@@ -123,7 +123,7 @@
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-params</artifactId>
-      <version>5.10.2</version>
+      <version>6.0.2</version>
       <scope>test</scope>
       <exclusions>
         <exclusion>
@@ -135,7 +135,7 @@
     <dependency>
       <groupId>org.mockito</groupId>
       <artifactId>mockito-core</artifactId>
-      <version>5.19.0</version>
+      <version>5.21.0</version>
       <scope>test</scope>
       <exclusions>
         <exclusion>
@@ -147,38 +147,34 @@
     <dependency>
       <groupId>org.mockito</groupId>
       <artifactId>mockito-junit-jupiter</artifactId>
-      <version>5.19.0</version>
+      <version>5.21.0</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>net.bytebuddy</groupId>
       <artifactId>byte-buddy</artifactId>
-      <version>1.17.7</version>
+      <version>1.18.4</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>net.bytebuddy</groupId>
       <artifactId>byte-buddy-agent</artifactId>
-      <version>1.17.7</version>
+      <version>1.18.4</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.mockbukkit.mockbukkit</groupId>
       <artifactId>mockbukkit-v1.21</artifactId>
-      <version>4.14.0</version>
+      <version>4.101.0</version>
       <scope>test</scope>
       <exclusions>
         <exclusion>
-          <artifactId>junit-jupiter</artifactId>
-          <groupId>org.junit.jupiter</groupId>
+          <artifactId>hamcrest</artifactId>
+          <groupId>org.hamcrest</groupId>
         </exclusion>
         <exclusion>
           <artifactId>adventure-platform-bungeecord</artifactId>
           <groupId>net.kyori</groupId>
-        </exclusion>
-        <exclusion>
-          <artifactId>hamcrest</artifactId>
-          <groupId>org.hamcrest</groupId>
         </exclusion>
         <exclusion>
           <artifactId>maven-resolver-connector-basic</artifactId>

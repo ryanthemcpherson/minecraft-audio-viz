@@ -1,9 +1,44 @@
 "use client";
 
-import { useRef, useState, useEffect, useMemo, Suspense } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
+import type { RootState } from "@react-three/fiber";
+import * as THREE from "three";
 import PatternScene from "./PatternScene";
 import type { VisualizationPattern } from "@/lib/patterns/base";
+
+// ── WebGL context slot manager ──────────────────────────────────
+// Browsers limit active WebGL contexts (~8-16). We use 14 to cover a full
+// 3-column grid viewport plus rootMargin pre-loading.
+// NOTE: Module-level mutable state is intentional and SSR-safe because this
+// module is marked "use client" and runs only in the browser.
+const MAX_WEBGL_CONTEXTS = 14;
+let activeSlots = 0;
+const waiters = new Set<() => void>();
+
+function acquireSlot(): boolean {
+  if (activeSlots < MAX_WEBGL_CONTEXTS) {
+    activeSlots++;
+    return true;
+  }
+  return false;
+}
+
+function releaseSlot() {
+  activeSlots--;
+  // Notify one waiter that a slot opened up
+  for (const fn of waiters) {
+    waiters.delete(fn);
+    fn();
+    break;
+  }
+}
+
+function onSlotFreed(fn: () => void): () => void {
+  waiters.add(fn);
+  return () => { waiters.delete(fn); };
+}
+// ────────────────────────────────────────────────────────────────
 
 interface PatternCardProps {
   id: string;
@@ -33,17 +68,29 @@ export default function PatternCard({
 }: PatternCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [hasSlot, setHasSlot] = useState(false);
+  const slotHeld = useRef(false);
+  const glRef = useRef<THREE.WebGLRenderer | null>(null);
 
-  // Only create the pattern instance when visible
+  // Only create the pattern instance when we have a rendering slot
+  const canRender = isVisible && hasSlot;
+
   const pattern = useMemo(() => {
-    if (!isVisible) return null;
+    if (!canRender) return null;
     return createPattern();
-  }, [isVisible, createPattern]);
+  }, [canRender, createPattern]);
 
   // Phase offset so each card's audio sim is unique
   const phaseOffset = useMemo(() => index * 1.7 + index * 0.3, [index]);
 
-  // IntersectionObserver to only render when visible
+  // Capture WebGL renderer on canvas creation for proper cleanup
+  const handleCreated = useCallback((state: RootState) => {
+    glRef.current = state.gl;
+    state.gl.toneMapping = THREE.ACESFilmicToneMapping;
+    state.gl.toneMappingExposure = 1.4;
+  }, []);
+
+  // IntersectionObserver to track viewport visibility
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -59,6 +106,54 @@ export default function PatternCard({
     return () => observer.disconnect();
   }, []);
 
+  // Acquire / release a WebGL context slot
+  useEffect(() => {
+    if (isVisible) {
+      // Try to grab a slot immediately
+      if (acquireSlot()) {
+        slotHeld.current = true;
+        queueMicrotask(() => setHasSlot(true));
+        return;
+      }
+      // Otherwise wait for one to free up
+      const unsub = onSlotFreed(() => {
+        if (slotHeld.current) return;
+        if (acquireSlot()) {
+          slotHeld.current = true;
+          setHasSlot(true);
+          unsub();
+        }
+      });
+      return () => { unsub(); };
+    }
+
+    // Not visible — release slot & dispose WebGL context
+    if (slotHeld.current) {
+      const gl = glRef.current;
+      if (gl) {
+        gl.dispose();
+        glRef.current = null;
+      }
+      slotHeld.current = false;
+      queueMicrotask(() => setHasSlot(false));
+      releaseSlot();
+    }
+  }, [isVisible]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (slotHeld.current) {
+        const gl = glRef.current;
+        if (gl) {
+          gl.dispose();
+        }
+        slotHeld.current = false;
+        releaseSlot();
+      }
+    };
+  }, []);
+
   const badgeClass = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.Original;
 
   return (
@@ -71,7 +166,7 @@ export default function PatternCard({
     >
       {/* 3D Canvas */}
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-[#050505]">
-        {isVisible && pattern ? (
+        {canRender && pattern ? (
           <Suspense
             fallback={
               <div className="flex h-full w-full items-center justify-center">
@@ -88,9 +183,9 @@ export default function PatternCard({
             }
           >
             <Canvas
-              dpr={1}
+              dpr={typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 1.5) : 1}
               gl={{
-                antialias: false,
+                antialias: true,
                 alpha: true,
                 powerPreference: "low-power",
               }}
@@ -108,6 +203,7 @@ export default function PatternCard({
                 height: "100%",
               }}
               frameloop="always"
+              onCreated={handleCreated}
             >
               <PatternScene pattern={pattern} phaseOffset={phaseOffset} staticCamera={staticCamera} />
             </Canvas>
@@ -137,9 +233,9 @@ export default function PatternCard({
       </div>
 
       {/* Info */}
-      <div className="px-4 py-3">
-        <h3 className="text-sm font-semibold text-text-primary">{name}</h3>
-        <p className="mt-0.5 text-xs text-text-secondary line-clamp-2">
+      <div className="px-5 py-4">
+        <h3 className="text-base font-semibold text-text-primary">{name}</h3>
+        <p className="mt-1 text-sm text-text-secondary line-clamp-2">
           {description}
         </p>
       </div>

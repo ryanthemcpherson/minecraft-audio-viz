@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_session
 from app.models.db import Organization, Show, VJServer
@@ -25,6 +26,8 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 )
 async def resolve_tenant(
     slug: str = Query(..., min_length=1, max_length=63),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> TenantResolveResponse:
     """Public endpoint called by the Cloudflare Worker to resolve a subdomain
@@ -46,10 +49,16 @@ async def resolve_tenant(
 
     # Servers belonging to this org
     servers = (
-        await session.execute(
-            select(VJServer).where(VJServer.org_id == org.id)
+        (
+            await session.execute(
+                select(VJServer)
+                .where(VJServer.org_id == org.id)
+                .options(selectinload(VJServer.shows))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     server_ids = [s.id for s in servers]
 
@@ -57,13 +66,20 @@ async def resolve_tenant(
     active_shows: list[TenantShowInfo] = []
     if server_ids:
         shows = (
-            await session.execute(
-                select(Show).where(
-                    Show.server_id.in_(server_ids),
-                    Show.status == "active",
+            (
+                await session.execute(
+                    select(Show)
+                    .where(
+                        Show.server_id.in_(server_ids),
+                        Show.status == "active",
+                    )
+                    .limit(limit)
+                    .offset(offset)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         # Build a server name lookup
         server_name_map = {s.id: s.name for s in servers}

@@ -3,6 +3,7 @@
 use super::messages::*;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -87,6 +88,18 @@ pub struct ConnectionState {
     pub dj_id: Option<String>,
     pub latency_ms: f32,
     pub reconnect_attempts: u32,
+    pub route_mode: String, // relay | dual
+    pub mc_host: Option<String>,
+    pub mc_port: Option<u16>,
+    pub mc_zone: Option<String>,
+    pub mc_entity_count: Option<u32>,
+    // Voice status fields (populated by server voice_status messages)
+    pub voice_available: bool,
+    pub voice_streaming: bool,
+    pub voice_channel_type: Option<String>,
+    pub voice_connected_players: Option<u32>,
+    /// Preset name received from server (bridge task consumes this)
+    pub pending_preset: Option<String>,
 }
 
 /// DJ Client for VJ server communication
@@ -95,6 +108,7 @@ pub struct DjClient {
     state: Arc<Mutex<ConnectionState>>,
     tx: Option<mpsc::Sender<Message>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
+    mc_connected: Arc<AtomicBool>,
 }
 
 impl DjClient {
@@ -105,7 +119,13 @@ impl DjClient {
             state: Arc::new(Mutex::new(ConnectionState::default())),
             tx: None,
             shutdown_tx: None,
+            mc_connected: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Update the mc_connected flag reported in heartbeats to the VJ server.
+    pub fn set_mc_connected(&self, val: bool) {
+        self.mc_connected.store(val, Ordering::Relaxed);
     }
 
     /// Connect to the VJ server
@@ -114,9 +134,14 @@ impl DjClient {
             return Err(ClientError::AlreadyConnected);
         }
 
+        let scheme = if crate::is_local_host(&self.config.server_host) {
+            "ws"
+        } else {
+            "wss"
+        };
         let url = format!(
-            "ws://{}:{}",
-            self.config.server_host, self.config.server_port
+            "{}://{}:{}",
+            scheme, self.config.server_host, self.config.server_port
         );
 
         log::info!("Connecting to VJ server at {}", url);
@@ -191,6 +216,12 @@ impl DjClient {
                                     s.authenticated = true;
                                     s.is_active = auth.is_active;
                                     s.dj_id = Some(auth.dj_id.clone());
+                                    if let Some(route_mode) = auth.route_mode {
+                                        s.route_mode = route_mode;
+                                    }
+                                    if let Some(pattern_cfg) = auth.pattern_config.as_ref() {
+                                        s.mc_entity_count = pattern_cfg.entity_count;
+                                    }
                                     log::info!(
                                         "Authenticated as {} (active: {})",
                                         auth.dj_name,
@@ -306,13 +337,16 @@ impl DjClient {
 
         // Heartbeat task - delay first tick to avoid racing with handshake
         let tx_heartbeat = tx;
+        let mc_connected_flag = self.mc_connected.clone();
         tokio::spawn(async move {
             // Wait one full interval before sending first heartbeat
             tokio::time::sleep(Duration::from_secs_f64(heartbeat_interval)).await;
             let mut interval = tokio::time::interval(Duration::from_secs_f64(heartbeat_interval));
             loop {
                 interval.tick().await;
-                let msg = serde_json::to_string(&HeartbeatMessage::new()).unwrap();
+                let mut hb = HeartbeatMessage::new();
+                hb.mc_connected = Some(mc_connected_flag.load(Ordering::Relaxed));
+                let msg = serde_json::to_string(&hb).unwrap();
                 if tx_heartbeat.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
@@ -323,6 +357,7 @@ impl DjClient {
     }
 
     /// Send audio frame
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_audio_frame(
         &self,
         seq: u64,
@@ -331,10 +366,23 @@ impl DjClient {
         beat: bool,
         beat_intensity: f32,
         bpm: f32,
+        tempo_confidence: f32,
+        beat_phase: f32,
     ) -> Result<(), ClientError> {
         let tx = self.tx.as_ref().ok_or(ClientError::NotConnected)?;
 
-        let msg = AudioFrameMessage::new(seq, bands, peak, beat, beat_intensity, bpm);
+        let msg = AudioFrameMessage::new(
+            seq,
+            bands,
+            peak,
+            beat,
+            beat_intensity,
+            bpm,
+            tempo_confidence,
+            beat_phase,
+            0.0,   // instant_bass (not available in this code path)
+            false,  // instant_kick
+        );
         let json =
             serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
 
@@ -378,6 +426,11 @@ impl DjClient {
     pub fn get_tx_clone(&self) -> Option<mpsc::Sender<Message>> {
         self.tx.clone()
     }
+
+    /// Take the pending preset name (if any) that was received from the server.
+    pub fn take_pending_preset(&self) -> Option<String> {
+        self.state.lock().pending_preset.take()
+    }
 }
 
 /// Handle incoming server messages
@@ -392,6 +445,12 @@ async fn handle_server_message(
             s.authenticated = true;
             s.is_active = auth.is_active;
             s.dj_id = Some(auth.dj_id);
+            if let Some(route_mode) = auth.route_mode {
+                s.route_mode = route_mode;
+            }
+            if let Some(pattern_cfg) = auth.pattern_config.as_ref() {
+                s.mc_entity_count = pattern_cfg.entity_count;
+            }
             log::info!(
                 "Authenticated as {} (active: {})",
                 auth.dj_name,
@@ -420,20 +479,59 @@ async fn handle_server_message(
             let _ = tx.send(Message::Text(json.into())).await;
         }
         ServerMessage::HeartbeatAck(ack) => {
-            // Calculate latency
+            // Calculate latency: prefer RTT from echoed heartbeat timestamp.
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64();
 
-            let latency = ((now - ack.server_time) * 1000.0) as f32;
+            let latency = if let Some(echo_ts) = ack.echo_ts {
+                ((now - echo_ts) * 1000.0) as f32
+            } else {
+                ((now - ack.server_time) * 1000.0) as f32
+            };
             state.lock().latency_ms = latency.max(0.0);
+        }
+        ServerMessage::PresetSync(ps) => {
+            // Extract preset name from the server payload
+            if let Some(name) = ps.preset.get("name").and_then(|v| v.as_str()) {
+                log::info!("Preset sync from server: {}", name);
+                state.lock().pending_preset = Some(name.to_string());
+            }
         }
         ServerMessage::PatternSync(_)
         | ServerMessage::ConfigSync(_)
-        | ServerMessage::PresetSync(_)
         | ServerMessage::EffectTriggered(_) => {
             // These are informational, no action needed for basic client
+        }
+        ServerMessage::StreamRoute(route) => {
+            let mut s = state.lock();
+            s.route_mode = route.route_mode;
+            if let Some(active) = route.is_active {
+                s.is_active = active;
+            }
+            s.mc_host = route.minecraft_host;
+            s.mc_port = route.minecraft_port;
+            s.mc_zone = route.zone;
+            s.mc_entity_count = route
+                .entity_count
+                .or_else(|| route.pattern_config.and_then(|cfg| cfg.entity_count));
+        }
+        ServerMessage::VoiceStatus(vs) => {
+            log::info!(
+                "Voice status: available={}, streaming={}, players={}",
+                vs.available,
+                vs.streaming,
+                vs.connected_players.unwrap_or(0)
+            );
+            // Voice status is stored in AppState, not ConnectionState.
+            // The bridge task reads this from the ServerMessage via the reader task.
+            // We store in ConnectionState temporarily for the bridge to pick up.
+            let mut s = state.lock();
+            s.voice_available = vs.available;
+            s.voice_streaming = vs.streaming;
+            s.voice_channel_type = vs.channel_type;
+            s.voice_connected_players = vs.connected_players;
         }
     }
 }
@@ -466,6 +564,13 @@ mod tests {
         assert!(!state.authenticated);
         assert!(!state.is_active);
         assert!(state.dj_id.is_none());
+        assert_eq!(state.route_mode, "");
+        assert!(state.mc_host.is_none());
+        assert!(state.mc_port.is_none());
+        assert!(state.mc_zone.is_none());
+        assert!(state.mc_entity_count.is_none());
+        assert!(!state.voice_available);
+        assert!(!state.voice_streaming);
         assert!(client.get_tx_clone().is_none());
         assert!(!client.is_connected());
         assert!(!client.is_active());

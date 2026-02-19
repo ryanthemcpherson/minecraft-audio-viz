@@ -1,5 +1,10 @@
-# AudioViz - Test Audio Capture
-# Test audio capture without connecting to Minecraft
+# AudioViz - Test Audio Capture (DEPRECATED)
+# The Python DJ CLI has been replaced by the Rust DJ Client (dj_client/).
+# This script is kept for reference only.
+
+Write-Warning "DEPRECATED: The Python DJ CLI (audioviz) has been replaced by the Rust DJ Client."
+Write-Warning "See dj_client/ for the new implementation."
+Write-Host ""
 
 param(
     [string]$App = "spotify",

@@ -223,7 +223,13 @@ export default {
 
     // API subdomain → pass through (already routed by DNS)
     if (subdomain === "api") {
-      return fetch(request);
+      // Prevent forwarding loops: if our own header is present, bail out
+      if (request.headers.get("X-MCAV-Worker")) {
+        return new Response("Loop detected", { status: 508 });
+      }
+      const fwdRequest = new Request(request);
+      fwdRequest.headers.set("X-MCAV-Worker", "1");
+      return fetch(fwdRequest);
     }
 
     // Tenant resolution
@@ -237,7 +243,12 @@ export default {
         if (tenantResp.status === 404) {
           return new Response(renderNotFoundPage(subdomain), {
             status: 404,
-            headers: { "Content-Type": "text/html; charset=utf-8" },
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+              "X-Frame-Options": "DENY",
+              "X-Content-Type-Options": "nosniff",
+            },
           });
         }
         return new Response("Service unavailable", { status: 502 });
@@ -248,7 +259,11 @@ export default {
         status: 200,
         headers: {
           "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "public, max-age=60, s-maxage=60",
+          "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=60",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+          "X-Frame-Options": "DENY",
+          "X-Content-Type-Options": "nosniff",
+          "Strict-Transport-Security": "max-age=31536000",
         },
       });
     } catch {

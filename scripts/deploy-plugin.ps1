@@ -15,12 +15,17 @@ param(
     [string]$PluginsDir = "/home/ryan/minecraft-server/plugins",
     [string]$ServerDir = "/home/ryan/minecraft-server",
     [string]$RconPort = "25575",
-    [string]$RconPass = "audioviz123",
+    [string]$RconPass = $env:MCAV_RCON_PASSWORD,
     [switch]$SkipBuild,
     [switch]$SkipTests,
     [switch]$Restart,
     [switch]$DryRun
 )
+
+if (-not $RconPass) {
+    Write-Host "  ERROR: RCON password required. Set MCAV_RCON_PASSWORD env var or pass -RconPass" -ForegroundColor Red
+    exit 1
+}
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -47,13 +52,13 @@ if (-not $SkipBuild) {
     Push-Location $PluginDir
     try {
         # Try mvnw first, fall back to mvn
-        $mvnCmd = if (Test-Path "./mvnw.cmd") { "./mvnw.cmd" }
-                  elseif (Test-Path "./mvnw") { "bash ./mvnw" }
-                  elseif (Get-Command mvn -ErrorAction SilentlyContinue) { "mvn" }
-                  else { throw "Maven not found. Install Maven or use the wrapper." }
+        if (Test-Path "./mvnw.cmd") { $mvnCmd = "./mvnw.cmd" }
+        elseif (Get-Command mvn -ErrorAction SilentlyContinue) { $mvnCmd = "mvn" }
+        else { throw "Maven not found. Install Maven or use the wrapper." }
 
+        $mvnArgList = $mvnArgs -split '\s+'
         Write-Host "  Running: $mvnCmd $mvnArgs" -ForegroundColor Gray
-        Invoke-Expression "$mvnCmd $mvnArgs" 2>&1 | ForEach-Object {
+        & $mvnCmd @mvnArgList 2>&1 | ForEach-Object {
             if ($_ -match "BUILD (SUCCESS|FAILURE)") { Write-Host "  $_" -ForegroundColor $(if ($_ -match "SUCCESS") { "Green" } else { "Red" }) }
         }
 
@@ -99,6 +104,12 @@ Write-Host "[2/3] Deploying to $Server..." -ForegroundColor Yellow
 if ($DryRun) {
     Write-Host "  DRY RUN: Would copy $($jarFile.Name) to ${User}@${Server}:${PluginsDir}/" -ForegroundColor DarkGray
 } else {
+    ssh ${User}@${Server} "mkdir -p '$PluginsDir' && rm -f '$PluginsDir'/audioviz-plugin-*.jar"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  FAILED to prepare plugins directory on remote host" -ForegroundColor Red
+        exit 1
+    }
+
     # Copy JAR via SCP
     $scpTarget = "${User}@${Server}:${PluginsDir}/"
     Write-Host "  Copying $($jarFile.Name) -> $scpTarget" -ForegroundColor Gray

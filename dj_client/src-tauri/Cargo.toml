@@ -26,18 +26,23 @@ cpal = "0.15"
 log = "0.4"
 env_logger = "0.11"
 thiserror = "2"
-rand = "0.8"
+rand = "0.10"
 parking_lot = "0.12"
+base64 = "0.22"
+opus = { version = "0.3", optional = true }
+tauri-plugin-updater = "2"
 
 # Windows-specific dependencies for WASAPI per-app audio capture
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Media_Audio",
+    "Win32_Security",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Ole",
     "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_System_Variant",
 ] }
@@ -53,6 +58,7 @@ windows = { version = "0.62", features = [
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+voice-opus = ["opus"]
 
 [profile.release]
 panic = "abort"

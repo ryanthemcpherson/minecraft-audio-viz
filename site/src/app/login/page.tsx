@@ -1,15 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import {
   register,
   loginWithEmail,
   getDiscordAuthUrl,
+  exchangeDiscordCode,
+  getStoredOAuthState,
+  clearStoredOAuthState,
 } from "@/lib/auth";
 
 type Tab = "login" | "signup";
+
+/** Read and delete a cookie by name. */
+function consumeCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  if (!match) return null;
+  // Delete it immediately
+  document.cookie = `${name}=; path=/; max-age=0`;
+  return decodeURIComponent(match[1]);
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,6 +34,56 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const oauthHandled = useRef(false);
+
+  // Check for OAuth callback cookie (set by middleware redirect)
+  useEffect(() => {
+    if (oauthHandled.current) return;
+
+    const oauthError = consumeCookie("mcav_oauth_error");
+    if (oauthError) {
+      oauthHandled.current = true;
+      setError(oauthError);
+      return;
+    }
+
+    const oauthCode = consumeCookie("mcav_oauth_code");
+    if (!oauthCode) return;
+
+    oauthHandled.current = true;
+    const separatorIdx = oauthCode.indexOf(":");
+    if (separatorIdx === -1) {
+      setError("Invalid OAuth response. Please try signing in again.");
+      return;
+    }
+
+    const code = oauthCode.slice(0, separatorIdx);
+    const state = oauthCode.slice(separatorIdx + 1);
+
+    // Validate CSRF state
+    const storedState = getStoredOAuthState();
+    clearStoredOAuthState();
+    if (storedState && storedState !== state) {
+      setError("Security validation failed. Please try signing in again.");
+      return;
+    }
+
+    setOauthLoading(true);
+    exchangeDiscordCode(code, state)
+      .then((res) => {
+        setAuth(res.access_token, res.refresh_token, res.user);
+        router.replace(
+          res.user.onboarding_completed ? "/dashboard" : "/onboarding"
+        );
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to complete sign-in"
+        );
+        setOauthLoading(false);
+      });
+  }, [setAuth, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,7 +97,7 @@ export default function LoginPage() {
           : await register(email, password, displayName);
 
       setAuth(res.access_token, res.refresh_token, res.user);
-      router.push("/dashboard");
+      router.push(res.user.onboarding_completed ? "/dashboard" : "/onboarding");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -51,9 +114,29 @@ export default function LoginPage() {
     }
   }
 
+  // Show spinner while exchanging Discord OAuth code
+  if (oauthLoading) {
+    return (
+      <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
+        <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-electric-blue/5 rounded-full blur-[120px]" />
+        <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
+          <div className="mb-4 flex justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+          </div>
+          <p className="text-sm text-text-secondary">
+            Completing sign-in...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 pt-20">
-      <div className="w-full max-w-md rounded-2xl border border-white/5 bg-white/[0.02] p-8 backdrop-blur-xl">
+    <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
+      {/* Background glow */}
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-electric-blue/5 rounded-full blur-[120px]" />
+
+      <div className="relative w-full max-w-md glass-card rounded-2xl p-8">
         {/* Tabs */}
         <div className="mb-8 flex rounded-lg border border-white/5 bg-white/[0.02] p-1">
           <button
@@ -61,7 +144,7 @@ export default function LoginPage() {
             className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               tab === "login"
                 ? "bg-white/10 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+                : "text-text-secondary hover:text-text-primary"
             }`}
           >
             Log in
@@ -71,7 +154,7 @@ export default function LoginPage() {
             className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               tab === "signup"
                 ? "bg-white/10 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+                : "text-text-secondary hover:text-text-primary"
             }`}
           >
             Sign up
@@ -81,17 +164,17 @@ export default function LoginPage() {
         {/* Discord */}
         <button
           onClick={handleDiscord}
-          className="mb-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#5865F2] px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          className="mb-6 flex w-full items-center justify-center gap-2.5 rounded-full bg-[#5865F2] px-4 py-3 text-base font-medium text-white transition-colors hover:bg-[#4752C4]"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M20.317 4.369a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.009c.12.099.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z" />
+          <svg width="24" height="24" viewBox="0 -28.5 256 256" fill="currentColor">
+            <path d="M216.856 16.597A208.502 208.502 0 00164.042 0c-2.275 4.113-4.933 9.645-6.766 14.046-19.692-2.961-39.203-2.961-58.533 0-1.832-4.4-4.55-9.933-6.846-14.046a207.809 207.809 0 00-52.855 16.638C5.618 67.147-3.443 116.4 1.087 164.956c22.169 16.555 43.653 26.612 64.775 33.193a161.094 161.094 0 0013.89-22.985 136.664 136.664 0 01-21.846-10.632 108.636 108.636 0 005.356-4.237c42.122 19.702 87.89 19.702 129.51 0a131.66 131.66 0 005.355 4.237 136.07 136.07 0 01-21.886 10.653c4.006 8.02 8.638 15.67 13.89 22.985 21.142-6.58 42.646-16.637 64.815-33.213 5.316-56.288-9.08-105.09-38.056-148.36zM85.474 135.095c-12.645 0-23.015-11.805-23.015-26.18s10.149-26.2 23.015-26.2c12.867 0 23.236 11.804 23.015 26.2.02 14.375-10.148 26.18-23.015 26.18zm85.051 0c-12.645 0-23.014-11.805-23.014-26.18s10.148-26.2 23.014-26.2c12.867 0 23.236 11.804 23.015 26.2 0 14.375-10.148 26.18-23.015 26.18z" />
           </svg>
           Continue with Discord
         </button>
 
         <div className="mb-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-white/10" />
-          <span className="text-xs text-zinc-500">or</span>
+          <span className="text-xs text-text-secondary">or</span>
           <div className="h-px flex-1 bg-white/10" />
         </div>
 
@@ -99,48 +182,51 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {tab === "signup" && (
             <div>
-              <label htmlFor="displayName" className="mb-1 block text-sm text-zinc-400">
+              <label htmlFor="displayName" className="mb-1 block text-sm text-text-secondary">
                 Display name
               </label>
               <input
                 id="displayName"
                 type="text"
                 required
+                autoComplete="name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#00D4FF]/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
                 placeholder="Your name"
               />
             </div>
           )}
 
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm text-zinc-400">
+            <label htmlFor="email" className="mb-1 block text-sm text-text-secondary">
               Email
             </label>
             <input
               id="email"
               type="email"
               required
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#00D4FF]/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm text-zinc-400">
+            <label htmlFor="password" className="mb-1 block text-sm text-text-secondary">
               Password
             </label>
             <input
               id="password"
               type="password"
               required
+              autoComplete={tab === "signup" ? "new-password" : "current-password"}
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#00D4FF]/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
               placeholder={tab === "signup" ? "Min 8 characters" : "Your password"}
             />
           </div>
@@ -154,7 +240,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 rounded-lg bg-gradient-to-r from-[#00D4FF] to-[#7B2FFF] px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {loading
               ? "..."

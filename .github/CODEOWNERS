@@ -1,0 +1,21 @@
+# Default owner for everything
+* @ryanthemcpherson
+
+# Python audio processor
+/audio_processor/ @ryanthemcpherson
+/python_client/ @ryanthemcpherson
+
+# Minecraft plugin (Java)
+/minecraft_plugin/ @ryanthemcpherson
+
+# Site (Next.js)
+/site/ @ryanthemcpherson
+
+# Coordinator (FastAPI)
+/coordinator/ @ryanthemcpherson
+
+# DJ Client (Tauri)
+/dj_client/ @ryanthemcpherson
+
+# CI/CD and repo config
+/.github/ @ryanthemcpherson

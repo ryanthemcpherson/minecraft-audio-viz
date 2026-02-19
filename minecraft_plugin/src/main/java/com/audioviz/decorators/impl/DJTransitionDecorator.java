@@ -51,6 +51,11 @@ public class DJTransitionDecorator extends StageDecorator {
 
     @Override
     public void onDeactivate() {
+        if (transitionActive) {
+            cleanupDecoratorZone();
+            restoreBrightness();
+            setAllZoneGlow(false);
+        }
         transitionActive = false;
         preBrightness.clear();
     }
