@@ -62,6 +62,14 @@ const forceBrowserPlugin = {
   },
 };
 
+// Minimal process shim injected at the top of the IIFE so that fengari's
+// direct process.env / process.stdin / process.stdout references don't throw.
+const processShim = `var process = {
+  env: {}, stdin: { fd: 0 }, stdout: { write: function() {} },
+  stderr: { write: function() {} }, cwd: function() { return "/"; },
+  uptime: function() { return 0; }, exit: function() {},
+};`;
+
 await build({
   entryPoints: [path.resolve(__dirname, "fengari-entry.mjs")],
   bundle: true,
@@ -71,6 +79,7 @@ await build({
   platform: "browser",
   target: "es2020",
   plugins: [forceBrowserPlugin, nodeStubPlugin],
+  banner: { js: processShim },
   // Don't minify — easier to debug; size is small anyway
   minify: false,
   logLevel: "info",
