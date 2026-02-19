@@ -50,8 +50,7 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
 
 4. **admin_panel/** - DJ control interface (vanilla JS with debouncing)
 5. **preview_tool/frontend/** - Three.js 3D browser preview
-6. **python_client/** - `VizClient` WebSocket client library (used by vj_server)
-7. **scripts/** - Quick-start PowerShell scripts
+6. **scripts/** - Quick-start PowerShell scripts
 
 8. **site/** (TypeScript/React) - Landing page and pattern gallery at mcav.live
    - Next.js 15 with App Router, React 19, Tailwind CSS 4
@@ -258,7 +257,7 @@ The Rust DJ client handles reconnection automatically with exponential backoff (
 
 ### VizClient Options (Python - used by VJ server)
 ```python
-from python_client import VizClient
+from vj_server.viz_client import VizClient
 
 client = VizClient(
     connect_timeout=10.0,       # Connection timeout in seconds (default: 10.0)

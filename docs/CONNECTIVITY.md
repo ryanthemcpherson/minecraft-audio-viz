@@ -260,7 +260,7 @@ config = DJRelayConfig(
 ### VizClient
 
 ```python
-from python_client import VizClient
+from vj_server.viz_client import VizClient
 
 client = VizClient(
     host="localhost",

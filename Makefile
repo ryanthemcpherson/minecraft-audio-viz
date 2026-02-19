@@ -35,13 +35,13 @@ test: ## Run Python tests
 	pytest vj_server/tests/ -v --tb=short
 
 lint: ## Run ruff linter
-	ruff check vj_server/ python_client/
+	ruff check vj_server/
 
 format: ## Auto-format Python code with ruff
-	ruff format vj_server/ python_client/
+	ruff format vj_server/
 
 format-check: ## Check Python formatting without changes
-	ruff format --check vj_server/ python_client/
+	ruff format --check vj_server/
 
 # ---------------------------------------------------------------------------
 # Java (Minecraft Plugin)
@@ -55,14 +55,11 @@ build-verbose: ## Build Minecraft plugin JAR with full output
 # ---------------------------------------------------------------------------
 # Deploy
 # ---------------------------------------------------------------------------
-deploy: ## Run deploy script (pull, build, copy, restart)
-	./deploy.sh
+deploy: ## Deploy plugin to server
+	./scripts/deploy-plugin.sh
 
-deploy-quick: ## Deploy without building (use existing JAR)
-	./deploy.sh --skip-build --skip-tests
-
-deploy-dry: ## Dry-run deploy (show what would happen)
-	./deploy.sh --dry-run
+deploy-vj: ## Deploy VJ server to dev
+	./scripts/deploy-vj-dev.sh
 
 # ---------------------------------------------------------------------------
 # Docker (VJ Server)

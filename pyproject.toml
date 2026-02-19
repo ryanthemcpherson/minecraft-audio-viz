@@ -10,7 +10,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [tool.bandit]
-exclude_dirs = ["archive", "python_client/tests", "vj_server/tests"]
+exclude_dirs = ["archive", "vj_server/tests"]
 confidence = ["MEDIUM", "HIGH"]
 skips = ["B101", "B104", "B110", "B311", "B605", "B607"]
 
