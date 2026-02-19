@@ -16,27 +16,29 @@ public record EntityUpdate(
     int brightness,
     boolean hasBrightness,
     boolean glow,
-    boolean hasGlow
+    boolean hasGlow,
+    int interpolationDuration,
+    boolean hasInterpolation
 ) {
     /**
      * Create an update with only position change.
      */
     public static EntityUpdate position(String entityId, Location location) {
-        return new EntityUpdate(entityId, location, null, true, false, 15, false, false, false);
+        return new EntityUpdate(entityId, location, null, true, false, 15, false, false, false, -1, false);
     }
 
     /**
      * Create an update with only transformation change.
      */
     public static EntityUpdate transform(String entityId, Transformation transformation) {
-        return new EntityUpdate(entityId, null, transformation, false, true, 15, false, false, false);
+        return new EntityUpdate(entityId, null, transformation, false, true, 15, false, false, false, -1, false);
     }
 
     /**
      * Create an update with both position and transformation.
      */
     public static EntityUpdate full(String entityId, Location location, Transformation transformation) {
-        return new EntityUpdate(entityId, location, transformation, true, true, 15, false, false, false);
+        return new EntityUpdate(entityId, location, transformation, true, true, 15, false, false, false, -1, false);
     }
 
     /**
@@ -44,7 +46,7 @@ public record EntityUpdate(
      */
     public static EntityUpdate complete(String entityId, Location location, Transformation transformation,
                                          int brightness, boolean glow) {
-        return new EntityUpdate(entityId, location, transformation, true, true, brightness, true, glow, true);
+        return new EntityUpdate(entityId, location, transformation, true, true, brightness, true, glow, true, -1, false);
     }
 
     /**
@@ -67,6 +69,8 @@ public record EntityUpdate(
         private boolean hasBrightness = false;
         private boolean glow = false;
         private boolean hasGlow = false;
+        private int interpolationDuration = -1;
+        private boolean hasInterpolation = false;
 
         public Builder(String entityId) {
             this.entityId = entityId;
@@ -96,11 +100,18 @@ public record EntityUpdate(
             return this;
         }
 
+        public Builder interpolationDuration(int interpolationDuration) {
+            this.interpolationDuration = interpolationDuration;
+            this.hasInterpolation = true;
+            return this;
+        }
+
         public EntityUpdate build() {
             return new EntityUpdate(entityId, location, transformation,
                                      hasLocation, hasTransform,
                                      brightness, hasBrightness,
-                                     glow, hasGlow);
+                                     glow, hasGlow,
+                                     interpolationDuration, hasInterpolation);
         }
     }
 }

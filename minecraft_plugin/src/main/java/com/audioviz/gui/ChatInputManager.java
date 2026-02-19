@@ -160,6 +160,7 @@ public class ChatInputManager implements Listener {
      */
     public enum InputType {
         ZONE_NAME,
+        STAGE_NAME,
         CONFIRMATION,
         GENERAL
     }

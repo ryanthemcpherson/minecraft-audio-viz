@@ -102,3 +102,28 @@ dj_client/src-tauri/nsis/
 # Lock files (keep package-lock.json for CI reproducibility)
 dj_client/yarn.lock
 dj_client/pnpm-lock.yaml
+
+# ===================
+# Site (Next.js)
+# ===================
+site/.next/
+site/out/
+site/node_modules/
+
+# ===================
+# Coordinator (FastAPI)
+# ===================
+coordinator/*.egg-info/
+coordinator/.venv/
+
+# ===================
+# Worker (Cloudflare)
+# ===================
+worker/node_modules/
+worker/dist/
+
+# Railway
+.railway/
+
+# Additional env
+.env.production.local

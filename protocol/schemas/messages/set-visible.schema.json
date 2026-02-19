@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-visible.schema.json",
+  "title": "SetVisibleMessage",
+  "description": "Show or hide all entities in a zone. Used by blackout effect.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_visible"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visible": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "zone", "visible"]
+}

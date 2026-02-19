@@ -224,10 +224,12 @@ fn run_audio_thread(
     // Get supported config
     // For loopback, we query the output config (which is what the device is producing)
     let config = if is_loopback {
-        device.default_output_config()
+        device
+            .default_output_config()
             .map_err(|e| CaptureError::ConfigError(format!("Loopback config: {}", e)))?
     } else {
-        device.default_input_config()
+        device
+            .default_input_config()
             .map_err(|e| CaptureError::ConfigError(e.to_string()))?
     };
 
@@ -335,4 +337,37 @@ where
         },
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AudioBuffer;
+
+    #[test]
+    fn get_latest_returns_recent_samples_in_order() {
+        let mut buffer = AudioBuffer::new(8);
+        buffer.push_samples(&[1.0, 2.0, 3.0, 4.0]);
+
+        let latest = buffer.get_latest(3);
+        assert_eq!(latest, vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn circular_buffer_wraps_and_preserves_time_order() {
+        let mut buffer = AudioBuffer::new(5);
+        buffer.push_samples(&[1.0, 2.0, 3.0]);
+        buffer.push_samples(&[4.0, 5.0, 6.0]);
+
+        let latest = buffer.get_latest(5);
+        assert_eq!(latest, vec![2.0, 3.0, 4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn get_latest_caps_count_to_capacity() {
+        let mut buffer = AudioBuffer::new(4);
+        buffer.push_samples(&[1.0, 2.0, 3.0, 4.0]);
+
+        let latest = buffer.get_latest(100);
+        assert_eq!(latest, vec![1.0, 2.0, 3.0, 4.0]);
+    }
 }

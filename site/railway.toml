@@ -1,0 +1,8 @@
+[build]
+builder = "RAILPACK"
+watchPatterns = ["site/**"]
+
+[deploy]
+startCommand = "npm run start"
+healthcheckPath = "/"
+healthcheckTimeout = 300

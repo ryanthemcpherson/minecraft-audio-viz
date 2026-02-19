@@ -5,10 +5,10 @@ Uses synthetic test signals to verify behavior without needing actual audio file
 Run with: python -m pytest audio_processor/tests/ -v
 """
 
-import pytest
 import math
 import time
-from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class MockTime:
@@ -37,10 +37,14 @@ class MockAudioCapture:
 
     def __init__(self):
         # Import the real class to get its beat detection logic
-        import sys
         import os
+        import sys
+
         import numpy as np
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
 
         from audio_processor.app_capture import AppAudioCapture
 
@@ -103,7 +107,6 @@ class MockAudioCapture:
         Advances simulated time by one frame after each call.
         """
         # Patch time.time for this call
-        import time
         original_time = time.time
         time.time = self.mock_time.time
 
@@ -142,9 +145,14 @@ class TestSignalGenerator:
         return signal
 
     @staticmethod
-    def kick_pattern(duration_frames: int, bpm: float, fps: float = 60.0,
-                     kick_value: float = 0.8, floor_value: float = 0.1,
-                     include_warmup: bool = True) -> list:
+    def kick_pattern(
+        duration_frames: int,
+        bpm: float,
+        fps: float = 60.0,
+        kick_value: float = 0.8,
+        floor_value: float = 0.1,
+        include_warmup: bool = True,
+    ) -> list:
         """
         Generate 4-on-the-floor kick pattern at specified BPM.
 
@@ -182,11 +190,17 @@ class TestSignalGenerator:
     def noise(duration_frames: int, mean: float = 0.3, variance: float = 0.1) -> list:
         """Generate random noise signal."""
         import random
+
         return [max(0, min(1, random.gauss(mean, variance))) for _ in range(duration_frames)]
 
     @staticmethod
-    def sine_wave(duration_frames: int, frequency_hz: float, fps: float = 60.0,
-                  amplitude: float = 0.5, offset: float = 0.5) -> list:
+    def sine_wave(
+        duration_frames: int,
+        frequency_hz: float,
+        fps: float = 60.0,
+        amplitude: float = 0.5,
+        offset: float = 0.5,
+    ) -> list:
         """Generate sine wave (smooth oscillation)."""
         signal = []
         for i in range(duration_frames):
@@ -221,11 +235,7 @@ class TestBeatDetection:
             if is_beat:
                 beats.append((i, intensity))
 
-        return {
-            'beats': beats,
-            'beat_count': len(beats),
-            'beat_frames': [b[0] for b in beats]
-        }
+        return {"beats": beats, "beat_count": len(beats), "beat_frames": [b[0] for b in beats]}
 
     # === SILENCE TESTS ===
 
@@ -233,14 +243,14 @@ class TestBeatDetection:
         """Silence should produce no beats."""
         signal = self.generator.silence(300)  # 5 seconds at 60fps
         result = self._run_signal(signal)
-        assert result['beat_count'] == 0, "Silence should not trigger any beats"
+        assert result["beat_count"] == 0, "Silence should not trigger any beats"
 
     def test_constant_low_no_beats(self):
         """Constant low energy should produce no beats after warmup."""
         signal = self.generator.constant(0.1, 300)
         result = self._run_signal(signal)
         # May detect 1-2 during warmup, but not sustained
-        assert result['beat_count'] <= 2, "Constant low signal should not trigger beats"
+        assert result["beat_count"] <= 2, "Constant low signal should not trigger beats"
 
     # === IMPULSE TESTS ===
 
@@ -252,7 +262,7 @@ class TestBeatDetection:
         signal = warmup + impulse
 
         result = self._run_signal(signal)
-        assert result['beat_count'] >= 1, "Impulse should trigger at least one beat"
+        assert result["beat_count"] >= 1, "Impulse should trigger at least one beat"
 
     def test_impulse_timing(self):
         """Impulse should be detected near the actual impulse frame."""
@@ -262,12 +272,13 @@ class TestBeatDetection:
 
         result = self._run_signal(signal)
 
-        if result['beat_count'] > 0:
+        if result["beat_count"] > 0:
             # Beat should be detected within 5 frames of impulse (frame 120)
             impulse_frame = 90 + 30
-            closest_beat = min(result['beat_frames'], key=lambda x: abs(x - impulse_frame))
-            assert abs(closest_beat - impulse_frame) <= 5, \
+            closest_beat = min(result["beat_frames"], key=lambda x: abs(x - impulse_frame))
+            assert abs(closest_beat - impulse_frame) <= 5, (
                 f"Beat detected at {closest_beat}, expected near {impulse_frame}"
+            )
 
     # === KICK PATTERN TESTS ===
 
@@ -278,8 +289,9 @@ class TestBeatDetection:
         result = self._run_signal(signal)
 
         # Should detect 6-15 beats (allowing for threshold adaptation)
-        assert 4 <= result['beat_count'] <= 15, \
+        assert 4 <= result["beat_count"] <= 15, (
             f"Expected 6-12 beats at 128 BPM, got {result['beat_count']}"
+        )
 
     def test_kick_pattern_140bpm(self):
         """140 BPM (fast EDM) should still detect beats."""
@@ -288,8 +300,9 @@ class TestBeatDetection:
         result = self._run_signal(signal)
 
         # Should detect multiple beats
-        assert 4 <= result['beat_count'] <= 18, \
+        assert 4 <= result["beat_count"] <= 18, (
             f"Expected 5-15 beats at 140 BPM, got {result['beat_count']}"
+        )
 
     def test_kick_pattern_80bpm(self):
         """80 BPM (slower) should detect fewer beats."""
@@ -298,8 +311,9 @@ class TestBeatDetection:
         result = self._run_signal(signal)
 
         # Should detect beats at slower rate
-        assert 3 <= result['beat_count'] <= 12, \
+        assert 3 <= result["beat_count"] <= 12, (
             f"Expected 3-10 beats at 80 BPM, got {result['beat_count']}"
+        )
 
     # === MIN INTERVAL TESTS ===
 
@@ -313,21 +327,23 @@ class TestBeatDetection:
 
         result = self._run_signal(signal)
 
-        if result['beat_count'] > 1:
+        if result["beat_count"] > 1:
             # Check intervals between beats
-            frames = result['beat_frames']
+            frames = result["beat_frames"]
             min_interval_frames = self.capture.capture._min_beat_interval * 60  # ~5 frames
 
             for i in range(1, len(frames)):
-                interval = frames[i] - frames[i-1]
-                assert interval >= min_interval_frames - 1, \
+                interval = frames[i] - frames[i - 1]
+                assert interval >= min_interval_frames - 1, (
                     f"Beat interval {interval} frames is below minimum"
+                )
 
     # === NOISE REJECTION TESTS ===
 
     def test_noise_limited_beats(self):
         """Random noise should not trigger excessive beats."""
         import random
+
         random.seed(42)  # Reproducible
 
         signal = self.generator.noise(300, mean=0.3, variance=0.15)
@@ -336,8 +352,9 @@ class TestBeatDetection:
         # Noise might trigger some beats, but not constantly
         # At 60fps, 5 seconds (300 frames), allow up to ~8 beats/second
         # The detector is designed to be sensitive, so some false positives are OK
-        assert result['beat_count'] <= 40, \
+        assert result["beat_count"] <= 40, (
             f"Noise triggered {result['beat_count']} beats, expected fewer false positives"
+        )
 
     # === BASS WEIGHTING TESTS ===
 
@@ -357,8 +374,9 @@ class TestBeatDetection:
         result = self._run_signal(warmup_full + full_spectrum, warmup_bass + bass_signal)
 
         # Should detect the bass kicks
-        assert result['beat_count'] >= 1, \
+        assert result["beat_count"] >= 1, (
             "Bass-weighted detection should find bass kicks even with low full spectrum"
+        )
 
     # === OUTPUT RANGE TESTS ===
 
@@ -367,9 +385,10 @@ class TestBeatDetection:
         signal = self.generator.kick_pattern(240, bpm=128)
         result = self._run_signal(signal)
 
-        for frame, intensity in result['beats']:
-            assert 0 <= intensity <= 1, \
+        for frame, intensity in result["beats"]:
+            assert 0 <= intensity <= 1, (
                 f"Beat intensity {intensity} at frame {frame} outside valid range"
+            )
 
 
 class TestBandGeneration:
@@ -391,15 +410,22 @@ class TestPresets:
 
     def test_all_presets_valid(self):
         """All presets should have required keys."""
-        import sys
         import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
 
         from audio_processor.app_capture import PRESETS
 
         required_keys = [
-            'attack', 'release', 'beat_threshold', 'agc_max_gain',
-            'beat_sensitivity', 'band_sensitivity'
+            "attack",
+            "release",
+            "beat_threshold",
+            "agc_max_gain",
+            "beat_sensitivity",
+            "band_sensitivity",
         ]
 
         for preset_name, preset in PRESETS.items():
@@ -408,34 +434,45 @@ class TestPresets:
 
     def test_preset_values_in_range(self):
         """Preset values should be within valid ranges."""
-        import sys
         import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
 
         from audio_processor.app_capture import PRESETS
 
         for preset_name, preset in PRESETS.items():
-            assert 0 < preset['attack'] <= 1, f"{preset_name}: attack out of range"
-            assert 0 < preset['release'] <= 1, f"{preset_name}: release out of range"
-            assert 0.5 <= preset['beat_threshold'] <= 3, f"{preset_name}: beat_threshold out of range"
-            assert 1 <= preset['agc_max_gain'] <= 20, f"{preset_name}: agc_max_gain out of range"
-            assert 0 < preset['beat_sensitivity'] <= 3, f"{preset_name}: beat_sensitivity out of range"
-            assert len(preset['band_sensitivity']) == 6, f"{preset_name}: band_sensitivity wrong length"
+            assert 0 < preset["attack"] <= 1, f"{preset_name}: attack out of range"
+            assert 0 < preset["release"] <= 1, f"{preset_name}: release out of range"
+            assert 0.5 <= preset["beat_threshold"] <= 3, (
+                f"{preset_name}: beat_threshold out of range"
+            )
+            assert 1 <= preset["agc_max_gain"] <= 20, f"{preset_name}: agc_max_gain out of range"
+            assert 0 < preset["beat_sensitivity"] <= 3, (
+                f"{preset_name}: beat_sensitivity out of range"
+            )
+            assert len(preset["band_sensitivity"]) == 5, (
+                f"{preset_name}: band_sensitivity wrong length (expected 5-band system)"
+            )
 
     def test_edm_preset_bass_heavy(self):
         """EDM preset should boost bass bands."""
-        import sys
         import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
 
         from audio_processor.app_capture import PRESETS
 
-        edm = PRESETS['edm']
-        # Sub-bass and bass should be boosted (> 1.0)
-        assert edm['band_sensitivity'][0] > 1.0, "EDM should boost sub-bass"
-        assert edm['band_sensitivity'][1] > 1.0, "EDM should boost bass"
+        edm = PRESETS["edm"]
+        # Bass band (index 0) should be boosted (> 1.0)
+        assert edm["band_sensitivity"][0] > 1.0, "EDM should boost bass"
         # Bass weight should be high
-        assert edm.get('bass_weight', 0.7) >= 0.8, "EDM should have high bass weight"
+        assert edm.get("bass_weight", 0.7) >= 0.8, "EDM should have high bass weight"
 
 
 class TestAGC:
@@ -460,11 +497,15 @@ class TestAutoCalibration:
 
     def setup_method(self):
         """Set up mock agent for testing."""
-        import sys
         import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
 
         from audio_processor.app_capture import AppCaptureAgent
+
         self.agent = AppCaptureAgent.__new__(AppCaptureAgent)
 
         # Initialize minimal state needed for auto-calibration
@@ -490,6 +531,7 @@ class TestAutoCalibration:
         # Mock capture object
         class MockCapture:
             _beat_threshold = 1.3
+
         self.agent.capture = MockCapture()
 
     def test_warmup_no_changes(self):
@@ -514,12 +556,13 @@ class TestAutoCalibration:
         # Simulate 140 BPM beats (60/140 * 60fps ≈ 26 frames per beat)
         beat_interval = 26
         for i in range(300):
-            is_beat = (i % beat_interval == 0)
+            is_beat = i % beat_interval == 0
             self.agent._auto_calibrate(0.5 if is_beat else 0.3, is_beat)
 
         # Should estimate high BPM
-        assert self.agent._estimated_bpm > 120, \
+        assert self.agent._estimated_bpm > 120, (
             f"Expected BPM > 120 for fast beats, got {self.agent._estimated_bpm:.0f}"
+        )
 
     def test_tempo_estimation_slow(self):
         """Slow beat intervals should estimate low BPM."""
@@ -530,16 +573,18 @@ class TestAutoCalibration:
         # Simulate 80 BPM beats (60/80 * 60fps = 45 frames per beat)
         beat_interval = 45
         for i in range(400):
-            is_beat = (i % beat_interval == 0)
+            is_beat = i % beat_interval == 0
             self.agent._auto_calibrate(0.5 if is_beat else 0.3, is_beat)
 
         # Should estimate lower BPM
-        assert self.agent._estimated_bpm < 100, \
+        assert self.agent._estimated_bpm < 100, (
             f"Expected BPM < 100 for slow beats, got {self.agent._estimated_bpm:.0f}"
+        )
 
     def test_high_variance_increases_threshold(self):
         """High energy variance should increase beat threshold."""
         import random
+
         random.seed(123)
 
         # Warmup with stable signal
@@ -554,8 +599,9 @@ class TestAutoCalibration:
             self.agent._auto_calibrate(energy, i % 30 == 0)
 
         # Threshold should increase for noisy music
-        assert self.agent.capture._beat_threshold >= initial_threshold - 0.1, \
+        assert self.agent.capture._beat_threshold >= initial_threshold - 0.1, (
             "High variance should not significantly lower threshold"
+        )
 
     def test_attack_increases_for_fast_tempo(self):
         """Fast tempo should increase attack speed."""
@@ -569,12 +615,13 @@ class TestAutoCalibration:
         # Simulate fast beats (160 BPM = ~22 frames per beat)
         beat_interval = 22
         for i in range(500):
-            is_beat = (i % beat_interval == 0)
+            is_beat = i % beat_interval == 0
             self.agent._auto_calibrate(0.6 if is_beat else 0.2, is_beat)
 
         # Attack should increase for fast music
-        assert self.agent._smooth_attack > 0.3, \
+        assert self.agent._smooth_attack > 0.3, (
             f"Expected attack > 0.3 for fast tempo, got {self.agent._smooth_attack:.2f}"
+        )
 
 
 class TestBPMEstimation:
@@ -582,12 +629,16 @@ class TestBPMEstimation:
 
     def setup_method(self):
         """Set up FFTAnalyzer for testing."""
-        import sys
         import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+
+        import numpy as np
 
         from audio_processor.fft_analyzer import FFTAnalyzer
-        import numpy as np
 
         # Create analyzer without starting capture
         self.analyzer = FFTAnalyzer.__new__(FFTAnalyzer)
@@ -614,24 +665,27 @@ class TestBPMEstimation:
         self._simulate_kicks_at_bpm(120.0, num_beats=32)
 
         # Should estimate close to 120 BPM
-        assert 115 <= self.analyzer._estimated_bpm <= 125, \
+        assert 115 <= self.analyzer._estimated_bpm <= 125, (
             f"Expected ~120 BPM, got {self.analyzer._estimated_bpm:.1f}"
+        )
 
     def test_bpm_123_one_more_time(self):
         """Test BPM estimation at 123 BPM (One More Time tempo)."""
         self._simulate_kicks_at_bpm(123.0, num_beats=32)
 
         # Should estimate close to 123 BPM
-        assert 118 <= self.analyzer._estimated_bpm <= 128, \
+        assert 118 <= self.analyzer._estimated_bpm <= 128, (
             f"Expected ~123 BPM, got {self.analyzer._estimated_bpm:.1f}"
+        )
 
     def test_bpm_140_fast_edm(self):
         """Test BPM estimation at 140 BPM (fast EDM)."""
         self._simulate_kicks_at_bpm(140.0, num_beats=32)
 
         # Should estimate close to 140 BPM
-        assert 135 <= self.analyzer._estimated_bpm <= 145, \
+        assert 135 <= self.analyzer._estimated_bpm <= 145, (
             f"Expected ~140 BPM, got {self.analyzer._estimated_bpm:.1f}"
+        )
 
     def test_bpm_80_slow(self):
         """Test BPM estimation at 80 BPM (slower tempo)."""
@@ -639,8 +693,9 @@ class TestBPMEstimation:
 
         # Should estimate close to 80 BPM (or possibly doubled to 160)
         # Due to octave preference for 80-160, 80 should be detected
-        assert 75 <= self.analyzer._estimated_bpm <= 85 or 155 <= self.analyzer._estimated_bpm <= 165, \
-            f"Expected ~80 or ~160 BPM, got {self.analyzer._estimated_bpm:.1f}"
+        assert (
+            75 <= self.analyzer._estimated_bpm <= 85 or 155 <= self.analyzer._estimated_bpm <= 165
+        ), f"Expected ~80 or ~160 BPM, got {self.analyzer._estimated_bpm:.1f}"
 
     def test_confidence_increases_with_beats(self):
         """Confidence should increase as more consistent beats are detected."""
@@ -652,28 +707,30 @@ class TestBPMEstimation:
         self._simulate_kicks_at_bpm(120.0, num_beats=20)
         confidence_high = self.analyzer._bpm_confidence
 
-        assert confidence_high >= confidence_low, \
+        assert confidence_high >= confidence_low, (
             f"Confidence should increase with more beats: {confidence_low:.2f} -> {confidence_high:.2f}"
+        )
 
     def test_no_octave_error_double(self):
         """Should not report double the actual tempo (246 for 123 BPM)."""
         self._simulate_kicks_at_bpm(123.0, num_beats=32)
 
         # Should NOT be 246 BPM (double octave error)
-        assert self.analyzer._estimated_bpm < 200, \
+        assert self.analyzer._estimated_bpm < 200, (
             f"Octave error: got {self.analyzer._estimated_bpm:.1f} BPM instead of ~123"
+        )
 
     def test_no_octave_error_half(self):
         """Should not report half the actual tempo (61 for 123 BPM)."""
         self._simulate_kicks_at_bpm(123.0, num_beats=32)
 
         # Should NOT be ~61 BPM (half octave error)
-        assert self.analyzer._estimated_bpm > 100, \
+        assert self.analyzer._estimated_bpm > 100, (
             f"Octave error: got {self.analyzer._estimated_bpm:.1f} BPM instead of ~123"
+        )
 
     def test_histogram_decay(self):
         """Histogram should decay over time, allowing tempo changes."""
-        import numpy as np
 
         # Establish 120 BPM
         self._simulate_kicks_at_bpm(120.0, num_beats=16)
@@ -688,8 +745,7 @@ class TestBPMEstimation:
         bpm_new = self.analyzer._estimated_bpm
 
         # Should have adapted toward 140
-        assert bpm_new > bpm_120, \
-            f"BPM should adapt: was {bpm_120:.1f}, now {bpm_new:.1f}"
+        assert bpm_new > bpm_120, f"BPM should adapt: was {bpm_120:.1f}, now {bpm_new:.1f}"
 
     def test_ioi_filtering(self):
         """Invalid IOIs (too fast or too slow) should be filtered out."""
@@ -701,8 +757,9 @@ class TestBPMEstimation:
 
         # The 0.1s IOI should be filtered, but the 0.5s from 0.1 to 0.6 is valid
         # So let's check that invalid IOIs are not in the history
-        assert all(0.25 <= ioi <= 1.5 for ioi in self.analyzer._ioi_history), \
+        assert all(0.25 <= ioi <= 1.5 for ioi in self.analyzer._ioi_history), (
             f"Invalid IOIs found in history: {self.analyzer._ioi_history}"
+        )
 
         # Very slow IOI (2.0 sec = 30 BPM) - should also be ignored
         self.analyzer._ioi_history.clear()
@@ -710,8 +767,9 @@ class TestBPMEstimation:
         self.analyzer._update_bpm_from_onset(base_time)
         self.analyzer._update_bpm_from_onset(base_time + 2.0)
 
-        assert len(self.analyzer._ioi_history) == 0, \
+        assert len(self.analyzer._ioi_history) == 0, (
             f"Too-slow IOI should be filtered: {self.analyzer._ioi_history}"
+        )
 
 
 # Run with: python -m pytest audio_processor/tests/test_beat_detection.py -v

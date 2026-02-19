@@ -84,6 +84,14 @@ public class ItemBuilder {
     }
 
     /**
+     * Conditionally add a glowing enchantment effect.
+     */
+    public ItemBuilder glow(boolean condition) {
+        if (condition) glow();
+        return this;
+    }
+
+    /**
      * Set the item amount.
      */
     public ItemBuilder amount(int amount) {

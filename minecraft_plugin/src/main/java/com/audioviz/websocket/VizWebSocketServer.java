@@ -104,9 +104,19 @@ public class VizWebSocketServer extends WebSocketServer {
             ", duration=" + durationStr);
     }
 
+    // Maximum incoming message size (256KB - generous for any valid message)
+    private static final int MAX_MESSAGE_SIZE = 262_144;
+
     @Override
     public void onMessage(WebSocket conn, String message) {
         totalMessagesReceived.incrementAndGet();
+
+        // Reject oversized messages to prevent memory exhaustion
+        if (message.length() > MAX_MESSAGE_SIZE) {
+            plugin.getLogger().warning("Oversized message rejected: " + message.length() + " chars from " +
+                conn.getRemoteSocketAddress());
+            return;
+        }
 
         // Handle pong responses for heartbeat
         if (message.contains("\"type\":\"pong\"") || message.contains("\"type\": \"pong\"")) {
@@ -157,12 +167,16 @@ public class VizWebSocketServer extends WebSocketServer {
 
     /**
      * Check if a message is high-frequency and should be processed asynchronously.
+     * Only checks the first 60 chars (where the "type" field is) to avoid
+     * false-matching keywords in payload data.
      */
     private boolean isHighFrequencyMessage(String message) {
-        // Quick string check to avoid parsing just to determine type
-        return message.contains("\"batch_update\"") ||
-               message.contains("\"audio\"") ||
-               message.contains("\"state\"");
+        // Check the prefix where the "type" field appears in serialized JSON
+        String prefix = message.substring(0, Math.min(message.length(), 60));
+        return prefix.contains("\"type\":\"batch_update\"") ||
+               prefix.contains("\"type\": \"batch_update\"") ||
+               prefix.contains("\"type\":\"audio_state\"") ||
+               prefix.contains("\"type\": \"audio_state\"");
     }
 
     @Override

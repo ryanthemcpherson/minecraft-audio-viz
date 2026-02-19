@@ -4,16 +4,18 @@ No Discord required - uses generated audio patterns.
 """
 
 import asyncio
-import numpy as np
-import time
-import sys
 import os
+import sys
+import time
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from audio_processor.processor import AudioProcessor, AudioFrame
-from viz_client import VizClient
 import click
+from viz_client import VizClient
+
+from audio_processor.processor import AudioFrame, AudioProcessor
 
 
 class AudioVisualizer:
@@ -26,10 +28,7 @@ class AudioVisualizer:
         self.grid_size = int(np.ceil(np.sqrt(entity_count)))
 
         self.processor = AudioProcessor(
-            sample_rate=48000,
-            channels=2,
-            smoothing=0.15,
-            beat_sensitivity=1.2
+            sample_rate=48000, channels=2, smoothing=0.15, beat_sensitivity=1.2
         )
 
         self._update_queue = asyncio.Queue()
@@ -66,10 +65,7 @@ class AudioVisualizer:
         """Process update queue and send to Minecraft."""
         while self._running:
             try:
-                frame = await asyncio.wait_for(
-                    self._update_queue.get(),
-                    timeout=0.1
-                )
+                frame = await asyncio.wait_for(self._update_queue.get(), timeout=0.1)
                 await self._send_update(frame)
             except asyncio.TimeoutError:
                 continue
@@ -103,25 +99,22 @@ class AudioVisualizer:
                 y = min(1.0, y * 1.3)
                 scale = min(1.0, scale * 1.4)
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": x,
-                "y": y,
-                "z": z,
-                "scale": scale,
-                "visible": True
-            })
+            entities.append(
+                {"id": f"block_{i}", "x": x, "y": y, "z": z, "scale": scale, "visible": True}
+            )
 
         # Particles on beat
         particles = []
         if frame.is_beat and frame.beat_intensity > 0.2:
-            particles.append({
-                "particle": "FLAME",
-                "x": 0.5,
-                "y": 0.3 + frame.beat_intensity * 0.5,
-                "z": 0.5,
-                "count": int(15 * frame.beat_intensity)
-            })
+            particles.append(
+                {
+                    "particle": "FLAME",
+                    "x": 0.5,
+                    "y": 0.3 + frame.beat_intensity * 0.5,
+                    "z": 0.5,
+                    "count": int(15 * frame.beat_intensity),
+                }
+            )
 
         await self.viz_client.batch_update(self.zone, entities, particles)
 
@@ -147,7 +140,7 @@ async def generate_music_pattern(visualizer: AudioVisualizer, duration: float, b
         # Generate one frame
         frame_t = np.linspace(t, t + frame_samples / sample_rate, frame_samples)
 
-        # Base frequencies (sub-bass and bass)
+        # Base frequencies (bass band: 40-250Hz)
         bass = np.sin(2 * np.pi * 60 * frame_t) * 0.3
         bass += np.sin(2 * np.pi * 120 * frame_t) * 0.2
 
@@ -220,15 +213,19 @@ async def generate_sweep(visualizer: AudioVisualizer, duration: float):
 
 
 @click.command()
-@click.option('--host', default='192.168.208.1', help='Minecraft WebSocket host')
-@click.option('--port', default=8765, help='Minecraft WebSocket port')
-@click.option('--zone', default='main', help='Visualization zone')
-@click.option('--entities', default=16, help='Number of entities')
-@click.option('--pattern', '-p', default='music',
-              type=click.Choice(['music', 'sweep']),
-              help='Audio pattern to generate')
-@click.option('--duration', '-d', default=30.0, help='Duration in seconds')
-@click.option('--bpm', default=120.0, help='Beats per minute (for music pattern)')
+@click.option("--host", default="192.168.208.1", help="Minecraft WebSocket host")
+@click.option("--port", default=8765, help="Minecraft WebSocket port")
+@click.option("--zone", default="main", help="Visualization zone")
+@click.option("--entities", default=16, help="Number of entities")
+@click.option(
+    "--pattern",
+    "-p",
+    default="music",
+    type=click.Choice(["music", "sweep"]),
+    help="Audio pattern to generate",
+)
+@click.option("--duration", "-d", default=30.0, help="Duration in seconds")
+@click.option("--bpm", default=120.0, help="Beats per minute (for music pattern)")
 def main(host, port, zone, entities, pattern, duration, bpm):
     """Test audio visualization with generated audio."""
     asyncio.run(run_test(host, port, zone, entities, pattern, duration, bpm))
@@ -245,7 +242,7 @@ async def run_test(host, port, zone, entities, pattern, duration, bpm):
 
     # Check zone
     zones = await client.get_zones()
-    zone_names = [z['name'] for z in zones]
+    zone_names = [z["name"] for z in zones]
     if zone not in zone_names:
         print(f"Zone '{zone}' not found. Available: {zone_names}")
         await client.disconnect()
@@ -257,9 +254,9 @@ async def run_test(host, port, zone, entities, pattern, duration, bpm):
     await visualizer.start()
 
     try:
-        if pattern == 'music':
+        if pattern == "music":
             await generate_music_pattern(visualizer, duration, bpm)
-        elif pattern == 'sweep':
+        elif pattern == "sweep":
             await generate_sweep(visualizer, duration)
     except KeyboardInterrupt:
         print("\nInterrupted")
@@ -268,5 +265,5 @@ async def run_test(host, port, zone, entities, pattern, duration, bpm):
         await client.disconnect()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

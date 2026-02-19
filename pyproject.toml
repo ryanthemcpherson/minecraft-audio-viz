@@ -65,8 +65,9 @@ audioviz = "audio_processor.cli:main"
 audioviz-vj = "audio_processor.cli:vj_server"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/minecraft-audio-viz"
-Repository = "https://github.com/yourusername/minecraft-audio-viz"
+Homepage = "https://github.com/ryanthemcpherson/minecraft-audio-viz"
+Repository = "https://github.com/ryanthemcpherson/minecraft-audio-viz"
+Issues = "https://github.com/ryanthemcpherson/minecraft-audio-viz/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["audio_processor", "python_client"]
@@ -90,6 +91,14 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]  # Line length handled separately
+
+[tool.bandit]
+# Exclude test files from security scanning
+exclude_dirs = ["audio_processor/tests", "python_client/tests"]
+# Skip low-confidence findings
+confidence = ["MEDIUM", "HIGH"]
+# Skip assert checks (common in non-production code)
+skips = ["B101"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

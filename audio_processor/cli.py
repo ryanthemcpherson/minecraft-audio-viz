@@ -8,14 +8,14 @@ Entry points:
 
 import argparse
 import asyncio
-import sys
 import os
 import signal
+import sys
 
 # Fix Windows console encoding for unicode characters
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def validate_port(value: str) -> int:
@@ -26,9 +26,7 @@ def validate_port(value: str) -> int:
         raise argparse.ArgumentTypeError(f"Invalid port number: {value}")
 
     if not 1 <= port <= 65535:
-        raise argparse.ArgumentTypeError(
-            f"Port must be between 1 and 65535, got: {port}"
-        )
+        raise argparse.ArgumentTypeError(f"Port must be between 1 and 65535, got: {port}")
     return port
 
 
@@ -40,25 +38,19 @@ def validate_positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError(f"Invalid integer: {value}")
 
     if num <= 0:
-        raise argparse.ArgumentTypeError(
-            f"Value must be positive, got: {num}"
-        )
+        raise argparse.ArgumentTypeError(f"Value must be positive, got: {num}")
     return num
 
 
 def validate_hostname(value: str) -> str:
     """Validate hostname or IP address."""
     if not value or len(value) > 253:
-        raise argparse.ArgumentTypeError(
-            f"Invalid hostname: {value}"
-        )
+        raise argparse.ArgumentTypeError(f"Invalid hostname: {value}")
     # Basic validation - allow alphanumeric, dots, hyphens
     # More sophisticated validation would use socket.getaddrinfo
-    valid_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]')
+    valid_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]")
     if not all(c in valid_chars for c in value):
-        raise argparse.ArgumentTypeError(
-            f"Invalid characters in hostname: {value}"
-        )
+        raise argparse.ArgumentTypeError(f"Invalid characters in hostname: {value}")
     return value
 
 
@@ -70,8 +62,8 @@ def main():
     data to Minecraft and/or browser preview.
     """
     parser = argparse.ArgumentParser(
-        prog='audioviz',
-        description='AudioViz - Real-time audio visualization for Minecraft',
+        prog="audioviz",
+        description="AudioViz - Real-time audio visualization for Minecraft",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -82,198 +74,186 @@ Examples:
   audioviz --list-apps              # Show active audio applications
   audioviz --test                   # Test audio capture without Minecraft
   audioviz --dj-relay ws://192.168.1.204:9000 --dj-name "Ryan"  # Remote DJ mode
-        """
+        """,
     )
 
     # Audio source
-    audio_group = parser.add_argument_group('Audio Source')
+    audio_group = parser.add_argument_group("Audio Source")
     audio_group.add_argument(
-        '--app', '-a',
-        type=str, default='spotify',
-        help='Application name to capture audio from (default: spotify)'
+        "--app",
+        "-a",
+        type=str,
+        default="spotify",
+        help="Application name to capture audio from (default: spotify)",
     )
     audio_group.add_argument(
-        '--list-apps',
-        action='store_true',
-        help='List active audio applications and exit'
+        "--list-apps", action="store_true", help="List active audio applications and exit"
     )
     audio_group.add_argument(
-        '--list-devices',
-        action='store_true',
-        help='List available audio devices and exit'
+        "--list-devices", action="store_true", help="List available audio devices and exit"
     )
 
     # Minecraft connection
-    mc_group = parser.add_argument_group('Minecraft Connection')
+    mc_group = parser.add_argument_group("Minecraft Connection")
     mc_group.add_argument(
-        '--host', '-H',
-        type=validate_hostname, default=os.environ.get('MINECRAFT_HOST', 'localhost'),
-        help='Minecraft server host (default: localhost or $MINECRAFT_HOST)'
+        "--host",
+        "-H",
+        type=validate_hostname,
+        default=os.environ.get("MINECRAFT_HOST", "localhost"),
+        help="Minecraft server host (default: localhost or $MINECRAFT_HOST)",
     )
     mc_group.add_argument(
-        '--port', '-p',
-        type=validate_port, default=int(os.environ.get('MINECRAFT_PORT', '8765')),
-        help='Minecraft WebSocket port (default: 8765 or $MINECRAFT_PORT)'
+        "--port",
+        "-p",
+        type=validate_port,
+        default=int(os.environ.get("MINECRAFT_PORT", "8765")),
+        help="Minecraft WebSocket port (default: 8765 or $MINECRAFT_PORT)",
     )
     mc_group.add_argument(
-        '--zone', '-z',
-        type=str, default='main',
-        help='Visualization zone name (default: main)'
+        "--zone", "-z", type=str, default="main", help="Visualization zone name (default: main)"
     )
     mc_group.add_argument(
-        '--entities', '-e',
-        type=validate_positive_int, default=16,
-        help='Number of visualization entities (default: 16)'
+        "--entities",
+        "-e",
+        type=validate_positive_int,
+        default=16,
+        help="Number of visualization entities (default: 16)",
     )
     mc_group.add_argument(
-        '--no-minecraft',
-        action='store_true',
-        help='Run without Minecraft connection (preview/spectrograph only)'
+        "--no-minecraft",
+        action="store_true",
+        help="Run without Minecraft connection (preview/spectrograph only)",
     )
 
     # Preview server
-    preview_group = parser.add_argument_group('Preview Server')
+    preview_group = parser.add_argument_group("Preview Server")
     preview_group.add_argument(
-        '--preview',
-        action='store_true',
-        help='Enable browser preview server'
+        "--preview", action="store_true", help="Enable browser preview server"
     )
     preview_group.add_argument(
-        '--preview-port',
-        type=validate_port, default=8766,
-        help='WebSocket port for browser preview (default: 8766)'
+        "--preview-port",
+        type=validate_port,
+        default=8766,
+        help="WebSocket port for browser preview (default: 8766)",
     )
     preview_group.add_argument(
-        '--http-port',
-        type=validate_port, default=8080,
-        help='HTTP port for web interface (default: 8080)'
+        "--http-port",
+        type=validate_port,
+        default=8080,
+        help="HTTP port for web interface (default: 8080)",
     )
     preview_group.add_argument(
-        '--no-http',
-        action='store_true',
-        help='Disable built-in HTTP server (use Vite dev server)'
+        "--no-http", action="store_true", help="Disable built-in HTTP server (use Vite dev server)"
     )
 
     # Display options
-    display_group = parser.add_argument_group('Display Options')
+    display_group = parser.add_argument_group("Display Options")
     display_group.add_argument(
-        '--no-spectrograph',
-        action='store_true',
-        help='Disable terminal spectrograph display'
+        "--no-spectrograph", action="store_true", help="Disable terminal spectrograph display"
     )
     display_group.add_argument(
-        '--compact',
-        action='store_true',
-        help='Use compact single-line spectrograph'
+        "--compact", action="store_true", help="Use compact single-line spectrograph"
     )
     display_group.add_argument(
-        '--quiet', '-q',
-        action='store_true',
-        help='Minimal output (errors only)'
+        "--quiet", "-q", action="store_true", help="Minimal output (errors only)"
     )
 
     # Performance tuning
-    perf_group = parser.add_argument_group('Performance')
+    perf_group = parser.add_argument_group("Performance")
     perf_group.add_argument(
-        '--low-latency',
-        action='store_true',
-        help='Use low-latency FFT mode (~25ms total, smaller buffers)'
+        "--low-latency",
+        action="store_true",
+        help="Use low-latency FFT mode (~25ms total, smaller buffers)",
     )
     perf_group.add_argument(
-        '--ultra-low-latency',
-        action='store_true',
-        help='Use ultra-low-latency mode (~15ms, WASAPI exclusive, reduced bass)'
+        "--ultra-low-latency",
+        action="store_true",
+        help="Use ultra-low-latency mode (~15ms, WASAPI exclusive, reduced bass)",
     )
     perf_group.add_argument(
-        '--beat-prediction',
-        action='store_true',
-        help='Enable predictive beat tracking (fires beats BEFORE they occur)'
+        "--beat-prediction",
+        action="store_true",
+        help="Enable predictive beat tracking (fires beats BEFORE they occur)",
     )
     perf_group.add_argument(
-        '--prediction-lookahead',
-        type=int, default=80,
-        help='Beat prediction lookahead in ms (default: 80, match your total latency)'
+        "--prediction-lookahead",
+        type=int,
+        default=80,
+        help="Beat prediction lookahead in ms (default: 80, match your total latency)",
     )
     perf_group.add_argument(
-        '--tick-aligned',
-        action='store_true',
-        help='Align updates to Minecraft 20 TPS with beat prediction'
+        "--tick-aligned",
+        action="store_true",
+        help="Align updates to Minecraft 20 TPS with beat prediction",
     )
     perf_group.add_argument(
-        '--no-fft',
-        action='store_true',
-        help='Disable FFT analysis (use simple peak detection only)'
+        "--no-fft",
+        action="store_true",
+        help="Disable FFT analysis (use simple peak detection only)",
     )
     perf_group.add_argument(
-        '--no-mmcss',
-        action='store_true',
-        help='Disable MMCSS thread priority elevation'
+        "--no-mmcss", action="store_true", help="Disable MMCSS thread priority elevation"
     )
     perf_group.add_argument(
-        '--no-native-format',
-        action='store_true',
-        help='Use AUTOCONVERTPCM mode (disable native format optimization)'
+        "--no-native-format",
+        action="store_true",
+        help="Use AUTOCONVERTPCM mode (disable native format optimization)",
     )
     perf_group.add_argument(
-        '--no-bass-lane',
-        action='store_true',
-        help='Disable parallel bass lane for instant kick detection'
+        "--no-bass-lane",
+        action="store_true",
+        help="Disable parallel bass lane for instant kick detection",
     )
     perf_group.add_argument(
-        '--buffer-stats',
-        action='store_true',
-        help='Show ring buffer statistics in spectrograph'
+        "--buffer-stats", action="store_true", help="Show ring buffer statistics in spectrograph"
     )
     perf_group.add_argument(
-        '--list-audio-backends',
-        action='store_true',
-        help='List available audio backends (WASAPI, ASIO) and exit'
+        "--list-audio-backends",
+        action="store_true",
+        help="List available audio backends (WASAPI, ASIO) and exit",
     )
 
     # Testing
-    test_group = parser.add_argument_group('Testing')
+    test_group = parser.add_argument_group("Testing")
     test_group.add_argument(
-        '--test',
-        action='store_true',
-        help='Test audio capture and display spectrograph (no network)'
+        "--test",
+        action="store_true",
+        help="Test audio capture and display spectrograph (no network)",
     )
 
     # DJ Relay mode (connect to remote VJ server)
-    relay_group = parser.add_argument_group('DJ Relay Mode')
+    relay_group = parser.add_argument_group("DJ Relay Mode")
     relay_group.add_argument(
-        '--dj-relay',
-        type=str, metavar='URL',
-        help='Connect to VJ server as remote DJ (e.g., ws://192.168.1.204:9000)'
+        "--dj-relay",
+        type=str,
+        metavar="URL",
+        help="Connect to VJ server as remote DJ (e.g., ws://192.168.1.204:9000)",
     )
     relay_group.add_argument(
-        '--dj-name',
-        type=str, default='DJ',
-        help='DJ display name (default: DJ)'
+        "--dj-name", type=str, default="DJ", help="DJ display name (default: DJ)"
     )
     relay_group.add_argument(
-        '--dj-id',
-        type=str, default='dj_1',
-        help='DJ identifier (default: dj_1)'
+        "--dj-id", type=str, default="dj_1", help="DJ identifier (default: dj_1)"
     )
     relay_group.add_argument(
-        '--dj-key',
-        type=str, default='',
-        help='DJ authentication key (if VJ server requires auth)'
+        "--dj-key", type=str, default="", help="DJ authentication key (if VJ server requires auth)"
     )
     relay_group.add_argument(
-        '--direct',
-        action='store_true',
-        help='Direct mode: send visualization directly to Minecraft (lower latency)'
+        "--direct",
+        action="store_true",
+        help="Direct mode: send visualization directly to Minecraft (lower latency)",
     )
     relay_group.add_argument(
-        '--relay-minecraft-host',
-        type=validate_hostname, default=None,
-        help='Minecraft host for direct mode (default: get from VJ server)'
+        "--relay-minecraft-host",
+        type=validate_hostname,
+        default=None,
+        help="Minecraft host for direct mode (default: get from VJ server)",
     )
     relay_group.add_argument(
-        '--relay-minecraft-port',
-        type=validate_port, default=8765,
-        help='Minecraft WebSocket port for direct mode (default: 8765)'
+        "--relay-minecraft-port",
+        type=validate_port,
+        default=8765,
+        help="Minecraft WebSocket port for direct mode (default: 8765)",
     )
 
     args = parser.parse_args()
@@ -287,7 +267,7 @@ Examples:
         _list_devices()
         return 0
 
-    if getattr(args, 'list_audio_backends', False):
+    if getattr(args, "list_audio_backends", False):
         _list_audio_backends()
         return 0
 
@@ -316,15 +296,10 @@ Examples:
         vscode_mode=False,
         use_fft=not args.no_fft,
         low_latency=args.low_latency,
-        ultra_low_latency=getattr(args, 'ultra_low_latency', False),
-        use_beat_prediction=getattr(args, 'beat_prediction', False),
-        prediction_lookahead_ms=float(getattr(args, 'prediction_lookahead', 80)),
+        ultra_low_latency=getattr(args, "ultra_low_latency", False),
+        use_beat_prediction=getattr(args, "beat_prediction", False),
+        prediction_lookahead_ms=float(getattr(args, "prediction_lookahead", 80)),
         tick_aligned=args.tick_aligned,
-        # New performance flags
-        use_mmcss=not getattr(args, 'no_mmcss', False),
-        native_format=not getattr(args, 'no_native_format', False),
-        enable_bass_lane=not getattr(args, 'no_bass_lane', False),
-        show_buffer_stats=getattr(args, 'buffer_stats', False),
     )
 
     # Signal handlers
@@ -345,16 +320,10 @@ Examples:
 
 async def _run_agent(agent, args):
     """Run the capture agent with appropriate connections."""
-    from python_client.viz_client import VizClient
-
     # Connect to Minecraft if enabled
     if not args.no_minecraft:
-        client = VizClient(args.host, args.port)
-        connected = await client.connect()
-        if connected:
-            agent.set_viz_client(client)
-            print(f"Connected to Minecraft at {args.host}:{args.port}")
-        else:
+        connected = await agent.connect_minecraft()
+        if not connected:
             print(f"Warning: Could not connect to Minecraft at {args.host}:{args.port}")
             print("Running in preview-only mode...")
 
@@ -365,9 +334,9 @@ async def _run_agent(agent, args):
 def _run_dj_relay(args):
     """Run in DJ relay mode - send audio to a VJ server."""
     from audio_processor.app_capture import AppAudioCapture
+    from audio_processor.dj_relay import DJRelay, DJRelayAgent, DJRelayConfig
     from audio_processor.fft_analyzer import HybridAnalyzer
-    from audio_processor.spectrograph import TerminalSpectrograph, CompactSpectrograph
-    from audio_processor.dj_relay import DJRelay, DJRelayConfig, DJRelayAgent
+    from audio_processor.spectrograph import CompactSpectrograph, TerminalSpectrograph
 
     mode_str = "DIRECT" if args.direct else "RELAY"
     print(f"Starting DJ Relay mode ({mode_str})...")
@@ -388,7 +357,7 @@ def _run_dj_relay(args):
         minecraft_host=args.relay_minecraft_host,
         minecraft_port=args.relay_minecraft_port,
         zone=args.zone,
-        entity_count=args.entities
+        entity_count=args.entities,
     )
 
     # Create components
@@ -401,10 +370,10 @@ def _run_dj_relay(args):
         try:
             fft_analyzer = HybridAnalyzer(
                 low_latency=args.low_latency,
-                ultra_low_latency=getattr(args, 'ultra_low_latency', False),
-                use_beat_prediction=getattr(args, 'beat_prediction', False),
-                prediction_lookahead_ms=float(getattr(args, 'prediction_lookahead', 80)),
-                enable_bass_lane=not getattr(args, 'no_bass_lane', False),
+                ultra_low_latency=getattr(args, "ultra_low_latency", False),
+                use_beat_prediction=getattr(args, "beat_prediction", False),
+                prediction_lookahead_ms=float(getattr(args, "prediction_lookahead", 80)),
+                enable_bass_lane=not getattr(args, "no_bass_lane", False),
             )
         except Exception as e:
             print(f"Warning: FFT not available: {e}")
@@ -442,59 +411,100 @@ def vj_server():
     broadcasts combined visualization to Minecraft/browsers.
     """
     parser = argparse.ArgumentParser(
-        prog='audioviz-vj',
-        description='AudioViz VJ Server - Central server for multi-DJ visualization',
+        prog="audioviz-vj",
+        description="AudioViz VJ Server - Central server for multi-DJ visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   audioviz-vj                           # Start VJ server on default ports
   audioviz-vj --port 9000               # Custom DJ connection port
   audioviz-vj --minecraft-host mc.local # Connect to remote Minecraft
-        """
+        """,
     )
 
     # VJ Server settings
     parser.add_argument(
-        '--port', '-p',
-        type=validate_port, default=int(os.environ.get('VJ_SERVER_PORT', '9000')),
-        help='Port for DJ connections (default: 9000 or $VJ_SERVER_PORT)'
+        "--port",
+        "-p",
+        type=validate_port,
+        default=int(os.environ.get("VJ_SERVER_PORT", "9000")),
+        help="Port for DJ connections (default: 9000 or $VJ_SERVER_PORT)",
     )
     parser.add_argument(
-        '--minecraft-host',
-        type=validate_hostname, default=os.environ.get('MINECRAFT_HOST', 'localhost'),
-        help='Minecraft server host (default: localhost or $MINECRAFT_HOST)'
+        "--minecraft-host",
+        type=validate_hostname,
+        default=os.environ.get("MINECRAFT_HOST", "localhost"),
+        help="Minecraft server host (default: localhost or $MINECRAFT_HOST)",
     )
     parser.add_argument(
-        '--minecraft-port',
-        type=validate_port, default=int(os.environ.get('MINECRAFT_PORT', '8765')),
-        help='Minecraft WebSocket port (default: 8765 or $MINECRAFT_PORT)'
+        "--minecraft-port",
+        type=validate_port,
+        default=int(os.environ.get("MINECRAFT_PORT", "8765")),
+        help="Minecraft WebSocket port (default: 8765 or $MINECRAFT_PORT)",
     )
     parser.add_argument(
-        '--broadcast-port',
-        type=validate_port, default=8766,
-        help='WebSocket port for browser clients (default: 8766)'
+        "--broadcast-port",
+        type=validate_port,
+        default=8766,
+        help="WebSocket port for browser clients (default: 8766)",
     )
     parser.add_argument(
-        '--auth-file',
-        type=str, default=os.environ.get('DJ_AUTH_FILE', 'configs/dj_auth.json'),
-        help='DJ authentication config file'
+        "--auth-file",
+        type=str,
+        default=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
+        help="DJ authentication config file",
     )
     parser.add_argument(
-        '--no-auth',
-        action='store_true',
-        help='Disable DJ authentication (development only)'
+        "--no-auth",
+        action="store_true",
+        help="Disable DJ authentication (INSECURE - development only)",
+    )
+    parser.add_argument(
+        "--hash-passwords",
+        action="store_true",
+        help="Hash any plaintext passwords in the auth config file and exit",
     )
 
     args = parser.parse_args()
 
     # Import and run VJ server
-    from audio_processor.vj_server import VJServer, DJAuthConfig
+    from audio_processor.vj_server import DJAuthConfig, VJServer
+
+    # Handle --hash-passwords: hash plaintext entries in-place and exit
+    if args.hash_passwords:
+        import json
+        from pathlib import Path
+
+        from audio_processor.auth import hash_password
+
+        auth_path = Path(args.auth_file)
+        if not auth_path.exists():
+            print(f"Error: Auth config not found: {args.auth_file}")
+            return 1
+        with open(auth_path) as f:
+            auth_data = json.load(f)
+        changed = 0
+        for section in ["djs", "vj_operators"]:
+            for entry_id, entry in auth_data.get(section, {}).items():
+                key_hash = entry.get("key_hash", "")
+                if key_hash and not key_hash.startswith(("bcrypt:", "sha256:")):
+                    entry["key_hash"] = hash_password(key_hash)
+                    changed += 1
+                    print(f"  Hashed: {section}/{entry_id}")
+        if changed:
+            with open(auth_path, "w") as f:
+                json.dump(auth_data, f, indent=2)
+            print(f"\nHashed {changed} plaintext password(s) in {args.auth_file}")
+        else:
+            print("No plaintext passwords found — all entries already hashed.")
+        return 0
 
     # Load auth config if authentication is enabled
     auth_config = None
     if not args.no_auth and args.auth_file:
         import json
         from pathlib import Path
+
         auth_path = Path(args.auth_file)
         if auth_path.exists():
             try:
@@ -502,8 +512,25 @@ Examples:
                     auth_data = json.load(f)
                 auth_config = DJAuthConfig.from_dict(auth_data)
                 print(f"Loaded DJ auth config from {args.auth_file}")
+
+                # Refuse to start with plaintext passwords when auth is required
+                if auth_config.has_plaintext_passwords():
+                    print(
+                        "\nERROR: Auth config contains plaintext passwords.\n"
+                        "Fix with: audioviz-vj --hash-passwords\n"
+                        "Or to skip auth (dev only): audioviz-vj --no-auth"
+                    )
+                    return 1
             except Exception as e:
                 print(f"Warning: Failed to load auth config: {e}")
+        else:
+            # Auth file not found — require explicit --no-auth
+            print(
+                f"\nERROR: Auth config not found: {args.auth_file}\n"
+                f"Create it with: python -m audio_processor.auth init {args.auth_file}\n"
+                f"Or to skip auth (dev only): audioviz-vj --no-auth"
+            )
+            return 1
 
     server = VJServer(
         dj_port=args.port,
@@ -511,7 +538,7 @@ Examples:
         minecraft_port=args.minecraft_port,
         broadcast_port=args.broadcast_port,
         auth_config=auth_config,
-        require_auth=not args.no_auth and auth_config is not None
+        require_auth=not args.no_auth,
     )
 
     def signal_handler(sig, frame):
@@ -526,7 +553,9 @@ Examples:
         if await server.connect_minecraft():
             print(f"Connected to Minecraft at {args.minecraft_host}:{args.minecraft_port}")
         else:
-            print(f"Warning: Could not connect to Minecraft at {args.minecraft_host}:{args.minecraft_port}")
+            print(
+                f"Warning: Could not connect to Minecraft at {args.minecraft_host}:{args.minecraft_port}"
+            )
 
         try:
             await server.run()
@@ -569,6 +598,7 @@ def _list_devices():
     """List available audio devices."""
     try:
         from audio_processor.fft_analyzer import list_audio_devices
+
         list_audio_devices()
     except ImportError:
         print("Error: FFT module not available.")
@@ -586,13 +616,14 @@ def _list_audio_backends():
     print("\n[WASAPI Loopback - pyaudiowpatch]")
     try:
         import pyaudiowpatch as pyaudio
+
         p = pyaudio.PyAudio()
         try:
             loopback = p.get_default_wasapi_loopback()
-            print(f"  Status: AVAILABLE")
+            print("  Status: AVAILABLE")
             print(f"  Default loopback: {loopback['name']}")
             print(f"  Sample rate: {int(loopback['defaultSampleRate'])} Hz")
-            print(f"  Latency: ~10-20ms (shared mode)")
+            print("  Latency: ~10-20ms (shared mode)")
         except Exception:
             print("  Status: AVAILABLE (no loopback device found)")
         p.terminate()
@@ -604,6 +635,7 @@ def _list_audio_backends():
     print("\n[ASIO - Ultra Low Latency]")
     try:
         from audio_processor.asio_capture import check_asio_available, list_asio_devices
+
         available, msg = check_asio_available()
         print(f"  Status: {'AVAILABLE' if available else 'NOT AVAILABLE'}")
         print(f"  {msg}")
@@ -611,7 +643,7 @@ def _list_audio_backends():
             devices = list_asio_devices()
             print(f"  Devices: {len(devices)}")
             for dev in devices[:3]:  # Show first 3
-                print(f"    - {dev.name} ({dev.default_low_latency*1000:.1f}ms)")
+                print(f"    - {dev.name} ({dev.default_low_latency * 1000:.1f}ms)")
             print("  Latency: 1-5ms (driver dependent)")
         else:
             print("  Install ASIO4ALL: https://www.asio4all.org/")
@@ -622,6 +654,7 @@ def _list_audio_backends():
     print("\n[WASAPI IAudioClient3 - Low Latency Shared Mode]")
     try:
         from audio_processor.wasapi_loopback import check_wasapi_lowlatency_available
+
         available, msg = check_wasapi_lowlatency_available()
         print(f"  Status: {'AVAILABLE' if available else 'NOT AVAILABLE'}")
         print(f"  {msg}")
@@ -635,6 +668,7 @@ def _list_audio_backends():
     print("\n[sounddevice - General Purpose]")
     try:
         import sounddevice as sd
+
         print("  Status: AVAILABLE")
         hostapis = sd.query_hostapis()
         print(f"  Host APIs: {', '.join(api['name'] for api in hostapis)}")
@@ -650,5 +684,5 @@ def _list_audio_backends():
     print("=" * 60 + "\n")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

@@ -1,0 +1,13 @@
+name = "mcav-tenant-router"
+main = "src/index.ts"
+compatibility_date = "2026-02-01"
+
+[vars]
+COORDINATOR_API = "https://api.mcav.live"
+SITE_ORIGIN = "https://mcav.live"
+
+# Route: all *.mcav.live requests
+# Uncomment and configure once DNS is set up:
+# [[routes]]
+# pattern = "*.mcav.live/*"
+# zone_name = "mcav.live"

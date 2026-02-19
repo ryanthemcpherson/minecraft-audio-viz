@@ -7,11 +7,11 @@ Provides:
 - Loading/saving from JSON/environment
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional
 import json
 import os
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -19,23 +19,21 @@ class AudioConfig:
     """Audio processing configuration."""
 
     # Envelope settings
-    attack: float = 0.35       # Attack time (0-1, higher = faster response)
-    release: float = 0.08      # Release time (0-1, higher = faster decay)
+    attack: float = 0.35  # Attack time (0-1, higher = faster response)
+    release: float = 0.08  # Release time (0-1, higher = faster decay)
 
     # Beat detection
-    beat_threshold: float = 1.3    # Multiplier over average for beat detection
+    beat_threshold: float = 1.3  # Multiplier over average for beat detection
     beat_sensitivity: float = 1.0  # Overall beat response strength
 
     # Gain control
-    agc_max_gain: float = 8.0      # Maximum automatic gain
+    agc_max_gain: float = 8.0  # Maximum automatic gain
 
     # Frequency weighting
-    bass_weight: float = 0.7       # Weight for bass in beat detection (0-1)
+    bass_weight: float = 0.7  # Weight for bass in beat detection (0-1)
 
-    # Per-band sensitivity [sub, bass, low, mid, high, air]
-    band_sensitivity: List[float] = field(
-        default_factory=lambda: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    )
+    # Per-band sensitivity [bass, low_mid, mid, high_mid, high]
+    band_sensitivity: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0, 1.0, 1.0])
 
     # Auto-calibration
     auto_calibrate: bool = True
@@ -45,7 +43,7 @@ class AudioConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'AudioConfig':
+    def from_dict(cls, data: dict) -> "AudioConfig":
         """Create from dictionary."""
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
@@ -59,28 +57,28 @@ PRESETS: Dict[str, AudioConfig] = {
         agc_max_gain=8.0,
         beat_sensitivity=1.0,
         bass_weight=0.7,
-        band_sensitivity=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        auto_calibrate=True
+        band_sensitivity=[1.0, 1.0, 1.0, 1.0, 1.0],
+        auto_calibrate=True,
     ),
     "edm": AudioConfig(
-        attack=0.7,           # Fast attack for punchy beats
-        release=0.15,         # Quick decay for fast BPM
-        beat_threshold=1.1,   # Lower threshold = more beats detected
-        agc_max_gain=10.0,    # Higher gain for dynamic range
-        beat_sensitivity=1.5, # Stronger beat response
-        bass_weight=0.85,     # Heavy bass focus for EDM kicks
-        band_sensitivity=[1.5, 1.3, 0.8, 0.9, 1.2, 1.0],
-        auto_calibrate=False
+        attack=0.7,  # Fast attack for punchy beats
+        release=0.15,  # Quick decay for fast BPM
+        beat_threshold=1.1,  # Lower threshold = more beats detected
+        agc_max_gain=10.0,  # Higher gain for dynamic range
+        beat_sensitivity=1.5,  # Stronger beat response
+        bass_weight=0.85,  # Heavy bass focus for EDM kicks
+        band_sensitivity=[1.5, 0.8, 0.9, 1.2, 1.0],  # Boost bass
+        auto_calibrate=False,
     ),
     "chill": AudioConfig(
-        attack=0.25,          # Slower attack for smoother response
-        release=0.05,         # Smooth decay
-        beat_threshold=1.6,   # Higher threshold = fewer beats
+        attack=0.25,  # Slower attack for smoother response
+        release=0.05,  # Smooth decay
+        beat_threshold=1.6,  # Higher threshold = fewer beats
         agc_max_gain=6.0,
         beat_sensitivity=0.7,
-        bass_weight=0.5,      # Less bass focus, more balanced
-        band_sensitivity=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
-        auto_calibrate=False
+        bass_weight=0.5,  # Less bass focus, more balanced
+        band_sensitivity=[0.9, 1.0, 1.1, 1.2, 1.3],  # Boost highs
+        auto_calibrate=False,
     ),
     "rock": AudioConfig(
         attack=0.5,
@@ -88,9 +86,9 @@ PRESETS: Dict[str, AudioConfig] = {
         beat_threshold=1.3,
         agc_max_gain=8.0,
         beat_sensitivity=1.2,
-        bass_weight=0.65,     # Drum-focused
-        band_sensitivity=[1.2, 1.1, 1.0, 1.0, 0.9, 0.8],
-        auto_calibrate=False
+        bass_weight=0.65,  # Drum-focused
+        band_sensitivity=[1.2, 1.0, 1.0, 0.9, 0.8],  # Guitar/drums focus
+        auto_calibrate=False,
     ),
     "hiphop": AudioConfig(
         attack=0.6,
@@ -98,19 +96,19 @@ PRESETS: Dict[str, AudioConfig] = {
         beat_threshold=1.2,
         agc_max_gain=9.0,
         beat_sensitivity=1.3,
-        bass_weight=0.8,      # Strong 808 focus
-        band_sensitivity=[1.4, 1.2, 0.9, 1.0, 1.1, 0.9],
-        auto_calibrate=False
+        bass_weight=0.8,  # Strong 808 focus
+        band_sensitivity=[1.4, 0.9, 1.0, 1.1, 0.9],  # Heavy bass
+        auto_calibrate=False,
     ),
     "classical": AudioConfig(
-        attack=0.2,           # Very smooth
+        attack=0.2,  # Very smooth
         release=0.04,
-        beat_threshold=1.8,   # Few beats
+        beat_threshold=1.8,  # Few beats
         agc_max_gain=5.0,
         beat_sensitivity=0.5,
         bass_weight=0.4,
-        band_sensitivity=[0.7, 0.8, 1.0, 1.2, 1.3, 1.4],
-        auto_calibrate=False
+        band_sensitivity=[0.8, 1.0, 1.2, 1.3, 1.4],  # Boost mids/highs
+        auto_calibrate=False,
     ),
 }
 
@@ -157,7 +155,7 @@ class PerformanceConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'PerformanceConfig':
+    def from_dict(cls, data: dict) -> "PerformanceConfig":
         """Create from dictionary."""
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
@@ -208,15 +206,15 @@ class ServerConfig:
     dj_auth_file: Optional[str] = "configs/dj_auth.json"
 
     @classmethod
-    def from_env(cls) -> 'ServerConfig':
+    def from_env(cls) -> "ServerConfig":
         """Load configuration from environment variables."""
         return cls(
-            minecraft_host=os.environ.get('MINECRAFT_HOST', 'localhost'),
-            minecraft_port=int(os.environ.get('MINECRAFT_PORT', '8765')),
-            vj_server_port=int(os.environ.get('VJ_SERVER_PORT', '9000')),
-            preview_port=int(os.environ.get('PREVIEW_PORT', '8766')),
-            http_port=int(os.environ.get('HTTP_PORT', '8080')),
-            dj_auth_file=os.environ.get('DJ_AUTH_FILE', 'configs/dj_auth.json'),
+            minecraft_host=os.environ.get("MINECRAFT_HOST", "localhost"),
+            minecraft_port=int(os.environ.get("MINECRAFT_PORT", "8765")),
+            vj_server_port=int(os.environ.get("VJ_SERVER_PORT", "9000")),
+            preview_port=int(os.environ.get("PREVIEW_PORT", "8766")),
+            http_port=int(os.environ.get("HTTP_PORT", "8080")),
+            dj_auth_file=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
         )
 
 
@@ -244,27 +242,27 @@ class AppConfig:
     def save(self, path: Path) -> None:
         """Save configuration to JSON file."""
         data = {
-            'audio': self.audio.to_dict(),
-            'server': asdict(self.server),
-            'performance_tuning': self.performance.to_dict(),
-            'display': {
-                'show_spectrograph': self.show_spectrograph,
-                'compact_spectrograph': self.compact_spectrograph,
+            "audio": self.audio.to_dict(),
+            "server": asdict(self.server),
+            "performance_tuning": self.performance.to_dict(),
+            "display": {
+                "show_spectrograph": self.show_spectrograph,
+                "compact_spectrograph": self.compact_spectrograph,
             },
-            'latency': {
-                'low_latency': self.low_latency,
-                'tick_aligned': self.tick_aligned,
-                'use_fft': self.use_fft,
+            "latency": {
+                "low_latency": self.low_latency,
+                "tick_aligned": self.tick_aligned,
+                "use_fft": self.use_fft,
             },
-            'zone': self.zone,
-            'entity_count': self.entity_count,
+            "zone": self.zone,
+            "entity_count": self.entity_count,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
     @classmethod
-    def load(cls, path: Path) -> 'AppConfig':
+    def load(cls, path: Path) -> "AppConfig":
         """Load configuration from JSON file."""
         if not path.exists():
             return cls()
@@ -274,34 +272,34 @@ class AppConfig:
 
         config = cls()
 
-        if 'audio' in data:
-            config.audio = AudioConfig.from_dict(data['audio'])
+        if "audio" in data:
+            config.audio = AudioConfig.from_dict(data["audio"])
 
-        if 'server' in data:
-            config.server = ServerConfig(**data['server'])
+        if "server" in data:
+            config.server = ServerConfig(**data["server"])
 
-        if 'performance_tuning' in data:
-            config.performance = PerformanceConfig.from_dict(data['performance_tuning'])
+        if "performance_tuning" in data:
+            config.performance = PerformanceConfig.from_dict(data["performance_tuning"])
 
-        if 'display' in data:
-            config.show_spectrograph = data['display'].get('show_spectrograph', True)
-            config.compact_spectrograph = data['display'].get('compact_spectrograph', False)
+        if "display" in data:
+            config.show_spectrograph = data["display"].get("show_spectrograph", True)
+            config.compact_spectrograph = data["display"].get("compact_spectrograph", False)
 
         # Support both old 'performance' and new 'latency' keys for backwards compatibility
-        latency_data = data.get('latency', data.get('performance', {}))
+        latency_data = data.get("latency", data.get("performance", {}))
         if latency_data:
-            config.low_latency = latency_data.get('low_latency', False)
-            config.tick_aligned = latency_data.get('tick_aligned', False)
-            config.use_fft = latency_data.get('use_fft', True)
+            config.low_latency = latency_data.get("low_latency", False)
+            config.tick_aligned = latency_data.get("tick_aligned", False)
+            config.use_fft = latency_data.get("use_fft", True)
 
-        config.zone = data.get('zone', 'main')
-        config.entity_count = data.get('entity_count', 16)
+        config.zone = data.get("zone", "main")
+        config.entity_count = data.get("entity_count", 16)
 
         return config
 
 
 # Default config file location
-DEFAULT_CONFIG_PATH = Path.home() / '.config' / 'audioviz' / 'config.json'
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "audioviz" / "config.json"
 
 
 def load_config(path: Optional[Path] = None) -> AppConfig:

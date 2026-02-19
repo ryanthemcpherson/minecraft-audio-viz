@@ -192,10 +192,13 @@ public class MessageQueue {
             String entityId = entity.has("id") ? entity.get("id").getAsString() : null;
             if (entityId == null) continue;
 
-            // Parse normalized coordinates (0-1) and convert to world coordinates
-            double nx = entity.has("x") ? entity.get("x").getAsDouble() : 0.5;
-            double ny = entity.has("y") ? entity.get("y").getAsDouble() : 0.5;
-            double nz = entity.has("z") ? entity.get("z").getAsDouble() : 0.5;
+            // Parse normalized coordinates (0-1, clamped for safety) and convert to world coordinates
+            double nx = InputSanitizer.sanitizeCoordinate(
+                entity.has("x") ? entity.get("x").getAsDouble() : 0.5);
+            double ny = InputSanitizer.sanitizeCoordinate(
+                entity.has("y") ? entity.get("y").getAsDouble() : 0.5);
+            double nz = InputSanitizer.sanitizeCoordinate(
+                entity.has("z") ? entity.get("z").getAsDouble() : 0.5);
 
             // Convert to world coordinates
             double worldX = origin.getX() + (nx * size.getX());
@@ -204,9 +207,11 @@ public class MessageQueue {
 
             Location loc = new Location(origin.getWorld(), worldX, worldY, worldZ);
 
-            // Parse scale and rotation if present
-            float scale = entity.has("scale") ? entity.get("scale").getAsFloat() : 0.5f;
-            float rotationY = entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0f;
+            // Parse scale and rotation if present (clamped for safety)
+            float scale = InputSanitizer.sanitizeScale(
+                entity.has("scale") ? entity.get("scale").getAsFloat() : 0.5f);
+            float rotationY = InputSanitizer.sanitizeRotation(
+                entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0f);
 
             // Create transformation with rotation
             Transformation transform = new Transformation(
@@ -216,19 +221,24 @@ public class MessageQueue {
                 new AxisAngle4f(0, 0, 0, 1)
             );
 
-            // Build update with optional brightness and glow
+            // Build update with optional brightness, glow, and interpolation
             EntityUpdate.Builder builder = EntityUpdate.builder(entityId)
                 .location(loc)
                 .transformation(transform);
 
-            // Parse brightness if present (0-15)
+            // Parse brightness if present (clamped to 0-15)
             if (entity.has("brightness")) {
-                builder.brightness(entity.get("brightness").getAsInt());
+                builder.brightness(InputSanitizer.sanitizeBrightness(entity.get("brightness").getAsInt()));
             }
 
             // Parse glow if present
             if (entity.has("glow")) {
                 builder.glow(entity.get("glow").getAsBoolean());
+            }
+
+            // Parse per-entity interpolation duration if present (clamped to 0-100)
+            if (entity.has("interpolation")) {
+                builder.interpolationDuration(InputSanitizer.sanitizeInterpolation(entity.get("interpolation").getAsInt()));
             }
 
             updates.add(builder.build());
@@ -241,7 +251,8 @@ public class MessageQueue {
      */
     private void processAudioInfo(JsonObject msg, String zoneName) {
         boolean isBeat = msg.has("is_beat") && msg.get("is_beat").getAsBoolean();
-        double beatIntensity = msg.has("beat_intensity") ? msg.get("beat_intensity").getAsDouble() : 0.0;
+        double beatIntensity = InputSanitizer.sanitizeAmplitude(
+            msg.has("beat_intensity") ? msg.get("beat_intensity").getAsDouble() : 0.0);
 
         // Trigger beat effects if this is a beat with sufficient intensity
         if (isBeat && beatIntensity > 0.2) {
@@ -251,11 +262,13 @@ public class MessageQueue {
         // Update particle visualization audio state
         if (msg.has("bands")) {
             JsonArray bandsJson = msg.getAsJsonArray("bands");
-            double[] bands = new double[bandsJson.size()];
+            int bandCount = Math.min(bandsJson.size(), 10); // Cap array size
+            double[] bands = new double[bandCount];
             for (int i = 0; i < bands.length; i++) {
-                bands[i] = bandsJson.get(i).getAsDouble();
+                bands[i] = InputSanitizer.sanitizeBandValue(bandsJson.get(i).getAsDouble());
             }
-            double amplitude = msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0;
+            double amplitude = InputSanitizer.sanitizeAmplitude(
+                msg.has("amplitude") ? msg.get("amplitude").getAsDouble() : 0.0);
             long frame = msg.has("frame") ? msg.get("frame").getAsLong() : messagesProcessed;
 
             AudioState audioState = new AudioState(bands, amplitude, isBeat, beatIntensity, frame);

@@ -21,12 +21,13 @@ public class MainMenu implements Menu {
     private final AudioVizPlugin plugin;
     private final MenuManager menuManager;
 
-    // Slot positions
-    private static final int SLOT_ZONES = 11;
-    private static final int SLOT_DJ_PANEL = 13;
-    private static final int SLOT_SETTINGS = 15;
+    // Slot positions (4 rows)
+    private static final int SLOT_ZONES = 10;
+    private static final int SLOT_STAGES = 12;
+    private static final int SLOT_DJ_PANEL = 14;
+    private static final int SLOT_SETTINGS = 16;
     private static final int SLOT_STATUS = 22;
-    private static final int SLOT_HELP = 26;
+    private static final int SLOT_HELP = 35;
 
     public MainMenu(AudioVizPlugin plugin, MenuManager menuManager) {
         this.plugin = plugin;
@@ -40,14 +41,14 @@ public class MainMenu implements Menu {
 
     @Override
     public int getSize() {
-        return 27; // 3 rows
+        return 36; // 4 rows
     }
 
     @Override
     public void build(Inventory inventory, Player viewer) {
         // Fill border with glass panes
         ItemStack filler = ItemBuilder.glassPane(DyeColor.GRAY);
-        for (int i = 0; i < 27; i++) {
+        for (int i = 0; i < 36; i++) {
             inventory.setItem(i, filler);
         }
 
@@ -61,6 +62,21 @@ public class MainMenu implements Menu {
                 "",
                 "&eClick to manage zones"
             )
+            .build());
+
+        // Stage Setup
+        int stageCount = plugin.getStageManager().getStageCount();
+        inventory.setItem(SLOT_STAGES, new ItemBuilder(Material.END_PORTAL_FRAME)
+            .name("&5Stage Setup")
+            .lore(
+                "&7Create and manage stages",
+                "&7with multi-zone layouts",
+                "",
+                "&fStages: &e" + stageCount,
+                "",
+                "&eClick to manage stages"
+            )
+            .glow()
             .build());
 
         // DJ Control Panel
@@ -107,6 +123,7 @@ public class MainMenu implements Menu {
                 "&fWebSocket: " + (connectionCount > 0 ? "&aConnected" : "&cDisconnected"),
                 "&fClients: &e" + connectionCount,
                 "&fActive Zones: &e" + plugin.getZoneManager().getZoneCount(),
+                "&fStages: &e" + stageCount,
                 "&fTotal Entities: &e" + totalEntities,
                 "&fUpdates Processed: &e" + formatNumber(updatesProcessed),
                 "",
@@ -136,6 +153,10 @@ public class MainMenu implements Menu {
             case SLOT_ZONES -> {
                 playClickSound(player);
                 menuManager.openMenu(player, new ZoneManagementMenu(plugin, menuManager));
+            }
+            case SLOT_STAGES -> {
+                playClickSound(player);
+                menuManager.openMenu(player, new StageListMenu(plugin, menuManager));
             }
             case SLOT_DJ_PANEL -> {
                 playClickSound(player);

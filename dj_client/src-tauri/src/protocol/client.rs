@@ -154,17 +154,13 @@ impl DjClient {
             ))
             .unwrap()
         } else {
-            // Anonymous auth (for development)
-            serde_json::to_string(&DjAuthMessage::new(
-                "anon".to_string(),
-                "".to_string(),
-                self.config.dj_name.clone(),
-            ))
-            .unwrap()
+            return Err(ClientError::AuthenticationFailed(
+                "No credentials provided. Set a connect code or DJ ID/key in settings.".to_string(),
+            ));
         };
 
         write
-            .send(Message::Text(auth_msg))
+            .send(Message::Text(auth_msg.into()))
             .await
             .map_err(|e| ClientError::SendError(e.to_string()))?;
 
@@ -183,18 +179,23 @@ impl DjClient {
             }
 
             match tokio::time::timeout(remaining, read.next()).await {
-                Ok(Some(Ok(Message::Text(text)))) => {
-                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(Some(Ok(Message::Text(ref text)))) => {
+                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(text) {
                         let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                         match msg_type {
                             "auth_success" => {
-                                if let Ok(auth) = serde_json::from_value::<AuthSuccessMessage>(msg) {
+                                if let Ok(auth) = serde_json::from_value::<AuthSuccessMessage>(msg)
+                                {
                                     let mut s = self.state.lock();
                                     s.authenticated = true;
                                     s.is_active = auth.is_active;
                                     s.dj_id = Some(auth.dj_id.clone());
-                                    log::info!("Authenticated as {} (active: {})", auth.dj_name, auth.is_active);
+                                    log::info!(
+                                        "Authenticated as {} (active: {})",
+                                        auth.dj_name,
+                                        auth.is_active
+                                    );
                                 }
                             }
                             "auth_error" => {
@@ -209,7 +210,9 @@ impl DjClient {
                                     .as_secs_f64();
                                 let response = ClockSyncResponse::new(now);
                                 let json = serde_json::to_string(&response).unwrap();
-                                write.send(Message::Text(json)).await
+                                write
+                                    .send(Message::Text(json.into()))
+                                    .await
                                     .map_err(|e| ClientError::SendError(e.to_string()))?;
                                 log::info!("Clock sync completed");
                                 // Clock sync is the last handshake message, we're done
@@ -217,7 +220,9 @@ impl DjClient {
                             }
                             "status_update" => {
                                 // May arrive during handshake, handle it
-                                if let Some(is_active) = msg.get("is_active").and_then(|v| v.as_bool()) {
+                                if let Some(is_active) =
+                                    msg.get("is_active").and_then(|v| v.as_bool())
+                                {
                                     self.state.lock().is_active = is_active;
                                 }
                             }
@@ -228,7 +233,9 @@ impl DjClient {
                     }
                 }
                 Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_))) | Ok(None) => {
-                    return Err(ClientError::ConnectionFailed("Connection closed during handshake".to_string()));
+                    return Err(ClientError::ConnectionFailed(
+                        "Connection closed during handshake".to_string(),
+                    ));
                 }
                 Ok(Some(Ok(_))) => {
                     // Binary/ping/pong - ignore
@@ -260,7 +267,7 @@ impl DjClient {
                     _ = shutdown_rx.recv() => {
                         // Send going offline message
                         let _ = write.send(Message::Text(
-                            serde_json::to_string(&GoingOfflineMessage::new()).unwrap()
+                            serde_json::to_string(&GoingOfflineMessage::new()).unwrap().into()
                         )).await;
                         let _ = write.close().await;
                         break;
@@ -275,8 +282,8 @@ impl DjClient {
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(server_msg) = serde_json::from_str::<ServerMessage>(&text) {
+                    Ok(Message::Text(ref text)) => {
+                        if let Ok(server_msg) = serde_json::from_str::<ServerMessage>(text) {
                             handle_server_message(&state_reader, &tx_reader, server_msg).await;
                         }
                     }
@@ -306,7 +313,7 @@ impl DjClient {
             loop {
                 interval.tick().await;
                 let msg = serde_json::to_string(&HeartbeatMessage::new()).unwrap();
-                if tx_heartbeat.send(Message::Text(msg)).await.is_err() {
+                if tx_heartbeat.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
             }
@@ -331,7 +338,7 @@ impl DjClient {
         let json =
             serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
 
-        tx.send(Message::Text(json))
+        tx.send(Message::Text(json.into()))
             .await
             .map_err(|e| ClientError::SendError(e.to_string()))?;
 
@@ -410,7 +417,7 @@ async fn handle_server_message(
 
             let response = ClockSyncResponse::new(now);
             let json = serde_json::to_string(&response).unwrap();
-            let _ = tx.send(Message::Text(json)).await;
+            let _ = tx.send(Message::Text(json.into())).await;
         }
         ServerMessage::HeartbeatAck(ack) => {
             // Calculate latency
@@ -428,5 +435,53 @@ async fn handle_server_message(
         | ServerMessage::EffectTriggered(_) => {
             // These are informational, no action needed for basic client
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_uses_expected_connection_settings() {
+        let config = DjClientConfig::default();
+
+        assert_eq!(config.server_host, "localhost");
+        assert_eq!(config.server_port, 9000);
+        assert_eq!(config.dj_name, "DJ");
+        assert_eq!(config.max_reconnect_attempts, 10);
+        assert_eq!(config.reconnect_delay, 2.0);
+        assert_eq!(config.heartbeat_interval, 2.0);
+        assert!(config.connect_code.is_none());
+        assert!(config.dj_id.is_none());
+        assert!(config.dj_key.is_none());
+    }
+
+    #[test]
+    fn new_client_starts_disconnected() {
+        let client = DjClient::new(DjClientConfig::default());
+
+        let state = client.get_state();
+        assert!(!state.connected);
+        assert!(!state.authenticated);
+        assert!(!state.is_active);
+        assert!(state.dj_id.is_none());
+        assert!(client.get_tx_clone().is_none());
+        assert!(!client.is_connected());
+        assert!(!client.is_active());
+    }
+
+    #[tokio::test]
+    async fn disconnect_without_connection_succeeds() {
+        let client = DjClient::new(DjClientConfig::default());
+
+        client
+            .disconnect()
+            .await
+            .expect("disconnect should be safe when not connected");
+        client
+            .disconnect()
+            .await
+            .expect("disconnect should be idempotent");
     }
 }

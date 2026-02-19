@@ -236,3 +236,74 @@ impl FftAnalyzer {
         bpm.clamp(60.0, 200.0) as f32
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_approx(actual: f32, expected: f32, tolerance: f32) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected} +/- {tolerance}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn analyze_returns_default_for_insufficient_samples() {
+        let mut analyzer = FftAnalyzer::new(AudioConfig::default());
+        let short_samples = vec![0.0; analyzer.fft_size() - 1];
+
+        let result = analyzer.analyze(&short_samples);
+
+        assert_eq!(result.bands, [0.0; 5]);
+        assert_eq!(result.peak, 0.0);
+        assert!(!result.is_beat);
+        assert_eq!(result.beat_intensity, 0.0);
+        assert_eq!(result.bpm, 0.0);
+    }
+
+    #[test]
+    fn analyze_silence_produces_no_energy_and_default_bpm() {
+        let mut analyzer = FftAnalyzer::new(AudioConfig::default());
+        let silent_frame = vec![0.0; analyzer.fft_size()];
+
+        let result = analyzer.analyze(&silent_frame);
+
+        assert_eq!(result.bands, [0.0; 5]);
+        assert_eq!(result.peak, 0.0);
+        assert!(!result.is_beat);
+        assert_eq!(result.beat_intensity, 0.0);
+        assert_eq!(result.bpm, 120.0);
+    }
+
+    #[test]
+    fn detect_beat_enforces_cooldown() {
+        let mut analyzer = FftAnalyzer::new(AudioConfig::default());
+
+        for _ in 0..60 {
+            analyzer.beat_history.push_back(0.1);
+        }
+
+        analyzer.frame = 120;
+        let (first_beat, first_intensity) = analyzer.detect_beat(0.6);
+        assert!(first_beat);
+        assert!(first_intensity > 0.0);
+        assert_eq!(analyzer.beat_cooldown, 8);
+
+        analyzer.frame += 1;
+        let (second_beat, second_intensity) = analyzer.detect_beat(0.8);
+        assert!(!second_beat);
+        assert_eq!(second_intensity, 0.0);
+        assert_eq!(analyzer.beat_cooldown, 7);
+    }
+
+    #[test]
+    fn estimate_bpm_uses_recent_beat_intervals() {
+        let mut analyzer = FftAnalyzer::new(AudioConfig::default());
+        analyzer.last_beat_times = VecDeque::from(vec![0.0, 0.5, 1.0, 1.5, 2.0]);
+
+        let bpm = analyzer.estimate_bpm();
+
+        assert_approx(bpm, 120.0, 0.01);
+    }
+}

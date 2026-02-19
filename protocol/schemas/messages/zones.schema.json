@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zones.schema.json",
+  "title": "ZonesMessage",
+  "description": "Response listing all visualization zones.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "zones"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "world": {
+            "type": "string"
+          },
+          "corner1": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "z": { "type": "number" }
+            },
+            "required": ["x", "y", "z"]
+          },
+          "corner2": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "z": { "type": "number" }
+            },
+            "required": ["x", "y", "z"]
+          },
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["name"]
+      }
+    }
+  },
+  "required": ["type", "zones"]
+}

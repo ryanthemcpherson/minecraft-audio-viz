@@ -6,10 +6,9 @@ Demonstrates various visualization patterns by controlling entities in Minecraft
 import asyncio
 import math
 import time
-from typing import List, Dict
-import numpy as np
-import click
 
+import click
+import numpy as np
 from viz_client import VizClient
 
 
@@ -43,14 +42,16 @@ class DemoAnimations:
                 wave = math.sin(t * speed + x * 6) * 0.5 + 0.5
                 y = wave * 0.8  # Max height 80% of zone
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "scale": 0.4 + wave * 0.3,  # Scale with height
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{i}",
+                        "x": x,
+                        "y": y,
+                        "z": z,
+                        "scale": 0.4 + wave * 0.3,  # Scale with height
+                        "visible": True,
+                    }
+                )
 
             await self.client.batch_update(self.zone_name, entities)
             await asyncio.sleep(0.05)  # 20 FPS
@@ -67,14 +68,16 @@ class DemoAnimations:
             for i in range(self.entity_count):
                 x, z = self._entity_grid_position(i)
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": pulse * 0.5,
-                    "z": z,
-                    "scale": 0.3 + pulse * 0.5,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{i}",
+                        "x": x,
+                        "y": pulse * 0.5,
+                        "z": z,
+                        "scale": 0.3 + pulse * 0.5,
+                        "visible": True,
+                    }
+                )
 
             await self.client.batch_update(self.zone_name, entities)
             await asyncio.sleep(0.05)
@@ -93,20 +96,22 @@ class DemoAnimations:
                 # Distance from center
                 dx = x - 0.5
                 dz = z - 0.5
-                dist = math.sqrt(dx*dx + dz*dz)
+                dist = math.sqrt(dx * dx + dz * dz)
 
                 # Ripple wave
                 ripple = math.sin(t * speed - dist * 10) * 0.5 + 0.5
                 y = ripple * 0.6
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "scale": 0.3 + ripple * 0.4,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{i}",
+                        "x": x,
+                        "y": y,
+                        "z": z,
+                        "scale": 0.3 + ripple * 0.4,
+                        "visible": True,
+                    }
+                )
 
             await self.client.batch_update(self.zone_name, entities)
             await asyncio.sleep(0.05)
@@ -132,16 +137,18 @@ class DemoAnimations:
                 amplitude = max(0.1, min(1.0, amplitude))
 
                 x = i / bar_count
-                y = amplitude * 0.8
+                amplitude * 0.8
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": 0,  # Base at bottom
-                    "z": 0.5,
-                    "scale": 0.5,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{i}",
+                        "x": x,
+                        "y": 0,  # Base at bottom
+                        "z": 0.5,
+                        "scale": 0.5,
+                        "visible": True,
+                    }
+                )
 
             await self.client.batch_update(self.zone_name, entities)
             await asyncio.sleep(0.05)
@@ -166,14 +173,9 @@ class DemoAnimations:
                 z = 0.5 + math.sin(angle) * radius
                 y = y_norm * 0.8
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "scale": 0.3,
-                    "visible": True
-                })
+                entities.append(
+                    {"id": f"block_{i}", "x": x, "y": y, "z": z, "scale": 0.3, "visible": True}
+                )
 
             await self.client.batch_update(self.zone_name, entities)
             await asyncio.sleep(0.05)
@@ -197,39 +199,47 @@ class DemoAnimations:
                 bounce = abs(math.sin(t * speeds[i] + phases[i]))
                 y = bounce * 0.6
 
-                entities.append({
-                    "id": f"block_{i}",
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "scale": 0.3 + bounce * 0.2,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{i}",
+                        "x": x,
+                        "y": y,
+                        "z": z,
+                        "scale": 0.3 + bounce * 0.2,
+                        "visible": True,
+                    }
+                )
 
             await self.client.batch_update(self.zone_name, entities)
             await asyncio.sleep(0.05)
 
 
 @click.command()
-@click.option('--host', default='localhost', help='WebSocket host')
-@click.option('--port', default=8765, help='WebSocket port')
-@click.option('--zone', default='main', help='Zone name to use')
-@click.option('--count', default=16, help='Number of entities')
-@click.option('--animation', '-a', default='all',
-              type=click.Choice(['wave', 'pulse', 'ripple', 'spectrum',
-                               'tower', 'bounce', 'all']),
-              help='Animation to run')
-@click.option('--duration', '-d', default=5.0, help='Duration per animation')
-@click.option('--init-pool/--no-init-pool', default=True,
-              help='Initialize entity pool before animations')
-def main(host: str, port: int, zone: str, count: int, animation: str,
-         duration: float, init_pool: bool):
+@click.option("--host", default="localhost", help="WebSocket host")
+@click.option("--port", default=8765, help="WebSocket port")
+@click.option("--zone", default="main", help="Zone name to use")
+@click.option("--count", default=16, help="Number of entities")
+@click.option(
+    "--animation",
+    "-a",
+    default="all",
+    type=click.Choice(["wave", "pulse", "ripple", "spectrum", "tower", "bounce", "all"]),
+    help="Animation to run",
+)
+@click.option("--duration", "-d", default=5.0, help="Duration per animation")
+@click.option(
+    "--init-pool/--no-init-pool", default=True, help="Initialize entity pool before animations"
+)
+def main(
+    host: str, port: int, zone: str, count: int, animation: str, duration: float, init_pool: bool
+):
     """Run demo animations on AudioViz Minecraft plugin."""
     asyncio.run(run_demo(host, port, zone, count, animation, duration, init_pool))
 
 
-async def run_demo(host: str, port: int, zone: str, count: int, animation: str,
-                   duration: float, init_pool: bool):
+async def run_demo(
+    host: str, port: int, zone: str, count: int, animation: str, duration: float, init_pool: bool
+):
     """Main demo routine."""
     client = VizClient(host, port)
 
@@ -241,7 +251,7 @@ async def run_demo(host: str, port: int, zone: str, count: int, animation: str,
 
     # Check if zone exists
     zones = await client.get_zones()
-    zone_names = [z['name'] for z in zones]
+    zone_names = [z["name"] for z in zones]
 
     if zone not in zone_names:
         click.echo(f"Zone '{zone}' not found. Available zones: {zone_names}")
@@ -264,16 +274,16 @@ async def run_demo(host: str, port: int, zone: str, count: int, animation: str,
     demo = DemoAnimations(client, zone, count)
 
     animations = {
-        'wave': ('Wave Animation', demo.wave_animation),
-        'pulse': ('Pulse Animation', demo.pulse_animation),
-        'ripple': ('Ripple Animation', demo.ripple_animation),
-        'spectrum': ('Spectrum Bars', demo.spectrum_bars),
-        'tower': ('Rotating Tower', demo.rotating_tower),
-        'bounce': ('Random Bounce', demo.random_bounce),
+        "wave": ("Wave Animation", demo.wave_animation),
+        "pulse": ("Pulse Animation", demo.pulse_animation),
+        "ripple": ("Ripple Animation", demo.ripple_animation),
+        "spectrum": ("Spectrum Bars", demo.spectrum_bars),
+        "tower": ("Rotating Tower", demo.rotating_tower),
+        "bounce": ("Random Bounce", demo.random_bounce),
     }
 
     try:
-        if animation == 'all':
+        if animation == "all":
             # Run all animations
             for name, (display_name, anim_func) in animations.items():
                 click.echo(f"\nRunning: {display_name}")
@@ -296,5 +306,5 @@ async def run_demo(host: str, port: int, zone: str, count: int, animation: str,
         await client.disconnect()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

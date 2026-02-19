@@ -1,5 +1,6 @@
 /* ==========================================================================
    Audio Visualizer Control Center - Professional Dark Theme
+   VJ-optimized UX overhaul
    ========================================================================== */
 
 /* CSS Variables */
@@ -32,10 +33,24 @@
     --band-high: #00b0ff;
     --band-air: #d500f9;
 
+    /* Preset accent colors */
+    --preset-auto: #6366f1;
+    --preset-auto-dim: rgba(99, 102, 241, 0.15);
+    --preset-edm: #ec4899;
+    --preset-edm-dim: rgba(236, 72, 153, 0.15);
+    --preset-chill: #14b8a6;
+    --preset-chill-dim: rgba(20, 184, 166, 0.15);
+    --preset-rock: #f59e0b;
+    --preset-rock-dim: rgba(245, 158, 11, 0.15);
+    --preset-hiphop: #ef4444;
+    --preset-hiphop-dim: rgba(239, 68, 68, 0.15);
+    --preset-classical: #eab308;
+    --preset-classical-dim: rgba(234, 179, 8, 0.15);
+
     /* Layout */
     --sidebar-width: 280px;
     --header-height: 56px;
-    --status-bar-height: 40px;
+    --status-bar-height: 44px;
 
     /* Borders & Shadows */
     --border-color: rgba(255, 255, 255, 0.08);
@@ -148,20 +163,24 @@ body {
     border-radius: 50%;
     background: var(--warning);
     animation: pulse 2s infinite;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
 }
 
 .connection-status.connected .status-dot {
     background: var(--success);
     animation: none;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
 }
 
 .connection-status.error .status-dot {
     background: var(--error);
+    animation: pulse 1s infinite;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
 }
 
 @keyframes pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+    50% { opacity: 0.4; }
 }
 
 .header-stat {
@@ -199,10 +218,24 @@ body {
     overflow: hidden;
 }
 
+/* Canvas glow border */
 #visualizer {
     width: 100%;
     height: 100%;
     display: block;
+    box-shadow: inset 0 0 40px rgba(99, 102, 241, 0.06),
+                inset 0 0 80px rgba(99, 102, 241, 0.03);
+}
+
+/* Subtle canvas edge glow via pseudo-element on the section */
+.preview-section::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 1px solid rgba(99, 102, 241, 0.12);
+    box-shadow: inset 0 0 30px rgba(99, 102, 241, 0.04);
+    z-index: 1;
 }
 
 /* Audio Meters Overlay */
@@ -217,6 +250,7 @@ body {
     backdrop-filter: blur(10px);
     border-radius: 12px;
     border: 1px solid var(--border-color);
+    z-index: 2;
 }
 
 .meter {
@@ -246,18 +280,56 @@ body {
     border-radius: 4px;
 }
 
+/* Peak hold line (CSS-only via box-shadow on ::after) */
+.meter-fill::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    height: 2px;
+    bottom: 0%;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.9);
+    opacity: 0;
+    transition: bottom 0.05s ease-out, opacity 0.8s ease-out 0.3s;
+    z-index: 2;
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+}
+
 /* 5-band meter colors for ultra-low-latency mode */
-.meter[data-band="0"] .meter-bar { background: linear-gradient(to top, var(--band-bass), rgba(255, 145, 0, 0.5)); }
-.meter[data-band="1"] .meter-bar { background: linear-gradient(to top, var(--band-low), rgba(255, 234, 0, 0.5)); }
-.meter[data-band="2"] .meter-bar { background: linear-gradient(to top, var(--band-mid), rgba(0, 230, 118, 0.5)); }
-.meter[data-band="3"] .meter-bar { background: linear-gradient(to top, var(--band-high), rgba(0, 176, 255, 0.5)); }
-.meter[data-band="4"] .meter-bar { background: linear-gradient(to top, var(--band-air), rgba(213, 0, 249, 0.5)); }
+.meter[data-band="0"] .meter-bar {
+    background: linear-gradient(to top, var(--band-bass), rgba(255, 145, 0, 0.5));
+    box-shadow: 0 0 8px rgba(255, 145, 0, 0.2);
+}
+.meter[data-band="1"] .meter-bar {
+    background: linear-gradient(to top, var(--band-low), rgba(255, 234, 0, 0.5));
+    box-shadow: 0 0 8px rgba(255, 234, 0, 0.15);
+}
+.meter[data-band="2"] .meter-bar {
+    background: linear-gradient(to top, var(--band-mid), rgba(0, 230, 118, 0.5));
+    box-shadow: 0 0 8px rgba(0, 230, 118, 0.2);
+}
+.meter[data-band="3"] .meter-bar {
+    background: linear-gradient(to top, var(--band-high), rgba(0, 176, 255, 0.5));
+    box-shadow: 0 0 8px rgba(0, 176, 255, 0.2);
+}
+.meter[data-band="4"] .meter-bar {
+    background: linear-gradient(to top, var(--band-air), rgba(213, 0, 249, 0.5));
+    box-shadow: 0 0 8px rgba(213, 0, 249, 0.2);
+}
+
+/* Band label colors matching their meter */
+.meter[data-band="0"] .meter-label { color: var(--band-bass); }
+.meter[data-band="1"] .meter-label { color: var(--band-low); }
+.meter[data-band="2"] .meter-label { color: var(--band-mid); }
+.meter[data-band="3"] .meter-label { color: var(--band-high); }
+.meter[data-band="4"] .meter-label { color: var(--band-air); }
 
 .meter-label {
     font-size: 10px;
-    font-weight: 500;
-    color: var(--text-muted);
+    font-weight: 600;
     text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 /* Beat Overlay */
@@ -267,12 +339,14 @@ body {
     pointer-events: none;
     border: 3px solid transparent;
     border-radius: 0;
-    transition: border-color 0.1s ease;
+    transition: border-color 0.08s ease-out;
+    z-index: 3;
 }
 
 .beat-overlay.active {
     border-color: var(--accent);
-    box-shadow: inset 0 0 60px rgba(99, 102, 241, 0.15);
+    box-shadow: inset 0 0 80px rgba(99, 102, 241, 0.15),
+                inset 0 0 160px rgba(99, 102, 241, 0.05);
 }
 
 /* ==========================================================================
@@ -281,7 +355,9 @@ body {
 
 .control-sidebar {
     width: var(--sidebar-width);
-    background: var(--bg-secondary);
+    background: rgba(18, 18, 26, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-left: 1px solid var(--border-color);
     overflow-y: auto;
     flex-shrink: 0;
@@ -291,22 +367,30 @@ body {
     padding: 8px;
 }
 
-/* Scrollbar */
+/* Polished Scrollbar */
 .control-sidebar::-webkit-scrollbar {
-    width: 6px;
+    width: 5px;
 }
 
 .control-sidebar::-webkit-scrollbar-track {
     background: transparent;
+    margin: 4px 0;
 }
 
 .control-sidebar::-webkit-scrollbar-thumb {
-    background: var(--bg-elevated);
-    border-radius: 3px;
+    background: rgba(99, 102, 241, 0.2);
+    border-radius: 10px;
+    transition: background 0.2s ease;
 }
 
 .control-sidebar::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
+    background: rgba(99, 102, 241, 0.4);
+}
+
+/* Firefox scrollbar */
+.control-sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 102, 241, 0.2) transparent;
 }
 
 /* Panel */
@@ -340,7 +424,7 @@ body {
     gap: 12px;
 }
 
-/* Collapsible Panel */
+/* Collapsible Panel with chevron arrows */
 .panel.collapsible .panel-header {
     cursor: pointer;
     user-select: none;
@@ -355,40 +439,53 @@ body {
     width: 16px;
     height: 16px;
     position: relative;
+    flex-shrink: 0;
 }
 
-.collapse-icon::before,
-.collapse-icon::after {
+/* Chevron arrow using CSS borders */
+.collapse-icon::before {
     content: '';
     position: absolute;
-    background: var(--text-muted);
-    transition: transform var(--transition-fast);
+    width: 7px;
+    height: 7px;
+    top: 3px;
+    left: 4px;
+    border-right: 2px solid var(--text-muted);
+    border-bottom: 2px solid var(--text-muted);
+    transform: rotate(45deg);
+    transition: transform 0.2s ease, top 0.2s ease;
 }
 
-.collapse-icon::before {
-    width: 10px;
-    height: 2px;
-    top: 7px;
+/* Remove the old ::after plus-sign element */
+.collapse-icon::after {
+    display: none;
+}
+
+/* Collapsed: chevron points right */
+.panel.collapsed .collapse-icon::before {
+    transform: rotate(-45deg);
+    top: 4px;
     left: 3px;
 }
 
-.collapse-icon::after {
-    width: 2px;
-    height: 10px;
+/* Expanded: chevron points down (default) */
+.panel:not(.collapsed) .collapse-icon::before {
+    transform: rotate(45deg);
     top: 3px;
-    left: 7px;
-}
-
-.panel.collapsed .collapse-icon::after {
-    transform: rotate(0deg);
-}
-
-.panel:not(.collapsed) .collapse-icon::after {
-    transform: rotate(90deg);
 }
 
 .panel.collapsed .panel-content {
     display: none;
+}
+
+/* Smooth expand/collapse with max-height */
+.panel:not(.collapsed) .panel-content {
+    animation: panelExpand 0.2s ease-out;
+}
+
+@keyframes panelExpand {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* ==========================================================================
@@ -480,43 +577,167 @@ body {
     text-align: right;
 }
 
-/* Preset Grid */
+/* ==========================================================================
+   View Mode - Segmented Pill Toggle
+   ========================================================================== */
+
+.view-mode-group {
+    display: flex;
+    gap: 0;
+    background: var(--bg-primary);
+    border-radius: 10px;
+    padding: 3px;
+    border: 1px solid var(--border-color);
+}
+
+.view-mode-option {
+    flex: 1;
+    cursor: pointer;
+}
+
+.view-mode-option input {
+    display: none;
+}
+
+.view-mode-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 6px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.view-mode-option input:checked + .view-mode-label {
+    background: var(--accent);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+.view-mode-option:hover:not(:has(input:checked)) .view-mode-label {
+    background: rgba(99, 102, 241, 0.1);
+}
+
+/* Hide icons in pill mode for cleaner look */
+.view-mode-icon {
+    display: none;
+}
+
+.view-mode-text {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: color 0.2s ease;
+}
+
+.view-mode-option input:checked + .view-mode-label .view-mode-text {
+    color: #fff;
+}
+
+.view-mode-option:hover:not(:has(input:checked)) .view-mode-label .view-mode-text {
+    color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   Preset Grid - Per-preset accent colors
+   ========================================================================== */
+
 .preset-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
 }
 
 .preset-btn {
-    padding: 10px 12px;
+    padding: 9px 6px;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     color: var(--text-secondary);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
 }
 
-.preset-btn:hover {
-    background: var(--accent-dim);
-    border-color: var(--accent);
-    color: var(--accent);
+/* Per-preset hover colors */
+.preset-btn[data-preset="auto"]:hover {
+    background: var(--preset-auto-dim);
+    border-color: var(--preset-auto);
+    color: var(--preset-auto);
+}
+.preset-btn[data-preset="edm"]:hover {
+    background: var(--preset-edm-dim);
+    border-color: var(--preset-edm);
+    color: var(--preset-edm);
+}
+.preset-btn[data-preset="chill"]:hover {
+    background: var(--preset-chill-dim);
+    border-color: var(--preset-chill);
+    color: var(--preset-chill);
+}
+.preset-btn[data-preset="rock"]:hover {
+    background: var(--preset-rock-dim);
+    border-color: var(--preset-rock);
+    color: var(--preset-rock);
+}
+.preset-btn[data-preset="hiphop"]:hover {
+    background: var(--preset-hiphop-dim);
+    border-color: var(--preset-hiphop);
+    color: var(--preset-hiphop);
+}
+.preset-btn[data-preset="classical"]:hover {
+    background: var(--preset-classical-dim);
+    border-color: var(--preset-classical);
+    color: var(--preset-classical);
 }
 
-.preset-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--bg-primary);
+/* Per-preset active states */
+.preset-btn[data-preset="auto"].active {
+    background: var(--preset-auto);
+    border-color: var(--preset-auto);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
 }
-
-.preset-btn[data-preset="edm"].active { background: var(--band-sub); border-color: var(--band-sub); }
-.preset-btn[data-preset="chill"].active { background: var(--band-air); border-color: var(--band-air); }
-.preset-btn[data-preset="rock"].active { background: var(--band-bass); border-color: var(--band-bass); }
+.preset-btn[data-preset="edm"].active {
+    background: var(--preset-edm);
+    border-color: var(--preset-edm);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(236, 72, 153, 0.4);
+}
+.preset-btn[data-preset="chill"].active {
+    background: var(--preset-chill);
+    border-color: var(--preset-chill);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(20, 184, 166, 0.4);
+}
+.preset-btn[data-preset="rock"].active {
+    background: var(--preset-rock);
+    border-color: var(--preset-rock);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+}
+.preset-btn[data-preset="hiphop"].active {
+    background: var(--preset-hiphop);
+    border-color: var(--preset-hiphop);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
+.preset-btn[data-preset="classical"].active {
+    background: var(--preset-classical);
+    border-color: var(--preset-classical);
+    color: #1a1a25;
+    box-shadow: 0 0 12px rgba(234, 179, 8, 0.4);
+}
 
 /* Toggle Switch */
 .toggle-switch {
@@ -616,6 +837,13 @@ body {
     min-width: 32px;
 }
 
+/* Band name colors matching meter colors */
+.band-sens-row[data-band="0"] .band-name { color: var(--band-bass); }
+.band-sens-row[data-band="1"] .band-name { color: var(--band-low); }
+.band-sens-row[data-band="2"] .band-name { color: var(--band-mid); }
+.band-sens-row[data-band="3"] .band-name { color: var(--band-high); }
+.band-sens-row[data-band="4"] .band-name { color: var(--band-air); }
+
 /* 5-band slider thumb colors for ultra-low-latency mode */
 .band-sens-row[data-band="0"] .band-slider::-webkit-slider-thumb { background: var(--band-bass); }
 .band-sens-row[data-band="1"] .band-slider::-webkit-slider-thumb { background: var(--band-low); }
@@ -703,6 +931,7 @@ body {
     gap: 6px;
     font-size: 12px;
     color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
 }
 
 .status-icon {
@@ -713,42 +942,92 @@ body {
     opacity: 0.5;
 }
 
-/* Beat Indicator */
+/* Latency dot indicator */
+.latency-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    flex-shrink: 0;
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Latency color classes applied by JS */
+.latency-dot.latency-good {
+    background: var(--success);
+    box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+.latency-dot.latency-warn {
+    background: var(--warning);
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.5);
+}
+.latency-dot.latency-bad {
+    background: var(--error);
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
+}
+
+/* ==========================================================================
+   Beat Indicator - Dramatic VJ-visible
+   ========================================================================== */
+
 .beat-indicator {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 14px;
+    padding: 6px 18px;
     background: var(--bg-tertiary);
     border-radius: 20px;
-    transition: all var(--transition-fast);
+    border: 1px solid transparent;
+    transition: all 0.06s ease-out;
 }
 
 .beat-indicator.active {
     background: var(--accent);
+    border-color: rgba(99, 102, 241, 0.6);
+    box-shadow: 0 0 16px rgba(99, 102, 241, 0.5),
+                0 0 32px rgba(99, 102, 241, 0.25),
+                0 0 48px rgba(99, 102, 241, 0.1);
+    animation: beatPulse 0.2s ease-out;
+}
+
+@keyframes beatPulse {
+    0% {
+        transform: scale(1.15);
+        box-shadow: 0 0 24px rgba(99, 102, 241, 0.7),
+                    0 0 48px rgba(99, 102, 241, 0.4),
+                    0 0 64px rgba(99, 102, 241, 0.15);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 16px rgba(99, 102, 241, 0.5),
+                    0 0 32px rgba(99, 102, 241, 0.25),
+                    0 0 48px rgba(99, 102, 241, 0.1);
+    }
 }
 
 .beat-dot {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     background: var(--text-muted);
-    transition: background var(--transition-fast);
+    transition: background 0.06s ease-out;
 }
 
 .beat-indicator.active .beat-dot {
-    background: var(--bg-primary);
+    background: #fff;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
 }
 
 .beat-text {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 700;
     color: var(--text-muted);
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
+    transition: color 0.06s ease-out;
 }
 
 .beat-indicator.active .beat-text {
-    color: var(--bg-primary);
+    color: #fff;
 }
 
 /* BPM Display */
@@ -819,10 +1098,10 @@ body {
 .beat-flash {
     position: fixed;
     inset: 0;
-    background: radial-gradient(circle at center, rgba(99, 102, 241, 0.2) 0%, transparent 60%);
+    background: radial-gradient(circle at center, rgba(99, 102, 241, 0.25) 0%, transparent 55%);
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.1s ease;
+    transition: opacity 0.08s ease-out;
     z-index: 1000;
 }
 
@@ -831,12 +1110,34 @@ body {
 }
 
 /* ==========================================================================
-   Responsive
+   Responsive - Sidebar below canvas at < 900px
    ========================================================================== */
 
 @media (max-width: 900px) {
+    .app-main {
+        flex-direction: column;
+    }
+
+    .preview-section {
+        flex: 1;
+        min-height: 40vh;
+    }
+
     .control-sidebar {
-        width: 260px;
+        width: 100%;
+        max-height: 50vh;
+        border-left: none;
+        border-top: 1px solid var(--border-color);
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px;
+        overflow-y: auto;
+    }
+
+    .control-sidebar .panel {
+        flex: 1 1 calc(50% - 4px);
+        min-width: 200px;
     }
 
     .audio-meters {
@@ -852,21 +1153,38 @@ body {
     .meter-fill {
         height: 50px;
     }
-}
 
-@media (max-width: 700px) {
-    .control-sidebar {
-        position: absolute;
-        right: 0;
-        top: var(--header-height);
-        bottom: var(--status-bar-height);
-        z-index: 50;
-        transform: translateX(100%);
-        transition: transform var(--transition-normal);
+    /* Preset grid can go wider */
+    .preset-grid {
+        grid-template-columns: repeat(3, 1fr);
     }
 
-    .control-sidebar.open {
-        transform: translateX(0);
+    /* Compact status bar */
+    .status-bar {
+        padding: 0 12px;
+    }
+
+    .status-section {
+        gap: 12px;
+    }
+
+    .volume-display {
+        display: none;
+    }
+}
+
+@media (max-width: 600px) {
+    .app-main {
+        flex-direction: column;
+    }
+
+    .control-sidebar {
+        flex-direction: column;
+        max-height: 45vh;
+    }
+
+    .control-sidebar .panel {
+        flex: 1 1 100%;
     }
 
     .header-stat {

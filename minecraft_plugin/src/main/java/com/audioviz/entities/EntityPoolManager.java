@@ -3,6 +3,7 @@ package com.audioviz.entities;
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.zones.VisualizationZone;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.BlockDisplay;
@@ -92,8 +93,9 @@ public class EntityPoolManager {
                     BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(material.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(3); // 3 ticks for smoother interpolation
+                        entity.setInterpolationDuration(2); // 2 ticks - responsive interpolation
                         entity.setInterpolationDelay(0);
+                        entity.setTeleportDuration(1); // Smooth position changes over 1 tick
                         entity.setTransformation(createTransformation(0, 0, 0, 0.5f));
                         entity.setPersistent(false);
                     });
@@ -139,6 +141,7 @@ public class EntityPoolManager {
                     entity.setBrightness(new Display.Brightness(15, 15));
                     entity.setInterpolationDuration(2);
                     entity.setInterpolationDelay(0);
+                    entity.setTeleportDuration(1); // Smooth position changes over 1 tick
                     entity.setPersistent(false);
                 });
 
@@ -183,9 +186,18 @@ public class EntityPoolManager {
                     entity.teleport(update.location());
                 }
 
-                // Apply transformation update
+                // Apply per-entity interpolation duration if specified
+                if (update.hasInterpolation()) {
+                    display.setInterpolationDuration(update.interpolationDuration());
+                }
+
+                // Apply transformation update (only if changed to avoid resetting interpolation)
                 if (update.hasTransform() && update.transformation() != null) {
-                    display.setTransformation(update.transformation());
+                    Transformation currentTransform = display.getTransformation();
+                    if (!update.transformation().equals(currentTransform)) {
+                        display.setTransformation(update.transformation());
+                        display.setInterpolationDelay(0); // Start interpolation immediately
+                    }
                 }
 
                 // Apply brightness update
@@ -281,6 +293,66 @@ public class EntityPoolManager {
 
         Bukkit.getScheduler().runTask(plugin, () -> {
             display.setText(text);
+        });
+    }
+
+    /**
+     * Initialize a pool of text display entities with a specific billboard mode.
+     * Used by the banner decorator which needs FIXED billboard instead of CENTER.
+     */
+    public void initializeTextPool(String zoneName, int count, Display.Billboard billboardMode) {
+        VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+        if (zone == null) return;
+
+        if (count > MAX_ENTITIES_PER_ZONE) {
+            count = MAX_ENTITIES_PER_ZONE;
+        }
+
+        Map<String, Entity> pool = entityPools.computeIfAbsent(zoneName.toLowerCase(), k -> new ConcurrentHashMap<>());
+
+        final int finalCount = count;
+        final Display.Billboard mode = billboardMode;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Location spawnLoc = zone.getOrigin().clone();
+
+            for (int i = 0; i < finalCount; i++) {
+                String entityId = "text_" + i;
+                if (pool.containsKey(entityId)) continue;
+
+                TextDisplay display = spawnLoc.getWorld().spawn(spawnLoc, TextDisplay.class, entity -> {
+                    entity.setText("");
+                    entity.setBillboard(mode);
+                    entity.setBrightness(new Display.Brightness(15, 15));
+                    entity.setInterpolationDuration(2);
+                    entity.setInterpolationDelay(0);
+                    entity.setTeleportDuration(1);
+                    entity.setPersistent(false);
+                });
+
+                pool.put(entityId, display);
+                entityTypes.put(display.getUniqueId(), EntityType.TEXT_DISPLAY);
+            }
+        });
+    }
+
+    /**
+     * Batch update TextDisplay background colors for pixel-art banner rendering.
+     * Sets background color, text content, and billboard mode in a single scheduler task.
+     */
+    public void batchUpdateTextBackgrounds(String zoneName, Map<String, Color> colorMap) {
+        if (colorMap == null || colorMap.isEmpty()) return;
+
+        Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
+        if (pool == null) return;
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            for (Map.Entry<String, Color> entry : colorMap.entrySet()) {
+                Entity entity = pool.get(entry.getKey());
+                if (entity instanceof TextDisplay display) {
+                    display.setBackgroundColor(entry.getValue());
+                    display.setText(" "); // Single space creates a colored rectangle
+                }
+            }
         });
     }
 

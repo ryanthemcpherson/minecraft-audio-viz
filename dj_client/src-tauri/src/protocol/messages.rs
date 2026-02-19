@@ -265,3 +265,75 @@ pub struct PresetSyncMessage {
 pub struct EffectTriggeredMessage {
     pub effect: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_auth_message_serializes_expected_shape() {
+        let msg = CodeAuthMessage::new("BEAT-7K3M".to_string(), "DJ Spark".to_string());
+        let json = serde_json::to_value(&msg).expect("code auth should serialize");
+
+        assert_eq!(json["type"], "code_auth");
+        assert_eq!(json["code"], "BEAT-7K3M");
+        assert_eq!(json["dj_name"], "DJ Spark");
+    }
+
+    #[test]
+    fn dj_auth_message_defaults_direct_mode_to_none() {
+        let msg = DjAuthMessage::new("dj_1".to_string(), "key_1".to_string(), "DJ".to_string());
+        let json = serde_json::to_value(&msg).expect("dj auth should serialize");
+
+        assert_eq!(json["type"], "dj_auth");
+        assert_eq!(json["dj_id"], "dj_1");
+        assert_eq!(json["dj_key"], "key_1");
+        assert_eq!(json["dj_name"], "DJ");
+        assert!(json.get("direct_mode").is_none());
+    }
+
+    #[test]
+    fn audio_frame_message_uses_expected_type_and_payload() {
+        let msg = AudioFrameMessage::new(42, [0.1, 0.2, 0.3, 0.4, 0.5], 0.5, true, 0.8, 128.0);
+        let json = serde_json::to_value(&msg).expect("audio frame should serialize");
+
+        assert_eq!(json["type"], "dj_audio_frame");
+        assert_eq!(json["seq"], 42);
+        assert_eq!(json["beat"], true);
+        assert!((json["beat_i"].as_f64().unwrap_or_default() - 0.8).abs() < 1e-6);
+        assert!((json["bpm"].as_f64().unwrap_or_default() - 128.0).abs() < 1e-6);
+        assert!(json["ts"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn clock_sync_response_preserves_received_time() {
+        let recv_time = 1234.5;
+        let msg = ClockSyncResponse::new(recv_time);
+
+        assert_eq!(msg.msg_type, "clock_sync_response");
+        assert_eq!(msg.dj_recv_time, recv_time);
+        assert!(msg.dj_send_time >= recv_time);
+    }
+
+    #[test]
+    fn server_message_deserializes_auth_success_variant() {
+        let input = r#"{
+          "type": "auth_success",
+          "dj_id": "abc",
+          "dj_name": "DJ Test",
+          "is_active": true
+        }"#;
+
+        let parsed: ServerMessage =
+            serde_json::from_str(input).expect("auth_success payload should deserialize");
+
+        match parsed {
+            ServerMessage::AuthSuccess(msg) => {
+                assert_eq!(msg.dj_id, "abc");
+                assert_eq!(msg.dj_name, "DJ Test");
+                assert!(msg.is_active);
+            }
+            _ => panic!("expected auth_success variant"),
+        }
+    }
+}

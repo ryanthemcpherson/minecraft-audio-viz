@@ -8,87 +8,205 @@ Usage:
     python -m audio_processor.vj_server --config configs/dj_auth.json
 
 Architecture:
-    DJ 1 (Remote) ──┐
-    DJ 2 (Remote) ──┼──> VJ Server ──> Minecraft + Browsers
-    DJ 3 (Remote) ──┘
-                    ↑
+    DJ 1 (Remote) â”€â”€â”
+    DJ 2 (Remote) â”€â”€â”¼â”€â”€> VJ Server â”€â”€> Minecraft + Browsers
+    DJ 3 (Remote) â”€â”€â”˜
+                    â†‘
                 VJ Admin Panel
 """
 
 import argparse
 import asyncio
+import http.server
 import json
 import logging
-import signal
-import sys
+import math
 import os
-import time
-import hashlib
-import threading
-import http.server
-import socketserver
+import posixpath
 import secrets
-import string
-from pathlib import Path
-from typing import Optional, Dict, Set, List
+import signal
+import socketserver
+import sys
+import threading
+import time
+import urllib.parse
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Set
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     import websockets
     from websockets.server import serve as ws_serve
+
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
 
-from python_client.viz_client import VizClient
-from audio_processor.patterns import (
-    PatternConfig, AudioState, get_pattern, list_patterns, PATTERNS
-)
+from audio_processor.config import PRESETS as AUDIO_PRESETS
+from audio_processor.patterns import PATTERNS, AudioState, PatternConfig, get_pattern, list_patterns
 from audio_processor.spectrograph import TerminalSpectrograph
+from python_client.viz_client import VizClient
+
+# ---------------------------------------------------------------------------
+# Input validation helpers (security hardening)
+# ---------------------------------------------------------------------------
+
+
+def _clamp_finite(val, lo: float, hi: float, default: float) -> float:
+    """Clamp a numeric value to [lo, hi], replacing non-finite/non-numeric with default."""
+    if not isinstance(val, (int, float)):
+        return default
+    val = float(val)
+    if not math.isfinite(val):
+        return default
+    return max(lo, min(hi, val))
+
+
+def _sanitize_audio_frame(data: dict) -> dict:
+    """Validate and clamp an incoming DJ audio frame.
+
+    Enforces the constraints from dj-audio-frame.schema.json:
+    - bands: exactly 5 floats in [0.0, 1.0]
+    - peak, beat_i, i_bass: floats >= 0 (capped at 5.0)
+    - bpm: float in [0.0, 300.0]
+    - seq: int >= 0
+    - beat, i_kick: booleans
+    """
+    # Bands: must be list of exactly 5 floats in [0, 1]
+    raw_bands = data.get("bands", None)
+    if isinstance(raw_bands, list):
+        bands = [_clamp_finite(b, 0.0, 1.0, 0.0) for b in raw_bands[:5]]
+        while len(bands) < 5:
+            bands.append(0.0)
+    else:
+        bands = [0.0] * 5
+
+    return {
+        "bands": bands,
+        "peak": _clamp_finite(data.get("peak"), 0.0, 5.0, 0.0),
+        "beat": bool(data.get("beat", False)),
+        "beat_i": _clamp_finite(data.get("beat_i"), 0.0, 5.0, 0.0),
+        "bpm": _clamp_finite(data.get("bpm"), 0.0, 300.0, 120.0),
+        "seq": max(0, int(data.get("seq", 0))) if isinstance(data.get("seq"), (int, float)) else 0,
+        "i_bass": _clamp_finite(data.get("i_bass"), 0.0, 5.0, 0.0),
+        "i_kick": bool(data.get("i_kick", False)),
+        "ts": data.get("ts"),  # validated separately in latency calc
+    }
+
+
+def _sanitize_entities(entities: list, max_count: int = 512) -> list:
+    """Clamp entity fields to safe ranges before forwarding to Minecraft.
+
+    Enforces the constraints from entity-update.schema.json:
+    - x, y, z: [0.0, 1.0]
+    - scale: [0.0, 4.0]
+    - rotation: [0.0, 360.0]
+    - brightness: [0, 15]
+    - interpolation: [0, 100]
+    """
+    if not isinstance(entities, list):
+        return []
+    result = []
+    for e in entities[:max_count]:
+        if not isinstance(e, dict):
+            continue
+        clean = {}
+        # ID is required
+        eid = e.get("id")
+        if not isinstance(eid, str) or not eid:
+            continue
+        clean["id"] = eid
+        # Coordinates
+        if "x" in e:
+            clean["x"] = _clamp_finite(e["x"], 0.0, 1.0, 0.5)
+        if "y" in e:
+            clean["y"] = _clamp_finite(e["y"], 0.0, 1.0, 0.0)
+        if "z" in e:
+            clean["z"] = _clamp_finite(e["z"], 0.0, 1.0, 0.5)
+        # Scale, rotation
+        if "scale" in e:
+            clean["scale"] = _clamp_finite(e["scale"], 0.0, 4.0, 0.5)
+        if "rotation" in e:
+            clean["rotation"] = _clamp_finite(e["rotation"], 0.0, 360.0, 0.0)
+        # Brightness (integer 0-15)
+        if "brightness" in e:
+            clean["brightness"] = int(_clamp_finite(e["brightness"], 0, 15, 15))
+        # Interpolation (integer ticks)
+        if "interpolation" in e:
+            clean["interpolation"] = int(_clamp_finite(e["interpolation"], 0, 100, 3))
+        # Boolean fields
+        if "glow" in e:
+            clean["glow"] = bool(e["glow"])
+        if "visible" in e:
+            clean["visible"] = bool(e["visible"])
+        # Material (pass through as string)
+        if "material" in e and isinstance(e["material"], str):
+            clean["material"] = e["material"]
+        result.append(clean)
+    return result
+
 
 # Messages that should be forwarded directly to Minecraft
 # These are zone/rendering settings that the VJ server doesn't handle locally
 FORWARD_TO_MINECRAFT = {
-    'set_zone_config',
-    'set_render_mode',
-    'set_renderer_backend',
-    'renderer_capabilities',
-    'get_renderer_capabilities',
-    'set_hologram_config',
-    'set_particle_viz_config',
-    'set_particle_effect',
-    'set_particle_config',
-    'set_band_sensitivity',
-    'set_audio_setting',
-    'init_pool',
-    'cleanup_zone',
-    'set_entity_glow',
-    'set_entity_brightness',
+    "set_zone_config",
+    "set_render_mode",
+    "set_renderer_backend",
+    "renderer_capabilities",
+    "get_renderer_capabilities",
+    "set_hologram_config",
+    "set_particle_viz_config",
+    "set_particle_effect",
+    "set_particle_config",
+    "init_pool",
+    "cleanup_zone",
+    "set_entity_glow",
+    "set_entity_brightness",
+    "banner_config",
 }
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('vj_server')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("vj_server")
 
 
 # Memorable words for connect codes (no confusables)
 CONNECT_CODE_WORDS = [
-    'BEAT', 'BASS', 'DROP', 'WAVE', 'KICK', 'SYNC', 'LOOP', 'VIBE',
-    'RAVE', 'FUNK', 'JAZZ', 'ROCK', 'FLOW', 'PEAK', 'PUMP', 'TUNE',
-    'PLAY', 'SPIN', 'FADE', 'RISE', 'BOOM', 'DRUM', 'HIGH', 'DEEP',
+    "BEAT",
+    "BASS",
+    "DROP",
+    "WAVE",
+    "KICK",
+    "SYNC",
+    "LOOP",
+    "VIBE",
+    "RAVE",
+    "FUNK",
+    "JAZZ",
+    "ROCK",
+    "FLOW",
+    "PEAK",
+    "PUMP",
+    "TUNE",
+    "PLAY",
+    "SPIN",
+    "FADE",
+    "RISE",
+    "BOOM",
+    "DRUM",
+    "HIGH",
+    "DEEP",
 ]
 
 # Valid characters for code suffix (no confusables: O/0/I/1/L)
-CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 
 @dataclass
 class ConnectCode:
     """A temporary connect code for DJ authentication."""
+
     code: str  # Format: WORD-XXXX (e.g., BEAT-7K3M)
     created_at: float = field(default_factory=time.time)
     expires_at: float = 0.0
@@ -104,28 +222,25 @@ class ConnectCode:
         return not self.used and time.time() < self.expires_at
 
     @staticmethod
-    def generate(ttl_minutes: int = 30) -> 'ConnectCode':
+    def generate(ttl_minutes: int = 30) -> "ConnectCode":
         """Generate a new connect code."""
         # Pick a random word
         word = secrets.choice(CONNECT_CODE_WORDS)
         # Generate 4 random characters
-        suffix = ''.join(secrets.choice(CODE_CHARS) for _ in range(4))
+        suffix = "".join(secrets.choice(CODE_CHARS) for _ in range(4))
         code = f"{word}-{suffix}"
 
         now = time.time()
-        return ConnectCode(
-            code=code,
-            created_at=now,
-            expires_at=now + ttl_minutes * 60
-        )
+        return ConnectCode(code=code, created_at=now, expires_at=now + ttl_minutes * 60)
 
 
 @dataclass
 class DJConnection:
     """Represents a connected DJ."""
+
     dj_id: str
     dj_name: str
-    websocket: 'websockets.WebSocketServerProtocol'  # Type hint for websocket connection
+    websocket: "websockets.WebSocketServerProtocol"  # Type hint for websocket connection
     connected_at: float = field(default_factory=time.time)
     last_frame_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
@@ -158,6 +273,22 @@ class DJConnection:
     direct_mode: bool = False  # Whether this DJ is using direct Minecraft connection
     mc_connected: bool = False  # Whether DJ's direct Minecraft connection is alive
 
+    # Rate limiting (token bucket: 120 tokens/sec, 2x expected 60fps)
+    _rate_tokens: float = 120.0
+    _rate_last_refill: float = field(default_factory=time.time)
+
+    def check_rate_limit(self) -> bool:
+        """Check if this DJ is within the frame rate limit. Returns True if allowed."""
+        now = time.time()
+        elapsed = now - self._rate_last_refill
+        self._rate_last_refill = now
+        # Refill tokens (120 per second, max bucket size 120)
+        self._rate_tokens = min(120.0, self._rate_tokens + elapsed * 120.0)
+        if self._rate_tokens >= 1.0:
+            self._rate_tokens -= 1.0
+            return True
+        return False
+
     def update_fps(self):
         """Update FPS calculation."""
         now = time.time()
@@ -171,32 +302,63 @@ class DJConnection:
 @dataclass
 class DJAuthConfig:
     """DJ authentication configuration."""
+
     djs: Dict[str, dict] = field(default_factory=dict)
     vj_operators: Dict[str, dict] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, filepath: str) -> 'DJAuthConfig':
+    def load(cls, filepath: str) -> "DJAuthConfig":
         """Load auth config from file."""
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 data = json.load(f)
-            return cls(
-                djs=data.get('djs', {}),
-                vj_operators=data.get('vj_operators', {})
-            )
+            config = cls(djs=data.get("djs", {}), vj_operators=data.get("vj_operators", {}))
+            config._warn_plaintext_passwords()
+            return config
         except Exception as e:
             logger.warning(f"Failed to load auth config: {e}")
             return cls()
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DJAuthConfig":
+        """Create from a dictionary (e.g., parsed JSON)."""
+        config = cls(djs=data.get("djs", {}), vj_operators=data.get("vj_operators", {}))
+        config._warn_plaintext_passwords()
+        return config
+
+    def _warn_plaintext_passwords(self) -> list:
+        """Check for plaintext passwords and log warnings. Returns list of offending IDs."""
+        plaintext_ids = []
+        for section_name, section in [("djs", self.djs), ("vj_operators", self.vj_operators)]:
+            for entry_id, entry in section.items():
+                key_hash = entry.get("key_hash", "")
+                if key_hash and not key_hash.startswith(("bcrypt:", "sha256:")):
+                    plaintext_ids.append(f"{section_name}/{entry_id}")
+                    logger.critical(
+                        f"SECURITY WARNING: {section_name}/{entry_id} has a plaintext password! "
+                        f"Hash it with: python -m audio_processor.auth hash <password>"
+                    )
+        return plaintext_ids
+
+    def has_plaintext_passwords(self) -> bool:
+        """Return True if any entries have plaintext (unhashed) passwords."""
+        for section in [self.djs, self.vj_operators]:
+            for entry in section.values():
+                key_hash = entry.get("key_hash", "")
+                if key_hash and not key_hash.startswith(("bcrypt:", "sha256:")):
+                    return True
+        return False
 
     def verify_dj(self, dj_id: str, key: str) -> Optional[dict]:
         """Verify DJ credentials. Returns DJ info if valid."""
         if dj_id not in self.djs:
             return None
         dj = self.djs[dj_id]
-        expected_hash = dj.get('key_hash', '')
+        expected_hash = dj.get("key_hash", "")
 
         # Use auth module for secure password verification
         from audio_processor.auth import verify_password
+
         if not verify_password(key, expected_hash):
             return None
 
@@ -207,10 +369,11 @@ class DJAuthConfig:
         if vj_id not in self.vj_operators:
             return None
         vj = self.vj_operators[vj_id]
-        expected_hash = vj.get('key_hash', '')
+        expected_hash = vj.get("key_hash", "")
 
         # Use auth module for secure password verification
         from audio_processor.auth import verify_password
+
         if not verify_password(key, expected_hash):
             return None
 
@@ -219,16 +382,26 @@ class DJAuthConfig:
 
 class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler that serves from multiple directories."""
+
     directory_map = {}
 
+    def _safe_join(self, base: str, path: str) -> str:
+        path = path.split("?", 1)[0].split("#", 1)[0]
+        path = posixpath.normpath(urllib.parse.unquote(path))
+        words = [word for word in path.split("/") if word not in ("", ".", "..")]
+        full_path = base
+        for word in words:
+            full_path = os.path.join(full_path, word)
+        return full_path
+
     def translate_path(self, path):
-        path = path.split('?')[0].split('#')[0]
+        path = path.split("?", 1)[0].split("#", 1)[0]
         for url_prefix, fs_directory in self.directory_map.items():
-            if path.startswith(url_prefix):
-                relative_path = path[len(url_prefix):].lstrip('/')
-                return os.path.join(fs_directory, relative_path)
-        if '/' in self.directory_map:
-            return os.path.join(self.directory_map['/'], path.lstrip('/'))
+            if path == url_prefix or path.startswith(f"{url_prefix}/"):
+                relative_path = path[len(url_prefix) :].lstrip("/")
+                return self._safe_join(fs_directory, relative_path)
+        if "/" in self.directory_map:
+            return self._safe_join(self.directory_map["/"], path)
         return super().translate_path(path)
 
     def log_message(self, format, *args):
@@ -239,13 +412,13 @@ def run_http_server(port: int, directory: str):
     """Run HTTP server for admin panel."""
     # directory is audio_processor, parent is project root
     project_root = Path(directory).parent
-    admin_dir = project_root / 'admin_panel'
-    frontend_dir = project_root / 'preview_tool' / 'frontend'
+    admin_dir = project_root / "admin_panel"
+    frontend_dir = project_root / "preview_tool" / "frontend"
 
     # Admin panel at root, preview at /preview
     MultiDirectoryHandler.directory_map = {
-        '/preview': str(frontend_dir) if frontend_dir.exists() else str(directory),
-        '/': str(admin_dir) if admin_dir.exists() else str(directory),
+        "/preview": str(frontend_dir) if frontend_dir.exists() else str(directory),
+        "/": str(admin_dir) if admin_dir.exists() else str(directory),
     }
 
     os.chdir(str(project_root))
@@ -277,8 +450,8 @@ class VJServer:
         zone: str = "main",
         entity_count: int = 16,
         auth_config: Optional[DJAuthConfig] = None,
-        require_auth: bool = False,
-        show_spectrograph: bool = True
+        require_auth: bool = True,
+        show_spectrograph: bool = True,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -295,6 +468,14 @@ class VJServer:
         self._active_dj_id: Optional[str] = None
         self._dj_queue: List[str] = []  # Priority queue of DJ IDs
         self._dj_lock = asyncio.Lock()  # Lock for DJ dictionary operations
+
+        # Pending DJ approval queue (connect-code DJs that need VJ approval)
+        self._pending_djs: Dict[
+            str, dict
+        ] = {}  # dj_id -> {dj_id, dj_name, websocket, waiting_since, ...}
+
+        # Track last known MC connection state for change detection
+        self._last_mc_connected: bool = False
 
         # Connect codes for DJ client authentication
         self._connect_codes: Dict[str, ConnectCode] = {}  # code -> ConnectCode
@@ -326,6 +507,9 @@ class VJServer:
         # Control state
         self._blackout = False
         self._freeze = False
+        self._active_effects = {}  # Active effects with end times
+        self._last_entities = []  # For freeze effect
+        self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
 
         # Connection health metrics
         self._dj_connects = 0
@@ -340,6 +524,10 @@ class VJServer:
         self._fallback_bands = [0.0] * 5
         self._fallback_peak = 0.0
         self._last_frame_time = time.time()
+
+        # DJ banner profiles: dj_id -> banner config dict
+        self._dj_banner_profiles: Dict[str, dict] = {}
+        self._load_banner_profiles()
 
     @property
     def active_dj(self) -> Optional[DJConnection]:
@@ -367,23 +555,29 @@ class VJServer:
         # Take snapshot of current DJs dict to avoid iteration issues
         djs_snapshot = dict(self._djs)
         active_dj_id = self._active_dj_id
+        queue_snapshot = list(self._dj_queue)
 
         for dj_id, dj in djs_snapshot.items():
-            roster.append({
-                'dj_id': dj_id,
-                'dj_name': dj.dj_name,
-                'is_active': dj_id == active_dj_id,
-                'connected_at': dj.connected_at,
-                'fps': round(dj.frames_per_second, 1),
-                'latency_ms': round(dj.latency_ms, 1),
-                'bpm': round(dj.bpm, 1),
-                'priority': dj.priority,
-                'last_frame_age_ms': round((time.time() - dj.last_frame_at) * 1000, 0),
-                'direct_mode': dj.direct_mode,
-                'mc_connected': dj.mc_connected if dj.direct_mode else None
-            })
-        # Sort by priority, then by connection time
-        roster.sort(key=lambda x: (x['priority'], x['connected_at']))
+            # Determine queue position (0-based index in _dj_queue)
+            queue_pos = queue_snapshot.index(dj_id) if dj_id in queue_snapshot else 999
+            roster.append(
+                {
+                    "dj_id": dj_id,
+                    "dj_name": dj.dj_name,
+                    "is_active": dj_id == active_dj_id,
+                    "connected_at": dj.connected_at,
+                    "fps": round(dj.frames_per_second, 1),
+                    "latency_ms": round(dj.latency_ms, 1),
+                    "bpm": round(dj.bpm, 1),
+                    "priority": dj.priority,
+                    "last_frame_age_ms": round((time.time() - dj.last_frame_at) * 1000, 0),
+                    "direct_mode": dj.direct_mode,
+                    "mc_connected": dj.mc_connected if dj.direct_mode else None,
+                    "queue_position": queue_pos,
+                }
+            )
+        # Sort by queue position (respects manual reordering)
+        roster.sort(key=lambda x: x["queue_position"])
         return roster
 
     def get_health_stats(self) -> dict:
@@ -400,14 +594,14 @@ class VJServer:
         - mc_connected: Whether Minecraft is currently connected
         """
         return {
-            'dj_connects': self._dj_connects,
-            'dj_disconnects': self._dj_disconnects,
-            'browser_connects': self._browser_connects,
-            'browser_disconnects': self._browser_disconnects,
-            'mc_reconnect_count': self._mc_reconnect_count,
-            'current_djs': len(self._djs),
-            'current_browsers': len(self._broadcast_clients),
-            'mc_connected': self.viz_client is not None and self.viz_client.connected
+            "dj_connects": self._dj_connects,
+            "dj_disconnects": self._dj_disconnects,
+            "browser_connects": self._browser_connects,
+            "browser_disconnects": self._browser_disconnects,
+            "mc_reconnect_count": self._mc_reconnect_count,
+            "current_djs": len(self._djs),
+            "current_browsers": len(self._broadcast_clients),
+            "mc_connected": self.viz_client is not None and self.viz_client.connected,
         }
 
     async def _handle_dj_connection(self, websocket):
@@ -418,10 +612,7 @@ class VJServer:
             # Wait for authentication message
             auth_timeout = 10.0  # 10 second timeout for auth
             try:
-                message = await asyncio.wait_for(
-                    websocket.recv(),
-                    timeout=auth_timeout
-                )
+                message = await asyncio.wait_for(websocket.recv(), timeout=auth_timeout)
             except asyncio.TimeoutError:
                 logger.warning("DJ connection timed out waiting for auth")
                 await websocket.close(4001, "Authentication timeout")
@@ -433,36 +624,36 @@ class VJServer:
                 await websocket.close(4002, "Invalid JSON")
                 return
 
-            msg_type = data.get('type')
+            msg_type = data.get("type")
 
             # Support both traditional auth and code-based auth
-            if msg_type == 'code_auth':
+            if msg_type == "code_auth":
                 # Code-based authentication (from DJ client)
-                code = data.get('code', '').upper()
-                dj_name = data.get('dj_name', 'DJ')
+                code = data.get("code", "").upper()
+                dj_name = data.get("dj_name", "DJ")
 
-                # Validate connect code
-                if code not in self._connect_codes:
-                    logger.warning(f"DJ code auth failed: invalid code {code}")
-                    await websocket.send(json.dumps({
-                        'type': 'auth_error',
-                        'error': 'Invalid connect code'
-                    }))
-                    await websocket.close(4004, "Invalid connect code")
-                    return
+                # Validate connect code (locked to prevent race condition
+                # where two concurrent auths could both pass is_valid())
+                async with self._dj_lock:
+                    if code not in self._connect_codes:
+                        logger.warning(f"DJ code auth failed: invalid code {code}")
+                        await websocket.send(
+                            json.dumps({"type": "auth_error", "error": "Invalid connect code"})
+                        )
+                        await websocket.close(4004, "Invalid connect code")
+                        return
 
-                connect_code = self._connect_codes[code]
-                if not connect_code.is_valid():
-                    logger.warning(f"DJ code auth failed: expired code {code}")
-                    await websocket.send(json.dumps({
-                        'type': 'auth_error',
-                        'error': 'Connect code has expired'
-                    }))
-                    await websocket.close(4004, "Connect code expired")
-                    return
+                    connect_code = self._connect_codes[code]
+                    if not connect_code.is_valid():
+                        logger.warning(f"DJ code auth failed: expired code {code}")
+                        await websocket.send(
+                            json.dumps({"type": "auth_error", "error": "Connect code has expired"})
+                        )
+                        await websocket.close(4004, "Connect code expired")
+                        return
 
-                # Mark code as used
-                connect_code.used = True
+                    # Mark code as used (atomically with validation)
+                    connect_code.used = True
 
                 # Generate a unique DJ ID for code-authenticated users
                 dj_id = f"dj_{code.replace('-', '_').lower()}"
@@ -470,11 +661,119 @@ class VJServer:
 
                 logger.info(f"DJ code auth successful: {dj_name} with code {code}")
 
-            elif msg_type == 'dj_auth':
+                # Connect-code DJs go into pending approval queue
+                direct_mode = data.get("direct_mode", False)
+                pending_info = {
+                    "dj_id": dj_id,
+                    "dj_name": dj_name,
+                    "websocket": websocket,
+                    "waiting_since": time.time(),
+                    "direct_mode": direct_mode,
+                    "priority": priority,
+                    "code": code,
+                }
+                self._pending_djs[dj_id] = pending_info
+
+                # Tell the DJ they're waiting for approval
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "type": "auth_pending",
+                            "message": "Waiting for VJ approval...",
+                            "dj_id": dj_id,
+                        }
+                    )
+                )
+
+                # Notify admin panel
+                await self._broadcast_to_browsers(
+                    json.dumps(
+                        {
+                            "type": "dj_pending",
+                            "dj": {
+                                "dj_id": dj_id,
+                                "dj_name": dj_name,
+                                "waiting_since": pending_info["waiting_since"],
+                                "direct_mode": direct_mode,
+                            },
+                        }
+                    )
+                )
+
+                logger.info(f"DJ {dj_name} ({dj_id}) placed in approval queue")
+
+                # Wait for approval or denial (the DJ stays connected)
+                try:
+                    while dj_id in self._pending_djs:
+                        # Check for messages from the pending DJ (heartbeat/disconnect)
+                        try:
+                            msg = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                            msg_data = json.loads(msg)
+                            if msg_data.get("type") == "ping":
+                                await websocket.send(json.dumps({"type": "pong"}))
+                        except asyncio.TimeoutError:
+                            # Just a timeout on recv, keep waiting
+                            pass
+                        except websockets.exceptions.ConnectionClosed:
+                            # DJ disconnected while waiting
+                            self._pending_djs.pop(dj_id, None)
+                            logger.info(
+                                f"Pending DJ {dj_name} disconnected while waiting for approval"
+                            )
+                            await self._broadcast_to_browsers(
+                                json.dumps(
+                                    {
+                                        "type": "dj_denied",
+                                        "dj_id": dj_id,
+                                    }
+                                )
+                            )
+                            return
+                except Exception as e:
+                    self._pending_djs.pop(dj_id, None)
+                    logger.warning(f"Error in pending DJ wait loop: {e}")
+                    return
+
+                # If we get here, the DJ was removed from pending (approved or denied)
+                # Check if they were approved (they'll be in self._djs by now)
+                if dj_id not in self._djs:
+                    # They were denied
+                    return
+
+                # They were approved - run the frame handling loop
+                dj = self._djs[dj_id]
+
+                # Handle incoming frames (same pattern as credentialed DJs)
+                async for message in websocket:
+                    try:
+                        frame_data = json.loads(message)
+                        frame_type = frame_data.get("type")
+
+                        if frame_type == "dj_audio_frame":
+                            await self._handle_dj_frame(dj, frame_data)
+                        elif frame_type == "dj_heartbeat":
+                            dj.last_heartbeat = time.time()
+                            if dj.direct_mode:
+                                dj.mc_connected = frame_data.get("mc_connected", False)
+                            await websocket.send(
+                                json.dumps({"type": "heartbeat_ack", "server_time": time.time()})
+                            )
+                        elif frame_type == "going_offline":
+                            logger.info(
+                                f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully"
+                            )
+                            break
+                    except json.JSONDecodeError:
+                        logger.debug(f"Invalid JSON from DJ {dj_name}")
+                    except Exception as e:
+                        logger.error(f"Error processing DJ frame: {e}")
+                return
+
+            elif msg_type == "dj_auth":
                 # Traditional credential-based authentication
-                dj_id = data.get('dj_id', '')
-                dj_key = data.get('dj_key', '')
-                dj_name = data.get('dj_name', dj_id)
+                dj_id = data.get("dj_id", "")
+                dj_key = data.get("dj_key", "")
+                dj_name = data.get("dj_name", dj_id)
 
                 # Verify credentials
                 if self.require_auth:
@@ -483,8 +782,8 @@ class VJServer:
                         logger.warning(f"DJ auth failed: {dj_id}")
                         await websocket.close(4004, "Authentication failed")
                         return
-                    dj_name = dj_info.get('name', dj_name)
-                    priority = dj_info.get('priority', 10)
+                    dj_name = dj_info.get("name", dj_name)
+                    priority = dj_info.get("priority", 10)
                 else:
                     priority = 10
             else:
@@ -499,7 +798,7 @@ class VJServer:
                     return
 
                 # Check if DJ is using direct mode
-                direct_mode = data.get('direct_mode', False)
+                direct_mode = data.get("direct_mode", False)
 
                 # Create DJ connection
                 dj = DJConnection(
@@ -507,38 +806,40 @@ class VJServer:
                     dj_name=dj_name,
                     websocket=websocket,
                     priority=priority,
-                    direct_mode=direct_mode
+                    direct_mode=direct_mode,
                 )
                 self._djs[dj_id] = dj
                 self._dj_queue.append(dj_id)
 
             mode_str = " (DIRECT)" if direct_mode else ""
-            logger.info(f"[DJ CONNECT] {dj_name} ({dj_id}){mode_str} from {websocket.remote_address}")
+            logger.info(
+                f"[DJ CONNECT] {dj_name} ({dj_id}){mode_str} from {websocket.remote_address}"
+            )
             self._dj_connects += 1
 
             # Build auth success response
             auth_response = {
-                'type': 'auth_success',
-                'dj_id': dj_id,
-                'dj_name': dj_name,
-                'is_active': self._active_dj_id == dj_id,
+                "type": "auth_success",
+                "dj_id": dj_id,
+                "dj_name": dj_name,
+                "is_active": self._active_dj_id == dj_id,
                 # Pattern info for direct mode
-                'current_pattern': self._pattern_name,
-                'pattern_config': {
-                    'entity_count': self.entity_count,
-                    'zone_size': self._pattern_config.zone_size,
-                    'beat_boost': self._pattern_config.beat_boost,
-                    'base_scale': self._pattern_config.base_scale,
-                    'max_scale': self._pattern_config.max_scale
-                }
+                "current_pattern": self._pattern_name,
+                "pattern_config": {
+                    "entity_count": self.entity_count,
+                    "zone_size": self._pattern_config.zone_size,
+                    "beat_boost": self._pattern_config.beat_boost,
+                    "base_scale": self._pattern_config.base_scale,
+                    "max_scale": self._pattern_config.max_scale,
+                },
             }
 
             # Include Minecraft connection info for direct mode DJs
             if direct_mode:
-                auth_response['minecraft_host'] = self.minecraft_host
-                auth_response['minecraft_port'] = self.minecraft_port
-                auth_response['zone'] = self.zone
-                auth_response['entity_count'] = self.entity_count
+                auth_response["minecraft_host"] = self.minecraft_host
+                auth_response["minecraft_port"] = self.minecraft_port
+                auth_response["zone"] = self.zone
+                auth_response["entity_count"] = self.entity_count
 
             await websocket.send(json.dumps(auth_response))
             logger.info(f"[DJ AUTH SUCCESS] {dj_name} ({dj_id}) authenticated, priority={priority}")
@@ -547,31 +848,52 @@ class VJServer:
             # Uses NTP-style algorithm: send server time, DJ responds with its time
             try:
                 t1 = time.time()  # Server time when sync request sent
-                await websocket.send(json.dumps({
-                    'type': 'clock_sync_request',
-                    'server_time': t1
-                }))
+                await websocket.send(json.dumps({"type": "clock_sync_request", "server_time": t1}))
                 # Wait for DJ response with timeout
                 sync_response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                 t4 = time.time()  # Server time when response received
                 sync_data = json.loads(sync_response)
 
-                if sync_data.get('type') == 'clock_sync_response':
-                    t2 = sync_data.get('dj_recv_time', t1)  # DJ time when it received request
-                    t3 = sync_data.get('dj_send_time', t4)  # DJ time when it sent response
+                if sync_data.get("type") == "clock_sync_response":
+                    t2 = sync_data.get("dj_recv_time", t1)  # DJ time when it received request
+                    t3 = sync_data.get("dj_send_time", t4)  # DJ time when it sent response
 
-                    # Calculate clock offset using NTP algorithm
-                    # offset = ((t2 - t1) + (t3 - t4)) / 2
-                    # Positive offset means DJ clock is ahead of server
-                    clock_offset = ((t2 - t1) + (t3 - t4)) / 2
-                    rtt = (t4 - t1) - (t3 - t2)  # Round-trip time
+                    # Validate clock sync values are finite and within reasonable range
+                    if (
+                        not isinstance(t2, (int, float))
+                        or not isinstance(t3, (int, float))
+                        or not math.isfinite(t2)
+                        or not math.isfinite(t3)
+                    ):
+                        logger.warning(
+                            f"[DJ CLOCK SYNC] {dj_name}: non-finite timestamps, skipping sync"
+                        )
+                    elif abs(t2 - t1) > 3600 or abs(t3 - t4) > 3600:
+                        logger.warning(
+                            f"[DJ CLOCK SYNC] {dj_name}: timestamps too far from server time (>1h), skipping sync"
+                        )
+                    else:
+                        # Calculate clock offset using NTP algorithm
+                        # offset = ((t2 - t1) + (t3 - t4)) / 2
+                        # Positive offset means DJ clock is ahead of server
+                        clock_offset = ((t2 - t1) + (t3 - t4)) / 2
+                        rtt = (t4 - t1) - (t3 - t2)  # Round-trip time
 
-                    dj.clock_offset = clock_offset
-                    dj.clock_sync_done = True
-                    logger.info(f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset*1000:.1f}ms, RTT={rtt*1000:.1f}ms")
+                        if rtt < 0 or rtt > 30:
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: invalid RTT={rtt * 1000:.1f}ms, skipping sync"
+                            )
+                        else:
+                            dj.clock_offset = clock_offset
+                            dj.clock_sync_done = True
+                            logger.info(
+                                f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
+                            )
                 else:
-                    actual_type = sync_data.get('type', 'unknown')
-                    logger.warning(f"[DJ CLOCK SYNC] {dj_name}: expected 'clock_sync_response' but got '{actual_type}', skipping sync")
+                    actual_type = sync_data.get("type", "unknown")
+                    logger.warning(
+                        f"[DJ CLOCK SYNC] {dj_name}: expected 'clock_sync_response' but got '{actual_type}', skipping sync"
+                    )
             except asyncio.TimeoutError:
                 logger.warning(f"[DJ CLOCK SYNC] {dj_name}: timeout waiting for sync response")
             except Exception as e:
@@ -588,23 +910,24 @@ class VJServer:
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    msg_type = data.get('type')
+                    msg_type = data.get("type")
 
-                    if msg_type == 'dj_audio_frame':
+                    if msg_type == "dj_audio_frame":
                         await self._handle_dj_frame(dj, data)
 
-                    elif msg_type == 'dj_heartbeat':
+                    elif msg_type == "dj_heartbeat":
                         dj.last_heartbeat = time.time()
                         # Track Minecraft connection status for direct mode DJs
                         if dj.direct_mode:
-                            dj.mc_connected = data.get('mc_connected', False)
-                        await websocket.send(json.dumps({
-                            'type': 'heartbeat_ack',
-                            'server_time': time.time()
-                        }))
+                            dj.mc_connected = data.get("mc_connected", False)
+                        await websocket.send(
+                            json.dumps({"type": "heartbeat_ack", "server_time": time.time()})
+                        )
 
-                    elif msg_type == 'going_offline':
-                        logger.info(f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully")
+                    elif msg_type == "going_offline":
+                        logger.info(
+                            f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully"
+                        )
                         break
 
                     else:
@@ -614,12 +937,20 @@ class VJServer:
                     logger.warning(f"Invalid JSON from DJ {dj.dj_id}: {e}")
 
         except websockets.exceptions.ConnectionClosed as e:
-            dj_name = self._djs[dj_id].dj_name if dj_id and dj_id in self._djs else dj_id or "unknown"
-            logger.info(f"DJ {dj_name} ({dj_id}) connection closed: code={e.code}, reason={e.reason}")
+            dj_name = (
+                self._djs[dj_id].dj_name if dj_id and dj_id in self._djs else dj_id or "unknown"
+            )
+            logger.info(
+                f"DJ {dj_name} ({dj_id}) connection closed: code={e.code}, reason={e.reason}"
+            )
         except Exception as e:
             logger.error(f"DJ connection error: {e}")
         finally:
-            # Clean up (with lock)
+            # Clean up pending DJs
+            if dj_id and dj_id in self._pending_djs:
+                self._pending_djs.pop(dj_id, None)
+
+            # Clean up active DJs (with lock)
             if dj_id:
                 async with self._dj_lock:
                     if dj_id in self._djs:
@@ -638,23 +969,31 @@ class VJServer:
 
     async def _handle_dj_frame(self, dj: DJConnection, data: dict):
         """Process an audio frame from a DJ."""
-        dj.seq = data.get('seq', 0)
-        dj.bands = data.get('bands', [0.0] * 5)
-        dj.peak = data.get('peak', 0.0)
-        dj.is_beat = data.get('beat', False)
-        dj.beat_intensity = data.get('beat_i', 0.0)
-        dj.bpm = data.get('bpm', 120.0)
-        # Bass lane (instant kick detection)
-        dj.instant_bass = data.get('i_bass', 0.0)
-        dj.instant_kick = data.get('i_kick', False)
+        # Rate limit: drop excess frames (allows bursts up to 120fps, sustain ~60fps)
+        if not dj.check_rate_limit():
+            logger.debug(f"Rate limit: dropping frame from {dj.dj_id}")
+            return
+
+        # Validate and clamp all incoming values
+        safe = _sanitize_audio_frame(data)
+
+        dj.seq = safe["seq"]
+        dj.bands = safe["bands"]
+        dj.peak = safe["peak"]
+        dj.is_beat = safe["beat"]
+        dj.beat_intensity = safe["beat_i"]
+        dj.bpm = safe["bpm"]
+        dj.instant_bass = safe["i_bass"]
+        dj.instant_kick = safe["i_kick"]
         dj.last_frame_at = time.time()
         dj.frame_count += 1
         dj.update_fps()
 
         # Calculate latency if timestamp provided
         # Apply clock offset to correct for clock skew between DJ and server
-        if 'ts' in data:
-            dj_timestamp = data['ts']
+        ts = safe["ts"]
+        if ts is not None and isinstance(ts, (int, float)) and math.isfinite(ts):
+            dj_timestamp = float(ts)
             server_time = time.time()
 
             # Adjust DJ timestamp by clock offset (offset is DJ_time - server_time)
@@ -666,7 +1005,7 @@ class VJServer:
                 # Fallback to raw calculation if sync not done
                 latency = (server_time - dj_timestamp) * 1000
 
-            latency = max(0.0, latency)  # Clamp negative values
+            latency = max(0.0, min(latency, 60000.0))  # Clamp to [0, 60s]
             # Smooth latency with EMA to prevent spikes from event loop stalls
             if dj.latency_ms > 0:
                 dj.latency_ms = dj.latency_ms * 0.8 + latency * 0.2
@@ -684,7 +1023,6 @@ class VJServer:
             logger.warning(f"Cannot set active DJ: {dj_id} not found")
             return
 
-        old_active = self._active_dj_id
         self._active_dj_id = dj_id
 
         logger.info(f"Active DJ: {self._djs[dj_id].dj_name}")
@@ -695,14 +1033,161 @@ class VJServer:
         # Notify all DJs of status change (outside lock to avoid deadlock)
         for did, dj in djs_snapshot:
             try:
-                await dj.websocket.send(json.dumps({
-                    'type': 'status_update',
-                    'is_active': did == dj_id
-                }))
+                await dj.websocket.send(
+                    json.dumps({"type": "status_update", "is_active": did == dj_id})
+                )
             except Exception as e:
                 logger.debug(f"Failed to send status to DJ {did}: {e}")
 
         await self._broadcast_dj_roster()
+
+        # Send dj_info to Minecraft for stage decorators (billboard, transitions)
+        await self._send_dj_info_to_minecraft(dj_id)
+
+    async def _send_dj_info_to_minecraft(self, dj_id: Optional[str]):
+        """Send DJ info to Minecraft plugin for stage decorator effects."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+
+        if dj_id and dj_id in self._djs:
+            dj = self._djs[dj_id]
+            msg = {
+                "type": "dj_info",
+                "dj_name": dj.dj_name,
+                "dj_id": dj.dj_id,
+                "bpm": dj.bpm,
+                "is_active": True,
+            }
+        else:
+            msg = {"type": "dj_info", "dj_name": "", "dj_id": "", "bpm": 0.0, "is_active": False}
+
+        try:
+            await self.viz_client.send(msg)
+            logger.debug(f"Sent dj_info to Minecraft: {msg.get('dj_name', 'none')}")
+        except Exception as e:
+            logger.debug(f"Failed to send dj_info to Minecraft: {e}")
+
+        # Also send banner config for the active DJ
+        await self._send_banner_config_to_minecraft(dj_id)
+
+    async def _send_banner_config_to_minecraft(self, dj_id: Optional[str]):
+        """Send banner config for the active DJ to Minecraft."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+
+        profile = self._dj_banner_profiles.get(dj_id, {}) if dj_id else {}
+
+        msg = {
+            "type": "banner_config",
+            "banner_mode": profile.get("banner_mode", "text"),
+            "text_style": profile.get("text_style", "bold"),
+            "text_color_mode": profile.get("text_color_mode", "frequency"),
+            "text_fixed_color": profile.get("text_fixed_color", "f"),
+            "text_format": profile.get("text_format", "%s"),
+            "grid_width": profile.get("grid_width", 24),
+            "grid_height": profile.get("grid_height", 12),
+            "image_pixels": profile.get("image_pixels", []),
+        }
+
+        try:
+            await self.viz_client.send(msg)
+            logger.debug(f"Sent banner_config to Minecraft for DJ: {dj_id}")
+        except Exception as e:
+            logger.debug(f"Failed to send banner_config: {e}")
+
+    # ========== Banner Profile Management ==========
+
+    def _load_banner_profiles(self):
+        """Load banner profiles from disk."""
+        path = Path("configs/dj_banner_profiles.json")
+        if not path.exists():
+            return
+
+        try:
+            with open(path, "r") as f:
+                profiles = json.load(f)
+
+            for dj_id, profile in profiles.items():
+                if profile.get("has_image"):
+                    pixel_path = Path(f"configs/banners/{dj_id}_pixels.bin")
+                    if pixel_path.exists():
+                        import struct
+
+                        with open(pixel_path, "rb") as f:
+                            data = f.read()
+                        pixels = [
+                            struct.unpack(">i", data[i : i + 4])[0] for i in range(0, len(data), 4)
+                        ]
+                        profile["image_pixels"] = pixels
+                self._dj_banner_profiles[dj_id] = profile
+
+            logger.info(f"Loaded {len(self._dj_banner_profiles)} banner profiles")
+        except Exception as e:
+            logger.warning(f"Failed to load banner profiles: {e}")
+
+    def _save_banner_profiles(self):
+        """Save banner profiles to disk."""
+        path = Path("configs/dj_banner_profiles.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        profiles_for_save = {}
+        for dj_id, profile in self._dj_banner_profiles.items():
+            save_profile = {k: v for k, v in profile.items() if k != "image_pixels"}
+            if profile.get("image_pixels"):
+                # Save pixel data as a separate binary file
+                pixel_dir = Path("configs/banners")
+                pixel_dir.mkdir(parents=True, exist_ok=True)
+                pixel_path = pixel_dir / f"{dj_id}_pixels.bin"
+                import struct
+
+                try:
+                    with open(pixel_path, "wb") as f:
+                        for p in profile["image_pixels"]:
+                            f.write(struct.pack(">i", p))
+                    save_profile["has_image"] = True
+                except Exception as e:
+                    logger.warning(f"Failed to save pixel data for {dj_id}: {e}")
+            profiles_for_save[dj_id] = save_profile
+
+        try:
+            with open(path, "w") as f:
+                json.dump(profiles_for_save, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save banner profiles: {e}")
+
+    def _process_logo_image(
+        self, image_base64: str, grid_width: int, grid_height: int
+    ) -> Optional[List[int]]:
+        """Downsample a PNG image to a pixel grid for TextDisplay rendering.
+
+        Returns list of ARGB int values.
+        """
+        try:
+            import base64
+            import io
+
+            from PIL import Image
+
+            image_data = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(image_data))
+            img = img.convert("RGBA")
+            img = img.resize((grid_width, grid_height), Image.Resampling.LANCZOS)
+
+            pixels = []
+            for y in range(grid_height):
+                for x in range(grid_width):
+                    r, g, b, a = img.getpixel((x, y))
+                    # Pack as ARGB int (Java Color.fromARGB format)
+                    argb = (a << 24) | (r << 16) | (g << 8) | b
+                    pixels.append(argb)
+
+            return pixels
+        except ImportError:
+            logger.error("Pillow (PIL) required for logo processing: pip install Pillow")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to process logo image: {e}")
+            return None
 
     async def _auto_switch_dj(self):
         """Automatically switch to next available DJ."""
@@ -714,6 +1199,7 @@ class VJServer:
         if not self._dj_queue:
             self._active_dj_id = None
             logger.info("No DJs available")
+            await self._send_dj_info_to_minecraft(None)
             return
 
         # Find highest priority connected DJ
@@ -724,6 +1210,7 @@ class VJServer:
             await self._set_active_dj_locked(available[0])
         else:
             self._active_dj_id = None
+            await self._send_dj_info_to_minecraft(None)
 
     async def _handle_browser_client(self, websocket):
         """Handle browser preview/admin panel connection."""
@@ -731,55 +1218,97 @@ class VJServer:
         self._browser_connects += 1
         logger.info(f"Browser client connected. Total: {len(self._broadcast_clients)}")
 
-        # Send initial state
-        await websocket.send(json.dumps({
-            'type': 'vj_state',
-            'patterns': list_patterns(),
-            'current_pattern': self._pattern_name,
-            'entity_count': self.entity_count,
-            'zone': self.zone,
-            'dj_roster': self._get_dj_roster(),
-            'active_dj': self._active_dj_id,
-            'health_stats': self.get_health_stats()
-        }))
+        # Send initial state (includes MC status and pending DJs)
+        mc_connected = self.viz_client is not None and self.viz_client.connected
+        pending_list = [
+            {
+                "dj_id": info["dj_id"],
+                "dj_name": info["dj_name"],
+                "waiting_since": info["waiting_since"],
+                "direct_mode": info.get("direct_mode", False),
+            }
+            for info in self._pending_djs.values()
+        ]
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "vj_state",
+                    "patterns": list_patterns(),
+                    "current_pattern": self._pattern_name,
+                    "entity_count": self.entity_count,
+                    "zone": self.zone,
+                    "dj_roster": self._get_dj_roster(),
+                    "active_dj": self._active_dj_id,
+                    "health_stats": self.get_health_stats(),
+                    "minecraft_connected": mc_connected,
+                    "pending_djs": pending_list,
+                    "banner_profiles": {
+                        did: {k: v for k, v in prof.items() if k != "image_pixels"}
+                        for did, prof in self._dj_banner_profiles.items()
+                    },
+                }
+            )
+        )
 
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    msg_type = data.get('type')
+                    msg_type = data.get("type")
 
-                    if msg_type == 'ping':
-                        await websocket.send(json.dumps({'type': 'pong'}))
+                    if msg_type == "ping":
+                        await websocket.send(json.dumps({"type": "pong"}))
 
-                    elif msg_type == 'pong':
+                    elif msg_type == "pong":
                         # Record pong response for heartbeat tracking
                         self._browser_last_pong[websocket] = time.time()
 
-                    elif msg_type == 'get_state':
-                        await websocket.send(json.dumps({
-                            'type': 'vj_state',
-                            'patterns': list_patterns(),
-                            'current_pattern': self._pattern_name,
-                            'dj_roster': self._get_dj_roster(),
-                            'active_dj': self._active_dj_id,
-                            'health_stats': self.get_health_stats()
-                        }))
+                    elif msg_type == "get_state":
+                        mc_status = self.viz_client is not None and self.viz_client.connected
+                        pending = [
+                            {
+                                "dj_id": info["dj_id"],
+                                "dj_name": info["dj_name"],
+                                "waiting_since": info["waiting_since"],
+                                "direct_mode": info.get("direct_mode", False),
+                            }
+                            for info in self._pending_djs.values()
+                        ]
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "vj_state",
+                                    "patterns": list_patterns(),
+                                    "current_pattern": self._pattern_name,
+                                    "entity_count": self.entity_count,
+                                    "zone": self.zone,
+                                    "dj_roster": self._get_dj_roster(),
+                                    "active_dj": self._active_dj_id,
+                                    "health_stats": self.get_health_stats(),
+                                    "minecraft_connected": mc_status,
+                                    "pending_djs": pending,
+                                    "banner_profiles": {
+                                        did: {k: v for k, v in prof.items() if k != "image_pixels"}
+                                        for did, prof in self._dj_banner_profiles.items()
+                                    },
+                                }
+                            )
+                        )
 
-                    elif msg_type == 'set_pattern':
-                        pattern_name = data.get('pattern', 'spectrum')
+                    elif msg_type == "set_pattern":
+                        pattern_name = data.get("pattern", "spectrum")
                         if pattern_name in PATTERNS:
                             self._pattern_name = pattern_name
                             self._current_pattern = get_pattern(pattern_name, self._pattern_config)
                             await self._broadcast_pattern_change()
 
-                    elif msg_type == 'set_active_dj':
-                        dj_id = data.get('dj_id')
+                    elif msg_type == "set_active_dj":
+                        dj_id = data.get("dj_id")
                         if dj_id:
                             await self._set_active_dj(dj_id)
 
-                    elif msg_type == 'kick_dj':
-                        dj_id = data.get('dj_id')
+                    elif msg_type == "kick_dj":
+                        dj_id = data.get("dj_id")
                         if dj_id and dj_id in self._djs:
                             dj = self._djs[dj_id]
                             try:
@@ -788,74 +1317,116 @@ class VJServer:
                                 pass  # Ignore errors when closing already-closed connections
                             logger.info(f"DJ kicked: {dj.dj_name}")
 
-                    elif msg_type == 'generate_connect_code':
+                    elif msg_type == "generate_connect_code":
                         # Generate a new connect code for DJ client auth
-                        ttl_minutes = data.get('ttl_minutes', 30)
+                        ttl_minutes = data.get("ttl_minutes", 30)
                         connect_code = ConnectCode.generate(ttl_minutes)
                         self._connect_codes[connect_code.code] = connect_code
 
                         # Clean up expired codes
                         self._cleanup_expired_codes()
 
-                        logger.info(f"Generated connect code: {connect_code.code} (expires in {ttl_minutes}m)")
+                        logger.info(
+                            f"Generated connect code: {connect_code.code} (expires in {ttl_minutes}m)"
+                        )
 
-                        await websocket.send(json.dumps({
-                            'type': 'connect_code_generated',
-                            'code': connect_code.code,
-                            'expires_at': connect_code.expires_at,
-                            'ttl_minutes': ttl_minutes
-                        }))
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "connect_code_generated",
+                                    "code": connect_code.code,
+                                    "expires_at": connect_code.expires_at,
+                                    "ttl_minutes": ttl_minutes,
+                                }
+                            )
+                        )
 
                         # Broadcast updated code list to all admin clients
                         await self._broadcast_connect_codes()
 
-                    elif msg_type == 'get_connect_codes':
+                    elif msg_type == "get_connect_codes":
                         # Get list of active connect codes
                         self._cleanup_expired_codes()
                         codes = [
                             {
-                                'code': code.code,
-                                'created_at': code.created_at,
-                                'expires_at': code.expires_at,
-                                'used': code.used
+                                "code": code.code,
+                                "created_at": code.created_at,
+                                "expires_at": code.expires_at,
+                                "used": code.used,
                             }
                             for code in self._connect_codes.values()
                             if code.is_valid()
                         ]
-                        await websocket.send(json.dumps({
-                            'type': 'connect_codes',
-                            'codes': codes
-                        }))
+                        await websocket.send(json.dumps({"type": "connect_codes", "codes": codes}))
 
-                    elif msg_type == 'revoke_connect_code':
+                    elif msg_type == "revoke_connect_code":
                         # Revoke a connect code
-                        code = data.get('code', '').upper()
+                        code = data.get("code", "").upper()
                         if code in self._connect_codes:
                             del self._connect_codes[code]
                             logger.info(f"Revoked connect code: {code}")
                             await self._broadcast_connect_codes()
 
-                    elif msg_type == 'get_dj_roster':
-                        await websocket.send(json.dumps({
-                            'type': 'dj_roster',
-                            'roster': self._get_dj_roster(),
-                            'active_dj': self._active_dj_id
-                        }))
+                    elif msg_type == "get_dj_roster":
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "dj_roster",
+                                    "roster": self._get_dj_roster(),
+                                    "active_dj": self._active_dj_id,
+                                }
+                            )
+                        )
 
-                    elif msg_type in ('set_entity_count', 'set_block_count'):
-                        new_count = data.get('count', 16)
+                    elif msg_type == "get_pending_djs":
+                        pending_list = [
+                            {
+                                "dj_id": info["dj_id"],
+                                "dj_name": info["dj_name"],
+                                "waiting_since": info["waiting_since"],
+                                "direct_mode": info.get("direct_mode", False),
+                            }
+                            for info in self._pending_djs.values()
+                        ]
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "pending_djs",
+                                    "pending": pending_list,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "approve_dj":
+                        await self._approve_pending_dj(data.get("dj_id"))
+
+                    elif msg_type == "deny_dj":
+                        await self._deny_pending_dj(data.get("dj_id"))
+
+                    elif msg_type == "reorder_dj_queue":
+                        dj_id = data.get("dj_id")
+                        new_pos = data.get("new_position")
+                        if dj_id and new_pos is not None:
+                            await self._reorder_dj_queue(dj_id, int(new_pos))
+
+                    elif msg_type in ("set_entity_count", "set_block_count"):
+                        new_count = data.get("count", 16)
                         if 1 <= new_count <= 256:
                             old_count = self.entity_count
                             self.entity_count = new_count
                             self._pattern_config.entity_count = new_count
                             # Re-init pattern with new count
-                            self._current_pattern = get_pattern(self._pattern_name, self._pattern_config)
+                            self._current_pattern = get_pattern(
+                                self._pattern_name, self._pattern_config
+                            )
                             # Re-init Minecraft pool (cleanup first to remove old entities)
                             if self.viz_client and self.viz_client.connected:
                                 try:
                                     # Cleanup old entities before reinitializing with new count
                                     await self.viz_client.cleanup_zone(self.zone)
-                                    await self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN")
+                                    await self.viz_client.init_pool(
+                                        self.zone, self.entity_count, "SEA_LANTERN"
+                                    )
                                 except Exception as e:
                                     logger.warning(f"Failed to update Minecraft pool: {e}")
                             # Sync to all DJs and browser clients
@@ -863,14 +1434,16 @@ class VJServer:
                             await self._broadcast_config_to_browsers()
                             logger.info(f"Entity count changed: {old_count} -> {new_count}")
 
-                    elif msg_type == 'set_zone':
-                        new_zone = data.get('zone', 'main')
+                    elif msg_type == "set_zone":
+                        new_zone = data.get("zone", "main")
                         if new_zone != self.zone:
                             self.zone = new_zone
                             # Re-init Minecraft pool in new zone
                             if self.viz_client and self.viz_client.connected:
                                 try:
-                                    await self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN")
+                                    await self.viz_client.init_pool(
+                                        self.zone, self.entity_count, "SEA_LANTERN"
+                                    )
                                 except Exception as e:
                                     logger.warning(f"Failed to init Minecraft pool: {e}")
                             # Sync to all DJs and browser clients
@@ -878,60 +1451,259 @@ class VJServer:
                             await self._broadcast_config_to_browsers()
                             logger.info(f"Zone changed to: {new_zone}")
 
-                    elif msg_type == 'set_preset':
-                        # Handle FFT preset settings (attack/release/threshold)
-                        preset = data.get('preset', {})
-                        if 'attack' in preset:
-                            self._pattern_config.attack = float(preset['attack'])
-                        if 'release' in preset:
-                            self._pattern_config.release = float(preset['release'])
-                        if 'beat_threshold' in preset:
-                            self._pattern_config.beat_threshold = float(preset['beat_threshold'])
-                        # Broadcast to DJs so they can update their FFT settings
-                        await self._broadcast_preset_to_djs(preset)
-                        logger.info(f"Preset updated: {preset}")
+                    elif msg_type == "set_preset":
+                        # Handle preset selection by name or raw settings dict
+                        preset = data.get("preset", {})
+                        if isinstance(preset, str):
+                            # Admin panel sends preset name (e.g., "edm", "chill")
+                            preset_name = preset.lower()
+                            if preset_name in AUDIO_PRESETS:
+                                config = AUDIO_PRESETS[preset_name]
+                                self._pattern_config.attack = config.attack
+                                self._pattern_config.release = config.release
+                                self._pattern_config.beat_threshold = config.beat_threshold
+                                self._band_sensitivity = list(config.band_sensitivity)
+                                # Broadcast settings to DJs
+                                await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
+                                logger.info(f"Preset applied: {preset_name}")
+                            else:
+                                logger.warning(f"Unknown preset: {preset_name}")
+                        elif isinstance(preset, dict):
+                            # Raw settings dict (from DJs or other sources)
+                            if "attack" in preset:
+                                self._pattern_config.attack = float(preset["attack"])
+                            if "release" in preset:
+                                self._pattern_config.release = float(preset["release"])
+                            if "beat_threshold" in preset:
+                                self._pattern_config.beat_threshold = float(
+                                    preset["beat_threshold"]
+                                )
+                            if "band_sensitivity" in preset:
+                                self._band_sensitivity = list(preset["band_sensitivity"])
+                            await self._broadcast_preset_to_djs(preset)
+                            logger.info("Preset settings updated")
 
-                    elif msg_type == 'get_zones':
+                    elif msg_type == "set_band_sensitivity":
+                        # Apply band sensitivity locally (not forwarded to MC)
+                        band = data.get("band", 0)
+                        sensitivity = data.get("sensitivity", 1.0)
+                        if 0 <= band < 5:
+                            self._band_sensitivity[band] = max(0.0, min(2.0, sensitivity))
+                            logger.debug(f"Band {band} sensitivity: {sensitivity}")
+
+                    elif msg_type == "set_audio_setting":
+                        # Apply audio settings locally (not forwarded to MC)
+                        setting = data.get("setting")
+                        value = data.get("value")
+                        if setting and value is not None:
+                            if setting == "attack":
+                                self._pattern_config.attack = float(value)
+                            elif setting == "release":
+                                self._pattern_config.release = float(value)
+                            elif setting == "beat_threshold":
+                                self._pattern_config.beat_threshold = float(value)
+                            logger.debug(f"Audio setting {setting}: {value}")
+
+                    elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
                         if self.viz_client and self.viz_client.connected:
                             try:
                                 zones = await self.viz_client.get_zones()
-                                await websocket.send(json.dumps({
-                                    'type': 'zones',
-                                    'zones': zones or []
-                                }))
+                                await websocket.send(
+                                    json.dumps({"type": "zones", "zones": zones or []})
+                                )
                             except Exception as e:
                                 logger.warning(f"Failed to get zones: {e}")
-                                await websocket.send(json.dumps({
-                                    'type': 'zones',
-                                    'zones': []
-                                }))
+                                await websocket.send(json.dumps({"type": "zones", "zones": []}))
 
-                    elif msg_type == 'get_zone':
+                    elif msg_type == "get_zone":
                         # Forward to Minecraft
-                        zone_name = data.get('zone', 'main')
+                        zone_name = data.get("zone", "main")
                         if self.viz_client and self.viz_client.connected:
                             try:
                                 zone = await self.viz_client.get_zone(zone_name)
-                                await websocket.send(json.dumps({
-                                    'type': 'zone',
-                                    'zone': zone
-                                }))
+                                await websocket.send(json.dumps({"type": "zone", "zone": zone}))
                             except Exception as e:
                                 logger.warning(f"Failed to get zone: {e}")
 
-                    elif msg_type == 'trigger_effect':
-                        # Broadcast effect trigger to all clients
-                        effect = data.get('effect', 'flash')
+                    elif msg_type == "trigger_effect":
+                        # Handle effect triggers (blackout, freeze, flash, strobe, etc.)
+                        effect = data.get("effect", "flash")
+                        intensity = data.get("intensity", 1.0)
+                        duration = data.get("duration", 500)
+
+                        if effect in ("blackout", "freeze"):
+                            # Toggle effects
+                            if intensity <= 0:
+                                # Turn off
+                                if effect == "blackout":
+                                    self._blackout = False
+                                    if effect in self._active_effects:
+                                        del self._active_effects[effect]
+                                    # Re-show entities
+                                    if self.viz_client and self.viz_client.connected:
+                                        try:
+                                            await self.viz_client.set_visible(self.zone, True)
+                                        except Exception:
+                                            pass
+                                elif effect == "freeze":
+                                    self._freeze = False
+                                    if effect in self._active_effects:
+                                        del self._active_effects[effect]
+                                logger.info(f"{effect.capitalize()} OFF")
+                            else:
+                                # Turn on
+                                if effect == "blackout":
+                                    self._blackout = True
+                                    # Hide entities in MC
+                                    if self.viz_client and self.viz_client.connected:
+                                        try:
+                                            await self.viz_client.set_visible(self.zone, False)
+                                        except Exception:
+                                            pass
+                                elif effect == "freeze":
+                                    self._freeze = True
+                                self._active_effects[effect] = {
+                                    "intensity": intensity,
+                                    "end_time": time.time() + 999999,
+                                    "duration": 999999999,
+                                    "start_time": time.time(),
+                                }
+                                logger.info(f"{effect.capitalize()} ON")
+                        else:
+                            # Timed effects (flash, strobe, pulse, wave, spiral, explode)
+                            self._active_effects[effect] = {
+                                "intensity": intensity,
+                                "end_time": time.time() + (duration / 1000),
+                                "duration": duration,
+                                "start_time": time.time(),
+                            }
+                            logger.info(
+                                f"Effect triggered: {effect} (intensity={intensity}, duration={duration}ms)"
+                            )
+
                         await self._broadcast_effect_trigger(effect)
 
-                    elif msg_type in ('blackout', 'set_blackout'):
-                        self._blackout = data.get('enabled', not self._blackout)
+                    elif msg_type in ("blackout", "set_blackout"):
+                        self._blackout = data.get("enabled", not self._blackout)
+                        if self._blackout:
+                            self._active_effects["blackout"] = {
+                                "intensity": 1.0,
+                                "end_time": time.time() + 999999,
+                                "duration": 999999999,
+                                "start_time": time.time(),
+                            }
+                            if self.viz_client and self.viz_client.connected:
+                                try:
+                                    await self.viz_client.set_visible(self.zone, False)
+                                except Exception:
+                                    pass
+                        else:
+                            self._active_effects.pop("blackout", None)
+                            if self.viz_client and self.viz_client.connected:
+                                try:
+                                    await self.viz_client.set_visible(self.zone, True)
+                                except Exception:
+                                    pass
                         logger.info(f"Blackout: {self._blackout}")
 
-                    elif msg_type in ('freeze', 'set_freeze'):
-                        self._freeze = data.get('enabled', not self._freeze)
+                    elif msg_type in ("freeze", "set_freeze"):
+                        self._freeze = data.get("enabled", not self._freeze)
+                        if self._freeze:
+                            self._active_effects["freeze"] = {
+                                "intensity": 1.0,
+                                "end_time": time.time() + 999999,
+                                "duration": 999999999,
+                                "start_time": time.time(),
+                            }
+                        else:
+                            self._active_effects.pop("freeze", None)
                         logger.info(f"Freeze: {self._freeze}")
+
+                    # ========== Banner Profile Management ==========
+
+                    elif msg_type == "set_banner_profile":
+                        dj_id = data.get("dj_id")
+                        profile = data.get("profile", {})
+                        if dj_id:
+                            self._dj_banner_profiles[dj_id] = profile
+                            self._save_banner_profiles()
+                            # If this DJ is currently active, push to Minecraft
+                            if dj_id == self._active_dj_id:
+                                await self._send_banner_config_to_minecraft(dj_id)
+                            await websocket.send(
+                                json.dumps({"type": "banner_profile_saved", "dj_id": dj_id})
+                            )
+                            logger.info(f"Banner profile saved for DJ: {dj_id}")
+
+                    elif msg_type == "get_banner_profile":
+                        dj_id = data.get("dj_id")
+                        profile = self._dj_banner_profiles.get(dj_id, {})
+                        # Strip image_pixels for transport (send separately if needed)
+                        safe_profile = {k: v for k, v in profile.items() if k != "image_pixels"}
+                        safe_profile["has_image"] = bool(profile.get("image_pixels"))
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "banner_profile",
+                                    "dj_id": dj_id,
+                                    "profile": safe_profile,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "get_all_banner_profiles":
+                        profiles_summary = {}
+                        for did, prof in self._dj_banner_profiles.items():
+                            summary = {k: v for k, v in prof.items() if k != "image_pixels"}
+                            summary["has_image"] = bool(prof.get("image_pixels"))
+                            profiles_summary[did] = summary
+                        await websocket.send(
+                            json.dumps(
+                                {"type": "all_banner_profiles", "profiles": profiles_summary}
+                            )
+                        )
+
+                    elif msg_type == "upload_banner_logo":
+                        dj_id = data.get("dj_id")
+                        image_data = data.get("image_base64")
+                        grid_width = min(48, max(4, data.get("grid_width", 24)))
+                        grid_height = min(24, max(2, data.get("grid_height", 12)))
+                        if dj_id and image_data:
+                            pixels = self._process_logo_image(image_data, grid_width, grid_height)
+                            if pixels is not None:
+                                profile = self._dj_banner_profiles.setdefault(dj_id, {})
+                                profile["banner_mode"] = "image"
+                                profile["image_pixels"] = pixels
+                                profile["grid_width"] = grid_width
+                                profile["grid_height"] = grid_height
+                                profile["logo_filename"] = data.get("filename", "logo.png")
+                                self._save_banner_profiles()
+                                if dj_id == self._active_dj_id:
+                                    await self._send_banner_config_to_minecraft(dj_id)
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "banner_logo_processed",
+                                            "dj_id": dj_id,
+                                            "grid_width": grid_width,
+                                            "grid_height": grid_height,
+                                            "pixel_count": len(pixels),
+                                        }
+                                    )
+                                )
+                                logger.info(
+                                    f"Logo processed for DJ {dj_id}: {grid_width}x{grid_height}"
+                                )
+                            else:
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "message": "Failed to process logo image. Is Pillow installed?",
+                                        }
+                                    )
+                                )
 
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
@@ -943,16 +1715,19 @@ class VJServer:
                                     logger.debug(f"Forwarded {msg_type} to Minecraft")
                             except Exception as e:
                                 logger.warning(f"Failed to forward {msg_type} to Minecraft: {e}")
-                                await websocket.send(json.dumps({
-                                    'type': 'error',
-                                    'message': f'Failed to forward to Minecraft: {e}'
-                                }))
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "message": f"Failed to forward to Minecraft: {e}",
+                                        }
+                                    )
+                                )
                         else:
                             logger.warning(f"Cannot forward {msg_type}: Minecraft not connected")
-                            await websocket.send(json.dumps({
-                                'type': 'error',
-                                'message': 'Minecraft not connected'
-                            }))
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Minecraft not connected"})
+                            )
 
                 except json.JSONDecodeError:
                     logger.debug("Invalid JSON received from browser client")
@@ -972,11 +1747,9 @@ class VJServer:
 
     async def _broadcast_dj_roster(self):
         """Broadcast DJ roster to all browser clients."""
-        message = json.dumps({
-            'type': 'dj_roster',
-            'roster': self._get_dj_roster(),
-            'active_dj': self._active_dj_id
-        })
+        message = json.dumps(
+            {"type": "dj_roster", "roster": self._get_dj_roster(), "active_dj": self._active_dj_id}
+        )
         dead_clients = set()
         for client in list(self._broadcast_clients):
             try:
@@ -984,6 +1757,143 @@ class VJServer:
             except Exception:
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
+
+    async def _broadcast_to_browsers(self, message: str):
+        """Broadcast a pre-serialized JSON message to all browser clients."""
+        dead_clients = set()
+        for client in list(self._broadcast_clients):
+            try:
+                await client.send(message)
+            except Exception:
+                dead_clients.add(client)
+        self._broadcast_clients -= dead_clients
+
+    async def _broadcast_minecraft_status(self):
+        """Broadcast Minecraft connection status to all browser clients."""
+        mc_connected = self.viz_client is not None and self.viz_client.connected
+        if mc_connected != self._last_mc_connected:
+            self._last_mc_connected = mc_connected
+            await self._broadcast_to_browsers(
+                json.dumps(
+                    {
+                        "type": "minecraft_status",
+                        "connected": mc_connected,
+                    }
+                )
+            )
+            logger.info(f"[MC STATUS] Broadcasting minecraft_connected={mc_connected}")
+
+    async def _approve_pending_dj(self, dj_id: str):
+        """Approve a pending DJ and move them to the active DJ list."""
+        if not dj_id or dj_id not in self._pending_djs:
+            logger.warning(f"Cannot approve DJ {dj_id}: not in pending queue")
+            return
+
+        info = self._pending_djs.pop(dj_id)
+        ws = info["websocket"]
+
+        # Create the DJ connection object
+        async with self._dj_lock:
+            if dj_id in self._djs:
+                logger.warning(f"DJ {dj_id} already in active list")
+                return
+
+            dj = DJConnection(
+                dj_id=dj_id,
+                dj_name=info["dj_name"],
+                websocket=ws,
+                priority=info.get("priority", 10),
+                direct_mode=info.get("direct_mode", False),
+            )
+            self._djs[dj_id] = dj
+            self._dj_queue.append(dj_id)
+
+        self._dj_connects += 1
+        logger.info(f"[DJ APPROVED] {info['dj_name']} ({dj_id})")
+
+        # Send auth_approved to the DJ
+        try:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "auth_approved",
+                        "dj_id": dj_id,
+                        "dj_name": info["dj_name"],
+                        "is_active": self._active_dj_id == dj_id,
+                        "current_pattern": self._pattern_name,
+                        "pattern_config": {
+                            "entity_count": self.entity_count,
+                            "zone_size": self._pattern_config.zone_size,
+                            "beat_boost": self._pattern_config.beat_boost,
+                            "base_scale": self._pattern_config.base_scale,
+                            "max_scale": self._pattern_config.max_scale,
+                        },
+                    }
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send auth_approved to DJ {dj_id}: {e}")
+
+        # If no active DJ, make this one active
+        if self._active_dj_id is None:
+            await self._set_active_dj(dj_id)
+
+        # Broadcast roster update
+        await self._broadcast_dj_roster()
+        await self._broadcast_to_browsers(
+            json.dumps(
+                {
+                    "type": "dj_approved",
+                    "dj_id": dj_id,
+                }
+            )
+        )
+
+    async def _deny_pending_dj(self, dj_id: str):
+        """Deny a pending DJ and close their connection."""
+        if not dj_id or dj_id not in self._pending_djs:
+            logger.warning(f"Cannot deny DJ {dj_id}: not in pending queue")
+            return
+
+        info = self._pending_djs.pop(dj_id)
+        ws = info["websocket"]
+
+        logger.info(f"[DJ DENIED] {info['dj_name']} ({dj_id})")
+
+        # Send denial and close
+        try:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "auth_denied",
+                        "message": "Connection denied by VJ",
+                    }
+                )
+            )
+            await ws.close(4006, "Connection denied by VJ")
+        except Exception:
+            pass
+
+        await self._broadcast_to_browsers(
+            json.dumps(
+                {
+                    "type": "dj_denied",
+                    "dj_id": dj_id,
+                }
+            )
+        )
+
+    async def _reorder_dj_queue(self, dj_id: str, new_position: int):
+        """Move a DJ to a new position in the queue."""
+        async with self._dj_lock:
+            if dj_id not in self._dj_queue:
+                return
+            self._dj_queue.remove(dj_id)
+            new_position = max(0, min(len(self._dj_queue), new_position))
+            self._dj_queue.insert(new_position, dj_id)
+            logger.info(f"DJ queue reordered: {dj_id} -> position {new_position}")
+
+        await self._broadcast_dj_roster()
 
     def _cleanup_expired_codes(self):
         """Remove expired or used connect codes."""
@@ -998,19 +1908,16 @@ class VJServer:
         self._cleanup_expired_codes()
         codes = [
             {
-                'code': code.code,
-                'created_at': code.created_at,
-                'expires_at': code.expires_at,
-                'used': code.used
+                "code": code.code,
+                "created_at": code.created_at,
+                "expires_at": code.expires_at,
+                "used": code.used,
             }
             for code in self._connect_codes.values()
             if code.is_valid()
         ]
 
-        message = json.dumps({
-            'type': 'connect_codes',
-            'codes': codes
-        })
+        message = json.dumps({"type": "connect_codes", "codes": codes})
 
         dead_clients = set()
         for client in list(self._broadcast_clients):
@@ -1022,11 +1929,9 @@ class VJServer:
 
     async def _broadcast_pattern_change(self):
         """Broadcast pattern change to all browser clients."""
-        message = json.dumps({
-            'type': 'pattern_changed',
-            'pattern': self._pattern_name,
-            'patterns': list_patterns()
-        })
+        message = json.dumps(
+            {"type": "pattern_changed", "pattern": self._pattern_name, "patterns": list_patterns()}
+        )
         dead_clients = set()
         for client in list(self._broadcast_clients):
             try:
@@ -1040,17 +1945,19 @@ class VJServer:
 
     async def _broadcast_pattern_sync_to_djs(self):
         """Broadcast pattern sync to all connected DJs (for direct mode)."""
-        message = json.dumps({
-            'type': 'pattern_sync',
-            'pattern': self._pattern_name,
-            'config': {
-                'entity_count': self.entity_count,
-                'zone_size': self._pattern_config.zone_size,
-                'beat_boost': self._pattern_config.beat_boost,
-                'base_scale': self._pattern_config.base_scale,
-                'max_scale': self._pattern_config.max_scale
+        message = json.dumps(
+            {
+                "type": "pattern_sync",
+                "pattern": self._pattern_name,
+                "config": {
+                    "entity_count": self.entity_count,
+                    "zone_size": self._pattern_config.zone_size,
+                    "beat_boost": self._pattern_config.beat_boost,
+                    "base_scale": self._pattern_config.base_scale,
+                    "max_scale": self._pattern_config.max_scale,
+                },
             }
-        })
+        )
 
         for dj in list(self._djs.values()):
             try:
@@ -1060,11 +1967,9 @@ class VJServer:
 
     async def _broadcast_config_sync_to_djs(self):
         """Broadcast config sync (entity count, zone) to all connected DJs."""
-        message = json.dumps({
-            'type': 'config_sync',
-            'entity_count': self.entity_count,
-            'zone': self.zone
-        })
+        message = json.dumps(
+            {"type": "config_sync", "entity_count": self.entity_count, "zone": self.zone}
+        )
 
         for dj in list(self._djs.values()):
             try:
@@ -1074,12 +1979,14 @@ class VJServer:
 
     async def _broadcast_config_to_browsers(self):
         """Broadcast config changes (entity count, zone, pattern) to all browser clients."""
-        message = json.dumps({
-            'type': 'config_update',
-            'entity_count': self.entity_count,
-            'zone': self.zone,
-            'current_pattern': self._pattern_name
-        })
+        message = json.dumps(
+            {
+                "type": "config_update",
+                "entity_count": self.entity_count,
+                "zone": self.zone,
+                "current_pattern": self._pattern_name,
+            }
+        )
 
         dead_clients = set()
         for client in list(self._broadcast_clients):
@@ -1089,12 +1996,9 @@ class VJServer:
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
-    async def _broadcast_preset_to_djs(self, preset: dict):
+    async def _broadcast_preset_to_djs(self, preset: dict, preset_name: str = None):
         """Broadcast preset changes (attack/release/threshold) to all DJs."""
-        message = json.dumps({
-            'type': 'preset_sync',
-            'preset': preset
-        })
+        message = json.dumps({"type": "preset_sync", "preset": preset})
 
         for dj in list(self._djs.values()):
             try:
@@ -1103,10 +2007,9 @@ class VJServer:
                 logger.debug(f"Failed to send preset sync to DJ {dj.dj_id}: {e}")
 
         # Also broadcast to browser clients
-        browser_msg = json.dumps({
-            'type': 'preset_changed',
-            'preset': preset
-        })
+        browser_msg = json.dumps(
+            {"type": "preset_changed", "preset": preset_name or "custom", "settings": preset}
+        )
         dead_clients = set()
         for client in list(self._broadcast_clients):
             try:
@@ -1117,10 +2020,7 @@ class VJServer:
 
     async def _broadcast_effect_trigger(self, effect: str):
         """Broadcast effect trigger to all clients."""
-        message = json.dumps({
-            'type': 'effect_triggered',
-            'effect': effect
-        })
+        message = json.dumps({"type": "effect_triggered", "effect": effect})
 
         # Send to browser clients
         dead_clients = set()
@@ -1138,16 +2038,25 @@ class VJServer:
             except Exception:
                 pass
 
-    async def _send_with_timeout(self, client, message: str, dead_clients: set, timeout: float = 0.5):
+    async def _send_with_timeout(
+        self, client, message: str, dead_clients: set, timeout: float = 0.5
+    ):
         """Send a message to a client with a timeout. Adds to dead_clients on failure."""
         try:
             await asyncio.wait_for(client.send(message), timeout=timeout)
         except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed, Exception):
             dead_clients.add(client)
 
-    async def _broadcast_viz_state(self, entities: List[dict], bands: List[float],
-                                    peak: float, is_beat: bool, beat_intensity: float,
-                                    instant_bass: float = 0.0, instant_kick: bool = False):
+    async def _broadcast_viz_state(
+        self,
+        entities: List[dict],
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+        instant_bass: float = 0.0,
+        instant_kick: bool = False,
+    ):
         """Broadcast visualization state to browser clients."""
         if not self._broadcast_clients:
             return
@@ -1162,24 +2071,24 @@ class VJServer:
             bpm = dj.bpm
             fps = dj.frames_per_second
 
-        message = json.dumps({
-            'type': 'state',
-            'entities': entities,
-            'bands': bands,
-            'amplitude': peak,
-            'is_beat': is_beat,
-            'beat_intensity': beat_intensity,
-            'instant_bass': instant_bass,      # Bass lane energy (instant, ~1ms latency)
-            'instant_kick': instant_kick,      # Bass lane kick detection (instant)
-            'frame': self._frame_count,
-            'pattern': self._pattern_name,
-            'active_dj': self._active_dj_id,
-            'latency_ms': round(latency_ms, 1),
-            'fps': round(fps, 1),
-            'zone_status': {
-                'bpm_estimate': round(bpm, 1)
+        message = json.dumps(
+            {
+                "type": "state",
+                "entities": entities,
+                "bands": bands,
+                "amplitude": peak,
+                "is_beat": is_beat,
+                "beat_intensity": beat_intensity,
+                "instant_bass": instant_bass,  # Bass lane energy (instant, ~1ms latency)
+                "instant_kick": instant_kick,  # Bass lane kick detection (instant)
+                "frame": self._frame_count,
+                "pattern": self._pattern_name,
+                "active_dj": self._active_dj_id,
+                "latency_ms": round(latency_ms, 1),
+                "fps": round(fps, 1),
+                "zone_status": {"bpm_estimate": round(bpm, 1)},
             }
-        })
+        )
 
         # Send to all clients concurrently with a short timeout to prevent
         # slow/dead clients from blocking the event loop (which causes latency spikes)
@@ -1207,30 +2116,28 @@ class VJServer:
 
         try:
             # 10 second timeout for initial connection
-            connected = await asyncio.wait_for(
-                self.viz_client.connect(),
-                timeout=10.0
-            )
+            connected = await asyncio.wait_for(self.viz_client.connect(), timeout=10.0)
             if not connected:
-                logger.error(f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
+                logger.error(
+                    f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
+                )
                 return False
         except asyncio.TimeoutError:
-            logger.error(f"Timeout connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
+            logger.error(
+                f"Timeout connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
+            )
             return False
 
         logger.info(f"Connected to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
 
         try:
             # 5 second timeout for zone query
-            zones = await asyncio.wait_for(
-                self.viz_client.get_zones(),
-                timeout=5.0
-            )
+            zones = await asyncio.wait_for(self.viz_client.get_zones(), timeout=5.0)
         except asyncio.TimeoutError:
             logger.error("Timeout getting zones from Minecraft")
             return False
 
-        zone_names = [z['name'] for z in zones] if zones else []
+        zone_names = [z["name"] for z in zones] if zones else []
 
         if self.zone not in zone_names:
             if zone_names:
@@ -1242,8 +2149,7 @@ class VJServer:
 
         try:
             await asyncio.wait_for(
-                self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN"),
-                timeout=5.0
+                self.viz_client.init_pool(self.zone, self.entity_count, "SEA_LANTERN"), timeout=5.0
             )
         except asyncio.TimeoutError:
             logger.warning("Timeout initializing entity pool, continuing anyway")
@@ -1270,7 +2176,11 @@ class VJServer:
 
                 # Check if we need to reconnect
                 if self.viz_client is None or not self.viz_client.connected:
-                    logger.info(f"[MC RECONNECT] Minecraft disconnected, attempting reconnection (backoff={self._mc_reconnect_backoff:.1f}s)")
+                    # Broadcast disconnection status to browsers
+                    await self._broadcast_minecraft_status()
+                    logger.info(
+                        f"[MC RECONNECT] Minecraft disconnected, attempting reconnection (backoff={self._mc_reconnect_backoff:.1f}s)"
+                    )
 
                     # Wait for backoff period
                     await asyncio.sleep(self._mc_reconnect_backoff)
@@ -1283,19 +2193,21 @@ class VJServer:
                             self._mc_reconnect_count += 1
                             # Reset backoff on success
                             self._mc_reconnect_backoff = 5.0
+                            # Broadcast MC status change to browsers
+                            await self._broadcast_minecraft_status()
                         else:
-                            logger.warning(f"[MC RECONNECT] Reconnection failed, will retry in {self._mc_reconnect_backoff:.1f}s")
+                            logger.warning(
+                                f"[MC RECONNECT] Reconnection failed, will retry in {self._mc_reconnect_backoff:.1f}s"
+                            )
                             # Increase backoff with exponential factor
                             self._mc_reconnect_backoff = min(
-                                self._mc_reconnect_backoff * backoff_multiplier,
-                                max_backoff
+                                self._mc_reconnect_backoff * backoff_multiplier, max_backoff
                             )
                     except Exception as e:
                         logger.error(f"[MC RECONNECT] Reconnection error: {e}")
                         # Increase backoff on error
                         self._mc_reconnect_backoff = min(
-                            self._mc_reconnect_backoff * backoff_multiplier,
-                            max_backoff
+                            self._mc_reconnect_backoff * backoff_multiplier, max_backoff
                         )
                 else:
                     # Connected - reset backoff to initial value
@@ -1326,7 +2238,7 @@ class VJServer:
                     continue
 
                 # Send ping to all browser clients
-                ping_message = json.dumps({'type': 'ping'})
+                ping_message = json.dumps({"type": "ping"})
                 current_time = time.time()
                 dead_clients = set()
 
@@ -1334,16 +2246,20 @@ class VJServer:
                     try:
                         # Check if previous pong was missed
                         if client in self._browser_pong_pending:
-                            last_ping_time = self._browser_pong_pending[client]['ping_time']
+                            last_ping_time = self._browser_pong_pending[client]["ping_time"]
                             last_pong_time = self._browser_last_pong.get(client, 0)
 
                             # If no pong received since last ping
                             if last_pong_time < last_ping_time:
-                                missed_count = self._browser_pong_pending[client].get('missed', 0) + 1
-                                self._browser_pong_pending[client]['missed'] = missed_count
+                                missed_count = (
+                                    self._browser_pong_pending[client].get("missed", 0) + 1
+                                )
+                                self._browser_pong_pending[client]["missed"] = missed_count
 
                                 if missed_count >= max_missed_pongs:
-                                    logger.info(f"[BROWSER HEARTBEAT] Removing client {client.remote_address} - missed {missed_count} pongs")
+                                    logger.info(
+                                        f"[BROWSER HEARTBEAT] Removing client {client.remote_address} - missed {missed_count} pongs"
+                                    )
                                     dead_clients.add(client)
                                     try:
                                         await client.close(4100, "Heartbeat timeout")
@@ -1352,11 +2268,14 @@ class VJServer:
                                     continue
                             else:
                                 # Pong received, reset missed count
-                                self._browser_pong_pending[client]['missed'] = 0
+                                self._browser_pong_pending[client]["missed"] = 0
 
                         # Send new ping
                         await client.send(ping_message)
-                        self._browser_pong_pending[client] = {'ping_time': current_time, 'missed': self._browser_pong_pending.get(client, {}).get('missed', 0)}
+                        self._browser_pong_pending[client] = {
+                            "ping_time": current_time,
+                            "missed": self._browser_pong_pending.get(client, {}).get("missed", 0),
+                        }
 
                     except websockets.exceptions.ConnectionClosed:
                         dead_clients.add(client)
@@ -1378,39 +2297,117 @@ class VJServer:
                 logger.error(f"[BROWSER HEARTBEAT] Loop error: {e}")
                 await asyncio.sleep(ping_interval)
 
-    def _calculate_entities(self, bands: List[float], peak: float,
-                           is_beat: bool, beat_intensity: float) -> List[dict]:
+    def _apply_effects(self, entities: List[dict], bands: List[float]) -> List[dict]:
+        """Apply active timed effects (flash, strobe, pulse, wave, etc.) to entities."""
+        if not self._active_effects:
+            return entities
+
+        now = time.time()
+        modified = [dict(e) for e in entities]
+
+        for effect_type, effect in self._active_effects.items():
+            if effect_type in ("blackout", "freeze"):
+                continue  # Handled in main loop
+
+            intensity = effect["intensity"]
+            elapsed = now - effect["start_time"]
+            duration_s = effect["duration"] / 1000.0
+            progress = min(1.0, elapsed / duration_s) if duration_s > 0 else 1.0
+
+            if effect_type == "flash":
+                flash_mult = intensity * (1.0 - progress)
+                for e in modified:
+                    e["scale"] = min(1.0, e.get("scale", 0.5) + flash_mult * 0.5)
+                    e["y"] = min(1.0, e.get("y", 0) + flash_mult * 0.2)
+
+            elif effect_type == "strobe":
+                strobe_on = int(elapsed * 8) % 2 == 0
+                if not strobe_on:
+                    for e in modified:
+                        e["scale"] = 0.01
+
+            elif effect_type == "pulse":
+                pulse_val = math.sin(elapsed * math.pi * 4) * intensity
+                for e in modified:
+                    base_scale = e.get("scale", 0.5)
+                    e["scale"] = max(0.05, base_scale * (1.0 + pulse_val * 0.5))
+
+            elif effect_type == "wave":
+                for i, e in enumerate(modified):
+                    phase = (i / max(1, len(modified))) * math.pi * 2
+                    wave_val = math.sin(elapsed * 3.0 + phase) * intensity
+                    e["y"] = max(0, min(1.0, e.get("y", 0) + wave_val * 0.3))
+
+            elif effect_type == "spiral":
+                for i, e in enumerate(modified):
+                    angle = elapsed * 2.0 + (i / max(1, len(modified))) * math.pi * 2
+                    radius = 0.3 * intensity * (1.0 - progress * 0.5)
+                    e["x"] = max(0, min(1.0, 0.5 + math.cos(angle) * radius))
+                    e["z"] = max(0, min(1.0, 0.5 + math.sin(angle) * radius))
+
+            elif effect_type == "explode":
+                explode_force = intensity * (1.0 - progress)
+                for e in modified:
+                    dx = e.get("x", 0.5) - 0.5
+                    dy = e.get("y", 0.5) - 0.5
+                    dz = e.get("z", 0.5) - 0.5
+                    dist = max(0.1, (dx * dx + dy * dy + dz * dz) ** 0.5)
+                    force = explode_force / dist * 0.3
+                    e["x"] = max(0, min(1.0, e.get("x", 0.5) + dx * force))
+                    e["y"] = max(0, min(1.0, e.get("y", 0.5) + dy * force))
+                    e["z"] = max(0, min(1.0, e.get("z", 0.5) + dz * force))
+                    e["scale"] = max(0.05, e.get("scale", 0.5) * (1.0 + explode_force * 0.5))
+
+        return modified
+
+    def _calculate_entities(
+        self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float
+    ) -> List[dict]:
         """Calculate entity positions from audio state."""
         audio_state = AudioState(
             bands=bands,
             amplitude=peak,
             is_beat=is_beat,
             beat_intensity=beat_intensity,
-            frame=self._frame_count
+            frame=self._frame_count,
         )
         return self._current_pattern.calculate_entities(audio_state)
 
-    async def _update_minecraft(self, entities: List[dict], bands: List[float],
-                                  peak: float, is_beat: bool, beat_intensity: float):
+    async def _update_minecraft(
+        self,
+        entities: List[dict],
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+    ):
         """Send entities to Minecraft."""
         if not self.viz_client or not self.viz_client.connected:
             return
 
         try:
+            # Sanitize entity data before forwarding to Minecraft
+            entities = _sanitize_entities(entities, max_count=self.entity_count * 2)
+
             particles = []
             if is_beat and beat_intensity > 0.2:
-                particles.append({
-                    'particle': 'NOTE',
-                    'x': 0.5, 'y': 0.5, 'z': 0.5,
-                    'count': int(20 * beat_intensity)
-                })
+                particles.append(
+                    {
+                        "particle": "NOTE",
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "count": max(1, min(100, int(20 * beat_intensity))),
+                    }
+                )
 
-            # Include audio data for redstone sensors
+            # Clamp audio values forwarded to Minecraft
+            safe_bands = [max(0.0, min(1.0, b)) for b in bands[:5]]
             audio = {
-                'bands': bands,
-                'amplitude': peak,
-                'is_beat': is_beat,
-                'beat_intensity': beat_intensity
+                "bands": safe_bands,
+                "amplitude": max(0.0, min(5.0, peak)),
+                "is_beat": bool(is_beat),
+                "beat_intensity": max(0.0, min(5.0, beat_intensity)),
             }
             await self.viz_client.batch_update_fast(self.zone, entities, particles, audio)
         except Exception as e:
@@ -1446,8 +2443,36 @@ class VJServer:
                     self._fallback_bands[i] *= 0.95
                 self._fallback_peak *= 0.95
 
+            # Apply band sensitivity
+            adjusted_bands = [
+                bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
+            ]
+
+            # Clean up expired effects
+            now = time.time()
+            expired = [k for k, v in self._active_effects.items() if now >= v["end_time"]]
+            for k in expired:
+                if k == "blackout":
+                    self._blackout = False
+                    if self.viz_client and self.viz_client.connected:
+                        try:
+                            asyncio.ensure_future(self.viz_client.set_visible(self.zone, True))
+                        except Exception:
+                            pass
+                elif k == "freeze":
+                    self._freeze = False
+                del self._active_effects[k]
+
             # Calculate visualization
-            entities = self._calculate_entities(bands, peak, is_beat, beat_intensity)
+            if self._freeze and self._last_entities:
+                entities = self._last_entities
+            elif self._blackout:
+                entities = []
+            else:
+                entities = self._calculate_entities(adjusted_bands, peak, is_beat, beat_intensity)
+                # Apply timed effects (flash, strobe, pulse, wave, etc.)
+                entities = self._apply_effects(entities, adjusted_bands)
+                self._last_entities = entities
 
             # Update spectrograph
             if self.spectrograph:
@@ -1462,13 +2487,10 @@ class VJServer:
                     preset=mode_str,
                     bpm=dj.bpm if dj else 0,
                     clients=len(self._broadcast_clients),
-                    using_fft=True
+                    using_fft=True,
                 )
                 self.spectrograph.display(
-                    bands=bands,
-                    amplitude=peak,
-                    is_beat=is_beat,
-                    beat_intensity=beat_intensity
+                    bands=bands, amplitude=peak, is_beat=is_beat, beat_intensity=beat_intensity
                 )
 
             # Send to Minecraft - skip if active DJ is using direct mode and connected
@@ -1485,8 +2507,9 @@ class VJServer:
                 await self._update_minecraft(entities, bands, peak, is_beat, beat_intensity)
 
             # Send to browser clients (always, for preview)
-            await self._broadcast_viz_state(entities, bands, peak, is_beat, beat_intensity,
-                                           instant_bass, instant_kick)
+            await self._broadcast_viz_state(
+                entities, bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
+            )
 
             # Log health summary every 60 seconds
             current_time = time.time()
@@ -1514,26 +2537,28 @@ class VJServer:
             project_root = Path(__file__).parent.parent
             http_thread = threading.Thread(
                 target=run_http_server,
-                args=(self.http_port, str(project_root / 'audio_processor')),
-                daemon=True
+                args=(self.http_port, str(project_root / "audio_processor")),
+                daemon=True,
             )
             http_thread.start()
             logger.info(f"Admin panel: http://localhost:{self.http_port}/")
             logger.info(f"3D Preview: http://localhost:{self.http_port}/preview/")
 
-        # Start DJ listener
+        # Start DJ listener (64KB max message â€” valid audio frames are ~200 bytes)
         dj_server = await ws_serve(
             self._handle_dj_connection,
             "0.0.0.0",
-            self.dj_port
+            self.dj_port,
+            max_size=65_536,
         )
         logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
 
-        # Start browser broadcast server
+        # Start browser broadcast server (256KB max â€” config messages can be larger)
         broadcast_server = await ws_serve(
             self._handle_browser_client,
             "0.0.0.0",
-            self.broadcast_port
+            self.broadcast_port,
+            max_size=262_144,
         )
         logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
 
@@ -1623,31 +2648,41 @@ def _validate_positive_int(value: str) -> int:
 
 async def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description='VJ Server - Multi-DJ Audio Visualization'
+    parser = argparse.ArgumentParser(description="VJ Server - Multi-DJ Audio Visualization")
+    parser.add_argument(
+        "--dj-port",
+        type=_validate_port,
+        default=9000,
+        help="Port for DJ connections (default: 9000)",
     )
-    parser.add_argument('--dj-port', type=_validate_port, default=9000,
-                       help='Port for DJ connections (default: 9000)')
-    parser.add_argument('--broadcast-port', type=_validate_port, default=8766,
-                       help='Port for browser clients (default: 8766)')
-    parser.add_argument('--http-port', type=_validate_port, default=8080,
-                       help='HTTP port for admin panel (default: 8080)')
-    parser.add_argument('--minecraft-host', '--host', type=str, default='localhost',
-                       help='Minecraft server host')
-    parser.add_argument('--port', type=_validate_port, default=8765,
-                       help='Minecraft WebSocket port')
-    parser.add_argument('--zone', type=str, default='main',
-                       help='Visualization zone')
-    parser.add_argument('--entities', type=_validate_positive_int, default=16,
-                       help='Entity count')
-    parser.add_argument('--config', type=str, default='configs/dj_auth.json',
-                       help='Path to DJ auth config')
-    parser.add_argument('--require-auth', action='store_true',
-                       help='Require DJ authentication')
-    parser.add_argument('--no-minecraft', action='store_true',
-                       help='Run without Minecraft')
-    parser.add_argument('--no-spectrograph', action='store_true',
-                       help='Disable terminal spectrograph')
+    parser.add_argument(
+        "--broadcast-port",
+        type=_validate_port,
+        default=8766,
+        help="Port for browser clients (default: 8766)",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=_validate_port,
+        default=8080,
+        help="HTTP port for admin panel (default: 8080)",
+    )
+    parser.add_argument(
+        "--minecraft-host", "--host", type=str, default="localhost", help="Minecraft server host"
+    )
+    parser.add_argument(
+        "--port", type=_validate_port, default=8765, help="Minecraft WebSocket port"
+    )
+    parser.add_argument("--zone", type=str, default="main", help="Visualization zone")
+    parser.add_argument("--entities", type=_validate_positive_int, default=16, help="Entity count")
+    parser.add_argument(
+        "--config", type=str, default="configs/dj_auth.json", help="Path to DJ auth config"
+    )
+    parser.add_argument("--require-auth", action="store_true", help="Require DJ authentication")
+    parser.add_argument("--no-minecraft", action="store_true", help="Run without Minecraft")
+    parser.add_argument(
+        "--no-spectrograph", action="store_true", help="Disable terminal spectrograph"
+    )
 
     args = parser.parse_args()
 
@@ -1656,7 +2691,9 @@ async def main():
     config_path = Path(args.config)
     if config_path.exists():
         auth_config = DJAuthConfig.load(str(config_path))
-        logger.info(f"Loaded auth config: {len(auth_config.djs)} DJs, {len(auth_config.vj_operators)} VJs")
+        logger.info(
+            f"Loaded auth config: {len(auth_config.djs)} DJs, {len(auth_config.vj_operators)} VJs"
+        )
     elif args.require_auth:
         logger.error(f"Auth config not found: {args.config}")
         sys.exit(1)
@@ -1672,7 +2709,7 @@ async def main():
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=args.require_auth,
-        show_spectrograph=not args.no_spectrograph
+        show_spectrograph=not args.no_spectrograph,
     )
 
     # Signal handling

@@ -7,18 +7,20 @@ Supports two capture backends:
 2. sounddevice - Fallback using input devices (requires Stereo Mix or virtual cable)
 """
 
-import numpy as np
-import threading
-import queue
-import time
 import logging
+import queue
+import threading
+import time
 from collections import deque
-from typing import Optional, List, Tuple
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+import numpy as np
 
 # Try to import ring buffer
 try:
-    from audio_processor.ringbuffer import SPSCRingBuffer, BufferStats
+    from audio_processor.ringbuffer import BufferStats, SPSCRingBuffer
+
     HAS_RINGBUFFER = True
 except ImportError:
     HAS_RINGBUFFER = False
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Try spectrograms library (Rust backend with FFTW)
 try:
     import spectrograms as sg
+
     HAS_SPECTROGRAMS = True
 except ImportError:
     HAS_SPECTROGRAMS = False
@@ -41,6 +44,7 @@ except ImportError:
 # Try pyfftw (FFTW backend with reusable plans)
 try:
     import pyfftw
+
     HAS_PYFFTW = True
 except ImportError:
     HAS_PYFFTW = False
@@ -50,21 +54,22 @@ except ImportError:
 @dataclass
 class FFTResult:
     """Result from FFT analysis."""
-    bands: List[float]          # 5 frequency bands (0-1 normalized)
-    raw_bands: List[float]      # Raw band magnitudes (not normalized)
-    peak: float                 # Overall peak level
-    spectral_flux: float        # Full spectrum change rate
-    band_flux: List[float]      # Per-band spectral flux
-    onsets: List[bool]          # Per-band onset detection
-    kick_onset: bool            # Detected kick drum (bass band)
-    snare_onset: bool           # Detected snare
-    hihat_onset: bool           # Detected hi-hat
-    timestamp: float            # When this was captured
-    estimated_bpm: float = 120.0   # Estimated tempo in BPM
-    bpm_confidence: float = 0.0    # Confidence in BPM estimate (0-1)
+
+    bands: List[float]  # 5 frequency bands (0-1 normalized)
+    raw_bands: List[float]  # Raw band magnitudes (not normalized)
+    peak: float  # Overall peak level
+    spectral_flux: float  # Full spectrum change rate
+    band_flux: List[float]  # Per-band spectral flux
+    onsets: List[bool]  # Per-band onset detection
+    kick_onset: bool  # Detected kick drum (bass band)
+    snare_onset: bool  # Detected snare
+    hihat_onset: bool  # Detected hi-hat
+    timestamp: float  # When this was captured
+    estimated_bpm: float = 120.0  # Estimated tempo in BPM
+    bpm_confidence: float = 0.0  # Confidence in BPM estimate (0-1)
     # Bass lane (ultra-fast detection, ~1ms latency)
-    instant_bass: float = 0.0          # Bass lane energy (0-1)
-    instant_kick_onset: bool = False   # Fast kick detection from bass lane
+    instant_bass: float = 0.0  # Bass lane energy (0-1)
+    instant_kick_onset: bool = False  # Fast kick detection from bass lane
 
 
 class BassLane:
@@ -84,9 +89,14 @@ class BassLane:
         energy, is_onset, strength = bass_lane.process_samples(audio, timestamp)
     """
 
-    def __init__(self, sample_rate: int = 44100, cutoff_hz: float = 120.0,
-                 attack_ms: float = 1.0, release_ms: float = 50.0,
-                 onset_threshold: float = 0.15):
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        cutoff_hz: float = 120.0,
+        attack_ms: float = 1.0,
+        release_ms: float = 50.0,
+        onset_threshold: float = 0.15,
+    ):
         """
         Initialize bass lane processor.
 
@@ -114,10 +124,10 @@ class BassLane:
         self._release_coef = 1.0 - np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
 
         # State variables
-        self._lp_state = 0.0          # Lowpass filter state
-        self._envelope = 0.0          # Current envelope value
-        self._prev_envelope = 0.0     # Previous envelope (for slope detection)
-        self._peak_envelope = 0.0     # Peak tracking for normalization
+        self._lp_state = 0.0  # Lowpass filter state
+        self._envelope = 0.0  # Current envelope value
+        self._prev_envelope = 0.0  # Previous envelope (for slope detection)
+        self._peak_envelope = 0.0  # Peak tracking for normalization
 
         # Onset detection state
         self._onset_threshold = onset_threshold
@@ -127,8 +137,10 @@ class BassLane:
         # Normalization with AGC
         self._max_envelope_history: deque = deque(maxlen=300)  # ~5 sec history
 
-        logger.debug(f"BassLane initialized: cutoff={cutoff_hz}Hz, "
-                    f"attack={attack_ms}ms, release={release_ms}ms")
+        logger.debug(
+            f"BassLane initialized: cutoff={cutoff_hz}Hz, "
+            f"attack={attack_ms}ms, release={release_ms}ms"
+        )
 
     def process_samples(self, samples: np.ndarray, timestamp: float) -> Tuple[float, bool, float]:
         """
@@ -194,10 +206,7 @@ class BassLane:
         if len(self._max_envelope_history) > 30:
             recent_max = max(self._max_envelope_history)
             # Decay peak slowly toward recent max
-            self._peak_envelope = max(
-                self._peak_envelope * 0.999,
-                recent_max * 1.1
-            )
+            self._peak_envelope = max(self._peak_envelope * 0.999, recent_max * 1.1)
 
         # Normalize to 0-1
         norm_envelope = envelope / (self._peak_envelope + 1e-6)
@@ -247,44 +256,46 @@ class FFTAnalyzer:
     # Frequency band definitions (Hz) - 5-band system (ultra-low-latency default)
     # Sub-bass removed since 1024 FFT can't accurately detect <43Hz
     BAND_RANGES = [
-        (40, 250),     # Bass (kick drums, bass guitar, toms)
-        (250, 500),    # Low-mid (snare body, vocals)
-        (500, 2000),   # Mid (vocals, instruments)
+        (40, 250),  # Bass (kick drums, bass guitar, toms)
+        (250, 500),  # Low-mid (snare body, vocals)
+        (500, 2000),  # Mid (vocals, instruments)
         (2000, 6000),  # High-mid (presence, snare crack)
-        (6000, 20000), # High (hi-hats, cymbals, air)
+        (6000, 20000),  # High (hi-hats, cymbals, air)
     ]
 
     # Latency mode presets - ultra is now default for lowest latency
     LATENCY_PRESETS = {
-        'normal': {
-            'fft_size': 2048,    # 43ms window - legacy mode
-            'hop_size': 512,     # 11ms updates
-            'buffer_frames': 512,
-            'queue_size': 12,
+        "normal": {
+            "fft_size": 2048,  # 43ms window - legacy mode
+            "hop_size": 512,  # 11ms updates
+            "buffer_frames": 512,
+            "queue_size": 12,
         },
-        'low': {
-            'fft_size': 1024,    # 21ms window - balanced
-            'hop_size': 256,     # 5ms updates
-            'buffer_frames': 256,
-            'queue_size': 6,
+        "low": {
+            "fft_size": 1024,  # 21ms window - balanced
+            "hop_size": 256,  # 5ms updates
+            "buffer_frames": 256,
+            "queue_size": 6,
         },
-        'ultra': {
-            'fft_size': 1024,    # 21ms window - lowest latency (DEFAULT)
-            'hop_size': 128,     # 2.7ms updates
-            'buffer_frames': 128,
-            'queue_size': 4,
+        "ultra": {
+            "fft_size": 1024,  # 21ms window - lowest latency (DEFAULT)
+            "hop_size": 128,  # 2.7ms updates
+            "buffer_frames": 128,
+            "queue_size": 4,
         },
     }
 
-    def __init__(self,
-                 sample_rate: int = 44100,
-                 fft_size: int = 2048,
-                 hop_size: int = 512,
-                 device: Optional[str] = None,
-                 low_latency: bool = False,
-                 ultra_low_latency: bool = False,
-                 enable_bass_lane: bool = True,
-                 bass_cutoff_hz: float = 120.0):
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        fft_size: int = 2048,
+        hop_size: int = 512,
+        device: Optional[str] = None,
+        low_latency: bool = False,
+        ultra_low_latency: bool = False,
+        enable_bass_lane: bool = True,
+        bass_cutoff_hz: float = 120.0,
+    ):
         """
         Initialize FFT analyzer.
 
@@ -301,19 +312,19 @@ class FFTAnalyzer:
         # Select latency preset - ultra is now default for lowest latency
         if ultra_low_latency or (not low_latency):
             # Default to ultra-low-latency mode
-            preset = self.LATENCY_PRESETS['ultra']
-            self._latency_mode = 'ultra'
+            preset = self.LATENCY_PRESETS["ultra"]
+            self._latency_mode = "ultra"
         elif low_latency:
-            preset = self.LATENCY_PRESETS['low']
-            self._latency_mode = 'low'
+            preset = self.LATENCY_PRESETS["low"]
+            self._latency_mode = "low"
         else:
-            preset = self.LATENCY_PRESETS['normal']
-            self._latency_mode = 'normal'
+            preset = self.LATENCY_PRESETS["normal"]
+            self._latency_mode = "normal"
 
-        fft_size = preset['fft_size']
-        hop_size = preset['hop_size']
-        self._buffer_frames = preset['buffer_frames']
-        self._queue_size = preset['queue_size']
+        fft_size = preset["fft_size"]
+        hop_size = preset["hop_size"]
+        self._buffer_frames = preset["buffer_frames"]
+        self._queue_size = preset["queue_size"]
 
         self.sample_rate = sample_rate
         self.fft_size = fft_size
@@ -342,19 +353,23 @@ class FFTAnalyzer:
         self._onsets = [False] * 5
 
         # Smoothing parameters (attack/release like synthetic system)
-        self._band_attack = 0.4    # How fast bands rise (0-1, higher = faster)
+        self._band_attack = 0.4  # How fast bands rise (0-1, higher = faster)
         self._band_release = 0.08  # How fast bands fall (0-1, higher = faster)
-        self._noise_floor = 0.02   # Ignore signals below this threshold
+        self._noise_floor = 0.02  # Ignore signals below this threshold
 
         # Per-band history for normalization (AGC per band) - using deque for O(1) ops
         self._band_history_size = 180  # ~3 seconds at 60fps (longer for stability)
-        self._band_histories: List[deque] = [deque(maxlen=self._band_history_size) for _ in range(5)]
+        self._band_histories: List[deque] = [
+            deque(maxlen=self._band_history_size) for _ in range(5)
+        ]
         self._band_max = np.full(5, 0.1, dtype=np.float32)  # Start with reasonable default
 
         # Onset detection state - using deque for O(1) popleft
         self._onset_threshold = 1.5  # Flux must be 1.5x average to trigger
         self._flux_history_size = 30  # ~0.5 second history
-        self._flux_histories: List[deque] = [deque(maxlen=self._flux_history_size) for _ in range(5)]
+        self._flux_histories: List[deque] = [
+            deque(maxlen=self._flux_history_size) for _ in range(5)
+        ]
         # Per-band minimum intervals (prevents detecting faster than realistic for each instrument)
         # Bass/kick: 200ms (max 300 BPM), low-mid: 120ms, mid: 100ms, high-mid: 80ms, high: 60ms
         self._min_onset_intervals = [0.20, 0.12, 0.10, 0.08, 0.06]
@@ -372,9 +387,7 @@ class FFTAnalyzer:
         self._use_ringbuffer = HAS_RINGBUFFER
         if self._use_ringbuffer:
             self._ring_buffer: Optional[SPSCRingBuffer] = SPSCRingBuffer(
-                capacity=self._queue_size,
-                max_chunk_size=4096,
-                channels=2
+                capacity=self._queue_size, max_chunk_size=4096, channels=2
             )
             self._audio_queue = None
             logger.debug("FFTAnalyzer using lock-free ring buffer")
@@ -391,12 +404,12 @@ class FFTAnalyzer:
         self._sd_available = self._check_sounddevice()
 
         # BPM estimation state
-        self._onset_times: List[float] = []      # Recent kick onset timestamps
-        self._ioi_history: List[float] = []      # Inter-onset intervals in seconds
+        self._onset_times: List[float] = []  # Recent kick onset timestamps
+        self._ioi_history: List[float] = []  # Inter-onset intervals in seconds
         self._tempo_histogram = np.zeros(200, dtype=np.float32)  # Bins for 40-240 BPM
-        self._histogram_decay = 0.995            # Slow decay for stability (~3 sec half-life)
-        self._estimated_bpm = 120.0              # Current BPM estimate
-        self._bpm_confidence = 0.0               # Confidence in estimate (0-1)
+        self._histogram_decay = 0.995  # Slow decay for stability (~3 sec half-life)
+        self._estimated_bpm = 120.0  # Current BPM estimate
+        self._bpm_confidence = 0.0  # Confidence in estimate (0-1)
 
         # High-performance FFT support (spectrograms > pyfftw > numpy)
         self._use_spectrograms = False
@@ -436,28 +449,21 @@ class FFTAnalyzer:
 
         if enable_bass_lane:
             self._bass_lane = BassLane(
-                sample_rate=sample_rate,
-                cutoff_hz=bass_cutoff_hz,
-                attack_ms=1.0,
-                release_ms=50.0
+                sample_rate=sample_rate, cutoff_hz=bass_cutoff_hz, attack_ms=1.0, release_ms=50.0
             )
             logger.info(f"Bass lane enabled: cutoff={bass_cutoff_hz}Hz")
 
     def _check_pyaudiowpatch(self) -> bool:
         """Check if pyaudiowpatch is available."""
-        try:
-            import pyaudiowpatch as pyaudio
-            return True
-        except ImportError:
-            return False
+        import importlib.util
+
+        return importlib.util.find_spec("pyaudiowpatch") is not None
 
     def _check_sounddevice(self) -> bool:
         """Check if sounddevice library is available."""
-        try:
-            import sounddevice as sd
-            return True
-        except ImportError:
-            return False
+        import importlib.util
+
+        return importlib.util.find_spec("sounddevice") is not None
 
     def _compute_band_bins(self) -> List[Tuple[int, int]]:
         """Compute FFT bin indices for each frequency band."""
@@ -480,7 +486,7 @@ class FFTAnalyzer:
             n_fft=self.fft_size,
             hop_size=self.fft_size,  # Single-frame processing
             window=sg.WindowType.hanning,
-            centre=False
+            centre=False,
         )
         params = sg.SpectrogramParams(stft, sample_rate=self.sample_rate)
         planner = sg.SpectrogramPlanner()
@@ -499,16 +505,16 @@ class FFTAnalyzer:
             return
 
         # Create aligned arrays for SIMD optimization
-        self._pyfftw_input = pyfftw.empty_aligned(self.fft_size, dtype='float32')
-        self._pyfftw_output = pyfftw.empty_aligned(self.fft_size // 2 + 1, dtype='complex64')
+        self._pyfftw_input = pyfftw.empty_aligned(self.fft_size, dtype="float32")
+        self._pyfftw_output = pyfftw.empty_aligned(self.fft_size // 2 + 1, dtype="complex64")
 
         # Create reusable FFT plan (the key performance gain)
         self._pyfftw_plan = pyfftw.FFTW(
             self._pyfftw_input,
             self._pyfftw_output,
-            direction='FFTW_FORWARD',
-            flags=['FFTW_MEASURE'],  # Optimize plan for this size
-            threads=1  # Single thread for low latency
+            direction="FFTW_FORWARD",
+            flags=["FFTW_MEASURE"],  # Optimize plan for this size
+            threads=1,  # Single thread for low latency
         )
 
     def _compute_spectrum_pyfftw(self, buffer: np.ndarray) -> np.ndarray:
@@ -530,7 +536,11 @@ class FFTAnalyzer:
                 if len(self._ioi_history) >= 4 and self._bpm_confidence > 0.3:
                     expected_ioi = 60.0 / self._estimated_bpm
                     # Allow IOIs that are close to expected, or multiples (half/double)
-                    ratios = [ioi / expected_ioi, ioi / (expected_ioi * 2), ioi / (expected_ioi * 0.5)]
+                    ratios = [
+                        ioi / expected_ioi,
+                        ioi / (expected_ioi * 2),
+                        ioi / (expected_ioi * 0.5),
+                    ]
                     best_ratio = min(ratios, key=lambda r: abs(r - 1.0))
                     # Reject if more than 20% off from nearest multiple
                     if abs(best_ratio - 1.0) > 0.20:
@@ -636,7 +646,7 @@ class FFTAnalyzer:
         # Remove mean for better correlation
         iois_centered = iois - np.mean(iois)
         n = len(iois_centered)
-        autocorr = np.correlate(iois_centered, iois_centered, mode='full')[n-1:]
+        autocorr = np.correlate(iois_centered, iois_centered, mode="full")[n - 1 :]
 
         # Normalize by zero-lag value
         if autocorr[0] > 0:
@@ -645,7 +655,7 @@ class FFTAnalyzer:
         # Find first significant peak after lag 0 (looking for periodicity)
         # This indicates consistent beat intervals
         for lag in range(1, min(8, len(autocorr) - 1)):
-            if lag > 0 and autocorr[lag] > autocorr[lag-1] and autocorr[lag] > autocorr[lag+1]:
+            if lag > 0 and autocorr[lag] > autocorr[lag - 1] and autocorr[lag] > autocorr[lag + 1]:
                 if autocorr[lag] > 0.3:  # Significant correlation
                     # Average IOI suggests the base tempo
                     avg_ioi = np.median(iois)
@@ -666,7 +676,7 @@ class FFTAnalyzer:
             wasapi_info = None
             for i in range(p.get_host_api_count()):
                 info = p.get_host_api_info_by_index(i)
-                if info['name'].lower() == 'windows wasapi':
+                if info["name"].lower() == "windows wasapi":
                     wasapi_info = info
                     break
 
@@ -686,7 +696,7 @@ class FFTAnalyzer:
             # Fallback: search for loopback devices
             for i in range(p.get_device_count()):
                 dev = p.get_device_info_by_index(i)
-                if dev.get('isLoopbackDevice', False):
+                if dev.get("isLoopbackDevice", False):
                     logger.info(f"Found loopback device: {dev['name']}")
                     return p, dev
 
@@ -706,13 +716,15 @@ class FFTAnalyzer:
 
             # Look for loopback devices
             for i, dev in enumerate(devices):
-                name = dev['name'].lower()
-                if ('loopback' in name or
-                    'stereo mix' in name or
-                    'what u hear' in name or
-                    'cable output' in name or
-                    'vb-audio' in name):
-                    if dev['max_input_channels'] > 0:
+                name = dev["name"].lower()
+                if (
+                    "loopback" in name
+                    or "stereo mix" in name
+                    or "what u hear" in name
+                    or "cable output" in name
+                    or "vb-audio" in name
+                ):
+                    if dev["max_input_channels"] > 0:
                         logger.info(f"Found loopback device: {dev['name']}")
                         return i
 
@@ -755,7 +767,7 @@ class FFTAnalyzer:
                 capture_time = time.time()  # Timestamp when audio arrived
                 audio = np.frombuffer(in_data, dtype=np.float32)
                 # Reshape to stereo if needed
-                if device['maxInputChannels'] >= 2:
+                if device["maxInputChannels"] >= 2:
                     audio = audio.reshape(-1, 2)
 
                 # Use ring buffer if available
@@ -777,21 +789,23 @@ class FFTAnalyzer:
             # Open stream with optimized buffer size
             # Smaller buffer = lower latency but more CPU load
             buffer_size = self._buffer_frames
-            logger.info(f"Opening WASAPI stream: buffer={buffer_size} samples "
-                       f"({buffer_size / device['defaultSampleRate'] * 1000:.1f}ms)")
+            logger.info(
+                f"Opening WASAPI stream: buffer={buffer_size} samples "
+                f"({buffer_size / device['defaultSampleRate'] * 1000:.1f}ms)"
+            )
 
             self._stream = p.open(
                 format=pyaudio.paFloat32,
-                channels=device['maxInputChannels'],
-                rate=int(device['defaultSampleRate']),
+                channels=device["maxInputChannels"],
+                rate=int(device["defaultSampleRate"]),
                 frames_per_buffer=buffer_size,
                 input=True,
-                input_device_index=device['index'],
-                stream_callback=audio_callback
+                input_device_index=device["index"],
+                stream_callback=audio_callback,
             )
 
             # Update sample rate to match device
-            actual_rate = int(device['defaultSampleRate'])
+            actual_rate = int(device["defaultSampleRate"])
             if actual_rate != self.sample_rate:
                 logger.info(f"Adjusting sample rate: {self.sample_rate} -> {actual_rate}")
                 self.sample_rate = actual_rate
@@ -806,14 +820,14 @@ class FFTAnalyzer:
 
             self._stream.start_stream()
             self._running = True
-            self._backend = 'pyaudiowpatch'
+            self._backend = "pyaudiowpatch"
 
             logger.info(f"WASAPI loopback capture started: {device['name']} @ {actual_rate}Hz")
             return True
 
         except Exception as e:
             logger.error(f"Failed to start pyaudiowpatch capture: {e}")
-            if hasattr(self, '_pyaudio') and self._pyaudio:
+            if hasattr(self, "_pyaudio") and self._pyaudio:
                 self._pyaudio.terminate()
             return False
 
@@ -845,7 +859,7 @@ class FFTAnalyzer:
 
             # Try to use WASAPI exclusive mode for lower latency
             extra_settings = None
-            latency = 'low' if self.low_latency else 'high'
+            latency = "low" if self.low_latency else "high"
 
             if self.ultra_low_latency:
                 try:
@@ -864,11 +878,11 @@ class FFTAnalyzer:
                 callback=audio_callback,
                 dtype=np.float32,
                 latency=latency,
-                extra_settings=extra_settings
+                extra_settings=extra_settings,
             )
             self._stream.start()
             self._running = True
-            self._backend = 'sounddevice'
+            self._backend = "sounddevice"
 
             mode = "exclusive" if extra_settings else "shared"
             logger.info(f"Sounddevice capture started ({mode} mode, device: {device_id})")
@@ -884,10 +898,10 @@ class FFTAnalyzer:
 
         if self._stream is not None:
             try:
-                if self._backend == 'pyaudiowpatch':
+                if self._backend == "pyaudiowpatch":
                     self._stream.stop_stream()
                     self._stream.close()
-                    if hasattr(self, '_pyaudio') and self._pyaudio:
+                    if hasattr(self, "_pyaudio") and self._pyaudio:
                         self._pyaudio.terminate()
                 else:
                     self._stream.stop()
@@ -911,13 +925,17 @@ class FFTAnalyzer:
 
         # Process through bass lane BEFORE buffering (ultra-low latency)
         if self._bass_lane is not None:
-            bass_energy, kick_onset, onset_strength = self._bass_lane.process_samples(mono, timestamp)
+            bass_energy, kick_onset, onset_strength = self._bass_lane.process_samples(
+                mono, timestamp
+            )
             self._instant_bass = bass_energy
             self._instant_kick_onset = kick_onset
 
         # Add to buffer
         samples_to_add = min(len(mono), self.fft_size - self._buffer_pos)
-        self._sample_buffer[self._buffer_pos:self._buffer_pos + samples_to_add] = mono[:samples_to_add]
+        self._sample_buffer[self._buffer_pos : self._buffer_pos + samples_to_add] = mono[
+            :samples_to_add
+        ]
         self._buffer_pos += samples_to_add
 
         # Check if we have enough for FFT
@@ -925,8 +943,8 @@ class FFTAnalyzer:
             result = self._sample_buffer.copy()
             # Shift buffer by hop_size (use numpy for speed)
             np.copyto(
-                self._sample_buffer[:self.fft_size - self.hop_size],
-                self._sample_buffer[self.hop_size:]
+                self._sample_buffer[: self.fft_size - self.hop_size],
+                self._sample_buffer[self.hop_size :],
             )
             self._buffer_pos = self.fft_size - self.hop_size
             return result
@@ -1007,7 +1025,7 @@ class FFTAnalyzer:
         if peak < self._noise_floor:
             # Silence - decay bands smoothly to zero
             for i in range(5):
-                self._smoothed_bands[i] *= (1.0 - self._band_release)
+                self._smoothed_bands[i] *= 1.0 - self._band_release
             self._raw_bands[:] = 0
             self._normalized_bands[:] = 0
         else:
@@ -1082,8 +1100,10 @@ class FFTAnalyzer:
 
                 # Check if flux exceeds threshold and enough time since last onset
                 # Use per-band minimum interval (slower for kick, faster for hi-hats)
-                if (flux_val > threshold and
-                    current_time - self._last_onset_time[i] > self._min_onset_intervals[i]):
+                if (
+                    flux_val > threshold
+                    and current_time - self._last_onset_time[i] > self._min_onset_intervals[i]
+                ):
                     self._onsets[i] = True
                     self._last_onset_time[i] = current_time
 
@@ -1155,8 +1175,14 @@ class FFTAnalyzer:
         fft_latency = (self.fft_size / self.sample_rate) * 1000
         hop_interval = (self.hop_size / self.sample_rate) * 1000
         if len(self._latency_samples) == 0:
-            return {"avg": 0, "min": 0, "max": 0, "samples": 0,
-                    "fft_latency_ms": fft_latency, "hop_interval_ms": hop_interval}
+            return {
+                "avg": 0,
+                "min": 0,
+                "max": 0,
+                "samples": 0,
+                "fft_latency_ms": fft_latency,
+                "hop_interval_ms": hop_interval,
+            }
         samples = list(self._latency_samples)
         return {
             "avg": sum(samples) / len(samples),
@@ -1173,12 +1199,12 @@ class FFTAnalyzer:
         if self._use_ringbuffer and self._ring_buffer is not None:
             stats = self._ring_buffer.stats
             return {
-                'writes': stats.writes,
-                'reads': stats.reads,
-                'overruns': stats.overruns,
-                'underruns': stats.underruns,
-                'capacity': stats.capacity,
-                'fill': stats.current_fill,
+                "writes": stats.writes,
+                "reads": stats.reads,
+                "overruns": stats.overruns,
+                "underruns": stats.underruns,
+                "capacity": stats.capacity,
+                "fill": stats.current_fill,
             }
         return None
 
@@ -1196,10 +1222,16 @@ class HybridAnalyzer:
     Optionally includes beat prediction for zero-latency perceived beats.
     """
 
-    def __init__(self, sample_rate: int = 44100, low_latency: bool = False,
-                 ultra_low_latency: bool = False, use_beat_prediction: bool = False,
-                 prediction_lookahead_ms: float = 80.0,
-                 enable_bass_lane: bool = True, bass_cutoff_hz: float = 120.0):
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        low_latency: bool = False,
+        ultra_low_latency: bool = False,
+        use_beat_prediction: bool = False,
+        prediction_lookahead_ms: float = 80.0,
+        enable_bass_lane: bool = True,
+        bass_cutoff_hz: float = 120.0,
+    ):
         self.fft_analyzer: Optional[FFTAnalyzer] = None
         self.sample_rate = sample_rate
         self.low_latency = low_latency
@@ -1216,6 +1248,7 @@ class HybridAnalyzer:
         if use_beat_prediction:
             try:
                 from audio_processor.beat_predictor import PredictiveBeatSync
+
                 self._beat_predictor = PredictiveBeatSync(lookahead_ms=prediction_lookahead_ms)
                 logger.info(f"Beat prediction enabled (lookahead: {prediction_lookahead_ms}ms)")
             except Exception as e:
@@ -1239,7 +1272,11 @@ class HybridAnalyzer:
                 if self.fft_analyzer.start_capture():
                     self._use_fft = True
                     self._backend = self.fft_analyzer.backend
-                    latency_info = f"~{self.fft_analyzer.latency_stats.get('fft_latency_ms', 0):.0f}ms" if self.fft_analyzer.latency_stats else ""
+                    latency_info = (
+                        f"~{self.fft_analyzer.latency_stats.get('fft_latency_ms', 0):.0f}ms"
+                        if self.fft_analyzer.latency_stats
+                        else ""
+                    )
                     mode = "LOW-LATENCY" if self.low_latency else "NORMAL"
                     logger.info(f"Hybrid analyzer: Using {self._backend} [{mode}] {latency_info}")
                 else:
@@ -1250,8 +1287,9 @@ class HybridAnalyzer:
             logger.warning(f"Hybrid analyzer: Failed to init FFT ({e}), using synthetic")
             self.fft_analyzer = None
 
-    def analyze(self, synthetic_peak: float = 0.0,
-                synthetic_bands: Optional[List[float]] = None) -> FFTResult:
+    def analyze(
+        self, synthetic_peak: float = 0.0, synthetic_bands: Optional[List[float]] = None
+    ) -> FFTResult:
         """
         Analyze audio, preferring real FFT over synthetic.
 
@@ -1284,7 +1322,7 @@ class HybridAnalyzer:
             hihat_onset=False,
             timestamp=time.time(),
             estimated_bpm=120.0,
-            bpm_confidence=0.0
+            bpm_confidence=0.0,
         )
 
     def _apply_beat_prediction(self, result: FFTResult) -> FFTResult:
@@ -1294,15 +1332,14 @@ class HybridAnalyzer:
 
         # Feed actual kick onset to predictor
         self._beat_predictor.process_fft_result(
-            result.kick_onset,
-            result.band_flux[0] if result.band_flux else 0.0
+            result.kick_onset, result.band_flux[0] if result.band_flux else 0.0
         )
 
         # Get predicted beat state
         beat_state = self._beat_predictor.get_beat_state()
 
         # Override kick_onset with predicted beat (fires BEFORE actual beat)
-        if beat_state['predicted_beat']:
+        if beat_state["predicted_beat"]:
             # Create new result with predicted beat
             return FFTResult(
                 bands=result.bands,
@@ -1315,8 +1352,8 @@ class HybridAnalyzer:
                 snare_onset=result.snare_onset,
                 hihat_onset=result.hihat_onset,
                 timestamp=result.timestamp,
-                estimated_bpm=beat_state['tempo_bpm'],
-                bpm_confidence=beat_state['tempo_confidence']
+                estimated_bpm=beat_state["tempo_bpm"],
+                bpm_confidence=beat_state["tempo_confidence"],
             )
 
         # Update BPM from predictor even if no predicted beat
@@ -1331,8 +1368,8 @@ class HybridAnalyzer:
             snare_onset=result.snare_onset,
             hihat_onset=result.hihat_onset,
             timestamp=result.timestamp,
-            estimated_bpm=beat_state['tempo_bpm'],
-            bpm_confidence=beat_state['tempo_confidence']
+            estimated_bpm=beat_state["tempo_bpm"],
+            bpm_confidence=beat_state["tempo_confidence"],
         )
 
     @property
@@ -1379,6 +1416,7 @@ def list_audio_devices():
     # Try pyaudiowpatch first
     try:
         import pyaudiowpatch as pyaudio
+
         print("\n[pyaudiowpatch - WASAPI Loopback Support]")
         print("-" * 60)
 
@@ -1388,16 +1426,18 @@ def list_audio_devices():
         try:
             default_loopback = p.get_default_wasapi_loopback()
             print(f"  DEFAULT LOOPBACK: {default_loopback['name']}")
-            print(f"    Rate: {int(default_loopback['defaultSampleRate'])}Hz, "
-                  f"Channels: {default_loopback['maxInputChannels']}")
+            print(
+                f"    Rate: {int(default_loopback['defaultSampleRate'])}Hz, "
+                f"Channels: {default_loopback['maxInputChannels']}"
+            )
         except Exception:
             print("  (No default loopback found)")
 
         print("\n  All devices:")
         for i in range(p.get_device_count()):
             dev = p.get_device_info_by_index(i)
-            loopback = " [LOOPBACK]" if dev.get('isLoopbackDevice', False) else ""
-            if dev['maxInputChannels'] > 0:
+            loopback = " [LOOPBACK]" if dev.get("isLoopbackDevice", False) else ""
+            if dev["maxInputChannels"] > 0:
                 print(f"    {i}: {dev['name'][:45]}{loopback}")
 
         p.terminate()
@@ -1409,13 +1449,14 @@ def list_audio_devices():
     # Try sounddevice
     try:
         import sounddevice as sd
+
         print("\n[sounddevice - Input Devices]")
         print("-" * 60)
 
         devices = sd.query_devices()
         for i, dev in enumerate(devices):
-            if dev['max_input_channels'] > 0:
-                name = dev['name'][:45]
+            if dev["max_input_channels"] > 0:
+                name = dev["name"][:45]
                 print(f"    {i}: {name}")
 
     except ImportError:
@@ -1458,7 +1499,7 @@ if __name__ == "__main__":
                 # Display bands as bars
                 bars = ""
                 for i, (band, onset) in enumerate(zip(result.bands, result.onsets)):
-                    char = "█" if onset else "▓"
+                    char = "Ã¢â€“Ë†" if onset else "Ã¢â€“â€œ"
                     filled = int(band * 10)
                     bars += f"{char * filled:10} "
 
@@ -1467,12 +1508,12 @@ if __name__ == "__main__":
                 hihat = "H" if result.hihat_onset else " "
 
                 # Show BPM with confidence indicator
-                conf_bar = "█" * int(result.bpm_confidence * 5)
+                conf_bar = "Ã¢â€“Ë†" * int(result.bpm_confidence * 5)
                 bpm_str = f"{result.estimated_bpm:5.1f}BPM [{conf_bar:5}]"
 
                 print(f"\r{bars} [{kick}{snare}{hihat}] {bpm_str} peak:{result.peak:.2f}", end="")
 
-            time.sleep(1/60)
+            time.sleep(1 / 60)
 
     except KeyboardInterrupt:
         print("\nStopping...")

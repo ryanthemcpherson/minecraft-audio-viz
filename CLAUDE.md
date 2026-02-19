@@ -41,10 +41,36 @@ Windows Audio (WASAPI) → Python FFT Processor → WebSocket → Minecraft Plug
 5. **python_client/** - `VizClient` WebSocket client library
 6. **scripts/** - Quick-start PowerShell scripts
 
+7. **site/** (TypeScript/React) - Landing page and pattern gallery at mcav.live
+   - Next.js 15 with App Router, React 19, Tailwind CSS 4
+   - `src/app/` - Pages (home, getting started, pattern gallery, login, dashboard)
+   - `src/components/` - Navbar, AuthProvider, Three.js visualizations
+   - `src/lib/` - Auth utilities, audio simulation, pattern implementations
+   - `package.json` (name: mcav-site) - Independent from root package.json
+
+8. **coordinator/** (Python 3.12+) - Central DJ coordinator API
+   - FastAPI with SQLAlchemy async, PostgreSQL, Alembic migrations
+   - `app/main.py` - FastAPI application entry point
+   - `app/config.py` - Pydantic Settings configuration (MCAV_* env vars)
+   - `app/models/` - SQLAlchemy ORM models and Pydantic schemas
+   - `app/routers/` - API routes (servers, shows, connect, auth, orgs, tenants)
+   - `app/services/` - Business logic (auth, Discord OAuth, JWT, rate limiting)
+   - `alembic/` - Database migrations
+   - `tests/` - Pytest async tests
+   - `pyproject.toml` (name: mcav-coordinator) - Independent from root pyproject.toml
+   - `Dockerfile` + `Procfile` - Railway deployment
+
+9. **worker/** (TypeScript) - Cloudflare Workers tenant router
+   - `src/index.ts` - Wildcard subdomain routing for multi-tenant
+   - `wrangler.toml` - Cloudflare Workers configuration
+   - `package.json` (name: mcav-tenant-router)
+
 ### WebSocket Ports
 - 8765: Minecraft plugin ↔ Python processor
 - 8766: Browser clients ↔ Python processor
 - 9000: Remote DJs ↔ VJ server
+- 8090: Coordinator REST API
+- 3000: Site dev server (Next.js)
 
 ### Frequency Bands
 Bass (40-250Hz), Low-mid (250-500Hz), Mid (500-2000Hz), High-mid (2-6kHz), High (6-20kHz)
@@ -52,6 +78,20 @@ Bass (40-250Hz), Low-mid (250-500Hz), Mid (500-2000Hz), High-mid (2-6kHz), High 
 Note: The system uses 5 frequency bands with ultra-low-latency mode (21ms window) as default. Sub-bass was removed since 1024-sample FFT cannot accurately detect frequencies below 43Hz.
 
 ## Quick Start
+
+### Site & Coordinator Development
+```bash
+# Site (landing page at mcav.live)
+cd site && npm install && npm run dev   # http://localhost:3000
+
+# Coordinator (DJ coordination API)
+cd coordinator
+pip install -e ".[dev]"
+uvicorn app.main:app --reload --port 8090   # http://localhost:8090
+
+# Run coordinator tests
+cd coordinator && pytest
+```
 
 ### Installation
 ```bash

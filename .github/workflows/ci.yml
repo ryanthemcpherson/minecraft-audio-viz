@@ -1,0 +1,479 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python: lint + test
+  # ---------------------------------------------------------------------------
+  python-lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check
+        run: ruff check audio_processor/ python_client/
+
+      - name: Ruff format check
+        run: ruff format --check audio_processor/ python_client/
+
+  python-test:
+    name: Python Test (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            pip-${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest audio_processor/tests/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Python: security static analysis (Bandit)
+  # ---------------------------------------------------------------------------
+  python-sast:
+    name: Python SAST (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install bandit
+        run: pip install bandit[toml]
+
+      - name: Run Bandit
+        run: bandit -r audio_processor/ python_client/ -c pyproject.toml -f json -o bandit-report.json || true
+
+      - name: Bandit (console output)
+        continue-on-error: true
+        run: bandit -r audio_processor/ python_client/ -c pyproject.toml
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report-${{ github.sha }}
+          path: bandit-report.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Python: dependency audit (pip-audit)
+  # ---------------------------------------------------------------------------
+  python-audit:
+    name: Python Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pip-audit
+
+      - name: Run pip-audit
+        continue-on-error: true
+        run: pip-audit --desc --local
+
+  # ---------------------------------------------------------------------------
+  # Java: build Minecraft plugin
+  # ---------------------------------------------------------------------------
+  java-build:
+    name: Java Build (Plugin JAR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: minecraft_plugin
+        run: mvn clean package -DskipTests
+
+      - name: SpotBugs (advisory)
+        working-directory: minecraft_plugin
+        continue-on-error: true
+        run: mvn spotbugs:check
+
+      - name: Upload plugin JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: audioviz-plugin-${{ github.sha }}
+          path: minecraft_plugin/target/audioviz-plugin-*.jar
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Next.js: site build + lint
+  # ---------------------------------------------------------------------------
+  site-build:
+    name: Site Build (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Lint
+        working-directory: site
+        run: npm run lint
+
+      - name: Build
+        working-directory: site
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Coordinator: Python lint + test
+  # ---------------------------------------------------------------------------
+  coordinator-test:
+    name: Coordinator Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check coordinator
+        run: ruff check coordinator/
+
+      - name: Ruff format check coordinator
+        run: ruff format --check coordinator/
+
+      - name: Install coordinator dependencies
+        working-directory: coordinator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run coordinator tests
+        working-directory: coordinator
+        run: pytest tests/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Java: OWASP Dependency-Check
+  # ---------------------------------------------------------------------------
+  java-audit:
+    name: Java Dependency Audit (OWASP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Cache OWASP NVD data
+        uses: actions/cache@v5
+        with:
+          path: ~/.owasp/dependency-check-data
+          key: owasp-nvd-${{ hashFiles('minecraft_plugin/pom.xml') }}
+          restore-keys: owasp-nvd-
+
+      - name: OWASP Dependency-Check
+        working-directory: minecraft_plugin
+        continue-on-error: true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          mvn org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=9 \
+            -Dformats=HTML,JSON \
+            -DprettyPrint=true \
+            -DnvdApiKey="${NVD_API_KEY}" \
+            -DdataDirectory="${HOME}/.owasp/dependency-check-data"
+
+      - name: Upload OWASP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-report-${{ github.sha }}
+          path: minecraft_plugin/target/dependency-check-report.*
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Node.js: npm audit (root + dj_client)
+  # ---------------------------------------------------------------------------
+  npm-audit:
+    name: npm Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Audit root package
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high || true
+
+      - name: Audit dj_client package
+        working-directory: dj_client
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high || true
+
+      - name: Audit site package
+        working-directory: site
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high || true
+
+      - name: Audit worker package
+        working-directory: worker
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high || true
+
+  # ---------------------------------------------------------------------------
+  # License compliance check
+  # ---------------------------------------------------------------------------
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pip-licenses
+
+      - name: Python license check
+        run: |
+          echo "### Python Dependency Licenses" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          pip-licenses --format=markdown --with-urls >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          # Fail on copyleft licenses that are incompatible with MIT
+          pip-licenses --fail-on="GPL-2.0;GPL-3.0;AGPL-3.0;LGPL-2.0;LGPL-2.1;LGPL-3.0"
+
+      - name: Java license check
+        working-directory: minecraft_plugin
+        run: |
+          mvn org.codehaus.mojo:license-maven-plugin:aggregate-third-party-report \
+            -Dlicense.excludedScopes=test
+          echo "### Java Dependency Licenses" >> $GITHUB_STEP_SUMMARY
+          echo "See artifact for full report." >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload license reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-reports-${{ github.sha }}
+          path: |
+            minecraft_plugin/target/site/aggregate-third-party-report.html
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Rust: cargo-audit (DJ Client / Tauri)
+  # ---------------------------------------------------------------------------
+  rust-audit:
+    name: Rust Dependency Audit (cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo-audit
+        working-directory: dj_client/src-tauri
+        run: cargo audit
+
+  # ---------------------------------------------------------------------------
+  # SBOM generation (CycloneDX)
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: [java-build]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Install Python deps + CycloneDX
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" cyclonedx-bom
+
+      - name: Generate Python SBOM
+        run: cyclonedx-py environment -o sbom-python.json --output-format json
+
+      - name: Generate Java SBOM
+        working-directory: minecraft_plugin
+        run: |
+          mvn org.cyclonedx:cyclonedx-maven-plugin:makeBom \
+            -DoutputFormat=json \
+            -DoutputName=sbom-java
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom-python.json
+            minecraft_plugin/target/sbom-java.json
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Checksums for release artifacts
+  # ---------------------------------------------------------------------------
+  checksums:
+    name: Generate Checksums
+    runs-on: ubuntu-latest
+    needs: [java-build]
+    steps:
+      - name: Download plugin JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: audioviz-plugin-${{ github.sha }}
+          path: ./artifacts/
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          echo "### Artifact Checksums" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat SHA256SUMS.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ github.sha }}
+          path: artifacts/SHA256SUMS.txt
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Summary gate -- all required checks must pass
+  # ---------------------------------------------------------------------------
+  ci-passed:
+    name: CI Passed
+    if: always()
+    needs: [python-lint, python-test, java-build, site-build, coordinator-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required results
+        run: |
+          # Core jobs (blocking)
+          if [[ "${{ needs.python-lint.result }}" == "failure" ||
+                "${{ needs.python-test.result }}" == "failure" ||
+                "${{ needs.java-build.result }}" == "failure" ||
+                "${{ needs.site-build.result }}" == "failure" ||
+                "${{ needs.coordinator-test.result }}" == "failure" ]]; then
+            echo "One or more required CI jobs failed."
+            exit 1
+          fi
+          echo "All required CI checks passed."
+
+      - name: Report advisory results
+        if: always()
+        run: |
+          echo "### Advisory Job Results (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bandit SAST | ${{ needs.python-sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| pip-audit | ${{ needs.python-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OWASP | ${{ needs.java-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| npm audit | ${{ needs.npm-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| cargo-audit | ${{ needs.rust-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| License | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pong.schema.json",
+  "title": "PongMessage",
+  "description": "Liveness check response to a ping request.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "pong"
+    },
+    "v": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Server timestamp in milliseconds since epoch"
+    }
+  },
+  "required": ["type", "timestamp"]
+}

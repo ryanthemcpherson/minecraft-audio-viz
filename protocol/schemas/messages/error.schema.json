@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "error.schema.json",
+  "title": "ErrorMessage",
+  "description": "Error response for invalid or failed requests.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "error"
+    },
+    "v": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable error description"
+    },
+    "code": {
+      "type": "string",
+      "description": "Machine-readable error code (optional)"
+    }
+  },
+  "required": ["type", "message"]
+}

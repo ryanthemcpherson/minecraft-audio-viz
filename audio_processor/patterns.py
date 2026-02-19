@@ -9,12 +9,12 @@ import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple
-
+from typing import Any, Dict, List, Tuple
 
 # ============================================================================
 # Utility Functions
 # ============================================================================
+
 
 def lerp(a: float, b: float, t: float) -> float:
     """Linear interpolation between a and b by factor t."""
@@ -32,8 +32,9 @@ def clamp(value: float, min_val: float = 0.0, max_val: float = 1.0) -> float:
     return max(min_val, min(max_val, value))
 
 
-def rotate_point_3d(x: float, y: float, z: float,
-                    rx: float, ry: float, rz: float) -> Tuple[float, float, float]:
+def rotate_point_3d(
+    x: float, y: float, z: float, rx: float, ry: float, rz: float
+) -> Tuple[float, float, float]:
     """Rotate a 3D point by angles rx, ry, rz (in radians)."""
     # Rotate around X axis
     cos_x, sin_x = math.cos(rx), math.sin(rx)
@@ -75,16 +76,18 @@ def simple_noise(x: float, y: float, z: float, seed: int = 0) -> float:
     # Hash-like function for deterministic noise
     n = int(x * 73 + y * 179 + z * 283 + seed * 397)
     n = (n << 13) ^ n
-    return 1.0 - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0
+    return 1.0 - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7FFFFFFF) / 1073741824.0
 
 
 # ============================================================================
 # Data Classes
 # ============================================================================
 
+
 @dataclass
 class PatternConfig:
     """Configuration for visualization patterns."""
+
     entity_count: int = 16
     zone_size: float = 10.0
     beat_boost: float = 1.5
@@ -95,11 +98,12 @@ class PatternConfig:
 @dataclass
 class AudioState:
     """Current audio state for pattern calculation."""
+
     bands: List[float]  # 5 frequency bands (bass, low-mid, mid, high-mid, high)
-    amplitude: float    # Overall amplitude 0-1
-    is_beat: bool       # Beat detected this frame
+    amplitude: float  # Overall amplitude 0-1
+    is_beat: bool  # Beat detected this frame
     beat_intensity: float  # Beat strength 0-1
-    frame: int          # Frame counter
+    frame: int  # Frame counter
 
 
 class VisualizationPattern(ABC):
@@ -156,7 +160,7 @@ class StackedTower(VisualizationPattern):
 
         # Propagate bounce wave upward
         for i in range(min(n, len(self._bounce_wave)) - 1, 0, -1):
-            self._bounce_wave[i] = self._bounce_wave[i] * 0.9 + self._bounce_wave[i-1] * 0.15
+            self._bounce_wave[i] = self._bounce_wave[i] * 0.9 + self._bounce_wave[i - 1] * 0.15
         self._bounce_wave[0] *= 0.85
 
         for i in range(n):
@@ -189,15 +193,17 @@ class StackedTower(VisualizationPattern):
                 scale *= 1.5
                 y += 0.05
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0.05, min(0.95, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0.05, min(0.95, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -283,15 +289,17 @@ class ExpandingSphere(VisualizationPattern):
             if audio.is_beat:
                 scale *= 1.4
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -328,7 +336,7 @@ class DNAHelix(VisualizationPattern):
 
         # Helix parameters
         radius = 0.15 + audio.amplitude * 0.1
-        pitch = 0.08 * self._stretch
+        0.08 * self._stretch
 
         for i in range(n):
             # Alternate between two helixes
@@ -345,7 +353,7 @@ class DNAHelix(VisualizationPattern):
             y = 0.1 + (idx / (n / 2)) * 0.8  # Spread vertically
 
             # Pulse radius with band
-            band_idx = idx % 6
+            band_idx = idx % 5
             pulse = audio.bands[band_idx] * 0.05
             x += math.cos(angle) * pulse
             z += math.sin(angle) * pulse
@@ -354,15 +362,17 @@ class DNAHelix(VisualizationPattern):
             if audio.is_beat:
                 scale *= 1.3
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -429,17 +439,23 @@ class Supernova(VisualizationPattern):
             z = center + r * math.sin(phi) * math.sin(theta)
 
             band_idx = i % 5
-            scale = self.config.base_scale + audio.bands[band_idx] * 0.3 + abs(self._velocities[i]) * 0.5
+            scale = (
+                self.config.base_scale
+                + audio.bands[band_idx] * 0.3
+                + abs(self._velocities[i]) * 0.5
+            )
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -501,15 +517,17 @@ class FloatingPlatforms(VisualizationPattern):
 
                 scale = self.config.base_scale + audio.bands[band] * 0.5
 
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -555,21 +573,23 @@ class AtomModel(VisualizationPattern):
 
             scale = self.config.base_scale + audio.bands[0] * 0.4 + self._nucleus_pulse * 0.3
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": 0,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": 0,
+                    "visible": True,
+                }
+            )
 
         # Electrons: remaining blocks on 3 orbital planes
         electron_count = n - nucleus_count
         electrons_per_orbit = max(1, electron_count // 3)
 
-        orbit_tilts = [(0, 0), (math.pi/3, 0), (0, math.pi/3)]  # (tilt_x, tilt_z)
+        orbit_tilts = [(0, 0), (math.pi / 3, 0), (0, math.pi / 3)]  # (tilt_x, tilt_z)
         orbit_speeds = [1.0, 1.3, 0.8]
 
         for orbit in range(3):
@@ -612,18 +632,20 @@ class AtomModel(VisualizationPattern):
                 y = center + py3
                 z = center + pz2
 
-                band_idx = (orbit + 2) % 6
+                band_idx = (orbit + 2) % 5
                 scale = self.config.base_scale + audio.bands[band_idx] * 0.3
 
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -640,7 +662,7 @@ class Fountain(VisualizationPattern):
 
     def __init__(self, config: PatternConfig = None):
         super().__init__(config)
-        self._particles = []  # [(x, y, z, vx, vy, vz)]
+        self._particles = []  # [(x, y, z, vx, vy, vz, age, spin)]
 
     def calculate_entities(self, audio: AudioState) -> List[Dict]:
         n = self.config.entity_count
@@ -652,24 +674,38 @@ class Fountain(VisualizationPattern):
                 self._particles.append(self._spawn_particle(audio, i))
 
         entities = []
-        center = 0.5
         gravity = 0.015
+        drag = 0.985
 
         for i in range(n):
             p = self._particles[i]
-            x, y, z, vx, vy, vz = p
+            x, y, z, vx, vy, vz, age, spin = p
 
             # Update physics
             vy -= gravity
+            age += 0.016
+
+            # Add gentle swirl and drag for a more fluid fountain
+            swirl = 0.02 + audio.bands[2] * 0.05
+            vx += -(z - 0.5) * swirl
+            vz += (x - 0.5) * swirl
+
+            spin_speed = (0.6 + audio.bands[3] * 1.2) * spin
+            cos_s = math.cos(spin_speed * 0.016)
+            sin_s = math.sin(spin_speed * 0.016)
+            vx, vz = (vx * cos_s - vz * sin_s, vx * sin_s + vz * cos_s)
+
+            vx *= drag
+            vz *= drag
             x += vx * 0.016 * 60
             y += vy * 0.016 * 60
             z += vz * 0.016 * 60
 
             # Respawn if below ground or on beat
             if y < 0 or (audio.is_beat and random.random() < 0.3):
-                x, y, z, vx, vy, vz = self._spawn_particle(audio, i)
+                x, y, z, vx, vy, vz, age, spin = self._spawn_particle(audio, i)
 
-            self._particles[i] = (x, y, z, vx, vy, vz)
+            self._particles[i] = (x, y, z, vx, vy, vz, age, spin)
 
             band_idx = i % 5
             scale = self.config.base_scale + audio.bands[band_idx] * 0.4
@@ -677,16 +713,19 @@ class Fountain(VisualizationPattern):
             # Scale based on height (bigger at peak)
             height_scale = 1.0 + (y - 0.5) * 0.5 if y > 0.5 else 1.0
             scale *= height_scale
+            scale += min(0.3, age * 0.1)
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -701,13 +740,18 @@ class Fountain(VisualizationPattern):
             speed *= 1.5
 
         angle = random.uniform(0, math.pi * 2)
-        spread = 0.003 + audio.bands[idx % 6] * 0.002
+        spread = 0.003 + audio.bands[idx % 5] * 0.003
 
         vx = math.cos(angle) * spread
         vz = math.sin(angle) * spread
-        vy = speed + random.uniform(0, 0.005)
+        vy = speed + random.uniform(0, 0.008)
 
-        return (center, 0.05, center, vx, vy, vz)
+        spawn_radius = 0.02 + audio.bands[1] * 0.03
+        x = center + math.cos(angle) * spawn_radius
+        z = center + math.sin(angle) * spawn_radius
+        spin = random.uniform(-1.0, 1.0)
+
+        return (x, 0.05, z, vx, vy, vz, 0.0, spin)
 
 
 class BreathingCube(VisualizationPattern):
@@ -733,8 +777,14 @@ class BreathingCube(VisualizationPattern):
 
         # Always include 8 vertices
         vertices = [
-            (-1, -1, -1), (-1, -1, 1), (-1, 1, -1), (-1, 1, 1),
-            (1, -1, -1), (1, -1, 1), (1, 1, -1), (1, 1, 1),
+            (-1, -1, -1),
+            (-1, -1, 1),
+            (-1, 1, -1),
+            (-1, 1, 1),
+            (1, -1, -1),
+            (1, -1, 1),
+            (1, 1, -1),
+            (1, 1, 1),
         ]
         points.extend(vertices)
 
@@ -743,9 +793,18 @@ class BreathingCube(VisualizationPattern):
 
         # Add edge midpoints (12 edges)
         edge_mids = [
-            (0, -1, -1), (0, 1, -1), (0, -1, 1), (0, 1, 1),  # X edges
-            (-1, 0, -1), (1, 0, -1), (-1, 0, 1), (1, 0, 1),  # Y edges
-            (-1, -1, 0), (1, -1, 0), (-1, 1, 0), (1, 1, 0),  # Z edges
+            (0, -1, -1),
+            (0, 1, -1),
+            (0, -1, 1),
+            (0, 1, 1),  # X edges
+            (-1, 0, -1),
+            (1, 0, -1),
+            (-1, 0, 1),
+            (1, 0, 1),  # Y edges
+            (-1, -1, 0),
+            (1, -1, 0),
+            (-1, 1, 0),
+            (1, 1, 0),  # Z edges
         ]
         points.extend(edge_mids)
 
@@ -754,9 +813,12 @@ class BreathingCube(VisualizationPattern):
 
         # Add face centers (6 faces)
         face_centers = [
-            (0, 0, -1), (0, 0, 1),   # Front/Back
-            (-1, 0, 0), (1, 0, 0),   # Left/Right
-            (0, -1, 0), (0, 1, 0),   # Bottom/Top
+            (0, 0, -1),
+            (0, 0, 1),  # Front/Back
+            (-1, 0, 0),
+            (1, 0, 0),  # Left/Right
+            (0, -1, 0),
+            (0, 1, 0),  # Bottom/Top
         ]
         points.extend(face_centers)
 
@@ -765,12 +827,18 @@ class BreathingCube(VisualizationPattern):
             # Add random points on cube surface
             face = random.randint(0, 5)
             u, v = random.uniform(-0.8, 0.8), random.uniform(-0.8, 0.8)
-            if face == 0: points.append((u, v, -1))
-            elif face == 1: points.append((u, v, 1))
-            elif face == 2: points.append((-1, u, v))
-            elif face == 3: points.append((1, u, v))
-            elif face == 4: points.append((u, -1, v))
-            else: points.append((u, 1, v))
+            if face == 0:
+                points.append((u, v, -1))
+            elif face == 1:
+                points.append((u, v, 1))
+            elif face == 2:
+                points.append((-1, u, v))
+            elif face == 3:
+                points.append((1, u, v))
+            elif face == 4:
+                points.append((u, -1, v))
+            else:
+                points.append((u, 1, v))
 
         return points[:n]
 
@@ -827,15 +895,17 @@ class BreathingCube(VisualizationPattern):
             if audio.is_beat:
                 scale *= 1.4
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -860,6 +930,8 @@ class Mushroom(VisualizationPattern):
         self._wobble = 0.0
         self._spore_time = 0.0
         self._grow = 1.0
+        self._cap_tilt = 0.0
+        self._stem_sway = 0.0
         # Pre-generate spot positions (consistent each frame)
         self._spot_angles = [i * 2.39996 for i in range(7)]  # Golden angle spacing
         self._spot_phis = [0.3 + (i % 3) * 0.2 for i in range(7)]
@@ -885,23 +957,32 @@ class Mushroom(VisualizationPattern):
             self._glow = 1.0
             self._wobble = 0.15 * audio.amplitude
             self._grow = 1.15
+            self._cap_tilt = 0.08 + audio.amplitude * 0.08
         self._pulse *= 0.92
         self._glow *= 0.93
         self._wobble *= 0.9
         self._grow = 1.0 + (self._grow - 1.0) * 0.95
+        self._cap_tilt *= 0.92
 
         self._spore_time += 0.016
 
         # Calculate wobble offset
         wobble_x = math.sin(self._spore_time * 2) * self._wobble
         wobble_z = math.cos(self._spore_time * 2.5) * self._wobble * 0.7
+        self._stem_sway = math.sin(self._spore_time * 1.1) * 0.03 + audio.bands[1] * 0.04
+        cap_offset_x = math.sin(self._rotation * 0.8) * self._cap_tilt + self._stem_sway * 0.6
+        cap_offset_z = math.cos(self._rotation * 0.6) * self._cap_tilt * 0.8 + self._stem_sway * 0.3
 
-        # Allocate entities: 20% stem, 45% cap, 15% gills, 10% spots, 10% spores
+        # Allocate entities: 20% stem, 42% cap, 15% gills, 10% spots, 7% rim, rest spores
         stem_count = max(6, n // 5)
-        cap_count = max(10, int(n * 0.45))
+        cap_count = max(10, int(n * 0.42))
         gill_count = max(6, int(n * 0.15))
         spot_count = max(5, n // 10)
-        spore_count = n - stem_count - cap_count - gill_count - spot_count
+        rim_count = max(4, n // 14)
+        spore_count = n - stem_count - cap_count - gill_count - spot_count - rim_count
+        if spore_count < 0:
+            cap_count = max(6, cap_count + spore_count)
+            spore_count = 0
 
         entity_idx = 0
         breathe_scale = 1.0 + self._breathe * 0.05
@@ -918,7 +999,7 @@ class Mushroom(VisualizationPattern):
 
             # Vertical position with variation - not flat rings
             # Base position spreads blocks along full stem height
-            base_t = (i / stem_count)
+            base_t = i / stem_count
             # Add sinusoidal variation based on angle for organic staggering
             height_variation = math.sin(angle_base * 3) * 0.04 + math.cos(angle_base * 5) * 0.02
             y_t = base_t + height_variation
@@ -936,29 +1017,36 @@ class Mushroom(VisualizationPattern):
             twist = y_t * math.pi * 0.6
             angle = self._rotation + twist + angle_base
 
-            x = center + math.cos(angle) * current_radius + wobble_x * y_t
-            z = center + math.sin(angle) * current_radius + wobble_z * y_t
+            sway_amount = self._stem_sway * (0.2 + y_t * 0.8)
+            x = center + math.cos(angle) * current_radius + wobble_x * y_t + sway_amount
+            z = center + math.sin(angle) * current_radius + wobble_z * y_t + sway_amount * 0.6
             y = ring_y
 
             # Vary band assignment for color variation in stem
             band_idx = 1 + (i % 2)  # Alternate between bands 1 and 2
-            base_scale = self.config.base_scale * (0.6 + y_t * 0.3)  # Smaller at base, larger at top
+            base_scale = self.config.base_scale * (
+                0.6 + y_t * 0.3
+            )  # Smaller at base, larger at top
             scale = base_scale + audio.bands[band_idx] * 0.2
 
-            entities.append({
-                "id": f"block_{entity_idx}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{entity_idx}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
             entity_idx += 1
 
         # === CAP (dome with classic toadstool shape) ===
         cap_base_y = 0.08 + stem_height
-        cap_radius = (0.22 + self._pulse * 0.06 + audio.bands[0] * 0.04) * breathe_scale * self._grow
+        cap_radius = (
+            (0.22 + self._pulse * 0.06 + audio.bands[0] * 0.04) * breathe_scale * self._grow
+        )
         layers = max(4, int(math.sqrt(cap_count)))
         points_placed = 0
 
@@ -972,7 +1060,8 @@ class Mushroom(VisualizationPattern):
             layer_radius = cap_radius * math.sin(phi)
             # Flatten top, curve down at edge
             height_factor = math.cos(phi) * 0.5 + (1 - layer_t) * 0.15
-            layer_y = cap_base_y + cap_radius * height_factor
+            ripple = math.sin(self._rotation * 1.8 + layer * 0.8) * audio.bands[2] * 0.025
+            layer_y = cap_base_y + cap_radius * height_factor + ripple
 
             points_this_layer = max(4, int(6 + layer * 4))
 
@@ -981,27 +1070,57 @@ class Mushroom(VisualizationPattern):
                     break
 
                 angle = self._rotation * 0.4 + (j / points_this_layer) * math.pi * 2
-                x = center + math.cos(angle) * layer_radius + wobble_x
-                z = center + math.sin(angle) * layer_radius + wobble_z
+                x = center + math.cos(angle) * layer_radius + wobble_x + cap_offset_x
+                z = center + math.sin(angle) * layer_radius + wobble_z + cap_offset_z
                 y = layer_y
 
                 band_idx = 0  # Cap uses bass
-                scale = self.config.base_scale * 1.1 + audio.bands[band_idx] * 0.4 + self._glow * 0.25
+                scale = (
+                    self.config.base_scale * 1.1 + audio.bands[band_idx] * 0.4 + self._glow * 0.25
+                )
 
-                entities.append({
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
+                entity_idx += 1
+                points_placed += 1
+
+        # === RIM (lip around cap edge) ===
+        rim_radius = cap_radius * 0.92
+        rim_drop = 0.02 + audio.bands[2] * 0.03
+        for r in range(rim_count):
+            angle = self._rotation * 0.5 + (r / rim_count) * math.pi * 2
+            lip_wave = math.sin(angle * 2 + self._rotation) * 0.01
+            x = center + math.cos(angle) * rim_radius + cap_offset_x
+            z = center + math.sin(angle) * rim_radius + cap_offset_z
+            y = cap_base_y + cap_radius * 0.12 - rim_drop + lip_wave
+
+            band_idx = 2
+            scale = self.config.base_scale * 0.8 + audio.bands[band_idx] * 0.25 + self._glow * 0.2
+
+            entities.append(
+                {
                     "id": f"block_{entity_idx}",
                     "x": max(0, min(1, x)),
                     "y": max(0, min(1, y)),
                     "z": max(0, min(1, z)),
                     "scale": min(self.config.max_scale, scale),
                     "band": band_idx,
-                    "visible": True
-                })
-                entity_idx += 1
-                points_placed += 1
+                    "visible": True,
+                }
+            )
+            entity_idx += 1
 
         # === GILLS (radial lines under cap) ===
-        gill_y = cap_base_y - 0.02
+        gill_y = cap_base_y - 0.02 - audio.bands[1] * 0.015
         num_gill_lines = max(4, gill_count // 3)
         points_per_gill = gill_count // num_gill_lines
 
@@ -1016,22 +1135,24 @@ class Mushroom(VisualizationPattern):
                 t = (p + 1) / (points_per_gill + 1)
                 r = stem_radius + t * (cap_radius * 0.85 - stem_radius)
 
-                x = center + math.cos(gill_angle) * r + wobble_x
-                z = center + math.sin(gill_angle) * r + wobble_z
-                y = gill_y - t * 0.03  # Slight droop
+                x = center + math.cos(gill_angle) * r + wobble_x + cap_offset_x * 0.4
+                z = center + math.sin(gill_angle) * r + wobble_z + cap_offset_z * 0.4
+                y = gill_y - t * (0.03 + audio.bands[1] * 0.02)  # Slight droop
 
                 band_idx = 3  # Gills use mid-high
-                scale = self.config.base_scale * 0.5 + audio.bands[band_idx] * 0.2
+                scale = self.config.base_scale * 0.5 + audio.bands[band_idx] * 0.22
 
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
                 entity_idx += 1
 
         # === SPOTS (white dots on cap - classic Amanita) ===
@@ -1041,22 +1162,24 @@ class Mushroom(VisualizationPattern):
             spot_y = cap_base_y + cap_radius * math.cos(spot_phi) * 0.5 + 0.02
 
             spot_angle = self._rotation * 0.4 + self._spot_angles[s]
-            x = center + math.cos(spot_angle) * spot_r + wobble_x
-            z = center + math.sin(spot_angle) * spot_r + wobble_z
+            x = center + math.cos(spot_angle) * spot_r + wobble_x + cap_offset_x
+            z = center + math.sin(spot_angle) * spot_r + wobble_z + cap_offset_z
             y = spot_y
 
             band_idx = 5  # Spots use high freq
             scale = self.config.base_scale * 0.9 + self._glow * 0.4 + audio.bands[4] * 0.3
 
-            entities.append({
-                "id": f"block_{entity_idx}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{entity_idx}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
             entity_idx += 1
 
         # === SPORES (floating particles rising up) ===
@@ -1068,10 +1191,10 @@ class Mushroom(VisualizationPattern):
             # Spiral upward from cap
             spore_angle = phase * 2.0 + sp
             spore_r = 0.05 + spore_life * 0.15 + math.sin(phase * 3) * 0.03
-            spore_y = cap_base_y + 0.1 + spore_life * 0.4
+            spore_y = cap_base_y + 0.1 + spore_life * 0.4 + audio.bands[4] * 0.05
 
-            x = center + math.cos(spore_angle) * spore_r + wobble_x * 0.5
-            z = center + math.sin(spore_angle) * spore_r + wobble_z * 0.5
+            x = center + math.cos(spore_angle) * spore_r + wobble_x * 0.5 + cap_offset_x * 0.6
+            z = center + math.sin(spore_angle) * spore_r + wobble_z * 0.5 + cap_offset_z * 0.6
             y = spore_y
 
             band_idx = 4  # Spores use high-mid
@@ -1079,15 +1202,17 @@ class Mushroom(VisualizationPattern):
             fade = math.sin(spore_life * math.pi)
             scale = self.config.base_scale * 0.3 * fade + audio.bands[band_idx] * 0.15 * fade
 
-            entities.append({
-                "id": f"block_{entity_idx}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, max(0.01, scale)),
-                "band": band_idx,
-                "visible": fade > 0.1
-            })
+            entities.append(
+                {
+                    "id": f"block_{entity_idx}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, max(0.01, scale)),
+                    "band": band_idx,
+                    "visible": fade > 0.1,
+                }
+            )
             entity_idx += 1
 
         self.update()
@@ -1136,7 +1261,7 @@ class Skull(VisualizationPattern):
                 rad = math.radians(angle)
                 x = math.sin(rad) * width
                 z = -math.cos(rad) * depth - 0.04
-                points.append((x, z, 'jaw'))
+                points.append((x, z, "jaw"))
 
         elif y_norm < 0.25:
             # Lower jaw with teeth
@@ -1147,7 +1272,7 @@ class Skull(VisualizationPattern):
                 rad = math.radians(angle)
                 x = math.sin(rad) * width
                 z = -math.cos(rad) * depth - 0.02
-                points.append((x, z, 'jaw'))
+                points.append((x, z, "jaw"))
 
         elif y_norm < 0.35:
             # Upper jaw / maxilla with teeth
@@ -1159,14 +1284,14 @@ class Skull(VisualizationPattern):
                 rad = math.radians(angle)
                 x = math.sin(rad) * width
                 z = -math.cos(rad) * depth
-                points.append((x, z, 'face'))
+                points.append((x, z, "face"))
             # Sides connecting to back
             if not front_only:
                 for side in [-1, 1]:
                     for d in range(3):
                         x = side * width
                         z = -depth + 0.02 + d * 0.04
-                        points.append((x, z, 'face'))
+                        points.append((x, z, "face"))
 
         elif y_norm < 0.45:
             # Nose cavity and cheekbones
@@ -1175,12 +1300,12 @@ class Skull(VisualizationPattern):
             # Nose hole (center front)
             nose_width = 0.03 * (1 - t * 0.5)
             for nx in [-nose_width, 0, nose_width]:
-                points.append((nx, -0.11, 'nose'))
+                points.append((nx, -0.11, "nose"))
             # Cheekbones (sides)
             for side in [-1, 1]:
-                points.append((side * 0.14, -0.08, 'cheek'))
-                points.append((side * 0.16, -0.04, 'cheek'))
-                points.append((side * 0.15, 0.0, 'face'))
+                points.append((side * 0.14, -0.08, "cheek"))
+                points.append((side * 0.16, -0.04, "cheek"))
+                points.append((side * 0.15, 0.0, "face"))
 
         elif y_norm < 0.55:
             # Eye sockets
@@ -1194,13 +1319,13 @@ class Skull(VisualizationPattern):
                     rad = math.radians(angle)
                     ex = eye_cx + math.cos(rad) * 0.04
                     ez = eye_cz + math.sin(rad) * 0.025
-                    points.append((ex, ez, 'eye'))
+                    points.append((ex, ez, "eye"))
             # Bridge of nose between eyes
-            points.append((0, -0.10, 'nose'))
+            points.append((0, -0.10, "nose"))
             # Outer face contour
             for side in [-1, 1]:
-                points.append((side * 0.15, -0.05, 'face'))
-                points.append((side * 0.16, 0.0, 'face'))
+                points.append((side * 0.15, -0.05, "face"))
+                points.append((side * 0.16, 0.0, "face"))
 
         elif y_norm < 0.65:
             # Brow ridge and upper eye sockets
@@ -1209,11 +1334,11 @@ class Skull(VisualizationPattern):
             for bx in range(-12, 13, 3):
                 x = bx * 0.01
                 z = -0.10 - abs(x) * 0.3  # Curved forward
-                points.append((x, z, 'brow'))
+                points.append((x, z, "brow"))
             # Temple sides
             for side in [-1, 1]:
-                points.append((side * 0.15, -0.03, 'temple'))
-                points.append((side * 0.14, 0.02, 'cranium'))
+                points.append((side * 0.15, -0.03, "temple"))
+                points.append((side * 0.14, 0.02, "cranium"))
 
         elif y_norm < 0.80:
             # Forehead and temporal region
@@ -1224,7 +1349,7 @@ class Skull(VisualizationPattern):
                 rad = math.radians(angle)
                 x = math.sin(rad) * width
                 z = -math.cos(rad) * 0.12 * (1 - t * 0.3)
-                points.append((x, z, 'cranium'))
+                points.append((x, z, "cranium"))
 
         else:
             # Top of skull (dome)
@@ -1235,9 +1360,9 @@ class Skull(VisualizationPattern):
                     rad = math.radians(angle)
                     x = math.cos(rad) * radius
                     z = math.sin(rad) * radius * 0.9
-                    points.append((x, z, 'cranium'))
+                    points.append((x, z, "cranium"))
             else:
-                points.append((0, 0, 'cranium'))
+                points.append((0, 0, "cranium"))
 
         return points
 
@@ -1264,14 +1389,14 @@ class Skull(VisualizationPattern):
                 angle = i * math.pi * 2 / 8
                 x = eye_cx + math.cos(angle) * 0.025
                 z = -0.08 + math.sin(angle) * 0.015
-                all_points.append(('eye_inner', x, eye_cy, z))
+                all_points.append(("eye_inner", x, eye_cy, z))
 
         # Extra teeth detail
         for i in range(10):
             t = i / 9
             x = -0.07 + t * 0.14
-            all_points.append(('teeth_upper', x, 0.30, -0.095))
-            all_points.append(('teeth_lower', x, 0.22, -0.09))
+            all_points.append(("teeth_upper", x, 0.30, -0.095))
+            all_points.append(("teeth_lower", x, 0.22, -0.09))
 
         # Scale to fit n points - take evenly distributed subset if too many
         if len(all_points) > n:
@@ -1289,8 +1414,12 @@ class Skull(VisualizationPattern):
             while len(result) < n:
                 # Add slight variation to duplicates
                 orig = all_points[idx % len(all_points)]
-                varied = (orig[0], orig[1] + (idx * 0.001) % 0.01,
-                         orig[2], orig[3] + (idx * 0.001) % 0.01)
+                varied = (
+                    orig[0],
+                    orig[1] + (idx * 0.001) % 0.01,
+                    orig[2],
+                    orig[3] + (idx * 0.001) % 0.01,
+                )
                 result.append(varied)
                 idx += 1
             return result[:n]
@@ -1332,10 +1461,15 @@ class Skull(VisualizationPattern):
         self._jaw_open += (target_jaw - self._jaw_open) * 0.25
 
         breathe_scale = 1.0 + self._breathe * 0.02
-        skull_scale = 0.55  # Overall skull size
+        skull_scale = 0.56 + audio.bands[1] * 0.05 + self._beat_intensity * 0.02
 
-        cos_r = math.cos(self._rotation)
-        sin_r = math.sin(self._rotation)
+        yaw = self._rotation + math.sin(self._time * 0.35) * 0.05
+        cos_r = math.cos(yaw)
+        sin_r = math.sin(yaw)
+        tilt_x = math.sin(self._time * 0.6) * 0.08 + self._beat_intensity * 0.12
+        tilt_z = math.cos(self._time * 0.5) * 0.05 + audio.bands[3] * 0.05
+        cos_tx, sin_tx = math.cos(tilt_x), math.sin(tilt_x)
+        cos_tz, sin_tz = math.cos(tilt_z), math.sin(tilt_z)
 
         for i, point in enumerate(self._skull_points):
             part_type, px, py_norm, pz = point[0], point[1], point[2], point[3]
@@ -1346,55 +1480,71 @@ class Skull(VisualizationPattern):
             py = py_norm * 0.45 * skull_scale  # Vertical scale
 
             # Apply jaw movement (only to jaw and lower teeth)
-            if part_type == 'jaw' and py_norm < 0.25:
+            if part_type == "jaw" and py_norm < 0.25:
                 py -= self._jaw_open * (0.25 - py_norm) / 0.25
-            elif part_type == 'teeth_lower':
+                pz -= self._jaw_open * 0.12
+            elif part_type == "teeth_lower":
                 py -= self._jaw_open * 0.8
+                pz -= self._jaw_open * 0.1
+            elif part_type in ("eye", "eye_inner"):
+                pz += 0.02
+            elif part_type in ("cranium", "temple"):
+                pz *= 1.08
+            elif part_type in ("face", "cheek"):
+                pz *= 0.96
+
+            # Subtle tilt for dramatic movement
+            ty = py * cos_tx - pz * sin_tx
+            tz = py * sin_tx + pz * cos_tx
+            tx = px * cos_tz - ty * sin_tz
+            ty2 = px * sin_tz + ty * cos_tz
 
             # Rotate around Y axis
-            rx = px * cos_r - pz * sin_r
-            rz = px * sin_r + pz * cos_r
+            rx = tx * cos_r - tz * sin_r
+            rz = tx * sin_r + tz * cos_r
 
             x = center + rx
-            y = 0.25 + py + self._head_bob
+            y = 0.25 + ty2 + self._head_bob
             z = center + rz
 
             # Scale based on part type
             band_idx = i % 5
             base_scale = self.config.base_scale * 0.9
 
-            if part_type in ('eye', 'eye_inner'):
+            if part_type in ("eye", "eye_inner"):
                 base_scale *= 1.1
-                base_scale += self._eye_glow * 0.5 + audio.bands[4] * 0.3
+                base_scale += self._eye_glow * 0.5 + audio.bands[4] * 0.45
                 band_idx = 4  # Eyes use high frequency color
-            elif part_type == 'jaw':
+            elif part_type == "jaw":
                 base_scale += audio.bands[0] * 0.3
                 band_idx = 0
-            elif part_type in ('teeth_upper', 'teeth_lower'):
+            elif part_type in ("teeth_upper", "teeth_lower"):
                 base_scale *= 0.7
                 base_scale += self._beat_intensity * 0.25
                 band_idx = 5
-            elif part_type == 'brow':
+            elif part_type == "brow":
                 base_scale *= 1.05
                 base_scale += audio.bands[2] * 0.2
-            elif part_type == 'cranium':
+            elif part_type == "cranium":
                 base_scale += audio.bands[band_idx % 3] * 0.2
-            elif part_type == 'nose':
+            elif part_type == "nose":
                 base_scale *= 0.85
 
             # Global beat pulse
             if audio.is_beat:
                 base_scale *= 1.1
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, base_scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, base_scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -1488,9 +1638,9 @@ class SacredGeometry(VisualizationPattern):
             px, py, pz = points_to_use[i]
 
             # Normalize
-            mag = math.sqrt(px*px + py*py + pz*pz)
+            mag = math.sqrt(px * px + py * py + pz * pz)
             if mag > 0:
-                px, py, pz = px/mag, py/mag, pz/mag
+                px, py, pz = px / mag, py / mag, pz / mag
 
             # Apply rotations
             # Y rotation
@@ -1520,15 +1670,17 @@ class SacredGeometry(VisualizationPattern):
             if audio.is_beat:
                 scale *= 1.3
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         # Fill remaining with additional recursive points
         for i in range(len(points_to_use), n):
@@ -1537,9 +1689,13 @@ class SacredGeometry(VisualizationPattern):
             point_idx = i % len(points_to_use)
             px, py, pz = points_to_use[point_idx]
 
-            mag = math.sqrt(px*px + py*py + pz*pz)
+            mag = math.sqrt(px * px + py * py + pz * pz)
             if mag > 0:
-                px, py, pz = px/mag * scale_factor, py/mag * scale_factor, pz/mag * scale_factor
+                px, py, pz = (
+                    px / mag * scale_factor,
+                    py / mag * scale_factor,
+                    pz / mag * scale_factor,
+                )
 
             # Apply same rotations
             cos_y, sin_y = math.cos(self._rotation_y), math.sin(self._rotation_y)
@@ -1562,15 +1718,17 @@ class SacredGeometry(VisualizationPattern):
             band_idx = i % 5
             scale = self.config.base_scale * 0.7 + audio.bands[band_idx] * 0.3
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -1597,7 +1755,7 @@ class Vortex(VisualizationPattern):
         center = 0.5
 
         # Faster rotation with energy
-        speed = 2.0 + audio.amplitude * 3.0
+        speed = 2.4 + audio.amplitude * 3.4
         if audio.is_beat:
             speed *= 1.5
             self._intensity = 1.0
@@ -1605,12 +1763,12 @@ class Vortex(VisualizationPattern):
         self._intensity *= 0.95
 
         # Z movement (flying through tunnel)
-        self._z_offset += (0.5 + audio.bands[0] * 0.5) * 0.016
+        self._z_offset += (0.55 + audio.bands[0] * 0.65) * 0.016
         if self._z_offset > 1.0:
             self._z_offset -= 1.0
 
         # Rings of entities forming tunnel
-        rings = max(4, n // 8)
+        rings = max(5, n // 8)
         per_ring = n // rings
 
         for ring in range(rings):
@@ -1619,8 +1777,8 @@ class Vortex(VisualizationPattern):
             depth = ring_z  # 0 = close, 1 = far
 
             # Ring radius - smaller as it goes further
-            base_radius = 0.35 - depth * 0.25
-            pulse_radius = base_radius + self._intensity * 0.1 * (1 - depth)
+            base_radius = 0.36 - depth * 0.26
+            pulse_radius = base_radius + self._intensity * 0.12 * (1 - depth)
 
             # Ring rotation - different speeds for each ring
             ring_rotation = self._rotation * (1.0 + ring * 0.2)
@@ -1637,28 +1795,31 @@ class Vortex(VisualizationPattern):
                 radius = pulse_radius + wobble
 
                 # Audio reactivity per band
-                band_idx = j % 6
+                band_idx = j % 5
                 radius += audio.bands[band_idx] * 0.05 * (1 - depth)
 
                 x = center + math.cos(angle) * radius
                 z_pos = center + math.sin(angle) * radius
-                y = 0.1 + depth * 0.8  # Map depth to y position
+                wave = math.sin(self._rotation + depth * math.pi * 2) * 0.04
+                y = 0.12 + depth * 0.78 + wave  # Map depth to y position
 
                 # Scale - larger when close
-                scale = self.config.base_scale * (1.5 - depth) + audio.bands[band_idx] * 0.3
+                scale = self.config.base_scale * (1.55 - depth) + audio.bands[band_idx] * 0.35
 
                 if audio.is_beat:
                     scale *= 1.2
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z_pos)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z_pos)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -1685,7 +1846,7 @@ class Pyramid(VisualizationPattern):
         center = 0.5
 
         # Slow majestic rotation
-        self._rotation += (0.3 + audio.amplitude * 0.3) * 0.016
+        self._rotation += (0.3 + audio.amplitude * 0.35) * 0.016
 
         # Invert on strong beats
         if audio.is_beat and audio.beat_intensity > 0.6:
@@ -1709,7 +1870,8 @@ class Pyramid(VisualizationPattern):
 
             # Layer properties
             layer_size = 1.0 - layer_norm * 0.9  # Size shrinks toward apex
-            layer_y = 0.1 + layer_norm * 0.7 + self._hover
+            layer_warp = math.sin(self._rotation + layer * 0.6) * audio.bands[2] * 0.08
+            layer_y = 0.1 + layer_norm * 0.7 + self._hover + layer_warp * 0.1
 
             # Points per layer (square arrangement)
             side_points = max(1, int(math.sqrt(n / layers) * layer_size))
@@ -1733,8 +1895,12 @@ class Pyramid(VisualizationPattern):
                     z = center + rz
                     y = layer_y
 
-                    band_idx = entity_idx % 6
+                    band_idx = entity_idx % 5
                     scale = self.config.base_scale + audio.bands[band_idx] * 0.4
+
+                    # Highlight edges with highs for definition
+                    if i in (0, side_points - 1) or j in (0, side_points - 1):
+                        scale += audio.bands[4] * 0.25
 
                     # Apex glows more
                     if layer_norm > 0.8:
@@ -1743,15 +1909,17 @@ class Pyramid(VisualizationPattern):
                     if audio.is_beat:
                         scale *= 1.25
 
-                    entities.append({
-                        "id": f"block_{entity_idx}",
-                        "x": max(0, min(1, x)),
-                        "y": max(0, min(1, y)),
-                        "z": max(0, min(1, z)),
-                        "scale": min(self.config.max_scale, scale),
-                        "band": band_idx,
-                        "visible": True
-                    })
+                    entities.append(
+                        {
+                            "id": f"block_{entity_idx}",
+                            "x": max(0, min(1, x)),
+                            "y": max(0, min(1, y)),
+                            "z": max(0, min(1, z)),
+                            "scale": min(self.config.max_scale, scale),
+                            "band": band_idx,
+                            "visible": True,
+                        }
+                    )
                     entity_idx += 1
 
                 if entity_idx >= n:
@@ -1785,7 +1953,7 @@ class GalaxySpiral(VisualizationPattern):
         self._rotation += (0.2 + audio.amplitude * 0.3) * 0.016
 
         # Arm twist increases with highs
-        self._arm_twist = 2.0 + audio.bands[4] * 2.0 + audio.bands[4] * 1.0
+        self._arm_twist = 2.3 + audio.bands[4] * 2.2 + audio.bands[3] * 0.8
 
         # Core pulse on beat
         if audio.is_beat:
@@ -1797,13 +1965,14 @@ class GalaxySpiral(VisualizationPattern):
 
         # Spiral arm entities - 80%
         arm_count = n - core_count
-        num_arms = 2  # Classic spiral galaxy
+        num_arms = 3 if (audio.bands[3] + audio.bands[4]) > 1.0 else 2  # React to highs
 
         # === CORE ===
         for i in range(core_count):
             # Random but consistent distribution in center
             seed_angle = (i * 137.5) * math.pi / 180  # Golden angle
             seed_radius = (i / core_count) ** 0.5 * 0.08  # Square root for uniform disk
+            seed_radius += audio.bands[2] * 0.02  # Pulsing halo
 
             angle = seed_angle + self._rotation * 2
             radius = seed_radius * (1.0 + self._core_pulse * 0.3)
@@ -1813,17 +1982,21 @@ class GalaxySpiral(VisualizationPattern):
             y = center + math.sin(seed_angle * 3) * 0.02  # Slight thickness
 
             band_idx = i % 5
-            scale = self.config.base_scale * 1.2 + audio.bands[band_idx] * 0.3 + self._core_pulse * 0.2
+            scale = (
+                self.config.base_scale * 1.2 + audio.bands[band_idx] * 0.3 + self._core_pulse * 0.2
+            )
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "z": max(0, min(1, z)),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "z": max(0, min(1, z)),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         # === SPIRAL ARMS ===
         per_arm = arm_count // num_arms
@@ -1840,39 +2013,42 @@ class GalaxySpiral(VisualizationPattern):
                 t = j / per_arm
 
                 # Logarithmic spiral
-                radius = 0.08 + t * 0.3
+                radius = 0.08 + t * 0.32
 
                 # Spiral angle
                 spiral_angle = arm_offset + self._rotation + t * math.pi * self._arm_twist
 
                 # Add some scatter for natural look
                 scatter = math.sin(j * 0.5) * 0.02
-                radius += scatter
+                radius += scatter + audio.bands[1] * 0.02 * (1 - t)
 
                 x = center + math.cos(spiral_angle) * radius
                 z = center + math.sin(spiral_angle) * radius
 
                 # Slight vertical variation
-                y = center + math.sin(spiral_angle * 2) * 0.03 * t
+                y = center + math.sin(spiral_angle * 2) * 0.04 * t
 
-                band_idx = j % 6
+                band_idx = j % 5
                 # Outer stars react more to highs, inner to bass
                 bass_react = (1 - t) * audio.bands[0] * 0.3
                 high_react = t * audio.bands[4] * 0.3
                 scale = self.config.base_scale + bass_react + high_react
+                scale += self._core_pulse * 0.15 * (1 - t)
 
                 if audio.is_beat:
                     scale *= 1.15
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -1915,7 +2091,7 @@ class LaserArray(VisualizationPattern):
             beam_angle = self._rotation + (beam / num_beams) * math.pi * 2
 
             # Beam target length based on frequency band
-            band_idx = beam % 6
+            band_idx = beam % 5
             target_length = 0.1 + audio.bands[band_idx] * 0.35
             if audio.is_beat:
                 target_length += 0.1
@@ -1945,15 +2121,17 @@ class LaserArray(VisualizationPattern):
                 thickness = 1.0 - t * 0.5
                 scale = self.config.base_scale * thickness + self._flash * 0.2
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "z": max(0, min(1, z)),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": max(0, min(1, x)),
+                        "y": max(0, min(1, y)),
+                        "z": max(0, min(1, z)),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -1962,6 +2140,7 @@ class LaserArray(VisualizationPattern):
 # ============================================================================
 # Category 3: Cosmic/Space (Flow & Energy Focus)
 # ============================================================================
+
 
 class WormholePortal(VisualizationPattern):
     """
@@ -1987,10 +2166,10 @@ class WormholePortal(VisualizationPattern):
 
         # Rotation speed driven by energy
         energy = sum(audio.bands) / 6.0
-        self._rotation += (1.0 + energy * 2.0) * 0.016
+        self._rotation += (1.1 + energy * 2.2) * 0.016
 
         # Tunnel movement speed (flying through)
-        speed = 0.3 + audio.bands[0] * 0.4 + audio.amplitude * 0.3
+        speed = 0.32 + audio.bands[0] * 0.45 + audio.amplitude * 0.35
         self._tunnel_offset += speed * 0.016
         if self._tunnel_offset > 1.0:
             self._tunnel_offset -= 1.0
@@ -2012,16 +2191,18 @@ class WormholePortal(VisualizationPattern):
 
             # Perspective: close rings are larger, far rings are smaller
             perspective = 1.0 - ring_depth * 0.8
-            ring_radius = 0.05 + perspective * 0.35
+            ring_radius = 0.05 + perspective * 0.36
 
             # Breathing with amplitude
             ring_radius += audio.amplitude * 0.05 * perspective
+            ring_radius += math.sin(self._rotation + ring_depth * math.pi * 3) * 0.02 * perspective
 
             # Ring rotation - different speeds for each depth
             ring_rotation = self._rotation * (1.0 + ring_depth * 0.5)
 
             # Y position maps to depth (close = low y, far = high y for upward tunnel)
             base_y = 0.1 + ring_depth * 0.8
+            base_y += math.sin(self._rotation * 1.3 + ring_depth * math.pi * 2) * 0.03
 
             for j in range(points_per_ring):
                 idx = ring * points_per_ring + j
@@ -2039,14 +2220,14 @@ class WormholePortal(VisualizationPattern):
                 y = base_y
 
                 # Band-reactive radius wobble
-                band_idx = j % 6
+                band_idx = j % 5
                 wobble = audio.bands[band_idx] * 0.03 * perspective
                 x += math.cos(angle) * wobble
                 z += math.sin(angle) * wobble
 
                 # Scale - larger when close, affected by flash
                 scale = self.config.base_scale * perspective
-                scale += audio.bands[band_idx] * 0.3 * perspective
+                scale += audio.bands[band_idx] * 0.35 * perspective
 
                 # Flash effect on close rings
                 if ring_depth < 0.3:
@@ -2055,15 +2236,17 @@ class WormholePortal(VisualizationPattern):
                 if audio.is_beat:
                     scale *= 1.2
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": clamp(x),
-                    "y": clamp(y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, max(0.05, scale)),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": clamp(x),
+                        "y": clamp(y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, max(0.05, scale)),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -2155,9 +2338,9 @@ class BlackHole(VisualizationPattern):
             band_idx = i % 5
             # Inner disk hotter (higher frequencies)
             if r < 0.15:
-                band_idx = 4 + (i % 2)  # highs
+                band_idx = 3 + (i % 2)  # high-mid and high bands
             elif r < 0.25:
-                band_idx = 2 + (i % 2)  # mids
+                band_idx = 2 + (i % 2)  # mid and high-mid bands
 
             scale = self.config.base_scale * (0.5 + (0.4 - r))  # Larger near center
             scale += audio.bands[band_idx] * 0.2
@@ -2165,15 +2348,17 @@ class BlackHole(VisualizationPattern):
             if audio.is_beat and r < 0.2:
                 scale *= 1.4
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": clamp(x),
-                "y": clamp(y),
-                "z": clamp(z),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": clamp(x),
+                    "y": clamp(y),
+                    "z": clamp(z),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         # === RELATIVISTIC JETS ===
         jet_height = 0.3 + self._jet_intensity * 0.15 + audio.bands[0] * 0.1
@@ -2198,19 +2383,21 @@ class BlackHole(VisualizationPattern):
                 z = center + math.sin(jet_angle) * jet_r
                 y = jet_y
 
-                band_idx = 4 + (j % 2)  # Jets are hot = high frequency
+                band_idx = 3 + (j % 2)  # Jets are hot = high-mid and high bands
                 scale = self.config.base_scale * (1.0 - t * 0.5) * (0.5 + self._jet_intensity)
                 scale += audio.bands[4] * 0.3
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": clamp(x),
-                    "y": clamp(y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": self._jet_intensity > 0.1 or audio.bands[0] > 0.3
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": clamp(x),
+                        "y": clamp(y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": self._jet_intensity > 0.1 or audio.bands[0] > 0.3,
+                    }
+                )
 
         self.update()
         return entities
@@ -2279,7 +2466,7 @@ class Nebula(VisualizationPattern):
             self._particles[i][2] += drift_z * 0.1
 
             # Keep within bounds (soft boundary)
-            dist = math.sqrt(px*px + py*py + pz*pz)
+            dist = math.sqrt(px * px + py * py + pz * pz)
             if dist > 1.2:
                 # Pull back toward center
                 self._particles[i][0] *= 0.99
@@ -2294,8 +2481,8 @@ class Nebula(VisualizationPattern):
             # Band based on position (creates color gradients)
             # Higher Y = higher frequency colors
             normalized_y = (py + 1) / 2  # 0 to 1
-            band_idx = int(normalized_y * 5.9)
-            band_idx = max(0, min(5, band_idx))
+            band_idx = int(normalized_y * 4.9)
+            band_idx = max(0, min(4, band_idx))
 
             # Scale based on density (denser near center)
             density_scale = 1.0 - dist * 0.3
@@ -2310,15 +2497,17 @@ class Nebula(VisualizationPattern):
             if audio.is_beat:
                 scale *= 1.15
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": clamp(x),
-                "y": clamp(y),
-                "z": clamp(z),
-                "scale": min(self.config.max_scale, max(0.05, scale)),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": clamp(x),
+                    "y": clamp(y),
+                    "z": clamp(z),
+                    "scale": min(self.config.max_scale, max(0.05, scale)),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -2327,6 +2516,7 @@ class Nebula(VisualizationPattern):
 # ============================================================================
 # Category 2: Organic/Nature (Beat Focus)
 # ============================================================================
+
 
 class Aurora(VisualizationPattern):
     """
@@ -2399,7 +2589,9 @@ class Aurora(VisualizationPattern):
                     dist = abs(x_norm - ripple_x)
                     if dist < ripple_time and ripple_time - dist < 0.5:
                         ripple_strength = (0.5 - (ripple_time - dist)) * 2
-                        ripple_offset += math.sin((ripple_time - dist) * math.pi * 4) * 0.1 * ripple_strength
+                        ripple_offset += (
+                            math.sin((ripple_time - dist) * math.pi * 4) * 0.1 * ripple_strength
+                        )
 
                 # Y position (curtains hang from top)
                 base_y = 0.7 - layer * 0.1
@@ -2412,8 +2604,8 @@ class Aurora(VisualizationPattern):
 
                 # Color band based on horizontal position + sweep
                 color_pos = (x_norm + self._color_offset) % 1.0
-                band_idx = int(color_pos * 5.9)
-                band_idx = max(0, min(5, band_idx))
+                band_idx = int(color_pos * 4.9)
+                band_idx = max(0, min(4, band_idx))
 
                 # Scale pulses with corresponding band
                 scale = self.config.base_scale + audio.bands[band_idx] * 0.35
@@ -2422,15 +2614,17 @@ class Aurora(VisualizationPattern):
                 if audio.is_beat:
                     scale *= 1.25
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": clamp(x),
-                    "y": clamp(y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": clamp(x),
+                        "y": clamp(y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -2495,17 +2689,17 @@ class OceanWaves(VisualizationPattern):
                 # Large waves (bass)
                 wave_bass = math.sin(x_norm * math.pi * 2 + self._wave_time * 0.5) * 0.08
                 wave_bass += math.sin(z_norm * math.pi * 1.5 + self._wave_time * 0.3) * 0.06
-                wave_bass *= (0.5 + audio.bands[0] * 1.5)
+                wave_bass *= 0.5 + audio.bands[0] * 1.5
 
                 # Medium waves (mids)
                 wave_mid = math.sin(x_norm * math.pi * 4 + self._wave_time * 1.2) * 0.04
                 wave_mid += math.sin(z_norm * math.pi * 3 - self._wave_time * 0.8) * 0.03
-                wave_mid *= (0.3 + audio.bands[2] + audio.bands[3])
+                wave_mid *= 0.3 + audio.bands[2] + audio.bands[3]
 
                 # Small shimmer (highs)
                 wave_high = math.sin(x_norm * math.pi * 8 + self._wave_time * 3) * 0.015
                 wave_high += math.sin(z_norm * math.pi * 7 - self._wave_time * 2.5) * 0.01
-                wave_high *= (0.2 + audio.bands[4] * 2 + audio.bands[4] * 2)
+                wave_high *= 0.2 + audio.bands[4] * 2 + audio.bands[4] * 2
 
                 # Combine waves
                 y = center + wave_bass + wave_mid + wave_high
@@ -2521,14 +2715,16 @@ class OceanWaves(VisualizationPattern):
                     if abs(dist - ripple_radius) < ripple_width:
                         # Ripple strength fades over time
                         fade = 1.0 - (t / 3.0)
-                        ring_strength = (1.0 - abs(dist - ripple_radius) / ripple_width)
-                        ripple_height += math.sin(dist * 20 - t * 10) * 0.1 * intensity * fade * ring_strength
+                        ring_strength = 1.0 - abs(dist - ripple_radius) / ripple_width
+                        ripple_height += (
+                            math.sin(dist * 20 - t * 10) * 0.1 * intensity * fade * ring_strength
+                        )
 
                 y += ripple_height
 
                 # Band based on wave activity
                 wave_activity = abs(wave_bass) + abs(wave_mid) + abs(wave_high)
-                band_idx = int(wave_activity * 10) % 6
+                band_idx = int(wave_activity * 10) % 5
 
                 scale = self.config.base_scale + wave_activity * 2
                 scale += ripple_height * 3  # Splashes make bigger particles
@@ -2536,15 +2732,17 @@ class OceanWaves(VisualizationPattern):
                 if audio.is_beat:
                     scale *= 1.2
 
-                entities.append({
-                    "id": f"block_{idx}",
-                    "x": clamp(x),
-                    "y": clamp(y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": band_idx,
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{idx}",
+                        "x": clamp(x),
+                        "y": clamp(y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": band_idx,
+                        "visible": True,
+                    }
+                )
 
         self.update()
         return entities
@@ -2676,15 +2874,17 @@ class Fireflies(VisualizationPattern):
             scale = self.config.base_scale * 0.5 + total_glow * 0.6
             scale += audio.bands[band_idx] * 0.2
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": x,
-                "y": y,
-                "z": z,
-                "scale": min(self.config.max_scale, max(0.05, scale)),
-                "band": band_idx,
-                "visible": total_glow > 0.15  # Only visible when glowing enough
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                    "scale": min(self.config.max_scale, max(0.05, scale)),
+                    "band": band_idx,
+                    "visible": total_glow > 0.15,  # Only visible when glowing enough
+                }
+            )
 
         self.update()
         return entities
@@ -2693,6 +2893,7 @@ class Fireflies(VisualizationPattern):
 # ============================================================================
 # Category 1: Geometric/Abstract (Frequency Mapping Focus)
 # ============================================================================
+
 
 class Mandala(VisualizationPattern):
     """
@@ -2741,7 +2942,7 @@ class Mandala(VisualizationPattern):
             # Also alternate direction for counter-rotation
             direction = 1 if ring % 2 == 0 else -1
             speed = (0.2 + ring * 0.18) * direction
-            speed *= (1.0 + audio.bands[ring] * 0.5)  # Speed up with band intensity
+            speed *= 1.0 + audio.bands[ring] * 0.5  # Speed up with band intensity
 
             self._ring_rotations[ring] += speed * 0.016
 
@@ -2766,15 +2967,17 @@ class Mandala(VisualizationPattern):
                 if audio.is_beat:
                     scale *= 1.2
 
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": clamp(x),
-                    "y": clamp(y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, scale),
-                    "band": ring,  # Each ring uses its corresponding band
-                    "visible": True
-                })
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": clamp(x),
+                        "y": clamp(y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, scale),
+                        "band": ring,  # Each ring uses its corresponding band
+                        "visible": True,
+                    }
+                )
                 entity_idx += 1
 
         self.update()
@@ -2893,11 +3096,7 @@ class Tesseract(VisualizationPattern):
 
             # Apply 4D rotations
             rotated = self._rotate_4d(
-                point,
-                self._rotation_xw,
-                self._rotation_yw,
-                self._rotation_zw,
-                self._rotation_xy
+                point, self._rotation_xw, self._rotation_yw, self._rotation_zw, self._rotation_xy
             )
 
             # Project to 3D
@@ -2912,8 +3111,8 @@ class Tesseract(VisualizationPattern):
             # Band based on w coordinate (4th dimension position)
             # w=-1 (inner cube) = bass, w=+1 (outer cube) = highs
             w_normalized = (pw + 1) / 2  # 0 to 1
-            band_idx = int(w_normalized * 5.9)
-            band_idx = clamp(band_idx, 0, 5)
+            band_idx = int(w_normalized * 4.9)
+            band_idx = clamp(band_idx, 0, 4)
 
             # Scale based on w (outer cube bigger when highs are strong)
             w_scale = 0.7 + w_normalized * 0.6
@@ -2923,15 +3122,17 @@ class Tesseract(VisualizationPattern):
             if audio.is_beat:
                 scale *= 1.3
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": clamp(x),
-                "y": clamp(y),
-                "z": clamp(z),
-                "scale": min(self.config.max_scale, scale),
-                "band": int(band_idx),
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": clamp(x),
+                    "y": clamp(y),
+                    "z": clamp(z),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": int(band_idx),
+                    "visible": True,
+                }
+            )
 
         # Fill remaining with inner vertices at smaller scale
         for i in range(points_to_use, n):
@@ -2943,7 +3144,7 @@ class Tesseract(VisualizationPattern):
                 self._rotation_xw * 0.5,  # Slower rotation for inner layer
                 self._rotation_yw * 0.5,
                 self._rotation_zw * 0.5,
-                self._rotation_xy
+                self._rotation_xy,
             )
             projected = self._project_4d_to_3d(rotated)
             px, py, pz, pw = projected
@@ -2957,15 +3158,17 @@ class Tesseract(VisualizationPattern):
             band_idx = i % 5
             scale = self.config.base_scale * 0.6 + audio.bands[band_idx] * 0.2
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": clamp(x),
-                "y": clamp(y),
-                "z": clamp(z),
-                "scale": min(self.config.max_scale, scale),
-                "band": band_idx,
-                "visible": True
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": clamp(x),
+                    "y": clamp(y),
+                    "z": clamp(z),
+                    "scale": min(self.config.max_scale, scale),
+                    "band": band_idx,
+                    "visible": True,
+                }
+            )
 
         self.update()
         return entities
@@ -2988,6 +3191,8 @@ class CrystalGrowth(VisualizationPattern):
         self._sparkle_phase = 0.0
         self._branch_points = None
         self._growth_spurt = 0.0
+        self._rotation = 0.0
+        self._sway = 0.0
 
     def _generate_crystal_structure(self, depth: int = 3) -> List[tuple]:
         """
@@ -3036,15 +3241,20 @@ class CrystalGrowth(VisualizationPattern):
                     # Normalize
                     mag = math.sqrt(new_dx**2 + new_dy**2 + new_dz**2)
                     if mag > 0:
-                        new_dx, new_dy, new_dz = new_dx/mag, new_dy/mag, new_dz/mag
+                        new_dx, new_dy, new_dz = new_dx / mag, new_dy / mag, new_dz / mag
 
                     # Child branches are shorter
                     child_length = length * 0.6
 
-                    add_branch(end_x, end_y, end_z,
-                              (new_dx, new_dy, new_dz),
-                              child_length, current_depth + 1,
-                              f"{branch_id}_{child}")
+                    add_branch(
+                        end_x,
+                        end_y,
+                        end_z,
+                        (new_dx, new_dy, new_dz),
+                        child_length,
+                        current_depth + 1,
+                        f"{branch_id}_{child}",
+                    )
 
         # Start with main trunk going up
         add_branch(0, 0, 0, (0, 1, 0), 0.4, 0, "trunk")
@@ -3052,9 +3262,9 @@ class CrystalGrowth(VisualizationPattern):
         # Add some root branches going down/out
         for i in range(3):
             angle = i * math.pi * 2 / 3
-            add_branch(0, 0, 0,
-                      (math.cos(angle) * 0.3, -0.3, math.sin(angle) * 0.3),
-                      0.15, 2, f"root_{i}")
+            add_branch(
+                0, 0, 0, (math.cos(angle) * 0.3, -0.3, math.sin(angle) * 0.3), 0.15, 2, f"root_{i}"
+            )
 
         return points
 
@@ -3066,6 +3276,8 @@ class CrystalGrowth(VisualizationPattern):
             self._branch_points = self._generate_crystal_structure()
 
         self._sparkle_phase += 0.1
+        self._rotation += (0.15 + audio.amplitude * 0.3) * 0.016
+        self._sway = math.sin(self._sparkle_phase * 0.5) * (0.05 + audio.bands[2] * 0.08)
 
         # Growth responds to bass
         target_growth = 0.5 + audio.bands[0] * 0.3 + audio.bands[1] * 0.2
@@ -3073,7 +3285,7 @@ class CrystalGrowth(VisualizationPattern):
 
         # Beat triggers growth spurt
         if audio.is_beat:
-            self._growth_spurt = 0.3
+            self._growth_spurt = 0.35
         self._growth_spurt *= 0.9
 
         effective_growth = self._growth + self._growth_spurt
@@ -3099,13 +3311,19 @@ class CrystalGrowth(VisualizationPattern):
                 continue
 
             # Position
-            x = center + px * depth_growth
+            # Rotate around Y for a more faceted shimmer
+            cos_r = math.cos(self._rotation)
+            sin_r = math.sin(self._rotation)
+            rx = px * cos_r - pz * sin_r
+            rz = px * sin_r + pz * cos_r
+
+            x = center + rx * depth_growth + self._sway * py
             y = 0.2 + py * depth_growth * 0.6  # Grow upward from base
-            z = center + pz * depth_growth
+            z = center + rz * depth_growth + self._sway * pz * 0.3
 
             # Band based on depth
             # Trunk (depth 0) = bass, tips (depth 3) = highs
-            band_idx = min(5, depth * 2)
+            band_idx = min(4, depth * 2)
 
             # Scale based on depth and audio
             base_scale = self.config.base_scale * (1.0 - depth * 0.15)
@@ -3114,20 +3332,22 @@ class CrystalGrowth(VisualizationPattern):
             # Tips sparkle with highs
             if depth >= 2:
                 sparkle = math.sin(self._sparkle_phase + i * 0.5) * 0.5 + 0.5
-                scale += sparkle * audio.bands[4] * 0.4 + audio.bands[4] * 0.3
+                scale += sparkle * audio.bands[4] * 0.45 + audio.bands[4] * 0.3
 
             if audio.is_beat:
                 scale *= 1.2 + (depth * 0.1)  # Tips react more
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": clamp(x),
-                "y": clamp(y),
-                "z": clamp(z),
-                "scale": min(self.config.max_scale, max(0.05, scale)),
-                "band": int(band_idx),
-                "visible": depth_growth > 0.1
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": clamp(x),
+                    "y": clamp(y),
+                    "z": clamp(z),
+                    "scale": min(self.config.max_scale, max(0.05, scale)),
+                    "band": int(band_idx),
+                    "visible": depth_growth > 0.1,
+                }
+            )
 
         # Fill remaining entities with extra tip points
         for i in range(len(entities), n):
@@ -3140,19 +3360,29 @@ class CrystalGrowth(VisualizationPattern):
             y = tip_y + math.sin(i * 0.7) * 0.05
             z = center + math.sin(angle) * radius * effective_growth
 
+            # Apply subtle rotation/sway to tips
+            cos_r = math.cos(self._rotation + i * 0.01)
+            sin_r = math.sin(self._rotation + i * 0.01)
+            tx = x - center
+            tz = z - center
+            x = center + tx * cos_r - tz * sin_r + self._sway * 0.2
+            z = center + tx * sin_r + tz * cos_r + self._sway * 0.1
+
             sparkle = math.sin(self._sparkle_phase + i) * 0.5 + 0.5
             scale = self.config.base_scale * 0.5 * sparkle
             scale += audio.bands[4] * 0.3
 
-            entities.append({
-                "id": f"block_{i}",
-                "x": clamp(x),
-                "y": clamp(y),
-                "z": clamp(z),
-                "scale": min(self.config.max_scale, max(0.03, scale)),
-                "band": 5,
-                "visible": sparkle > 0.3
-            })
+            entities.append(
+                {
+                    "id": f"block_{i}",
+                    "x": clamp(x),
+                    "y": clamp(y),
+                    "z": clamp(z),
+                    "scale": min(self.config.max_scale, max(0.03, scale)),
+                    "band": 5,
+                    "visible": sparkle > 0.3,
+                }
+            )
 
         self.update()
         return entities
@@ -3161,6 +3391,7 @@ class CrystalGrowth(VisualizationPattern):
 # ============================================================================
 # Classic Spectrum Patterns
 # ============================================================================
+
 
 class SpectrumBars(VisualizationPattern):
     """
@@ -3200,7 +3431,6 @@ class SpectrumBars(VisualizationPattern):
 
         # Distribute entities across 5 bars
         blocks_per_bar = n // 5
-        bar_width = 0.14
         bar_spacing = 0.16
         start_x = center - (2.0 * bar_spacing)
 
@@ -3239,15 +3469,17 @@ class SpectrumBars(VisualizationPattern):
                 # Slight depth variation per bar
                 z = center + (bar - 2.5) * 0.02
 
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": clamp(bar_x),
-                    "y": clamp(block_y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, scale) if visible else 0.01,
-                    "band": bar,
-                    "visible": visible
-                })
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": clamp(bar_x),
+                        "y": clamp(block_y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, scale) if visible else 0.01,
+                        "band": bar,
+                        "visible": visible,
+                    }
+                )
                 entity_idx += 1
 
         self.update()
@@ -3341,15 +3573,17 @@ class SpectrumTubes(VisualizationPattern):
                     if audio.is_beat:
                         scale *= 1.15
 
-                    entities.append({
-                        "id": f"block_{entity_idx}",
-                        "x": clamp(x),
-                        "y": clamp(ring_y),
-                        "z": clamp(z),
-                        "scale": min(self.config.max_scale, scale) if visible else 0.01,
-                        "band": tube,
-                        "visible": visible
-                    })
+                    entities.append(
+                        {
+                            "id": f"block_{entity_idx}",
+                            "x": clamp(x),
+                            "y": clamp(ring_y),
+                            "z": clamp(z),
+                            "scale": min(self.config.max_scale, scale) if visible else 0.01,
+                            "band": tube,
+                            "visible": visible,
+                        }
+                    )
                     entity_idx += 1
 
         self.update()
@@ -3425,15 +3659,17 @@ class SpectrumCircle(VisualizationPattern):
                 if audio.is_beat:
                     scale *= 1.2
 
-                entities.append({
-                    "id": f"block_{entity_idx}",
-                    "x": clamp(x),
-                    "y": clamp(y),
-                    "z": clamp(z),
-                    "scale": min(self.config.max_scale, scale) if visible else 0.01,
-                    "band": band_idx,
-                    "visible": visible
-                })
+                entities.append(
+                    {
+                        "id": f"block_{entity_idx}",
+                        "x": clamp(x),
+                        "y": clamp(y),
+                        "z": clamp(z),
+                        "scale": min(self.config.max_scale, scale) if visible else 0.01,
+                        "band": band_idx,
+                        "visible": visible,
+                    }
+                )
                 entity_idx += 1
 
         self.update()

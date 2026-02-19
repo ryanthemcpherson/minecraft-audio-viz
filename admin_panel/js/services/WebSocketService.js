@@ -19,10 +19,27 @@ export class WebSocketService extends EventTarget {
         this.pingInterval = null;
         this.lastPong = Date.now();
         this.lastSuccessfulMessage = 0;
+        this.isFailed = false;
 
         // Message queue for when disconnected (with max size to prevent memory bloat)
         this.messageQueue = [];
         this.maxQueueSize = 500;
+    }
+
+    /**
+     * Manually reconnect after failed state
+     */
+    manualReconnect() {
+        console.log('[WS] Manual reconnect triggered');
+        this.isFailed = false;
+        this.reconnectAttempts = 0;
+        this.shouldReconnect = true;
+        if (this.ws) {
+            try { this.ws.close(); } catch (_) { /* ignore */ }
+            this.ws = null;
+        }
+        this.isConnecting = false;
+        this.connect();
     }
 
     /**
@@ -181,6 +198,7 @@ export class WebSocketService extends EventTarget {
 
         if (this.reconnectAttempts > this.maxReconnectAttempts) {
             console.error('[WS] Max reconnect attempts reached');
+            this.isFailed = true;
             this._emit('reconnect_failed');
             return;
         }

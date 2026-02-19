@@ -3,28 +3,29 @@ Real-time audio processor for visualization.
 Performs FFT analysis and extracts frequency bands for visualization.
 """
 
-import numpy as np
-from scipy import signal
-from scipy.fft import rfft, rfftfreq
-from dataclasses import dataclass
-from typing import Optional, List, Callable
 import time
+from dataclasses import dataclass
+from typing import Callable, List, Optional
+
+import numpy as np
+from scipy.fft import rfft, rfftfreq
 
 
 @dataclass
 class AudioFrame:
     """Processed audio frame with visualization data."""
+
     timestamp: float
 
-    # Frequency bands (normalized 0-1)
-    bands: List[float]  # [sub_bass, bass, low_mid, mid, high_mid, high]
+    # Frequency bands (normalized 0-1) - 5-band system
+    bands: List[float]  # [bass, low_mid, mid, high_mid, high]
 
     # Overall metrics
-    amplitude: float    # RMS amplitude (0-1)
-    peak: float         # Peak amplitude (0-1)
+    amplitude: float  # RMS amplitude (0-1)
+    peak: float  # Peak amplitude (0-1)
 
     # Beat detection
-    is_beat: bool       # True if beat detected this frame
+    is_beat: bool  # True if beat detected this frame
     beat_intensity: float  # Strength of beat (0-1)
 
     # Raw spectrum for advanced visualizations
@@ -42,21 +43,23 @@ class AudioProcessor:
     - Frame size: 20ms (960 samples per channel)
     """
 
-    # Frequency band ranges (Hz)
+    # Frequency band ranges (Hz) - 5-band system (matches fft_analyzer.py)
+    # Sub-bass removed: 1024-sample FFT at 48kHz can't accurately detect <43Hz
     BAND_RANGES = [
-        (20, 60),      # Sub-bass
-        (60, 250),     # Bass
-        (250, 500),    # Low-mid
-        (500, 2000),   # Mid
-        (2000, 6000),  # High-mid
-        (6000, 20000), # High
+        (40, 250),  # Bass (kick drums, bass guitar, toms)
+        (250, 500),  # Low-mid (snare body, vocals)
+        (500, 2000),  # Mid (vocals, instruments)
+        (2000, 6000),  # High-mid (presence, snare crack)
+        (6000, 20000),  # High (hi-hats, cymbals, air)
     ]
 
-    def __init__(self,
-                 sample_rate: int = 48000,
-                 channels: int = 2,
-                 smoothing: float = 0.3,
-                 beat_sensitivity: float = 1.5):
+    def __init__(
+        self,
+        sample_rate: int = 48000,
+        channels: int = 2,
+        smoothing: float = 0.3,
+        beat_sensitivity: float = 1.5,
+    ):
         """
         Initialize the audio processor.
 
@@ -137,7 +140,7 @@ class AudioProcessor:
             frame = self._process_buffer()
 
             # Keep overlap for smoother analysis
-            self._audio_buffer = self._audio_buffer[len(samples):]
+            self._audio_buffer = self._audio_buffer[len(samples) :]
 
             # Call callbacks
             for callback in self._callbacks:
@@ -155,7 +158,7 @@ class AudioProcessor:
         timestamp = time.time()
 
         # Get the most recent samples for FFT
-        samples = self._audio_buffer[-self._fft_size:]
+        samples = self._audio_buffer[-self._fft_size :]
 
         # Apply Hanning window to reduce spectral leakage
         windowed = samples * np.hanning(len(samples))
@@ -189,7 +192,7 @@ class AudioProcessor:
         self._prev_bands = bands
 
         # Calculate amplitude (RMS)
-        rms = np.sqrt(np.mean(samples ** 2))
+        rms = np.sqrt(np.mean(samples**2))
         amplitude = min(1.0, rms * 3)  # Scale up for visibility
         amplitude = self._prev_amplitude * self.smoothing + amplitude * (1 - self.smoothing)
         self._prev_amplitude = amplitude
@@ -207,7 +210,7 @@ class AudioProcessor:
             peak=peak,
             is_beat=is_beat,
             beat_intensity=beat_intensity,
-            spectrum=magnitudes[:256] if len(magnitudes) >= 256 else magnitudes
+            spectrum=magnitudes[:256] if len(magnitudes) >= 256 else magnitudes,
         )
 
     def _detect_beat(self, samples: np.ndarray, bands: np.ndarray) -> tuple[bool, float]:
@@ -217,7 +220,7 @@ class AudioProcessor:
         Compares current energy to recent average energy.
         """
         # Calculate current energy (focus on bass frequencies)
-        bass_energy = (bands[0] + bands[1]) / 2  # Sub-bass + bass
+        bass_energy = bands[0]  # Bass band
         current_energy = bass_energy
 
         # Add to history
@@ -269,6 +272,6 @@ def process_audio_file(filepath: str, callback: Callable[[AudioFrame], None]):
     chunk_size = int(sample_rate * 0.02) * 2  # stereo
 
     for i in range(0, len(data), chunk_size):
-        chunk = data[i:i + chunk_size]
+        chunk = data[i : i + chunk_size]
         if len(chunk) == chunk_size:
             processor.process_pcm(chunk.tobytes())

@@ -1,8 +1,8 @@
 [package]
 name = "dj-client"
 version = "1.0.0"
-description = "AudioViz DJ Client - Connect to VJ servers and stream audio visualizations"
-authors = ["AudioViz Team"]
+description = "MCAV DJ Client - Connect to VJ servers and stream audio visualizations"
+authors = ["MCAV Team"]
 edition = "2021"
 license = "MIT"
 
@@ -19,28 +19,28 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full", "sync", "rt-multi-thread", "macros"] }
-tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 futures-util = "0.3"
 rustfft = "6"
 cpal = "0.15"
 log = "0.4"
-env_logger = "0.10"
-thiserror = "1"
+env_logger = "0.11"
+thiserror = "2"
 rand = "0.8"
 parking_lot = "0.12"
 
-# Windows-specific dependencies for WASAPI per-app capture
-# Currently disabled - using system audio capture via cpal instead
-# TODO: Re-enable for per-app capture feature
-# [target.'cfg(windows)'.dependencies]
-# windows = { version = "0.52", features = [
-#     "Win32_Foundation",
-#     "Win32_Media_Audio",
-#     "Win32_System_Com",
-#     "Win32_System_Ole",
-#     "Win32_System_ProcessStatus",
-#     "Win32_System_Threading"
-# ] }
+# Windows-specific dependencies for WASAPI per-app audio capture
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+] }
 
 # macOS-specific dependencies
 [target.'cfg(target_os = "macos")'.dependencies]

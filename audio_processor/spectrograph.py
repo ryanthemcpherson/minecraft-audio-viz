@@ -3,9 +3,9 @@ Terminal-based spectrograph display for audio visualization.
 Enhanced TUI with colors, beat indicators, and status display.
 """
 
-import sys
 import os
 import shutil
+import sys
 
 
 def is_vscode_terminal() -> bool:
@@ -15,6 +15,7 @@ def is_vscode_terminal() -> bool:
 
 class Colors:
     """ANSI color codes for terminal output."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -59,10 +60,10 @@ class Colors:
 
 # Band colors (matching the web UI) - 5 bands for ultra-low-latency mode
 BAND_COLORS = [
-    Colors.YELLOW,          # Bass (includes kick drums)
-    Colors.BRIGHT_YELLOW,   # Low-mid
-    Colors.BRIGHT_GREEN,    # Mid
-    Colors.BRIGHT_BLUE,     # High-mid
+    Colors.YELLOW,  # Bass (includes kick drums)
+    Colors.BRIGHT_YELLOW,  # Low-mid
+    Colors.BRIGHT_GREEN,  # Mid
+    Colors.BRIGHT_BLUE,  # High-mid
     Colors.BRIGHT_MAGENTA,  # High/Air
 ]
 
@@ -111,9 +112,18 @@ class TerminalSpectrograph:
             sys.stdout.write(Colors.HOME)
             sys.stdout.flush()
 
-    def set_stats(self, preset=None, bpm=None, variance=None, attack=None,
-                  release=None, threshold=None, clients=None, using_fft=None,
-                  latency_ms=None):
+    def set_stats(
+        self,
+        preset=None,
+        bpm=None,
+        variance=None,
+        attack=None,
+        release=None,
+        threshold=None,
+        clients=None,
+        using_fft=None,
+        latency_ms=None,
+    ):
         """Update display stats from the agent."""
         if preset is not None:
             self._preset = preset
@@ -183,7 +193,7 @@ class TerminalSpectrograph:
             "auto": Colors.CYAN,
             "edm": Colors.BRIGHT_RED,
             "chill": Colors.BRIGHT_MAGENTA,
-            "rock": Colors.YELLOW
+            "rock": Colors.YELLOW,
         }.get(self._preset, Colors.WHITE)
         preset_str = f"{preset_color}[{self._preset.upper()}]{Colors.RESET}"
 
@@ -218,7 +228,7 @@ class TerminalSpectrograph:
         amplitude = max(0.0, min(1.0, float(amplitude)))
         vol_bar = self._make_bar(amplitude, 15, Colors.WHITE)
         lines.append(f"{Colors.DIM}{'─' * min(50, self._width - 2)}{Colors.RESET}")
-        lines.append(f"Vol  {vol_bar} {int(amplitude*100):3d}%  {beat_ind}")
+        lines.append(f"Vol  {vol_bar} {int(amplitude * 100):3d}%  {beat_ind}")
 
         # === STATS ROW ===
         latency_str = f"lat={self._latency_ms:.0f}ms" if self._latency_ms > 0 else ""

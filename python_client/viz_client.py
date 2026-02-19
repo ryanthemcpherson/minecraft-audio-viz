@@ -7,7 +7,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional, Callable, Any
+from typing import Any, Callable, Optional
+
 import websockets
 from websockets.client import WebSocketClientProtocol
 
@@ -56,16 +57,12 @@ class VizClient:
         """Connect to the AudioViz WebSocket server."""
         try:
             self.ws = await asyncio.wait_for(
-                websockets.connect(self.uri),
-                timeout=self.connect_timeout
+                websockets.connect(self.uri), timeout=self.connect_timeout
             )
             self._connected = True
 
             # Wait for welcome message with timeout
-            response = await asyncio.wait_for(
-                self.ws.recv(),
-                timeout=self.connect_timeout
-            )
+            response = await asyncio.wait_for(self.ws.recv(), timeout=self.connect_timeout)
             data = json.loads(response)
             logger.info(f"Connected to AudioViz: {data.get('message', 'OK')}")
 
@@ -153,9 +150,17 @@ class VizClient:
 
                     # Queue response messages for send() to pick up
                     # (any message that's a response to a request)
-                    if msg_type in ("zones", "zone", "pool_initialized", "batch_updated",
-                                    "entity_updated", "visibility_updated", "zone_cleaned",
-                                    "error", "connected"):
+                    if msg_type in (
+                        "zones",
+                        "zone",
+                        "pool_initialized",
+                        "batch_updated",
+                        "entity_updated",
+                        "visibility_updated",
+                        "zone_cleaned",
+                        "error",
+                        "connected",
+                    ):
                         await self._pending_responses.put(data)
                         continue
 
@@ -274,8 +279,7 @@ class VizClient:
             if self._use_receive_loop:
                 try:
                     response = await asyncio.wait_for(
-                        self._pending_responses.get(),
-                        timeout=self.connect_timeout
+                        self._pending_responses.get(), timeout=self.connect_timeout
                     )
                     return response
                 except asyncio.TimeoutError:
@@ -314,37 +318,30 @@ class VizClient:
             return response.get("zone")
         return None
 
-    async def init_pool(self, zone_name: str, count: int = 16,
-                        material: str = "GLOWSTONE") -> bool:
+    async def init_pool(self, zone_name: str, count: int = 16, material: str = "GLOWSTONE") -> bool:
         """Initialize entity pool for a zone."""
-        response = await self.send({
-            "type": "init_pool",
-            "zone": zone_name,
-            "count": count,
-            "material": material
-        })
+        response = await self.send(
+            {"type": "init_pool", "zone": zone_name, "count": count, "material": material}
+        )
         return response is not None and response.get("type") == "pool_initialized"
 
-    async def batch_update(self, zone_name: str, entities: list[dict],
-                           particles: list[dict] = None) -> bool:
+    async def batch_update(
+        self, zone_name: str, entities: list[dict], particles: list[dict] = None
+    ) -> bool:
         """
         Send batch entity updates (waits for response).
         For real-time visualization, use batch_update_fast() instead.
         """
-        message = {
-            "type": "batch_update",
-            "zone": zone_name,
-            "entities": entities
-        }
+        message = {"type": "batch_update", "zone": zone_name, "entities": entities}
         if particles:
             message["particles"] = particles
 
         response = await self.send(message)
         return response is not None and response.get("type") == "batch_updated"
 
-    async def batch_update_fast(self, zone_name: str, entities: list[dict],
-                                 particles: list[dict] = None,
-                                 audio: dict = None):
+    async def batch_update_fast(
+        self, zone_name: str, entities: list[dict], particles: list[dict] = None, audio: dict = None
+    ):
         """
         Fire-and-forget batch update for real-time visualization.
         Does not wait for response - much faster for high frame rates.
@@ -360,11 +357,7 @@ class VizClient:
         if not self.ws or not self._connected:
             return
 
-        message = {
-            "type": "batch_update",
-            "zone": zone_name,
-            "entities": entities
-        }
+        message = {"type": "batch_update", "zone": zone_name, "entities": entities}
         if particles:
             message["particles"] = particles
         if audio:
@@ -374,7 +367,7 @@ class VizClient:
             message["is_beat"] = audio.get("is_beat", False)
             message["beat_intensity"] = audio.get("beat_intensity", 0.0)
             # Debug: log first time we send audio
-            if not hasattr(self, '_audio_logged'):
+            if not hasattr(self, "_audio_logged"):
                 self._audio_logged = True
                 logger.info(f"Sending audio data: bands={message['bands'][:2]}...")
 
@@ -385,21 +378,25 @@ class VizClient:
             self._connected = False
         except Exception as e:
             # Log unexpected errors but don't spam
-            if not hasattr(self, '_last_fast_error') or (time.time() - self._last_fast_error) > 5:
+            if not hasattr(self, "_last_fast_error") or (time.time() - self._last_fast_error) > 5:
                 logger.warning(f"Fast update error: {e}")
                 self._last_fast_error = time.time()
             self._connected = False
 
-    async def update_entity(self, zone_name: str, entity_id: str,
-                            x: float = None, y: float = None, z: float = None,
-                            scale: float = None, visible: bool = None,
-                            text: str = None, material: str = None) -> bool:
+    async def update_entity(
+        self,
+        zone_name: str,
+        entity_id: str,
+        x: float = None,
+        y: float = None,
+        z: float = None,
+        scale: float = None,
+        visible: bool = None,
+        text: str = None,
+        material: str = None,
+    ) -> bool:
         """Update a single entity."""
-        message = {
-            "type": "update_entity",
-            "zone": zone_name,
-            "id": entity_id
-        }
+        message = {"type": "update_entity", "zone": zone_name, "id": entity_id}
 
         if x is not None:
             message["x"] = x
@@ -419,14 +416,11 @@ class VizClient:
         response = await self.send(message)
         return response is not None and response.get("type") == "entity_updated"
 
-    async def set_visible(self, zone_name: str, visible: bool,
-                          entity_ids: list[str] = None) -> bool:
+    async def set_visible(
+        self, zone_name: str, visible: bool, entity_ids: list[str] = None
+    ) -> bool:
         """Set visibility for entities in a zone."""
-        message = {
-            "type": "set_visible",
-            "zone": zone_name,
-            "visible": visible
-        }
+        message = {"type": "set_visible", "zone": zone_name, "visible": visible}
         if entity_ids:
             message["entities"] = entity_ids
 

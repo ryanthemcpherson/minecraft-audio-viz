@@ -25,14 +25,15 @@ import queue
 import threading
 import time
 from ctypes import wintypes
-from typing import Optional, Tuple, List, Union
 from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import numpy as np
 
 # Try to import ring buffer
 try:
-    from audio_processor.ringbuffer import SPSCRingBuffer, AudioChunkBuffer, BufferStats
+    from audio_processor.ringbuffer import AudioChunkBuffer, BufferStats, SPSCRingBuffer
+
     HAS_RINGBUFFER = True
 except ImportError:
     HAS_RINGBUFFER = False
@@ -46,6 +47,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # QPC High-Precision Timer
 # =============================================================================
+
 
 class QPCTimer:
     """
@@ -67,13 +69,11 @@ class QPCTimer:
 
         try:
             # Query performance counter frequency (ticks per second)
-            result = ctypes.windll.kernel32.QueryPerformanceFrequency(
-                ctypes.byref(self._frequency)
-            )
+            result = ctypes.windll.kernel32.QueryPerformanceFrequency(ctypes.byref(self._frequency))
             if result != 0 and self._frequency.value > 0:
                 self._available = True
                 self._freq_float = float(self._frequency.value)
-                logger.debug(f"QPC initialized: {self._freq_float/1e6:.2f} MHz")
+                logger.debug(f"QPC initialized: {self._freq_float / 1e6:.2f} MHz")
             else:
                 logger.warning("QPC not available, falling back to time.time()")
         except Exception as e:
@@ -161,11 +161,12 @@ def qpc_now_ticks() -> int:
     """Get current QPC ticks (convenience function)."""
     return get_qpc_timer().now_ticks()
 
+
 # Try to import comtypes for COM interface access
 try:
     import comtypes
-    from comtypes import GUID, COMMETHOD, IUnknown, HRESULT
-    from comtypes.automation import VARIANT
+    from comtypes import GUID
+
     HAS_COMTYPES = True
 except ImportError:
     HAS_COMTYPES = False
@@ -202,6 +203,7 @@ THREAD_PRIORITY_HIGHEST = 2
 # =============================================================================
 # MMCSS Thread Priority Helper
 # =============================================================================
+
 
 class MMCSSPriority:
     """
@@ -256,8 +258,7 @@ class MMCSSPriority:
                 task_name_w = ctypes.create_unicode_buffer(self.task_name)
 
                 handle = self._avrt.AvSetMmThreadCharacteristicsW(
-                    task_name_w,
-                    ctypes.byref(task_index)
+                    task_name_w, ctypes.byref(task_index)
                 )
 
                 if handle:
@@ -337,6 +338,7 @@ class MMCSSPriority:
 @dataclass
 class WasapiDeviceInfo:
     """Information about a WASAPI device."""
+
     id: str
     name: str
     is_loopback: bool
@@ -359,9 +361,8 @@ def check_wasapi_lowlatency_available() -> Tuple[bool, str]:
 
     # Check Windows version (need Windows 10+)
     try:
-        version = ctypes.windll.ntdll.RtlGetVersion
         # Windows 10 is version 10.0
-        if not hasattr(ctypes.windll, 'kernel32'):
+        if not hasattr(ctypes.windll, "kernel32"):
             return False, "Cannot determine Windows version"
 
         # Try to access IAudioClient3 interface
@@ -377,33 +378,33 @@ if HAS_COMTYPES:
 
     class WAVEFORMATEX(ctypes.Structure):
         _fields_ = [
-            ('wFormatTag', wintypes.WORD),
-            ('nChannels', wintypes.WORD),
-            ('nSamplesPerSec', wintypes.DWORD),
-            ('nAvgBytesPerSec', wintypes.DWORD),
-            ('nBlockAlign', wintypes.WORD),
-            ('wBitsPerSample', wintypes.WORD),
-            ('cbSize', wintypes.WORD),
+            ("wFormatTag", wintypes.WORD),
+            ("nChannels", wintypes.WORD),
+            ("nSamplesPerSec", wintypes.DWORD),
+            ("nAvgBytesPerSec", wintypes.DWORD),
+            ("nBlockAlign", wintypes.WORD),
+            ("wBitsPerSample", wintypes.WORD),
+            ("cbSize", wintypes.WORD),
         ]
 
     class WAVEFORMATEXTENSIBLE(ctypes.Structure):
         _fields_ = [
-            ('Format', WAVEFORMATEX),
-            ('Samples', wintypes.WORD),
-            ('dwChannelMask', wintypes.DWORD),
-            ('SubFormat', GUID),
+            ("Format", WAVEFORMATEX),
+            ("Samples", wintypes.WORD),
+            ("dwChannelMask", wintypes.DWORD),
+            ("SubFormat", GUID),
         ]
 
     # GUIDs
-    CLSID_MMDeviceEnumerator = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
-    IID_IMMDeviceEnumerator = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
-    IID_IAudioClient = GUID('{1CB9AD4C-DBFA-4c32-B178-C2F568A703B2}')
-    IID_IAudioClient3 = GUID('{7ED4EE07-8E67-4CD4-8C1A-2B7A5987AD42}')
-    IID_IAudioCaptureClient = GUID('{C8ADBD64-E71E-48a0-A4DE-185C395CD317}')
+    CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+    IID_IMMDeviceEnumerator = GUID("{A95664D2-9614-4F35-A746-DE8DB63617E6}")
+    IID_IAudioClient = GUID("{1CB9AD4C-DBFA-4c32-B178-C2F568A703B2}")
+    IID_IAudioClient3 = GUID("{7ED4EE07-8E67-4CD4-8C1A-2B7A5987AD42}")
+    IID_IAudioCaptureClient = GUID("{C8ADBD64-E71E-48a0-A4DE-185C395CD317}")
 
     # Audio format GUIDs
-    KSDATAFORMAT_SUBTYPE_PCM = GUID('{00000001-0000-0010-8000-00aa00389b71}')
-    KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = GUID('{00000003-0000-0010-8000-00aa00389b71}')
+    KSDATAFORMAT_SUBTYPE_PCM = GUID("{00000001-0000-0010-8000-00aa00389b71}")
+    KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = GUID("{00000003-0000-0010-8000-00aa00389b71}")
 
     # EDataFlow enumeration
     eRender = 0
@@ -464,10 +465,7 @@ class WasapiLoopbackCapture:
         if self._use_ringbuffer:
             qpc_freq = get_qpc_timer().frequency if use_qpc else 0
             self._ring_buffer: Optional[AudioChunkBuffer] = AudioChunkBuffer(
-                capacity=16,
-                max_chunk_size=4096,
-                channels=2,
-                qpc_frequency=qpc_freq
+                capacity=16, max_chunk_size=4096, channels=2, qpc_frequency=qpc_freq
             )
             self._audio_queue = None
             logger.debug("Using lock-free ring buffer")
@@ -520,9 +518,10 @@ class WasapiLoopbackCapture:
 
         # Create device enumerator
         from comtypes.client import CreateObject
+
         enumerator = CreateObject(
             CLSID_MMDeviceEnumerator,
-            interface=None  # We'll query the interface
+            interface=None,  # We'll query the interface
         )
 
         # Get IMMDeviceEnumerator interface
@@ -540,29 +539,32 @@ class WasapiLoopbackCapture:
         """
         try:
             # Activate IAudioClient3
-            self._audio_client = self._device.Activate(
-                IID_IAudioClient3, 0, None
-            )
+            self._audio_client = self._device.Activate(IID_IAudioClient3, 0, None)
 
             # Get the mix format
             mix_format_ptr = self._audio_client.GetMixFormat()
             mix_format = ctypes.cast(mix_format_ptr, ctypes.POINTER(WAVEFORMATEX)).contents
 
-            logger.info(f"Device format: {mix_format.nSamplesPerSec}Hz, "
-                       f"{mix_format.nChannels}ch, {mix_format.wBitsPerSample}bit")
+            logger.info(
+                f"Device format: {mix_format.nSamplesPerSec}Hz, "
+                f"{mix_format.nChannels}ch, {mix_format.wBitsPerSample}bit"
+            )
 
             # Query supported periods using IAudioClient3
-            default_period, fundamental_period, min_period, max_period = \
+            default_period, fundamental_period, min_period, max_period = (
                 self._audio_client.GetSharedModeEnginePeriod(mix_format_ptr)
+            )
 
             # Convert frames to ms
             sample_rate = mix_format.nSamplesPerSec
             min_latency_ms = (min_period / sample_rate) * 1000
             default_latency_ms = (default_period / sample_rate) * 1000
 
-            logger.info(f"Supported periods: min={min_latency_ms:.2f}ms, "
-                       f"default={default_latency_ms:.2f}ms, "
-                       f"fundamental={fundamental_period} frames")
+            logger.info(
+                f"Supported periods: min={min_latency_ms:.2f}ms, "
+                f"default={default_latency_ms:.2f}ms, "
+                f"fundamental={fundamental_period} frames"
+            )
 
             # Calculate target period (must be multiple of fundamental)
             target_frames = int(self.target_latency_ms * sample_rate / 1000)
@@ -571,8 +573,9 @@ class WasapiLoopbackCapture:
 
             # Round to nearest multiple of fundamental
             if fundamental_period > 0:
-                target_frames = ((target_frames + fundamental_period // 2) //
-                               fundamental_period) * fundamental_period
+                target_frames = (
+                    (target_frames + fundamental_period // 2) // fundamental_period
+                ) * fundamental_period
                 target_frames = max(min_period, target_frames)
 
             self._actual_period_frames = target_frames
@@ -587,8 +590,7 @@ class WasapiLoopbackCapture:
 
             # Initialize shared audio stream with loopback
             # Note: Loopback mode captures the render device's output
-            stream_flags = (AUDCLNT_STREAMFLAGS_LOOPBACK |
-                          AUDCLNT_STREAMFLAGS_EVENTCALLBACK)
+            stream_flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
 
             # Add AUTOCONVERTPCM only if not using native format
             # Native format eliminates Windows Audio Engine resampling overhead
@@ -600,28 +602,28 @@ class WasapiLoopbackCapture:
                 stream_flags,
                 target_frames,
                 mix_format_ptr,
-                None  # No session GUID
+                None,  # No session GUID
             )
 
             if hr != 0:
                 # If native format failed, retry with AUTOCONVERTPCM
                 if self._native_format:
-                    logger.warning(f"Native format init failed (0x{hr:08X}), "
-                                 f"retrying with AUTOCONVERTPCM")
+                    logger.warning(
+                        f"Native format init failed (0x{hr:08X}), retrying with AUTOCONVERTPCM"
+                    )
                     self._native_format = False
                     stream_flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
 
                     hr = self._audio_client.InitializeSharedAudioStream(
-                        stream_flags,
-                        target_frames,
-                        mix_format_ptr,
-                        None
+                        stream_flags, target_frames, mix_format_ptr, None
                     )
 
                 if hr != 0:
                     # Fall back to regular Initialize if IAudioClient3 method fails
-                    logger.warning(f"InitializeSharedAudioStream failed (0x{hr:08X}), "
-                                 f"falling back to standard Initialize")
+                    logger.warning(
+                        f"InitializeSharedAudioStream failed (0x{hr:08X}), "
+                        f"falling back to standard Initialize"
+                    )
                     return self._init_audio_client_fallback()
 
             # Get capture client
@@ -644,9 +646,7 @@ class WasapiLoopbackCapture:
         """Fallback to standard IAudioClient initialization."""
         try:
             # Activate IAudioClient (not IAudioClient3)
-            self._audio_client = self._device.Activate(
-                IID_IAudioClient, 0, None
-            )
+            self._audio_client = self._device.Activate(IID_IAudioClient, 0, None)
 
             # Get mix format
             mix_format_ptr = self._audio_client.GetMixFormat()
@@ -655,8 +655,7 @@ class WasapiLoopbackCapture:
             # Use default buffer duration (usually 10ms)
             buffer_duration = int(self.target_latency_ms * REFTIMES_PER_MILLISEC)
 
-            stream_flags = (AUDCLNT_STREAMFLAGS_LOOPBACK |
-                          AUDCLNT_STREAMFLAGS_EVENTCALLBACK)
+            stream_flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
 
             self._audio_client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
@@ -664,7 +663,7 @@ class WasapiLoopbackCapture:
                 buffer_duration,
                 0,  # Periodicity (must be 0 for shared mode)
                 mix_format_ptr,
-                None
+                None,
             )
 
             # Get actual buffer size
@@ -672,8 +671,9 @@ class WasapiLoopbackCapture:
             self._actual_period_frames = buffer_frames
             self._actual_latency_ms = (buffer_frames / mix_format.nSamplesPerSec) * 1000
 
-            logger.info(f"Fallback mode: buffer={buffer_frames} frames "
-                       f"({self._actual_latency_ms:.2f}ms)")
+            logger.info(
+                f"Fallback mode: buffer={buffer_frames} frames ({self._actual_latency_ms:.2f}ms)"
+            )
 
             # Get capture client
             self._capture_client = self._audio_client.GetService(IID_IAudioCaptureClient)
@@ -714,7 +714,9 @@ class WasapiLoopbackCapture:
             # Start the audio client
             self._audio_client.Start()
 
-            logger.info(f"WASAPI loopback capture started at {self._actual_latency_ms:.2f}ms latency")
+            logger.info(
+                f"WASAPI loopback capture started at {self._actual_latency_ms:.2f}ms latency"
+            )
             return True
 
         except Exception as e:
@@ -748,7 +750,7 @@ class WasapiLoopbackCapture:
                 # Wait for buffer event (with timeout)
                 result = ctypes.windll.kernel32.WaitForSingleObject(
                     self._event,
-                    100  # 100ms timeout
+                    100,  # 100ms timeout
                 )
 
                 if result != 0:  # WAIT_OBJECT_0
@@ -759,8 +761,9 @@ class WasapiLoopbackCapture:
 
                 while packet_length > 0 and self._running:
                     # Get buffer
-                    data_ptr, num_frames, flags, device_position, qpc_position = \
+                    data_ptr, num_frames, flags, device_position, qpc_position = (
                         self._capture_client.GetBuffer()
+                    )
 
                     if num_frames > 0:
                         # Copy audio data
@@ -864,10 +867,10 @@ class WasapiLoopbackCapture:
     def native_format(self) -> dict:
         """Get detected native format properties."""
         return {
-            'sample_rate': self._native_sample_rate,
-            'channels': self._native_channels,
-            'bit_depth': self._native_bit_depth,
-            'using_native': self._native_format,
+            "sample_rate": self._native_sample_rate,
+            "channels": self._native_channels,
+            "bit_depth": self._native_bit_depth,
+            "using_native": self._native_format,
         }
 
     @property
@@ -888,12 +891,12 @@ class WasapiLoopbackCapture:
         if self._use_ringbuffer and self._ring_buffer is not None:
             stats = self._ring_buffer.stats
             return {
-                'writes': stats.writes,
-                'reads': stats.reads,
-                'overruns': stats.overruns,
-                'underruns': stats.underruns,
-                'capacity': stats.capacity,
-                'fill': stats.current_fill,
+                "writes": stats.writes,
+                "reads": stats.reads,
+                "overruns": stats.overruns,
+                "underruns": stats.underruns,
+                "capacity": stats.capacity,
+                "fill": stats.current_fill,
             }
         return None
 

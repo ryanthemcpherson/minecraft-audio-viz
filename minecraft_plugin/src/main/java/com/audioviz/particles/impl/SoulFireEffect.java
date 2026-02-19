@@ -35,7 +35,7 @@ public class SoulFireEffect implements ParticleEffect {
     @Override
     public List<ParticleSpawn> calculate(AudioState audio, ParticleEffectConfig config) {
         if (!audio.isBeat()) return Collections.emptyList();
-        if (audio.getSubBass() < config.getBeatThreshold()) return Collections.emptyList();
+        if (audio.getBass() < config.getBeatThreshold()) return Collections.emptyList();
 
         List<ParticleSpawn> spawns = new ArrayList<>();
 

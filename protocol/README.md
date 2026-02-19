@@ -1,4 +1,4 @@
-# Protocol Starter
+# Protocol Contracts
 
 This directory is the contract source of truth for cross-runtime messages in AudioViz.
 
@@ -29,20 +29,52 @@ This directory is the contract source of truth for cross-runtime messages in Aud
 3. Block releases when contract tests fail.
 4. Enforce backend fallback behavior through fixture-based tests.
 
-## Initial message coverage
-- `dj_auth`
-- `code_auth`
-- `dj_audio_frame`
-- `dj_heartbeat`
-- `batch_update`
-- `state`/`audio` browser broadcast
-- `set_zone_config`
-- `set_renderer_backend`
-- `renderer_capabilities`
-- `get_renderer_capabilities`
-- `set_hologram_config`
+## Message Coverage
+
+### Core (Plugin ↔ Processor)
+- `ping` / `pong` — Liveness heartbeat
+- `error` — Error response for any failed request
+- `get_zones` / `zones` — Zone listing
+- `audio_state` — High-frequency FFT data (5-band + beat detection)
+- `init_pool` — Display entity pool initialization
+- `batch_update` — Batched entity position/scale updates
+- `set_visible` — Zone visibility toggle (blackout)
+- `set_render_mode` — Change visualization render mode
+- `set_zone_config` — Zone configuration update
+
+### VJ Controls
+- `set_pattern` — Change visualization pattern
+- `set_preset` — Apply audio processing preset (named or custom)
+- `trigger_effect` — Trigger VJ effects (blackout, freeze, flash, strobe, pulse, wave, spiral, explode)
+
+### Renderer Backend
+- `set_renderer_backend` — Select rendering backend per zone
+- `renderer_capabilities` / `get_renderer_capabilities` — Query supported backends
+- `set_hologram_config` — Hologram backend configuration
+
+### DJ Server
+- `dj_auth` / `code_auth` — DJ authentication
+- `dj_audio_frame` — Audio data from remote DJs
+- `dj_heartbeat` — DJ session keepalive
+- `state_broadcast` — State sync to browser clients
 
 ## Renderer backend keys
 - `display_entities`
 - `particles`
 - `hologram`
+
+## Frequency Bands (5-band system)
+| Index | Band     | Range       |
+|-------|----------|-------------|
+| 0     | Bass     | 40-250 Hz   |
+| 1     | Low-mid  | 250-500 Hz  |
+| 2     | Mid      | 500-2000 Hz |
+| 3     | High-mid | 2-6 kHz     |
+| 4     | High     | 6-20 kHz    |
+
+## Port Reference
+| Port | Purpose                             |
+|------|-------------------------------------|
+| 8765 | Minecraft plugin ↔ Python processor |
+| 8766 | Browser clients ↔ Python processor  |
+| 9000 | Remote DJs ↔ VJ server              |

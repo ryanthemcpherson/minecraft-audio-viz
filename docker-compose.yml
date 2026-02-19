@@ -33,6 +33,51 @@ services:
       retries: 3
       start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # Coordinator API (FastAPI)
+  # ---------------------------------------------------------------------------
+  coordinator:
+    build:
+      context: ./coordinator
+      dockerfile: Dockerfile
+    container_name: mcav-coordinator
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - MCAV_DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/mcav
+      - MCAV_JWT_DEFAULT_EXPIRY_MINUTES=15
+      - MCAV_CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
+      - PORT=8090
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - audioviz-net
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL (for coordinator)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: mcav-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mcav
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - audioviz-net
+
   # Optional: Nginx reverse proxy for HTTPS
   # Uncomment if you need SSL termination
   # nginx:
@@ -52,3 +97,6 @@ services:
 networks:
   audioviz-net:
     driver: bridge
+
+volumes:
+  pgdata:

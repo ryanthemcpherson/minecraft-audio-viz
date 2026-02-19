@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-render-mode.schema.json",
+  "title": "SetRenderModeMessage",
+  "description": "Change the visualization render mode for a zone (e.g. bars, grid, circle, wave).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_render_mode"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "type": "string",
+      "description": "Render mode identifier"
+    }
+  },
+  "required": ["type", "zone", "mode"]
+}

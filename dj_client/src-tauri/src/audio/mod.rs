@@ -4,9 +4,7 @@ mod capture;
 mod fft;
 mod sources;
 
-// Platform-specific audio code (disabled for MVP - using cpal for all platforms)
-// #[cfg(target_os = "windows")]
-// mod platform;
+mod platform;
 
 pub use capture::{AnalysisResult, AudioCaptureHandle};
 pub use fft::FftAnalyzer;

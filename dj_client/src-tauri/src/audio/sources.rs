@@ -60,12 +60,56 @@ pub fn list_sources() -> Result<Vec<AudioSource>, SourceError> {
         });
     }
 
+    // List per-application audio sources (platform-specific)
+    #[cfg(target_os = "windows")]
+    {
+        match super::platform::windows::list_audio_applications() {
+            Ok(app_sources) => {
+                for source in app_sources {
+                    sources.push(source);
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to enumerate audio applications: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        match super::platform::macos::list_audio_applications() {
+            Ok(app_sources) => {
+                for source in app_sources {
+                    sources.push(source);
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to enumerate audio applications: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        match super::platform::linux::list_audio_applications() {
+            Ok(app_sources) => {
+                for source in app_sources {
+                    sources.push(source);
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to enumerate audio applications: {}", e);
+            }
+        }
+    }
+
     // List output devices as loopback sources
     if let Ok(devices) = host.output_devices() {
         for device in devices {
             if let Ok(name) = device.name() {
                 // Skip the default output device (already added as "System Audio")
-                if host.default_output_device()
+                if host
+                    .default_output_device()
                     .and_then(|d| d.name().ok())
                     .map(|n| n == name)
                     .unwrap_or(false)

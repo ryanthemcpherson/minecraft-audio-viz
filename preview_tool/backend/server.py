@@ -86,14 +86,13 @@ async def run_demo_mode():
     while True:
         current_state["frame"] += 1
 
-        # Simulate frequency bands
+        # Simulate 5 frequency bands: Bass, Low-mid, Mid, High-mid, High
         current_state["bands"] = [
-            0.5 + 0.4 * math.sin(t * 0.8 + 0),
-            0.4 + 0.35 * math.sin(t * 1.1 + 0.5),
-            0.35 + 0.3 * math.sin(t * 1.5 + 1.0),
-            0.3 + 0.25 * math.sin(t * 2.0 + 1.5),
-            0.25 + 0.2 * math.sin(t * 2.8 + 2.0),
-            0.2 + 0.15 * math.sin(t * 3.5 + 2.5),
+            0.5 + 0.4 * math.sin(t * 0.8 + 0),       # Bass (40-250Hz)
+            0.4 + 0.35 * math.sin(t * 1.1 + 0.5),     # Low-mid (250-500Hz)
+            0.35 + 0.3 * math.sin(t * 1.5 + 1.0),     # Mid (500-2kHz)
+            0.3 + 0.25 * math.sin(t * 2.0 + 1.5),     # High-mid (2-6kHz)
+            0.25 + 0.2 * math.sin(t * 2.8 + 2.0),     # High (6-20kHz)
         ]
 
         # Simulate amplitude
