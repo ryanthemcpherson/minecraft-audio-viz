@@ -219,6 +219,78 @@ async def login_discord(
 
 
 # ---------------------------------------------------------------------------
+# Google OAuth
+# ---------------------------------------------------------------------------
+
+
+async def login_google(
+    *,
+    google_id: str,
+    google_email: str | None,
+    google_name: str | None,
+    google_picture: str | None,
+    session: AsyncSession,
+    jwt_secret: str,
+    expiry_minutes: int,
+    refresh_expiry_days: int,
+) -> AuthResult:
+    """Find-or-create a user from a Google profile, then issue tokens."""
+    stmt = select(User).where(User.google_id == google_id)
+    user = (await session.execute(stmt)).scalar_one_or_none()
+
+    if user is None:
+        # Check if a user with this email already exists (link Google to existing account)
+        if google_email:
+            existing_by_email = (
+                await session.execute(
+                    select(User).where(User.email == google_email.lower().strip())
+                )
+            ).scalar_one_or_none()
+            if existing_by_email is not None:
+                existing_by_email.google_id = google_id
+                existing_by_email.last_login_at = datetime.now(timezone.utc)
+                if google_picture:
+                    existing_by_email.avatar_url = google_picture
+                user = existing_by_email
+                await session.flush()
+
+                return await _issue_tokens(
+                    user=user,
+                    session=session,
+                    jwt_secret=jwt_secret,
+                    expiry_minutes=expiry_minutes,
+                    refresh_expiry_days=refresh_expiry_days,
+                )
+
+        # New user — create
+        user = User(
+            id=uuid.uuid4(),
+            google_id=google_id,
+            email=google_email.lower().strip() if google_email else None,
+            display_name=google_name or google_email or "User",
+            avatar_url=google_picture,
+            last_login_at=datetime.now(timezone.utc),
+        )
+        session.add(user)
+        await session.flush()
+    else:
+        # Existing user — update profile fields
+        user.last_login_at = datetime.now(timezone.utc)
+        if google_name:
+            user.display_name = google_name
+        if google_picture:
+            user.avatar_url = google_picture
+
+    return await _issue_tokens(
+        user=user,
+        session=session,
+        jwt_secret=jwt_secret,
+        expiry_minutes=expiry_minutes,
+        refresh_expiry_days=refresh_expiry_days,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Token refresh (rotation)
 # ---------------------------------------------------------------------------
 

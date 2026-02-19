@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import {
   exchangeDiscordCode,
+  exchangeGoogleCode,
+  getOAuthProvider,
   getStoredOAuthState,
   clearStoredOAuthState,
 } from "@/lib/auth";
@@ -58,12 +60,14 @@ function CallbackHandler() {
     // Mark as handled so we don't re-process on re-render
     handled.current = true;
 
+    const provider = getOAuthProvider(state);
+
     // Desktop OAuth flow: the DJ client initiated this login.
     // Redirect the browser directly to the coordinator callback so it can
     // return HTML with a mcav:// deep-link redirect back to the DJ app.
     if (isDesktopOAuthState(state)) {
       const params = new URLSearchParams({ code, state });
-      window.location.href = `${COORDINATOR_URL}/api/v1/auth/discord/callback?${params}`;
+      window.location.href = `${COORDINATOR_URL}/api/v1/auth/${provider}/callback?${params}`;
       return;
     }
 
@@ -81,7 +85,8 @@ function CallbackHandler() {
       return;
     }
 
-    exchangeDiscordCode(code, state)
+    const exchangeFn = provider === "google" ? exchangeGoogleCode : exchangeDiscordCode;
+    exchangeFn(code, state)
       .then((res) => {
         setAuth(res.access_token, res.refresh_token, res.user);
         router.replace(res.user.onboarding_completed ? "/dashboard" : "/onboarding");

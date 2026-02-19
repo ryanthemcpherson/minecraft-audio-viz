@@ -38,6 +38,7 @@ export interface DJProfile {
   avatar_url: string | null;
   banner_url: string | null;
   color_palette: string[] | null;
+  block_palette: (string | null)[] | null;
   slug: string | null;
   soundcloud_url: string | null;
   spotify_url: string | null;
@@ -297,17 +298,11 @@ export async function loginWithEmail(
 }
 
 export async function getDiscordAuthUrl(): Promise<string> {
-  const data = await api<{ authorize_url: string }>(
+  const data = await api<{ authorize_url: string; state: string }>(
     "/api/v1/auth/discord"
   );
   // Store the state param for CSRF validation on callback
-  try {
-    const url = new URL(data.authorize_url);
-    const state = url.searchParams.get("state");
-    if (state) storeOAuthState(state);
-  } catch {
-    // If URL parsing fails, proceed without state storage
-  }
+  if (data.state) storeOAuthState(data.state);
   return data.authorize_url;
 }
 
@@ -317,6 +312,39 @@ export async function exchangeDiscordCode(
 ): Promise<AuthResponse> {
   const params = new URLSearchParams({ code, state });
   return api<AuthResponse>(`/api/v1/auth/discord/callback?${params}`);
+}
+
+export async function getGoogleAuthUrl(): Promise<string> {
+  const data = await api<{ authorize_url: string; state: string }>(
+    "/api/v1/auth/google"
+  );
+  if (data.state) storeOAuthState(data.state);
+  return data.authorize_url;
+}
+
+export async function exchangeGoogleCode(
+  code: string,
+  state: string
+): Promise<AuthResponse> {
+  const params = new URLSearchParams({ code, state });
+  return api<AuthResponse>(`/api/v1/auth/google/callback?${params}`);
+}
+
+/**
+ * Decode the `provider` field from an OAuth state JWT.
+ * Returns "discord" if the provider cannot be determined.
+ */
+export function getOAuthProvider(state: string): "discord" | "google" {
+  try {
+    let b64 = state.split(".")[1];
+    b64 = b64.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const payload = JSON.parse(atob(b64));
+    if (payload.provider === "google") return "google";
+  } catch {
+    // Fall through to default
+  }
+  return "discord";
 }
 
 export async function refreshToken(
@@ -426,7 +454,7 @@ export async function createInvite(
 
 export async function createDJProfile(
   accessToken: string,
-  data: { dj_name: string; bio?: string; genres?: string; slug?: string; color_palette?: string[]; soundcloud_url?: string; spotify_url?: string; website_url?: string }
+  data: { dj_name: string; bio?: string; genres?: string; slug?: string; color_palette?: string[]; block_palette?: (string | null)[]; soundcloud_url?: string; spotify_url?: string; website_url?: string }
 ): Promise<DJProfile> {
   return api<DJProfile>("/api/v1/dj/profile", {
     method: "POST",
@@ -443,6 +471,7 @@ export async function updateDJProfile(
     genres?: string;
     slug?: string;
     color_palette?: string[];
+    block_palette?: (string | null)[];
     avatar_url?: string;
     banner_url?: string;
     is_public?: boolean;

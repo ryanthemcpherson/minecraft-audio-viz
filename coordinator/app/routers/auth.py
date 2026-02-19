@@ -19,11 +19,11 @@ from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
     ChangePasswordRequest,
-    DiscordAuthorizeResponse,
     DJProfileResponse,
     ExchangeCodeRequest,
     LoginRequest,
     LogoutRequest,
+    OAuthAuthorizeResponse,
     OrgSummary,
     RefreshRequest,
     RegisterRequest,
@@ -31,7 +31,7 @@ from app.models.schemas import (
     UserProfileResponse,
     UserResponse,
 )
-from app.services import auth_service, discord_oauth
+from app.services import auth_service, discord_oauth, google_oauth
 from app.services.password import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
@@ -57,13 +57,16 @@ def _cleanup_expired_exchange_codes() -> None:
         del _desktop_exchange_codes[code]
 
 
-def _create_oauth_state(jwt_secret: str, *, desktop: bool = False) -> str:
+def _create_oauth_state(
+    jwt_secret: str, *, desktop: bool = False, provider: str = "discord"
+) -> str:
     """Create a self-validating OAuth state token as a signed JWT."""
     now = int(time.time())
     payload: dict[str, Any] = {
         "nonce": secrets.token_urlsafe(16),
         "iat": now,
         "exp": now + _OAUTH_STATE_TTL,
+        "provider": provider,
     }
     if desktop:
         payload["desktop"] = True
@@ -186,23 +189,23 @@ async def login(
 
 @router.get(
     "/discord",
-    response_model=DiscordAuthorizeResponse,
+    response_model=OAuthAuthorizeResponse,
     summary="Get Discord OAuth authorize URL",
 )
 async def discord_authorize(
     desktop: bool = Query(False, description="Set to true for desktop app deep-link flow"),
     settings: Settings = Depends(get_settings),
-) -> DiscordAuthorizeResponse:
+) -> OAuthAuthorizeResponse:
     if not settings.discord_client_id:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
-    state = _create_oauth_state(settings.user_jwt_secret, desktop=desktop)
+    state = _create_oauth_state(settings.user_jwt_secret, desktop=desktop, provider="discord")
     url = discord_oauth.get_authorize_url(
         client_id=settings.discord_client_id,
         redirect_uri=settings.discord_redirect_uri,
         state=state,
     )
-    return DiscordAuthorizeResponse(authorize_url=url, state=state)
+    return OAuthAuthorizeResponse(authorize_url=url, state=state)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +268,111 @@ async def discord_callback(
 
     # Desktop deep-link flow: store auth response behind a one-time exchange code
     # and redirect to the desktop app via custom URL scheme.
+    if state_payload.get("desktop"):
+        _cleanup_expired_exchange_codes()
+        exchange_code = secrets.token_urlsafe(32)
+        _desktop_exchange_codes[exchange_code] = (
+            auth_resp.model_dump(mode="json"),
+            time.time(),
+        )
+        scheme = settings.desktop_deep_link_scheme
+        redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
+        html = (
+            f"<html><head><meta http-equiv='refresh' content='0;url={redirect_url}'>"
+            f"</head><body><p>Redirecting to MCAV DJ Client...</p>"
+            f"<p><a href='{redirect_url}'>Click here if not redirected</a></p>"
+            f"</body></html>"
+        )
+        return HTMLResponse(content=html)
+
+    return auth_resp
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/google
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/google",
+    response_model=OAuthAuthorizeResponse,
+    summary="Get Google OAuth authorize URL",
+)
+async def google_authorize(
+    desktop: bool = Query(False, description="Set to true for desktop app deep-link flow"),
+    settings: Settings = Depends(get_settings),
+) -> OAuthAuthorizeResponse:
+    if not settings.google_client_id:
+        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+
+    state = _create_oauth_state(settings.user_jwt_secret, desktop=desktop, provider="google")
+    url = google_oauth.get_authorize_url(
+        client_id=settings.google_client_id,
+        redirect_uri=settings.google_redirect_uri,
+        state=state,
+    )
+    return OAuthAuthorizeResponse(authorize_url=url, state=state)
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/google/callback
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/google/callback",
+    response_model=None,
+    summary="Google OAuth callback",
+)
+async def google_callback(
+    code: str = Query(...),
+    state: str = Query(""),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> AuthResponse | HTMLResponse:
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+
+    state_payload = _validate_oauth_state(state, settings.user_jwt_secret)
+    if not state_payload:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    try:
+        access_token = await google_oauth.exchange_code(
+            code=code,
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+            redirect_uri=settings.google_redirect_uri,
+        )
+        google_user = await google_oauth.get_google_user(access_token)
+    except Exception:
+        logger.exception("Google OAuth exchange failed")
+        raise HTTPException(status_code=400, detail="Google OAuth exchange failed")
+
+    result = await auth_service.login_google(
+        google_id=google_user.id,
+        google_email=google_user.email,
+        google_name=google_user.name,
+        google_picture=google_user.picture,
+        session=session,
+        jwt_secret=settings.user_jwt_secret,
+        expiry_minutes=settings.user_jwt_expiry_minutes,
+        refresh_expiry_days=settings.refresh_token_expiry_days,
+    )
+
+    await session.commit()
+
+    from sqlalchemy import select
+
+    from app.models.db import User as UserModel
+
+    user = (
+        await session.execute(select(UserModel).where(UserModel.id == result.user_id))
+    ).scalar_one()
+
+    auth_resp = _auth_response(result, user)
+
+    # Desktop deep-link flow
     if state_payload.get("desktop"):
         _cleanup_expired_exchange_codes()
         exchange_code = secrets.token_urlsafe(32)

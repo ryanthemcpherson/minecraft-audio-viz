@@ -1,4 +1,4 @@
-"""Discord OAuth2 authorization code flow."""
+"""Google OAuth2 authorization code flow."""
 
 from __future__ import annotations
 
@@ -7,35 +7,35 @@ from urllib.parse import urlencode
 
 import httpx
 
-DISCORD_API = "https://discord.com/api/v10"
-DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
-DISCORD_TOKEN_URL = f"{DISCORD_API}/oauth2/token"
-DISCORD_USER_URL = f"{DISCORD_API}/users/@me"
+GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"  # nosec B105 — not a password
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-SCOPES = "identify email"
+SCOPES = "openid email profile"
 
 
 @dataclass(frozen=True)
-class DiscordUser:
-    """Relevant fields from Discord's ``/users/@me`` response."""
+class GoogleUser:
+    """Relevant fields from Google's userinfo response."""
 
     id: str
-    username: str
     email: str | None
-    avatar: str | None
+    name: str | None
+    picture: str | None
 
 
 def get_authorize_url(*, client_id: str, redirect_uri: str, state: str) -> str:
-    """Build the Discord OAuth2 authorization URL."""
+    """Build the Google OAuth2 authorization URL."""
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
         "state": state,
-        "prompt": "none",
+        "access_type": "offline",
+        "prompt": "consent",
     }
-    return f"{DISCORD_AUTHORIZE_URL}?{urlencode(params)}"
+    return f"{GOOGLE_AUTHORIZE_URL}?{urlencode(params)}"
 
 
 async def exchange_code(
@@ -47,11 +47,11 @@ async def exchange_code(
 ) -> str:
     """Exchange an authorization code for an access token.
 
-    Returns the Discord access token string.
+    Returns the Google access token string.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            DISCORD_TOKEN_URL,
+            GOOGLE_TOKEN_URL,
             data={
                 "grant_type": "authorization_code",
                 "code": code,
@@ -65,19 +65,19 @@ async def exchange_code(
         return resp.json()["access_token"]
 
 
-async def get_discord_user(access_token: str) -> DiscordUser:
-    """Fetch the authenticated user's Discord profile."""
+async def get_google_user(access_token: str) -> GoogleUser:
+    """Fetch the authenticated user's Google profile."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            DISCORD_USER_URL,
+            GOOGLE_USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         data = resp.json()
 
-    return DiscordUser(
-        id=data["id"],
-        username=data["username"],
+    return GoogleUser(
+        id=data["sub"],
         email=data.get("email"),
-        avatar=data.get("avatar"),
+        name=data.get("name"),
+        picture=data.get("picture"),
     )
