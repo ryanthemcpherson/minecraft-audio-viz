@@ -12,10 +12,13 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererRegistry;
 import com.audioviz.stages.StageManager;
+import com.audioviz.stages.StageZonePlacementManager;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
+import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
+import com.audioviz.zones.ZoneSelectionManager;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
@@ -41,6 +44,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private StageDecoratorManager decoratorManager;
     private BedrockSupport bedrockSupport;
     private VoicechatIntegration voicechatIntegration;
+    private ZoneBoundaryRenderer zoneBoundaryRenderer;
+    private ZoneSelectionManager zoneSelectionManager;
+    private StageZonePlacementManager zonePlacementManager;
 
     @Override
     public void onEnable() {
@@ -59,6 +65,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.chatInputManager = new ChatInputManager(this);
         this.beatEventManager = new BeatEventManager(this);
         this.zoneEditor = new ZoneEditor(this);
+        this.zoneBoundaryRenderer = new ZoneBoundaryRenderer(this);
+        this.zoneBoundaryRenderer.start();
+        this.zoneSelectionManager = new ZoneSelectionManager(this);
+        this.zoneSelectionManager.start();
 
         // Detect Geyser/Floodgate for Bedrock player support
         this.bedrockSupport = new BedrockSupport(getLogger(), getConfig());
@@ -76,10 +86,14 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(menuManager, this);
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
+        getServer().getPluginManager().registerEvents(zoneSelectionManager, this);
         getServer().getPluginManager().registerEvents(new BedrockPlayerListener(bedrockSupport), this);
 
         // Initialize stage manager
         this.stageManager = new StageManager(this);
+
+        // Initialize zone placement manager
+        this.zonePlacementManager = new StageZonePlacementManager(this);
 
         // Initialize stage decorator manager
         this.decoratorManager = new StageDecoratorManager(this);
@@ -93,6 +107,23 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         AudioVizCommand commandExecutor = new AudioVizCommand(this);
         getCommand("audioviz").setExecutor(commandExecutor);
         getCommand("audioviz").setTabCompleter(commandExecutor);
+
+        // Register /stage shortcut (delegates to "audioviz stage <args>")
+        var stageCmd = getCommand("stage");
+        if (stageCmd != null) {
+            stageCmd.setExecutor((sender, cmd, label, args) -> {
+                String[] newArgs = new String[args.length + 1];
+                newArgs[0] = "stage";
+                System.arraycopy(args, 0, newArgs, 1, args.length);
+                return commandExecutor.onCommand(sender, cmd, label, newArgs);
+            });
+            stageCmd.setTabCompleter((sender, cmd, label, args) -> {
+                String[] newArgs = new String[args.length + 1];
+                newArgs[0] = "stage";
+                System.arraycopy(args, 0, newArgs, 1, args.length);
+                return commandExecutor.onTabComplete(sender, cmd, label, newArgs);
+            });
+        }
 
         // Detect Simple Voice Chat for audio streaming support
         // Delay by 1 tick so SVC has time to register its BukkitVoicechatService
@@ -167,6 +198,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             menuManager.clearAllSessions();
         }
 
+        // Cancel active placement sessions
+        if (zonePlacementManager != null) {
+            zonePlacementManager.cancelAll();
+        }
+
         // Save zones and stages
         if (stageManager != null) {
             stageManager.saveStages();
@@ -200,6 +236,16 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             } catch (Exception e) {
                 getLogger().warning("Error stopping WebSocket server: " + e.getMessage());
             }
+        }
+
+        // Stop zone selection manager
+        if (zoneSelectionManager != null) {
+            zoneSelectionManager.stop();
+        }
+
+        // Stop zone boundary renderer
+        if (zoneBoundaryRenderer != null) {
+            zoneBoundaryRenderer.stop();
         }
 
         // Stop particle visualization manager
@@ -293,5 +339,17 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public VoicechatIntegration getVoicechatIntegration() {
         return voicechatIntegration;
+    }
+
+    public ZoneBoundaryRenderer getZoneBoundaryRenderer() {
+        return zoneBoundaryRenderer;
+    }
+
+    public ZoneSelectionManager getZoneSelectionManager() {
+        return zoneSelectionManager;
+    }
+
+    public StageZonePlacementManager getZonePlacementManager() {
+        return zonePlacementManager;
     }
 }

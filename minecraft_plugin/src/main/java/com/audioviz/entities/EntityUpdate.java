@@ -18,27 +18,29 @@ public record EntityUpdate(
     boolean glow,
     boolean hasGlow,
     int interpolationDuration,
-    boolean hasInterpolation
+    boolean hasInterpolation,
+    String material,
+    boolean hasMaterial
 ) {
     /**
      * Create an update with only position change.
      */
     public static EntityUpdate position(String entityId, Location location) {
-        return new EntityUpdate(entityId, location, null, true, false, 15, false, false, false, -1, false);
+        return new EntityUpdate(entityId, location, null, true, false, 15, false, false, false, -1, false, null, false);
     }
 
     /**
      * Create an update with only transformation change.
      */
     public static EntityUpdate transform(String entityId, Transformation transformation) {
-        return new EntityUpdate(entityId, null, transformation, false, true, 15, false, false, false, -1, false);
+        return new EntityUpdate(entityId, null, transformation, false, true, 15, false, false, false, -1, false, null, false);
     }
 
     /**
      * Create an update with both position and transformation.
      */
     public static EntityUpdate full(String entityId, Location location, Transformation transformation) {
-        return new EntityUpdate(entityId, location, transformation, true, true, 15, false, false, false, -1, false);
+        return new EntityUpdate(entityId, location, transformation, true, true, 15, false, false, false, -1, false, null, false);
     }
 
     /**
@@ -46,7 +48,7 @@ public record EntityUpdate(
      */
     public static EntityUpdate complete(String entityId, Location location, Transformation transformation,
                                          int brightness, boolean glow) {
-        return new EntityUpdate(entityId, location, transformation, true, true, brightness, true, glow, true, -1, false);
+        return new EntityUpdate(entityId, location, transformation, true, true, brightness, true, glow, true, -1, false, null, false);
     }
 
     /**
@@ -71,6 +73,8 @@ public record EntityUpdate(
         private boolean hasGlow = false;
         private int interpolationDuration = -1;
         private boolean hasInterpolation = false;
+        private String material = null;
+        private boolean hasMaterial = false;
 
         public Builder(String entityId) {
             this.entityId = entityId;
@@ -106,12 +110,19 @@ public record EntityUpdate(
             return this;
         }
 
+        public Builder material(String material) {
+            this.material = material;
+            this.hasMaterial = true;
+            return this;
+        }
+
         public EntityUpdate build() {
             return new EntityUpdate(entityId, location, transformation,
                                      hasLocation, hasTransform,
                                      brightness, hasBrightness,
                                      glow, hasGlow,
-                                     interpolationDuration, hasInterpolation);
+                                     interpolationDuration, hasInterpolation,
+                                     material, hasMaterial);
         }
     }
 }

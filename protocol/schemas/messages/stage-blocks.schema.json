@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "stage-blocks.schema.json",
+  "title": "StageBlocksMessage",
+  "description": "Response containing palette-compressed block data for all non-air blocks surrounding a stage's zones.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "stage_blocks"
+    },
+    "stage": {
+      "type": "string",
+      "description": "Name of the scanned stage."
+    },
+    "palette": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ordered list of Minecraft material names. Index corresponds to block palette index."
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer" },
+        "minItems": 4,
+        "maxItems": 4
+      },
+      "description": "Array of [x, y, z, paletteIndex] tuples for each non-air block."
+    },
+    "bounds": {
+      "type": "object",
+      "properties": {
+        "minX": { "type": "integer" },
+        "minY": { "type": "integer" },
+        "minZ": { "type": "integer" },
+        "maxX": { "type": "integer" },
+        "maxY": { "type": "integer" },
+        "maxZ": { "type": "integer" }
+      },
+      "required": ["minX", "minY", "minZ", "maxX", "maxY", "maxZ"]
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if scan failed."
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}

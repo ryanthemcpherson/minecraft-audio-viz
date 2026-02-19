@@ -67,10 +67,11 @@ function calculate(audio, config, dt)
         local drift_y = math.cos(state.drift_time * 0.2 + phase * 1.3) * 0.02
         local drift_z = math.sin(state.drift_time * 0.25 + phase * 0.7) * 0.02
 
-        -- Update particle position with drift
-        state.particles[i].x = px + drift_x * 0.1
-        state.particles[i].y = py + drift_y * 0.1
-        state.particles[i].z = pz + drift_z * 0.1
+        -- Update particle position with drift (dt-normalized)
+        local drift_scale = 0.1 * (dt / 0.016)
+        state.particles[i].x = px + drift_x * drift_scale
+        state.particles[i].y = py + drift_y * drift_scale
+        state.particles[i].z = pz + drift_z * drift_scale
 
         -- Keep within bounds (soft boundary)
         local dist = math.sqrt(px * px + py * py + pz * pz)

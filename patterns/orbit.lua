@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Atom Model"
 description = "Nucleus + electrons on 3D orbital planes"
+recommended_entities = 40
 category = "Original"
 static_camera = false
 

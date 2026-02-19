@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>MCAV | Control Center</title>
     <link rel="icon" type="image/x-icon" href="mcav.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="mcav-medium-square.png">
@@ -29,8 +29,18 @@
                 </div>
             </div>
             <div class="header-center">
-                <span class="zone-label">Stage:</span>
-                <select id="zone-select">
+                <select id="stage-select">
+                    <!-- Populated by JS, no "All Stages" option -->
+                </select>
+                <div id="zone-chip-bar" class="zone-chip-bar">
+                    <!-- Zone chips rendered by JS -->
+                </div>
+                <div class="zone-quick-select">
+                    <button class="zone-quick-btn" data-select="all" title="Select all zones">All</button>
+                    <button class="zone-quick-btn" data-select="none" title="Clear selection">None</button>
+                </div>
+                <!-- Hidden zone select kept for backward compat with Zone Settings tab -->
+                <select id="zone-select" class="hidden">
                     <option value="main">main</option>
                 </select>
             </div>
@@ -126,10 +136,12 @@
                         <button id="btn-blackout" class="btn btn-perf btn-perf-blackout">
                             <span class="perf-icon">&#x26AB;</span>
                             <span class="perf-label">Blackout</span>
+                            <span class="perf-shortcut">B</span>
                         </button>
                         <button id="btn-freeze" class="btn btn-perf btn-perf-freeze">
                             <span class="perf-icon">&#x2744;</span>
                             <span class="perf-label">Freeze</span>
+                            <span class="perf-shortcut">F</span>
                         </button>
                     </div>
                     <div class="tap-tempo">
@@ -196,6 +208,16 @@
                             <div id="pattern-grid" class="pattern-grid">
                                 <!-- Populated by JS -->
                             </div>
+                            <!-- Transition Duration Control -->
+                            <div class="transition-control">
+                                <label for="transition-duration-slider" class="control-label">
+                                    <span>Transition:</span>
+                                    <span id="transition-duration-value" class="control-value">1.0s</span>
+                                </label>
+                                <input type="range" id="transition-duration-slider" class="slider"
+                                       min="0" max="3000" step="100" value="1000">
+                                <span id="transition-status" class="transition-status hidden">Crossfading...</span>
+                            </div>
                         </section>
 
                         <!-- Preset Buttons -->
@@ -210,7 +232,7 @@
                         </section>
 
                         <!-- Band Faders - 5 bands for ultra-low-latency -->
-                        <section class="mixer-section">
+                        <section class="mixer-section collapsible collapsed">
                             <h3 class="section-title">Band Sensitivity</h3>
                             <div id="band-faders" class="fader-bank">
                                 <div class="fader" data-band="0">
@@ -259,39 +281,81 @@
                         </section>
 
                         <!-- Effect Controls -->
-                        <section class="mixer-section">
+                        <section class="mixer-section collapsible">
                             <h3 class="section-title">Audio Settings</h3>
                             <div id="effect-controls" class="controls-grid">
                                 <div class="control-row">
-                                    <label>Attack</label>
+                                    <label for="ctrl-attack">Attack</label>
                                     <input type="range" id="ctrl-attack" min="5" max="90" value="35">
                                     <span class="control-value" id="val-attack">35%</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Release</label>
+                                    <label for="ctrl-release">Release</label>
                                     <input type="range" id="ctrl-release" min="2" max="30" value="8">
                                     <span class="control-value" id="val-release">8%</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>AGC Gain</label>
+                                    <label for="ctrl-agc">AGC Gain</label>
                                     <input type="range" id="ctrl-agc" min="1" max="12" value="8" step="0.5">
                                     <span class="control-value" id="val-agc">8x</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Beat Sens</label>
+                                    <label for="ctrl-beat-sens">Beat Sens</label>
                                     <input type="range" id="ctrl-beat-sens" min="50" max="200" value="100">
                                     <span class="control-value" id="val-beat-sens">100%</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Beat Thresh</label>
+                                    <label for="ctrl-beat-thresh">Beat Thresh</label>
                                     <input type="range" id="ctrl-beat-thresh" min="80" max="200" value="130">
                                     <span class="control-value" id="val-beat-thresh">1.3x</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Block Count</label>
+                                    <label for="ctrl-blocks">Block Count</label>
                                     <input type="range" id="ctrl-blocks" min="8" max="64" value="16">
                                     <span class="control-value" id="val-blocks">16</span>
                                 </div>
+                            </div>
+                        </section>
+
+                        <!-- Visual Sync -->
+                        <section class="mixer-section collapsible collapsed">
+                            <h3 class="section-title">Visual Sync</h3>
+                            <div id="sync-controls" class="controls-grid">
+                                <div class="control-row">
+                                    <label for="sync-mode">Delay Mode</label>
+                                    <select id="sync-mode" class="control-select">
+                                        <option value="manual">Manual</option>
+                                        <option value="auto">Auto</option>
+                                        <option value="svc">Voice Chat (~80ms)</option>
+                                        <option value="discord">Discord (~200ms)</option>
+                                    </select>
+                                </div>
+                                <div class="control-row" id="sync-presets-row">
+                                    <label id="sync-presets-label">Quick Presets</label>
+                                    <div class="sync-preset-buttons" role="group" aria-labelledby="sync-presets-label">
+                                        <button class="sync-preset-btn" data-delay="0">Local (0ms)</button>
+                                        <button class="sync-preset-btn" data-delay="80">Voice Chat</button>
+                                        <button class="sync-preset-btn" data-delay="200">Discord</button>
+                                    </div>
+                                </div>
+                                <div class="control-row" id="sync-delay-row">
+                                    <label for="ctrl-visual-delay">Visual Delay</label>
+                                    <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10">
+                                    <span class="control-value" id="val-visual-delay">0ms</span>
+                                </div>
+                            </div>
+                            <!-- Sync Dashboard -->
+                            <div class="sync-dashboard" id="sync-dashboard">
+                                <span class="sync-metric" id="metric-ping" title="Network RTT">Ping: --ms</span>
+                                <span class="sync-metric" id="metric-pipeline" title="End-to-end pipeline">Pipeline: --ms</span>
+                                <span class="sync-metric" id="metric-delay" title="Applied visual delay">Delay: --ms</span>
+                                <span class="sync-metric" id="metric-sync" title="Sync quality score">Sync: --%</span>
+                                <span class="sync-metric" id="metric-jitter" title="Frame jitter">Jitter: --ms</span>
+                            </div>
+                            <!-- Sync Test -->
+                            <div class="sync-test-row">
+                                <button id="btn-sync-test" class="btn btn-secondary btn-sync-test">Sync Test</button>
+                                <span id="sync-test-result" class="sync-test-result"></span>
                             </div>
                         </section>
 
@@ -307,11 +371,23 @@
                             </div>
                         </section>
 
+                        <!-- Scene Presets -->
+                        <section class="mixer-section collapsible collapsed">
+                            <h3 class="section-title">Scenes</h3>
+                            <div class="scene-save-controls">
+                                <input type="text" id="scene-name-input" placeholder="Scene name..." class="scene-name-input">
+                                <button id="save-scene-btn" class="btn btn-primary">Save</button>
+                            </div>
+                            <div id="scenes-grid" class="scenes-grid">
+                                <!-- Populated by JS -->
+                            </div>
+                        </section>
+
                         <!-- Particle Effects -->
-                        <section class="mixer-section">
+                        <section class="mixer-section collapsible collapsed">
                             <h3 class="section-title">Particle Effects</h3>
                             <div class="control-row">
-                                <label>Global Intensity</label>
+                                <label for="particle-global-intensity">Global Intensity</label>
                                 <input type="range" id="particle-global-intensity" min="0" max="200" value="100">
                                 <span class="control-value" id="val-particle-intensity">100%</span>
                             </div>
@@ -332,7 +408,7 @@
                         </section>
 
                         <!-- Voice Chat -->
-                        <section class="mixer-section" id="voice-chat-section">
+                        <section class="mixer-section collapsible collapsed" id="voice-chat-section">
                             <h3 class="section-title">Voice Chat</h3>
                             <div class="voice-status-bar" id="voice-status-bar">
                                 <div class="voice-status-indicator" id="voice-status-indicator">
@@ -348,21 +424,21 @@
                             </div>
                             <div class="voice-controls" id="voice-controls">
                                 <div class="control-row toggle-row">
-                                    <label>Stream to Voice</label>
+                                    <label for="voice-stream-toggle">Stream to Voice</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="voice-stream-toggle">
+                                        <input type="checkbox" id="voice-stream-toggle" aria-label="Stream to Voice Chat">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row">
-                                    <label>Channel Type</label>
+                                    <label for="voice-channel-type">Channel Type</label>
                                     <select id="voice-channel-type" class="control-select">
                                         <option value="static">Static (Everywhere)</option>
                                         <option value="locational">Locational (3D Spatial)</option>
                                     </select>
                                 </div>
-                                <div class="control-row" id="voice-distance-row" style="display: none;">
-                                    <label>Hearing Distance</label>
+                                <div class="control-row" id="voice-distance-row" class="hidden">
+                                    <label for="voice-distance">Hearing Distance</label>
                                     <input type="range" id="voice-distance" min="10" max="200" value="100">
                                     <span class="control-value" id="val-voice-distance">100</span>
                                 </div>
@@ -372,13 +448,13 @@
 
                     <!-- Zone Settings Panel -->
                     <div id="zone-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-zone">
-                        <!-- Available Stages -->
+                        <!-- Stages & Zones -->
                         <section class="mixer-section">
                             <div class="section-header">
-                                <h3 class="section-title">Available Stages</h3>
+                                <h3 class="section-title">Stages & Zones</h3>
                                 <button id="btn-refresh-zones" class="btn btn-secondary btn-sm">Refresh</button>
                             </div>
-                            <div id="zone-list" class="zone-list">
+                            <div id="stage-zone-list" class="stage-zone-list">
                                 <div class="zone-empty">Loading stages...</div>
                             </div>
                         </section>
@@ -403,18 +479,18 @@
                                     <span class="mode-desc">Both (Mixed Server)</span>
                                 </button>
                             </div>
-                            <div class="bedrock-notice" id="bedrock-notice" style="display: none;">
+                            <div class="bedrock-notice hidden" id="bedrock-notice">
                                 <span class="notice-icon">&#x2139;&#xFE0F;</span>
                                 <span>Particle mode uses colored dust, flames, and end rods to visualize audio. Compatible with Bedrock players via Geyser.</span>
                             </div>
                         </section>
 
                         <!-- Particle Visualization Settings (shown in particles/hybrid mode) -->
-                        <section class="mixer-section" id="particle-viz-section" style="display: none;">
+                        <section class="mixer-section hidden" id="particle-viz-section">
                             <h3 class="section-title">Particle Visualization</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Particle Type</label>
+                                    <label for="particle-viz-type">Particle Type</label>
                                     <select id="particle-viz-type" class="control-select">
                                         <option value="DUST" selected>Colored Dust</option>
                                         <option value="FLAME">Flame</option>
@@ -426,12 +502,12 @@
                                     </select>
                                 </div>
                                 <div class="control-row">
-                                    <label>Particle Density</label>
+                                    <label for="particle-viz-density">Particle Density</label>
                                     <input type="range" id="particle-viz-density" min="1" max="10" value="3">
                                     <span class="control-value" id="val-particle-density">3x</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Color Mode</label>
+                                    <label for="particle-viz-color">Color Mode</label>
                                     <select id="particle-viz-color" class="control-select">
                                         <option value="frequency" selected>By Frequency Band</option>
                                         <option value="rainbow">Rainbow Cycle</option>
@@ -439,19 +515,19 @@
                                         <option value="fixed">Fixed Color</option>
                                     </select>
                                 </div>
-                                <div class="control-row" id="fixed-color-row" style="display: none;">
-                                    <label>Fixed Color</label>
+                                <div class="control-row hidden" id="fixed-color-row">
+                                    <label for="particle-viz-fixed-color">Fixed Color</label>
                                     <input type="color" id="particle-viz-fixed-color" value="#00ffff">
                                 </div>
                                 <div class="control-row">
-                                    <label>Particle Size</label>
+                                    <label for="particle-viz-size">Particle Size</label>
                                     <input type="range" id="particle-viz-size" min="5" max="30" value="15">
                                     <span class="control-value" id="val-particle-size">1.5</span>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Trail Effect</label>
+                                    <label for="particle-viz-trail">Trail Effect</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="particle-viz-trail">
+                                        <input type="checkbox" id="particle-viz-trail" aria-label="Trail Effect">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -463,12 +539,12 @@
                             <h3 class="section-title">Display Entities</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Entity Count</label>
+                                    <label for="zone-entity-count">Entity Count</label>
                                     <input type="range" id="zone-entity-count" min="4" max="128" value="16">
                                     <span class="control-value" id="val-entity-count">16</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Block Type</label>
+                                    <label for="zone-block-type">Block Type</label>
                                     <select id="zone-block-type" class="control-select">
                                         <option value="SEA_LANTERN" selected>Sea Lantern</option>
                                         <option value="GLOWSTONE">Glowstone</option>
@@ -485,12 +561,12 @@
                                     </select>
                                 </div>
                                 <div class="control-row">
-                                    <label>Base Scale</label>
+                                    <label for="zone-base-scale">Base Scale</label>
                                     <input type="range" id="zone-base-scale" min="10" max="100" value="50">
                                     <span class="control-value" id="val-base-scale">0.5</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Max Scale</label>
+                                    <label for="zone-max-scale">Max Scale</label>
                                     <input type="range" id="zone-max-scale" min="50" max="200" value="100">
                                     <span class="control-value" id="val-max-scale">1.0</span>
                                 </div>
@@ -502,28 +578,156 @@
                             <h3 class="section-title">Display Properties</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Brightness</label>
+                                    <label for="zone-brightness">Brightness</label>
                                     <input type="range" id="zone-brightness" min="0" max="15" value="15">
                                     <span class="control-value" id="val-brightness">15</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Interpolation</label>
+                                    <label for="zone-interpolation">Interpolation</label>
                                     <input type="range" id="zone-interpolation" min="0" max="10" value="2">
                                     <span class="control-value" id="val-interpolation">2 ticks</span>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Glow on Beat</label>
+                                    <label id="label-glow-beat">Glow on Beat</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-glow-beat">
+                                        <input type="checkbox" id="zone-glow-beat" aria-label="Glow on Beat">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Dynamic Brightness</label>
+                                    <label id="label-dynamic-brightness">Dynamic Brightness</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-dynamic-brightness">
+                                        <input type="checkbox" id="zone-dynamic-brightness" aria-label="Dynamic Brightness">
                                         <span class="toggle-slider"></span>
                                     </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Band Block Types -->
+                        <section class="mixer-section" id="band-materials-section">
+                            <h3 class="section-title">Band Block Types</h3>
+                            <p class="control-hint">Override block type per frequency band. "Default" uses the zone block type.</p>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label for="band-material-0">Bass (40-250Hz)</label>
+                                    <select id="band-material-0" class="control-select band-material-select">
+                                        <option value="">Default</option>
+                                        <option value="DIAMOND_BLOCK">Diamond</option>
+                                        <option value="EMERALD_BLOCK">Emerald</option>
+                                        <option value="GOLD_BLOCK">Gold</option>
+                                        <option value="IRON_BLOCK">Iron</option>
+                                        <option value="REDSTONE_BLOCK">Redstone</option>
+                                        <option value="LAPIS_BLOCK">Lapis</option>
+                                        <option value="COPPER_BLOCK">Copper</option>
+                                        <option value="AMETHYST_BLOCK">Amethyst</option>
+                                        <option value="GLOWSTONE">Glowstone</option>
+                                        <option value="SEA_LANTERN">Sea Lantern</option>
+                                        <option value="NETHERITE_BLOCK">Netherite</option>
+                                        <option value="OBSIDIAN">Obsidian</option>
+                                        <option value="PRISMARINE">Prismarine</option>
+                                        <option value="PURPUR_BLOCK">Purpur</option>
+                                        <option value="QUARTZ_BLOCK">Quartz</option>
+                                        <option value="WHITE_CONCRETE">White Concrete</option>
+                                        <option value="BLACK_CONCRETE">Black Concrete</option>
+                                        <option value="SHROOMLIGHT">Shroomlight</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="band-material-1">Low-mid (250-500Hz)</label>
+                                    <select id="band-material-1" class="control-select band-material-select">
+                                        <option value="">Default</option>
+                                        <option value="DIAMOND_BLOCK">Diamond</option>
+                                        <option value="EMERALD_BLOCK">Emerald</option>
+                                        <option value="GOLD_BLOCK">Gold</option>
+                                        <option value="IRON_BLOCK">Iron</option>
+                                        <option value="REDSTONE_BLOCK">Redstone</option>
+                                        <option value="LAPIS_BLOCK">Lapis</option>
+                                        <option value="COPPER_BLOCK">Copper</option>
+                                        <option value="AMETHYST_BLOCK">Amethyst</option>
+                                        <option value="GLOWSTONE">Glowstone</option>
+                                        <option value="SEA_LANTERN">Sea Lantern</option>
+                                        <option value="NETHERITE_BLOCK">Netherite</option>
+                                        <option value="OBSIDIAN">Obsidian</option>
+                                        <option value="PRISMARINE">Prismarine</option>
+                                        <option value="PURPUR_BLOCK">Purpur</option>
+                                        <option value="QUARTZ_BLOCK">Quartz</option>
+                                        <option value="WHITE_CONCRETE">White Concrete</option>
+                                        <option value="BLACK_CONCRETE">Black Concrete</option>
+                                        <option value="SHROOMLIGHT">Shroomlight</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="band-material-2">Mid (500-2000Hz)</label>
+                                    <select id="band-material-2" class="control-select band-material-select">
+                                        <option value="">Default</option>
+                                        <option value="DIAMOND_BLOCK">Diamond</option>
+                                        <option value="EMERALD_BLOCK">Emerald</option>
+                                        <option value="GOLD_BLOCK">Gold</option>
+                                        <option value="IRON_BLOCK">Iron</option>
+                                        <option value="REDSTONE_BLOCK">Redstone</option>
+                                        <option value="LAPIS_BLOCK">Lapis</option>
+                                        <option value="COPPER_BLOCK">Copper</option>
+                                        <option value="AMETHYST_BLOCK">Amethyst</option>
+                                        <option value="GLOWSTONE">Glowstone</option>
+                                        <option value="SEA_LANTERN">Sea Lantern</option>
+                                        <option value="NETHERITE_BLOCK">Netherite</option>
+                                        <option value="OBSIDIAN">Obsidian</option>
+                                        <option value="PRISMARINE">Prismarine</option>
+                                        <option value="PURPUR_BLOCK">Purpur</option>
+                                        <option value="QUARTZ_BLOCK">Quartz</option>
+                                        <option value="WHITE_CONCRETE">White Concrete</option>
+                                        <option value="BLACK_CONCRETE">Black Concrete</option>
+                                        <option value="SHROOMLIGHT">Shroomlight</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="band-material-3">High-mid (2-6kHz)</label>
+                                    <select id="band-material-3" class="control-select band-material-select">
+                                        <option value="">Default</option>
+                                        <option value="DIAMOND_BLOCK">Diamond</option>
+                                        <option value="EMERALD_BLOCK">Emerald</option>
+                                        <option value="GOLD_BLOCK">Gold</option>
+                                        <option value="IRON_BLOCK">Iron</option>
+                                        <option value="REDSTONE_BLOCK">Redstone</option>
+                                        <option value="LAPIS_BLOCK">Lapis</option>
+                                        <option value="COPPER_BLOCK">Copper</option>
+                                        <option value="AMETHYST_BLOCK">Amethyst</option>
+                                        <option value="GLOWSTONE">Glowstone</option>
+                                        <option value="SEA_LANTERN">Sea Lantern</option>
+                                        <option value="NETHERITE_BLOCK">Netherite</option>
+                                        <option value="OBSIDIAN">Obsidian</option>
+                                        <option value="PRISMARINE">Prismarine</option>
+                                        <option value="PURPUR_BLOCK">Purpur</option>
+                                        <option value="QUARTZ_BLOCK">Quartz</option>
+                                        <option value="WHITE_CONCRETE">White Concrete</option>
+                                        <option value="BLACK_CONCRETE">Black Concrete</option>
+                                        <option value="SHROOMLIGHT">Shroomlight</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="band-material-4">High (6-20kHz)</label>
+                                    <select id="band-material-4" class="control-select band-material-select">
+                                        <option value="">Default</option>
+                                        <option value="DIAMOND_BLOCK">Diamond</option>
+                                        <option value="EMERALD_BLOCK">Emerald</option>
+                                        <option value="GOLD_BLOCK">Gold</option>
+                                        <option value="IRON_BLOCK">Iron</option>
+                                        <option value="REDSTONE_BLOCK">Redstone</option>
+                                        <option value="LAPIS_BLOCK">Lapis</option>
+                                        <option value="COPPER_BLOCK">Copper</option>
+                                        <option value="AMETHYST_BLOCK">Amethyst</option>
+                                        <option value="GLOWSTONE">Glowstone</option>
+                                        <option value="SEA_LANTERN">Sea Lantern</option>
+                                        <option value="NETHERITE_BLOCK">Netherite</option>
+                                        <option value="OBSIDIAN">Obsidian</option>
+                                        <option value="PRISMARINE">Prismarine</option>
+                                        <option value="PURPUR_BLOCK">Purpur</option>
+                                        <option value="QUARTZ_BLOCK">Quartz</option>
+                                        <option value="WHITE_CONCRETE">White Concrete</option>
+                                        <option value="BLACK_CONCRETE">Black Concrete</option>
+                                        <option value="SHROOMLIGHT">Shroomlight</option>
+                                    </select>
                                 </div>
                             </div>
                         </section>
@@ -533,22 +737,22 @@
                             <h3 class="section-title">Zone Dimensions</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Size X</label>
+                                    <label for="zone-size-x">Size X</label>
                                     <input type="range" id="zone-size-x" min="5" max="50" value="10">
                                     <span class="control-value" id="val-size-x">10</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Size Y</label>
+                                    <label for="zone-size-y">Size Y</label>
                                     <input type="range" id="zone-size-y" min="5" max="50" value="10">
                                     <span class="control-value" id="val-size-y">10</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Size Z</label>
+                                    <label for="zone-size-z">Size Z</label>
                                     <input type="range" id="zone-size-z" min="5" max="50" value="10">
                                     <span class="control-value" id="val-size-z">10</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Rotation</label>
+                                    <label for="zone-rotation">Rotation</label>
                                     <input type="range" id="zone-rotation" min="0" max="360" value="0" step="15">
                                     <span class="control-value" id="val-rotation">0&deg;</span>
                                 </div>
@@ -560,23 +764,23 @@
                             <h3 class="section-title">Text Overlay</h3>
                             <div class="controls-grid">
                                 <div class="control-row toggle-row">
-                                    <label>Show BPM</label>
+                                    <label id="label-show-bpm">Show BPM</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-show-bpm">
+                                        <input type="checkbox" id="zone-show-bpm" aria-label="Show BPM">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Show Pattern Name</label>
+                                    <label id="label-show-pattern">Show Pattern Name</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-show-pattern">
+                                        <input type="checkbox" id="zone-show-pattern" aria-label="Show Pattern Name">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Show Band Values</label>
+                                    <label id="label-show-bands">Show Band Values</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-show-bands">
+                                        <input type="checkbox" id="zone-show-bands" aria-label="Show Band Values">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -643,6 +847,7 @@
                                         <input type="checkbox" id="preview-show-grid" checked>
                                         <span>Show Floor Grid</span>
                                     </label>
+                                    <button id="preview-scan-stage" class="btn btn-secondary btn-full" style="margin-top: 6px; display: none;">Scan Stage Blocks</button>
                                 </div>
 
                                 <!-- Particle Effects -->
@@ -702,7 +907,7 @@
                         <section class="mixer-section">
                             <h3 class="section-title">DJ Banner Profile</h3>
                             <div class="control-row">
-                                <label>Select DJ</label>
+                                <label for="banner-dj-select">Select DJ</label>
                                 <select id="banner-dj-select" class="control-select">
                                     <option value="">-- Select DJ --</option>
                                 </select>
@@ -729,7 +934,7 @@
                             <h3 class="section-title">Text Settings</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Font Style</label>
+                                    <label for="banner-text-style">Font Style</label>
                                     <select id="banner-text-style" class="control-select">
                                         <option value="bold">Bold</option>
                                         <option value="block">Block Letters</option>
@@ -737,15 +942,15 @@
                                     </select>
                                 </div>
                                 <div class="control-row">
-                                    <label>Color Mode</label>
+                                    <label for="banner-text-color-mode">Color Mode</label>
                                     <select id="banner-text-color-mode" class="control-select">
                                         <option value="frequency" selected>By Frequency</option>
                                         <option value="rainbow">Rainbow Cycle</option>
                                         <option value="fixed">Fixed Color</option>
                                     </select>
                                 </div>
-                                <div class="control-row" id="banner-fixed-color-row" style="display: none;">
-                                    <label>Fixed Color</label>
+                                <div class="control-row hidden" id="banner-fixed-color-row">
+                                    <label for="banner-text-fixed-color">Fixed Color</label>
                                     <select id="banner-text-fixed-color" class="control-select">
                                         <option value="c">Red</option>
                                         <option value="6">Gold</option>
@@ -759,31 +964,31 @@
                                     </select>
                                 </div>
                                 <div class="control-row">
-                                    <label>Text Format</label>
+                                    <label for="banner-text-format">Text Format</label>
                                     <input type="text" id="banner-text-format" class="control-input" value="%s" placeholder="%s = DJ name">
                                 </div>
                             </div>
                         </section>
 
                         <!-- Image Mode Settings -->
-                        <section class="mixer-section" id="banner-image-settings" style="display: none;">
+                        <section class="mixer-section hidden" id="banner-image-settings">
                             <h3 class="section-title">Logo Settings</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Logo Image</label>
+                                    <label for="banner-logo-file">Logo Image</label>
                                     <div class="file-upload-area">
-                                        <input type="file" id="banner-logo-file" accept="image/png,image/jpeg,image/webp" style="display:none;">
+                                        <input type="file" id="banner-logo-file" accept="image/png,image/jpeg,image/webp" class="hidden">
                                         <button id="btn-upload-logo" class="btn btn-secondary">Upload Logo</button>
                                         <span id="banner-logo-filename" class="file-name">No file selected</span>
                                     </div>
                                 </div>
                                 <div class="control-row">
-                                    <label>Grid Width</label>
+                                    <label for="banner-grid-width">Grid Width</label>
                                     <input type="range" id="banner-grid-width" min="8" max="32" value="24" class="slider">
                                     <span class="control-value" id="val-banner-grid-width">24</span>
                                 </div>
                                 <div class="control-row">
-                                    <label>Grid Height</label>
+                                    <label for="banner-grid-height">Grid Height</label>
                                     <input type="range" id="banner-grid-height" min="4" max="16" value="12" class="slider">
                                     <span class="control-value" id="val-banner-grid-height">12</span>
                                 </div>
@@ -799,21 +1004,21 @@
                             <h3 class="section-title">Audio Reactivity</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
-                                    <label>Pulse Intensity</label>
+                                    <label for="banner-pulse-intensity">Pulse Intensity</label>
                                     <input type="range" id="banner-pulse-intensity" min="0" max="100" value="30" class="slider">
                                     <span class="control-value" id="val-banner-pulse">30%</span>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Brightness React</label>
+                                    <label id="label-brightness-react">Brightness React</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="banner-brightness-react" checked>
+                                        <input type="checkbox" id="banner-brightness-react" checked aria-label="Brightness React">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
-                                    <label>Glow on Beat</label>
+                                    <label id="label-banner-glow-beat">Glow on Beat</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="banner-glow-beat" checked>
+                                        <input type="checkbox" id="banner-glow-beat" checked aria-label="Glow on Beat">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -849,6 +1054,8 @@
     <script src="js/vendor/three-r128.min.js"></script>
     <script src="js/particles.js"></script>
     <script src="js/block-indicators.js"></script>
+    <script src="js/block-textures.js"></script>
+    <script src="js/minecraft-env.js"></script>
     <script type="module" src="js/admin-app.js"></script>
 
     <!-- Toast Notifications -->

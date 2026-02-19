@@ -8,6 +8,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.content_filter import validate_no_slurs
+
 # ---------------------------------------------------------------------------
 # Shared
 # ---------------------------------------------------------------------------
@@ -30,6 +32,11 @@ class RegisterServerRequest(BaseModel):
         description="Plaintext API key chosen by the server operator",
     )
 
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "name")
+
 
 class RegisterServerResponse(BaseModel):
     server_id: uuid.UUID
@@ -51,6 +58,11 @@ class CreateShowRequest(BaseModel):
     server_id: uuid.UUID
     name: str = Field(..., min_length=1, max_length=200)
     max_djs: int = Field(default=8, ge=1, le=64)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "name")
 
 
 class CreateShowResponse(BaseModel):
@@ -120,6 +132,11 @@ class RegisterRequest(BaseModel):
             raise ValueError("Invalid email format")
         return v.lower().strip()
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "display_name")
+
 
 class LoginRequest(BaseModel):
     email: str = Field(..., min_length=1, max_length=255)
@@ -133,6 +150,7 @@ class UserResponse(BaseModel):
     discord_username: str | None
     avatar_url: str | None
     onboarding_completed: bool
+    is_admin: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -145,6 +163,13 @@ class AuthResponse(BaseModel):
 
 class UpdateAccountRequest(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "display_name")
+        return v
 
 
 class ChangePasswordRequest(BaseModel):
@@ -163,6 +188,10 @@ class LogoutRequest(BaseModel):
 class DiscordAuthorizeResponse(BaseModel):
     authorize_url: str
     state: str
+
+
+class ExchangeCodeRequest(BaseModel):
+    exchange_code: str = Field(..., min_length=1, max_length=128)
 
 
 class OrgSummary(BaseModel):
@@ -196,6 +225,7 @@ class UserProfileResponse(BaseModel):
     discord_username: str | None
     avatar_url: str | None
     onboarding_completed: bool
+    is_admin: bool = False
     user_type: str | None
     dj_profile: DJProfileResponse | None
     organizations: list[OrgSummary]
@@ -210,6 +240,23 @@ class CreateOrgRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     slug: str = Field(..., min_length=3, max_length=63)
     description: str | None = Field(None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "name")
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "slug")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "description")
+        return v
 
 
 class CreateOrgResponse(BaseModel):
@@ -234,6 +281,20 @@ class UpdateOrgRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
     avatar_url: str | None = Field(None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "name")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "description")
+        return v
 
 
 class AssignServerRequest(BaseModel):
@@ -384,6 +445,18 @@ class CreateDJProfileRequest(BaseModel):
     spotify_url: str | None = Field(None, max_length=500)
     website_url: str | None = Field(None, max_length=500)
 
+    @field_validator("dj_name")
+    @classmethod
+    def validate_dj_name_slurs(cls, v: str) -> str:
+        return validate_no_slurs(v, "dj_name")
+
+    @field_validator("bio")
+    @classmethod
+    def validate_bio_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "bio")
+        return v
+
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v: str | None) -> str | None:
@@ -392,6 +465,8 @@ class CreateDJProfileRequest(BaseModel):
                 "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
                 "starting and ending with alphanumeric"
             )
+        if v is not None:
+            validate_no_slurs(v, "slug")
         return v
 
     @field_validator("color_palette")
@@ -438,6 +513,20 @@ class UpdateDJProfileRequest(BaseModel):
     spotify_url: str | None = Field(None, max_length=500)
     website_url: str | None = Field(None, max_length=500)
 
+    @field_validator("dj_name")
+    @classmethod
+    def validate_dj_name_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "dj_name")
+        return v
+
+    @field_validator("bio")
+    @classmethod
+    def validate_bio_slurs(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_slurs(v, "bio")
+        return v
+
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v: str | None) -> str | None:
@@ -446,6 +535,8 @@ class UpdateDJProfileRequest(BaseModel):
                 "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
                 "starting and ending with alphanumeric"
             )
+        if v is not None:
+            validate_no_slurs(v, "slug")
         return v
 
     @field_validator("color_palette")
@@ -573,3 +664,72 @@ class UnifiedDashboard(BaseModel):
     dj: DJDashboardSection | None
     has_dj_profile: bool
     has_orgs: bool
+
+
+# ---------------------------------------------------------------------------
+# Admin dashboard schemas
+# ---------------------------------------------------------------------------
+
+
+class AdminUserRow(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    email: str | None
+    discord_username: str | None
+    avatar_url: str | None
+    is_active: bool
+    is_admin: bool
+    user_type: str | None
+    created_at: datetime
+    last_login_at: datetime | None
+    org_count: int
+    has_dj_profile: bool
+
+
+class AdminOrgRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    owner_name: str
+    member_count: int
+    server_count: int
+    is_active: bool
+    created_at: datetime
+
+
+class AdminServerRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    websocket_url: str
+    org_name: str | None
+    is_active: bool
+    last_heartbeat: datetime | None
+    active_show_count: int
+    created_at: datetime
+
+
+class AdminShowRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    server_name: str
+    connect_code: str | None
+    status: str
+    current_djs: int
+    max_djs: int
+    created_at: datetime
+    ended_at: datetime | None
+
+
+class AdminStats(BaseModel):
+    total_users: int
+    total_organizations: int
+    total_servers: int
+    total_shows: int
+    active_shows: int
+    users_last_30_days: int
+    dj_profiles: int
+
+
+class AdminUpdateUserRequest(BaseModel):
+    is_active: bool | None = None
+    is_admin: bool | None = None

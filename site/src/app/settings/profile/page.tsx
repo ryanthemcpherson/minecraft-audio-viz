@@ -218,7 +218,7 @@ export default function ProfileEditPage() {
   if (authLoading || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center pt-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
       </div>
     );
   }
@@ -272,7 +272,7 @@ export default function ProfileEditPage() {
           {/* Avatar upload */}
           <div className="-mt-14 ml-6">
             <label
-              className="relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border-4 border-[#0a0a0a] bg-white/5 transition-all hover:bg-white/10"
+              className="relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border-4 border-[#08090d] bg-white/5 transition-all hover:bg-white/10"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => handleFileDrop(e, "avatar")}
             >
@@ -310,7 +310,7 @@ export default function ProfileEditPage() {
               required
               value={djName}
               onChange={(e) => setDjName(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               placeholder="DJ Nova"
             />
           </div>
@@ -327,7 +327,7 @@ export default function ProfileEditPage() {
                 type="text"
                 value={slug}
                 onChange={(e) => handleSlugChange(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                 placeholder="dj-nova"
                 maxLength={30}
               />
@@ -354,7 +354,7 @@ export default function ProfileEditPage() {
               id="bio"
               value={bio}
               onChange={(e) => setBio(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50 resize-none"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 resize-none"
               rows={3}
               placeholder="Tell people about yourself"
               maxLength={500}
@@ -371,7 +371,7 @@ export default function ProfileEditPage() {
               type="text"
               value={genres}
               onChange={(e) => setGenres(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               placeholder="House, Techno, Drum & Bass"
               maxLength={500}
             />
@@ -426,7 +426,7 @@ export default function ProfileEditPage() {
                 type="url"
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                 placeholder="https://yoursite.com"
               />
             </div>
@@ -493,7 +493,7 @@ export default function ProfileEditPage() {
               role="switch"
               aria-checked={isPublic}
               onClick={() => setIsPublic(!isPublic)}
-              className={`relative h-6 w-11 rounded-full transition-colors ${isPublic ? "bg-electric-blue" : "bg-white/10"}`}
+              className={`relative h-6 w-11 rounded-full transition-colors ${isPublic ? "bg-disc-cyan" : "bg-white/10"}`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${isPublic ? "translate-x-5" : ""}`}
@@ -517,7 +517,7 @@ export default function ProfileEditPage() {
           <button
             type="submit"
             disabled={saving || !djName}
-            className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Saving..." : hasProfile ? "Save Changes" : "Create Profile"}
           </button>
@@ -526,7 +526,7 @@ export default function ProfileEditPage() {
           {hasProfile && slug && (
             <a
               href={`/dj/${slug}`}
-              className="block text-center text-sm text-text-secondary transition-colors hover:text-electric-blue"
+              className="block text-center text-sm text-text-secondary transition-colors hover:text-disc-cyan"
             >
               View public profile &rarr;
             </a>

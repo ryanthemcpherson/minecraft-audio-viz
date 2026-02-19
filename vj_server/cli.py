@@ -100,6 +100,41 @@ Examples:
         action="store_true",
         help="Hash any plaintext passwords in the auth config file and exit",
     )
+    parser.add_argument(
+        "--metrics-port",
+        type=validate_port,
+        default=int(os.environ.get("METRICS_PORT", "9001")),
+        help="Port for metrics HTTP endpoint (default: 9001 or $METRICS_PORT)",
+    )
+    parser.add_argument(
+        "--no-metrics",
+        action="store_true",
+        help="Disable metrics HTTP endpoint",
+    )
+    parser.add_argument(
+        "--visual-delay-ms",
+        type=float,
+        default=float(os.environ.get("VISUAL_DELAY_MS", "0")),
+        help="Visual delay in ms for audio-visual sync (default: 0 or $VISUAL_DELAY_MS)",
+    )
+    parser.add_argument(
+        "--visual-delay-mode",
+        choices=["manual", "auto", "discord", "svc"],
+        default=os.environ.get("VISUAL_DELAY_MODE", "manual"),
+        help="Visual delay mode: manual, auto, discord, svc (default: manual or $VISUAL_DELAY_MODE)",
+    )
+    parser.add_argument(
+        "--enable-link",
+        action="store_true",
+        default=os.environ.get("ENABLE_LINK", "").lower() in ("1", "true", "yes"),
+        help="Enable Ableton Link tempo sync (requires aalink package)",
+    )
+    parser.add_argument(
+        "--entities",
+        type=int,
+        default=int(os.environ.get("ENTITY_COUNT", "100")),
+        help="Initial entity pool size (default: 100 or $ENTITY_COUNT)",
+    )
 
     args = parser.parse_args()
 
@@ -173,8 +208,13 @@ Examples:
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
         broadcast_port=args.broadcast_port,
+        entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,
+        metrics_port=None if args.no_metrics else args.metrics_port,
+        visual_delay_ms=args.visual_delay_ms,
+        visual_delay_mode=args.visual_delay_mode,
+        enable_link=args.enable_link,
     )
 
     def signal_handler(sig, frame):

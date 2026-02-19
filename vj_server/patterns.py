@@ -40,6 +40,8 @@ class AudioState:
     is_beat: bool  # Beat detected this frame
     beat_intensity: float  # Beat strength 0-1
     frame: int  # Frame counter
+    bpm: float = 0.0  # Estimated BPM from DJ client
+    beat_phase: float = 0.0  # Beat phase 0.0-1.0 (0 = on beat, 0.5 = halfway)
 
 
 class VisualizationPattern(ABC):
@@ -47,6 +49,8 @@ class VisualizationPattern(ABC):
 
     name: str = "Base"
     description: str = "Base pattern"
+    category: str = ""
+    static_camera: bool = False
     recommended_entities: Optional[int] = None
 
     def __init__(self, config: PatternConfig = None):
@@ -86,6 +90,10 @@ class LuaPattern(VisualizationPattern):
         self._position_deadband = 0.0015
         self._load_lua(pattern_key)
 
+    def seed_entity_state(self, state: dict):
+        """Seed entity positions from another pattern's state for smooth transitions."""
+        self._entity_state = {k: dict(v) for k, v in state.items()}
+
     def _load_lua(self, pattern_key: str):
         try:
             from lupa import LuaRuntime
@@ -116,6 +124,8 @@ class LuaPattern(VisualizationPattern):
                     "beat": False,
                     "beat_intensity": 0.0,
                     "frame": 0,
+                    "bpm": 0.0,
+                    "beat_phase": 0.0,
                 }
             )
             self._bands_table = self._lua.table_from({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0})
@@ -155,6 +165,18 @@ class LuaPattern(VisualizationPattern):
                     self.recommended_entities = max(1, min(256, int(rec)))
             except (KeyError, IndexError):
                 pass
+            try:
+                cat = g["category"]
+                if cat:
+                    self.category = str(cat)
+            except (KeyError, IndexError):
+                pass
+            try:
+                sc = g["static_camera"]
+                if sc is not None:
+                    self.static_camera = bool(sc)
+            except (KeyError, IndexError):
+                pass
         else:
             logger.warning(f"Pattern file not found: {pattern_path}")
 
@@ -179,6 +201,8 @@ class LuaPattern(VisualizationPattern):
             audio_table["beat"] = audio.is_beat
             audio_table["beat_intensity"] = audio.beat_intensity
             audio_table["frame"] = audio.frame
+            audio_table["bpm"] = audio.bpm
+            audio_table["beat_phase"] = audio.beat_phase
             bands_table = self._bands_table
             for i, v in enumerate(audio.bands):
                 bands_table[i + 1] = v
@@ -216,13 +240,18 @@ class LuaPattern(VisualizationPattern):
                             scale = target_scale
                             rotation = target_rotation % 360.0
                         else:
+                            # dt-aware smoothing: effective_alpha adapts to actual frame time
+                            # so animation speed is consistent regardless of frame rate.
+                            dt_ratio = dt / 0.016
+
                             # Fast for larger moves, gentler for tiny changes to reduce wobble.
                             pos_delta = max(
                                 abs(target_x - prev["x"]),
                                 abs(target_y - prev["y"]),
                                 abs(target_z - prev["z"]),
                             )
-                            pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
+                            base_pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
+                            pos_alpha = 1.0 - (1.0 - base_pos_alpha) ** dt_ratio
                             x = prev["x"] + (target_x - prev["x"]) * pos_alpha
                             y = prev["y"] + (target_y - prev["y"]) * pos_alpha
                             z = prev["z"] + (target_z - prev["z"]) * pos_alpha
@@ -233,14 +262,16 @@ class LuaPattern(VisualizationPattern):
                             if abs(z - prev["z"]) < self._position_deadband:
                                 z = prev["z"]
 
-                            scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
+                            base_scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
+                            scale_alpha = 1.0 - (1.0 - base_scale_alpha) ** dt_ratio
                             scale = prev["scale"] + (target_scale - prev["scale"]) * scale_alpha
 
                             # Shortest-path angle smoothing.
                             current_rot = prev["rotation"] % 360.0
                             desired_rot = target_rotation % 360.0
                             delta_rot = ((desired_rot - current_rot + 180.0) % 360.0) - 180.0
-                            rotation = (current_rot + delta_rot * 0.52) % 360.0
+                            rot_alpha = 1.0 - (1.0 - 0.52) ** dt_ratio
+                            rotation = (current_rot + delta_rot * rot_alpha) % 360.0
 
                         self._entity_state[entity_id] = {
                             "x": x,
@@ -324,6 +355,8 @@ def list_patterns() -> List[Dict[str, Any]]:
                     "id": key,
                     "name": pat.name,
                     "description": pat.description,
+                    "category": pat.category,
+                    "static_camera": pat.static_camera,
                     "recommended_entities": pat.recommended_entities or 64,
                 }
             )
@@ -334,6 +367,8 @@ def list_patterns() -> List[Dict[str, Any]]:
                     "id": key,
                     "name": key.replace("_", " ").title(),
                     "description": "",
+                    "category": "",
+                    "static_camera": False,
                     "recommended_entities": 64,
                 }
             )

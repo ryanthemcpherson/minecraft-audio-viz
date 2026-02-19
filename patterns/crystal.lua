@@ -1,5 +1,6 @@
 name = "Crystal Growth"
 description = "Fractal crystal with recursive branching"
+recommended_entities = 80
 category = "Cosmic"
 static_camera = false
 state = {}

@@ -10,6 +10,23 @@ import {
 } from "@/lib/auth";
 import Link from "next/link";
 
+const COORDINATOR_URL = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
+
+/** Try to detect a desktop OAuth flow by decoding the state JWT payload. */
+function isDesktopOAuthState(state: string): boolean {
+  try {
+    // JWT uses base64url encoding (- instead of +, _ instead of /).
+    // Convert to standard base64 so atob() can decode it.
+    let b64 = state.split(".")[1];
+    b64 = b64.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const payload = JSON.parse(atob(b64));
+    return !!payload.desktop;
+  } catch {
+    return false;
+  }
+}
+
 function CallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -40,6 +57,15 @@ function CallbackHandler() {
 
     // Mark as handled so we don't re-process on re-render
     handled.current = true;
+
+    // Desktop OAuth flow: the DJ client initiated this login.
+    // Redirect the browser directly to the coordinator callback so it can
+    // return HTML with a mcav:// deep-link redirect back to the DJ app.
+    if (isDesktopOAuthState(state)) {
+      const params = new URLSearchParams({ code, state });
+      window.location.href = `${COORDINATOR_URL}/api/v1/auth/discord/callback?${params}`;
+      return;
+    }
 
     // Strip OAuth params from the URL immediately so password managers
     // (1Password, etc.) save a clean "https://mcav.live/login" entry
@@ -77,7 +103,7 @@ function CallbackHandler() {
         <p className="mb-6 text-sm text-text-secondary">{error}</p>
         <Link
           href="/login"
-          className="inline-block rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          className="inline-block rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
         >
           Back to login
         </Link>
@@ -88,7 +114,7 @@ function CallbackHandler() {
   return (
     <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
       <div className="mb-4 flex justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
       </div>
       <p className="text-sm text-text-secondary">
         Completing sign-in...
@@ -100,12 +126,12 @@ function CallbackHandler() {
 export default function AuthCallbackPage() {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
-      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-electric-blue/5 rounded-full blur-[120px]" />
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
       <Suspense
         fallback={
           <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
             <div className="mb-4 flex justify-center">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
             </div>
             <p className="text-sm text-text-secondary">Loading...</p>
           </div>

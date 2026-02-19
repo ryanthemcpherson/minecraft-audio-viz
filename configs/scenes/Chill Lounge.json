@@ -1,0 +1,11 @@
+{
+  "pattern": "wave_particles",
+  "preset": "chill",
+  "transition_duration": 2.0,
+  "band_sensitivity": [0.9, 1.0, 1.1, 1.2, 1.3],
+  "attack": 0.25,
+  "release": 0.05,
+  "beat_threshold": 1.6,
+  "entity_count": 32,
+  "block_type": "SEA_LANTERN"
+}

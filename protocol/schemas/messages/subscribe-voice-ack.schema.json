@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "subscribe-voice-ack.schema.json",
+  "title": "SubscribeVoiceAckMessage",
+  "description": "Acknowledgement that voice subscription state was updated. Sent by VJ server to the requesting client.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "enum": ["subscribe_voice_ack", "unsubscribe_voice_ack"]
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}

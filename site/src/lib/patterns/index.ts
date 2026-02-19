@@ -23,6 +23,7 @@ export interface PatternMeta {
   description: string;
   category: string;
   staticCamera: boolean;
+  startBlocks: number | null;
   createPattern: () => PatternInstance;
 }
 
@@ -74,6 +75,7 @@ export function listPatterns(): PatternMeta[] {
     description: def.description,
     category: def.category,
     staticCamera: def.staticCamera,
+    startBlocks: def.startBlocks,
     createPattern: () => new PendingPattern(LIB_LUA, def.source),
   }));
 }

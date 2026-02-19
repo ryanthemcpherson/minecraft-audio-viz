@@ -12,14 +12,14 @@ const steps = [
         <line x1="8" y1="23" x2="16" y2="23" />
       </svg>
     ),
-    gradient: "from-electric-blue to-electric-blue/50",
-    glowColor: "shadow-electric-blue/20",
+    gradient: "from-disc-cyan to-disc-cyan/50",
+    glowColor: "shadow-disc-cyan/20",
   },
   {
     number: "02",
     title: "Process",
     description:
-      "5-band FFT analysis with Aubio-powered beat and onset detection. Sub-21ms latency keeps visualizations perfectly synced.",
+      "5-band FFT analysis with beat and onset detection in the Rust DJ client. Sub-21ms latency keeps visualizations perfectly synced.",
     icon: (
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <rect x="1" y="6" width="4" height="14" rx="1" />
@@ -28,8 +28,8 @@ const steps = [
         <rect x="16" y="4" width="4" height="16" rx="1" />
       </svg>
     ),
-    gradient: "from-deep-purple to-deep-purple/50",
-    glowColor: "shadow-deep-purple/20",
+    gradient: "from-disc-blue to-disc-blue/50",
+    glowColor: "shadow-disc-blue/20",
   },
   {
     number: "03",
@@ -43,8 +43,8 @@ const steps = [
         <line x1="12" y1="22.08" x2="12" y2="12" />
       </svg>
     ),
-    gradient: "from-hot-pink to-hot-pink/50",
-    glowColor: "shadow-hot-pink/20",
+    gradient: "from-noteblock-amber to-noteblock-amber/50",
+    glowColor: "shadow-noteblock-amber/20",
   },
 ];
 
@@ -54,7 +54,7 @@ export default function HowItWorks() {
       <div className="mx-auto max-w-7xl">
         {/* Section Header */}
         <div className="mb-20 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-electric-blue">
+          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-cyan">
             How It Works
           </p>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
@@ -104,7 +104,7 @@ export default function HowItWorks() {
             <path d="M0 4h16M13 1l4 3-4 3" stroke="currentColor" strokeWidth="1.5" />
           </svg>
           <span className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 font-mono">
-            Python FFT
+            Rust FFT
           </span>
           <svg width="20" height="8" viewBox="0 0 20 8" fill="none">
             <path d="M0 4h16M13 1l4 3-4 3" stroke="currentColor" strokeWidth="1.5" />

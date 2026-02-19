@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Stacked Tower"
 description = "Spiraling vertical tower - blocks orbit and bounce"
+recommended_entities = 64
 category = "Original"
 static_camera = false
 

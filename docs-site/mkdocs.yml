@@ -1,0 +1,95 @@
+site_name: MCAV Documentation
+site_description: Real-time audio visualization in Minecraft, browser, and beyond
+site_url: https://docs.mcav.live
+repo_url: https://github.com/ryanthemcpherson/minecraft-audio-viz
+repo_name: ryanthemcpherson/minecraft-audio-viz
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Overview: getting-started.md
+      - Docker Demo: deployment/docker-demo.md
+  - Guides:
+      - Pattern Development: guides/pattern-development.md
+      - Audio Processing: guides/audio-processing.md
+      - Connectivity: guides/connectivity.md
+  - Reference:
+      - Audio Presets: reference/audio-presets.md
+      - WebSocket Protocol: reference/websocket-protocol.md
+      - Minecraft Commands: reference/minecraft-commands.md
+  - Deployment:
+      - VJ Server: deployment/vj-server.md
+      - Minecraft Plugin: deployment/minecraft-plugin.md
+      - Docker Demo: deployment/docker-demo.md
+  - Contributing: contributing.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_guess: false
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.mark
+  - pymdownx.critic
+  - pymdownx.keys
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ryanthemcpherson/minecraft-audio-viz
+  generator: false
+
+extra_css:
+  - assets/extra.css
+
+copyright: Copyright &copy; 2024-2026 MCAV

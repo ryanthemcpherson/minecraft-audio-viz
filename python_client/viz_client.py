@@ -186,6 +186,7 @@ class VizClient:
                         "stage_templates",
                         "stages",
                         "stage",
+                        "stage_blocks",
                         "voice_status",
                         "ok",
                         "error",
@@ -506,6 +507,20 @@ class VizClient:
             "zone": config.get("zone", "main"),
         }
         return await self.send(message)
+
+    async def scan_stage_blocks(self, stage: str) -> Optional[dict]:
+        """Scan all non-air blocks around a stage's zones.
+
+        Args:
+            stage: Stage name to scan blocks for.
+
+        Returns:
+            Response dict with palette + blocks data, or None.
+        """
+        response = await self.send({"type": "scan_stage_blocks", "stage": stage})
+        if response and response.get("type") == "stage_blocks":
+            return response
+        return None
 
     @property
     def connected(self) -> bool:

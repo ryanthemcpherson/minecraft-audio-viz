@@ -26,6 +26,8 @@ function extractMeta(source, filename) {
   const category = source.match(/^category\s*=\s*"([^"]+)"/m)?.[1];
   const staticCameraMatch = source.match(/^static_camera\s*=\s*(true|false)/m);
   const staticCamera = staticCameraMatch?.[1] === "true";
+  const startBlocksMatch = source.match(/^start_blocks\s*=\s*(\d+)/m);
+  const startBlocks = startBlocksMatch ? parseInt(startBlocksMatch[1], 10) : null;
 
   if (!name || !description) {
     console.warn(`  WARN: ${filename} missing name or description, skipping`);
@@ -35,7 +37,7 @@ function extractMeta(source, filename) {
     console.warn(`  WARN: ${filename} missing category, defaulting to "Original"`);
   }
 
-  return { name, description, category: category || "Original", staticCamera };
+  return { name, description, category: category || "Original", staticCamera, startBlocks };
 }
 
 function main() {
@@ -95,6 +97,7 @@ function main() {
     "  description: string;",
     "  category: string;",
     "  staticCamera: boolean;",
+    "  startBlocks: number | null;",
     "  source: string;",
     "}",
     "",
@@ -108,6 +111,7 @@ function main() {
     lines.push(`    description: ${JSON.stringify(p.description)},`);
     lines.push(`    category: ${JSON.stringify(p.category)},`);
     lines.push(`    staticCamera: ${p.staticCamera},`);
+    lines.push(`    startBlocks: ${p.startBlocks},`);
     lines.push("    source: `" + escapeForTemplateLiteral(p.source) + "`,");
     lines.push("  },");
   }

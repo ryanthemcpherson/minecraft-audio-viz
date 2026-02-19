@@ -53,10 +53,23 @@ def _random_suffix(length: int = 4) -> str:
 
 
 def generate_code() -> str:
-    """Generate a single WORD-XXXX connect code (not collision-checked)."""
-    word = secrets.choice(MUSIC_WORDS)
-    suffix = _random_suffix()
-    return f"{word}-{suffix}"
+    """Generate a single WORD-XXXX connect code (not collision-checked).
+
+    Retries up to 20 times if the generated code or its suffix alone
+    contains a severe slur.
+    """
+    from app.services.content_filter import contains_slur
+
+    for _ in range(20):
+        word = secrets.choice(MUSIC_WORDS)
+        suffix = _random_suffix()
+        code = f"{word}-{suffix}"
+        # Check the full code (word+suffix concatenated) and suffix alone
+        if contains_slur(code.replace("-", "")) or contains_slur(suffix):
+            continue
+        return code
+    # Fallback — astronomically unlikely to reach here
+    return f"{secrets.choice(MUSIC_WORDS)}-{_random_suffix()}"
 
 
 async def generate_unique_code(session: AsyncSession, max_attempts: int = 10) -> str:

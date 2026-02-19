@@ -205,6 +205,12 @@ class ServerConfig:
     # Authentication
     dj_auth_file: Optional[str] = "configs/dj_auth.json"
 
+    # Coordinator integration (set these to enable centralized connect codes)
+    coordinator_url: Optional[str] = None  # e.g. "https://api.mcav.live/api/v1"
+    coordinator_api_key: Optional[str] = None  # plaintext API key for this server
+    coordinator_server_name: str = "VJ Server"  # display name in coordinator
+    coordinator_ws_url: Optional[str] = None  # public WS URL DJs connect to
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Load configuration from environment variables."""
@@ -215,6 +221,10 @@ class ServerConfig:
             preview_port=int(os.environ.get("PREVIEW_PORT", "8766")),
             http_port=int(os.environ.get("HTTP_PORT", "8080")),
             dj_auth_file=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
+            coordinator_url=os.environ.get("COORDINATOR_URL"),
+            coordinator_api_key=os.environ.get("COORDINATOR_API_KEY"),
+            coordinator_server_name=os.environ.get("COORDINATOR_SERVER_NAME", "VJ Server"),
+            coordinator_ws_url=os.environ.get("COORDINATOR_WS_URL"),
         )
 
 

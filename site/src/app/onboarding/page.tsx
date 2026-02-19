@@ -24,9 +24,9 @@ function StepProgress({ current }: { current: number }) {
           key={i}
           className={`h-2 rounded-full transition-all duration-300 ${
             i === current
-              ? "w-8 bg-electric-blue"
+              ? "w-8 bg-disc-cyan"
               : i < current
-                ? "w-2 bg-electric-blue/40"
+                ? "w-2 bg-disc-cyan/40"
                 : "w-2 bg-white/10"
           }`}
         />
@@ -170,7 +170,7 @@ export default function OnboardingPage() {
   if (authLoading || checkingOnboarding) {
     return (
       <div className="flex min-h-screen items-center justify-center pt-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
       </div>
     );
   }
@@ -178,8 +178,8 @@ export default function OnboardingPage() {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4 pt-20 pb-20">
       {/* Background glows */}
-      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-electric-blue/5 rounded-full blur-[120px]" />
-      <div className="pointer-events-none absolute top-1/3 right-1/4 w-[300px] h-[300px] bg-deep-purple/5 rounded-full blur-[100px]" />
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-disc-cyan/5 rounded-full blur-[120px]" />
+      <div className="pointer-events-none absolute top-1/3 right-1/4 w-[300px] h-[300px] bg-disc-blue/5 rounded-full blur-[100px]" />
 
       <div className="relative w-full max-w-lg">
         {/* Step 1: Role Selection */}
@@ -197,10 +197,10 @@ export default function OnboardingPage() {
             <div className="flex flex-col gap-4">
               <button
                 onClick={() => selectRole("server_owner")}
-                className="glass-card rounded-xl p-6 text-left transition-all duration-200 hover:border-electric-blue/30 hover:bg-white/[0.04]"
+                className="glass-card rounded-xl p-6 text-left transition-all duration-200 hover:border-disc-cyan/30 hover:bg-white/[0.04]"
               >
                 <div className="mb-2 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-electric-blue/10 text-electric-blue">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-disc-cyan/10 text-disc-cyan">
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
                     </svg>
@@ -217,10 +217,10 @@ export default function OnboardingPage() {
 
               <button
                 onClick={() => selectRole("team_member")}
-                className="glass-card rounded-xl p-6 text-left transition-all duration-200 hover:border-electric-blue/30 hover:bg-white/[0.04]"
+                className="glass-card rounded-xl p-6 text-left transition-all duration-200 hover:border-disc-cyan/30 hover:bg-white/[0.04]"
               >
                 <div className="mb-2 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-deep-purple/10 text-deep-purple">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-disc-blue/10 text-disc-blue">
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
@@ -237,10 +237,10 @@ export default function OnboardingPage() {
 
               <button
                 onClick={() => selectRole("dj")}
-                className="glass-card rounded-xl p-6 text-left transition-all duration-200 hover:border-electric-blue/30 hover:bg-white/[0.04]"
+                className="glass-card rounded-xl p-6 text-left transition-all duration-200 hover:border-disc-cyan/30 hover:bg-white/[0.04]"
               >
                 <div className="mb-2 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-electric-blue/10 text-electric-blue">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-disc-cyan/10 text-disc-cyan">
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
                     </svg>
@@ -300,7 +300,7 @@ export default function OnboardingPage() {
                     required
                     value={orgName}
                     onChange={(e) => setOrgName(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                     placeholder="My Minecraft Server"
                   />
                 </div>
@@ -316,7 +316,7 @@ export default function OnboardingPage() {
                       required
                       value={orgSlug}
                       onChange={(e) => setOrgSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-                      className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                      className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                       placeholder="my-server"
                     />
                     <span className="text-sm text-text-secondary whitespace-nowrap">.mcav.live</span>
@@ -331,7 +331,7 @@ export default function OnboardingPage() {
                     id="orgDesc"
                     value={orgDescription}
                     onChange={(e) => setOrgDescription(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50 resize-none"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 resize-none"
                     rows={3}
                     placeholder="Tell people about your server"
                   />
@@ -346,7 +346,7 @@ export default function OnboardingPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                   {submitting ? "Creating..." : "Create Organization"}
                 </button>
@@ -373,7 +373,7 @@ export default function OnboardingPage() {
               </h1>
               {createdOrg && (
                 <p className="mb-6 text-text-secondary">
-                  <span className="font-mono text-electric-blue">{createdOrg.slug}.mcav.live</span> is all yours
+                  <span className="font-mono text-disc-cyan">{createdOrg.slug}.mcav.live</span> is all yours
                 </p>
               )}
 
@@ -399,7 +399,7 @@ export default function OnboardingPage() {
               <div className="flex flex-col gap-3">
                 <Link
                   href="/getting-started"
-                  className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                 >
                   View Setup Guide
                 </Link>
@@ -448,7 +448,7 @@ export default function OnboardingPage() {
                     required
                     value={inviteCode}
                     onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50 tracking-widest font-mono text-center text-lg"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 tracking-widest font-mono text-center text-lg"
                     placeholder="ABCD1234"
                     maxLength={8}
                   />
@@ -463,7 +463,7 @@ export default function OnboardingPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                   {submitting ? "Joining..." : "Join Organization"}
                 </button>
@@ -513,7 +513,7 @@ export default function OnboardingPage() {
               <div className="flex flex-col gap-3">
                 <Link
                   href="/dashboard"
-                  className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                 >
                   Go to Dashboard
                 </Link>
@@ -556,7 +556,7 @@ export default function OnboardingPage() {
                     required
                     value={djName}
                     onChange={(e) => setDjName(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                     placeholder="DJ Nova"
                   />
                 </div>
@@ -569,7 +569,7 @@ export default function OnboardingPage() {
                     id="djBio"
                     value={djBio}
                     onChange={(e) => setDjBio(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50 resize-none"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 resize-none"
                     rows={3}
                     placeholder="Tell people about yourself"
                   />
@@ -584,7 +584,7 @@ export default function OnboardingPage() {
                     type="text"
                     value={djGenres}
                     onChange={(e) => setDjGenres(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                     placeholder="House, Techno, Drum & Bass"
                   />
                 </div>
@@ -598,7 +598,7 @@ export default function OnboardingPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                   {submitting ? "Creating..." : "Create Profile"}
                 </button>
@@ -648,7 +648,7 @@ export default function OnboardingPage() {
               <div className="flex flex-col gap-3">
                 <Link
                   href="/getting-started"
-                  className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                 >
                   Download DJ Client
                 </Link>

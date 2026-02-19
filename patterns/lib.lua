@@ -61,6 +61,34 @@ function decay(value, rate, dt)
     return value * rate ^ (dt / 0.016)
 end
 
+-- BPM sync utilities --
+
+-- Get beat subdivision phase (0-1) for a given divisor.
+-- divisor=1: whole beat, divisor=2: half note, divisor=4: quarter note
+function beat_sub(beat_phase, divisor)
+    divisor = divisor or 1
+    return (beat_phase * divisor) % 1.0
+end
+
+-- Sine wave locked to beat phase. Returns -1 to 1.
+function beat_sin(beat_phase, divisor)
+    return math.sin(beat_sub(beat_phase, divisor or 1) * math.pi * 2)
+end
+
+-- Triangle wave locked to beat phase. Returns 0 to 1 (peaks at phase 0).
+function beat_tri(beat_phase, divisor)
+    local p = beat_sub(beat_phase, divisor or 1)
+    return 1.0 - math.abs(p * 2.0 - 1.0)
+end
+
+-- Sharp pulse that peaks at phase 0 and decays. Returns 0 to 1.
+-- sharpness controls falloff speed (higher = sharper pulse, default 4).
+function beat_pulse(beat_phase, divisor, sharpness)
+    sharpness = sharpness or 4.0
+    local p = beat_sub(beat_phase, divisor or 1)
+    return math.exp(-p * sharpness)
+end
+
 function simple_noise(x, y, z, seed)
     seed = seed or 0
     -- Use modular arithmetic to avoid bit operation compatibility issues

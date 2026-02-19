@@ -1,5 +1,6 @@
 name = "Pyramid"
 description = "Egyptian pyramid - inverts on drops"
+recommended_entities = 64
 category = "Epic"
 static_camera = false
 state = {}
@@ -29,82 +30,121 @@ function calculate(audio, config, dt)
     local target_hover = audio.bands[1] * 0.1 + audio.bands[2] * 0.05
     state.hover = smooth(state.hover, target_hover, 0.1, dt)
 
-    -- Pyramid layers
-    local layers = math.max(3, math.floor(math.sqrt(n)))
+    local cos_r = math.cos(state.rotation)
+    local sin_r = math.sin(state.rotation)
+
+    -- Pyramid geometry
+    local half = 0.35
+    local base_y = 0.15 + state.hover
+    local apex_y = 0.85 + state.hover
+
+    if state.invert > 0.5 then
+        base_y, apex_y = apex_y, base_y
+    end
+
+    -- 4 base corners (rotated)
+    local raw = {
+        {-half, -half},
+        { half, -half},
+        { half,  half},
+        {-half,  half},
+    }
+    local corners = {}
+    for i, c in ipairs(raw) do
+        corners[i] = {
+            c[1] * cos_r - c[2] * sin_r,
+            c[1] * sin_r + c[2] * cos_r,
+        }
+    end
 
     local entity_idx = 0
-    for layer = 0, layers - 1 do
-        local layer_norm
-        if layers > 1 then
-            layer_norm = layer / (layers - 1)
-        else
-            layer_norm = 0
+
+    local function place(rx, rz, y, band, extra_scale)
+        if entity_idx >= n then return end
+        local scale = config.base_scale + audio.bands[band + 1] * 0.4 + (extra_scale or 0)
+        if audio.beat then scale = scale * 1.25 end
+        entities[#entities + 1] = {
+            id = string.format("block_%d", entity_idx),
+            x = clamp(center + rx),
+            y = clamp(y),
+            z = clamp(center + rz),
+            scale = math.min(config.max_scale, scale),
+            rotation = (state.rotation * 57.3) % 360,
+            band = band,
+            visible = true,
+        }
+        entity_idx = entity_idx + 1
+    end
+
+    -- Entity budget: base edges 35%, slant edges 30%, horizontal layers 35%
+    local base_per_edge = math.max(2, math.floor(n * 0.088))
+    local slant_per_edge = math.max(2, math.floor(n * 0.075))
+    local edge_total = base_per_edge * 4 + slant_per_edge * 4
+    local layer_budget = math.max(0, n - edge_total)
+
+    -- === BASE EDGES (prominent, bass-reactive) ===
+    for edge = 1, 4 do
+        local c1 = corners[edge]
+        local c2 = corners[(edge % 4) + 1]
+        for i = 0, base_per_edge - 1 do
+            local t = base_per_edge > 1 and (i / (base_per_edge - 1)) or 0.5
+            local rx = lerp(c1[1], c2[1], t)
+            local rz = lerp(c1[2], c2[2], t)
+            place(rx, rz, base_y, 0, audio.bands[1] * 0.2)
         end
+    end
 
-        -- Inversion
-        if state.invert > 0.5 then
-            layer_norm = 1.0 - layer_norm
+    -- === SLANT EDGES (corners to apex) ===
+    for edge = 1, 4 do
+        local c = corners[edge]
+        for i = 0, slant_per_edge - 1 do
+            local t = slant_per_edge > 1 and (i / (slant_per_edge - 1)) or 0.5
+            local rx = c[1] * (1 - t)
+            local rz = c[2] * (1 - t)
+            local y = lerp(base_y, apex_y, t)
+            local band = ((edge - 1) % 4) + 1
+            -- Apex glow
+            local apex_boost = t > 0.85 and audio.peak * 0.3 or 0
+            place(rx, rz, y, band, apex_boost)
         end
+    end
 
-        -- Layer properties
-        local layer_size = 1.0 - layer_norm * 0.9
-        local layer_warp = math.sin(state.rotation + layer * 0.6) * audio.bands[3] * 0.08
-        local layer_y = 0.1 + layer_norm * 0.7 + state.hover + layer_warp * 0.1
+    -- === HORIZONTAL LAYER RINGS ===
+    if layer_budget > 0 then
+        local num_layers = math.max(1, math.min(4, math.floor(layer_budget / 8)))
+        local per_layer = math.floor(layer_budget / num_layers)
 
-        -- Points per layer (square arrangement)
-        local side_points = math.max(1, math.floor(math.sqrt(n / layers) * layer_size))
+        for layer = 1, num_layers do
+            local t = layer / (num_layers + 1)
+            local layer_size = 1.0 - t
+            local y = lerp(base_y, apex_y, t)
+            local lh = half * layer_size
 
-        for i = 0, side_points - 1 do
-            for j = 0, side_points - 1 do
-                if entity_idx >= n then
-                    break
-                end
+            -- Warp with mid frequencies
+            local warp = math.sin(state.rotation * 2 + layer * 1.2) * audio.bands[3] * 0.03
+            y = y + warp
 
-                -- Position within layer
-                local local_x = (i / math.max(1, side_points - 1) - 0.5) * layer_size * 0.4
-                local local_z = (j / math.max(1, side_points - 1) - 0.5) * layer_size * 0.4
-
-                -- Rotate
-                local cos_r = math.cos(state.rotation)
-                local sin_r = math.sin(state.rotation)
-                local rx = local_x * cos_r - local_z * sin_r
-                local rz = local_x * sin_r + local_z * cos_r
-
-                local x = center + rx
-                local z = center + rz
-                local y = layer_y
-
-                local band_idx = entity_idx % 5
-                local scale = config.base_scale + audio.bands[band_idx + 1] * 0.4
-
-                -- Highlight edges
-                if i == 0 or i == side_points - 1 or j == 0 or j == side_points - 1 then
-                    scale = scale + audio.bands[5] * 0.25
-                end
-
-                -- Apex glows more
-                if layer_norm > 0.8 then
-                    scale = scale + audio.peak * 0.3
-                end
-
-                if audio.beat then
-                    scale = scale * 1.25
-                end
-
-                entities[#entities + 1] = {
-                    id = string.format("block_%d", entity_idx),
-                    x = clamp(x),
-                    y = clamp(y),
-                    z = clamp(z),
-                    scale = math.min(config.max_scale, scale),
-                    band = band_idx,
-                    visible = true,
+            -- Layer corners (rotated)
+            local lc = {}
+            for i, c in ipairs(raw) do
+                lc[i] = {
+                    (c[1] * layer_size) * cos_r - (c[2] * layer_size) * sin_r,
+                    (c[1] * layer_size) * sin_r + (c[2] * layer_size) * cos_r,
                 }
-                entity_idx = entity_idx + 1
             end
 
-            if entity_idx >= n then
-                break
+            -- Distribute points evenly around the 4 edges
+            local per_edge = math.max(1, math.floor(per_layer / 4))
+            for edge = 1, 4 do
+                local c1 = lc[edge]
+                local c2 = lc[(edge % 4) + 1]
+                for i = 0, per_edge - 1 do
+                    local et = per_edge > 1 and (i / (per_edge - 1)) or 0.5
+                    local rx = lerp(c1[1], c2[1], et)
+                    local rz = lerp(c1[2], c2[2], et)
+                    local band = (edge + layer) % 5
+                    place(rx, rz, y, band, 0)
+                end
             end
         end
     end

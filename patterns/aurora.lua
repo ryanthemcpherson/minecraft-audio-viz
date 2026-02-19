@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Aurora"
 description = "Northern lights curtains - flowing waves"
+recommended_entities = 64
 category = "Organic"
 static_camera = false
 

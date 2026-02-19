@@ -143,7 +143,7 @@ function RegisterServerForm({
             placeholder="My VJ Server"
             required
             maxLength={100}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue/40"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none transition-colors focus:border-disc-cyan/40"
           />
         </div>
         <div>
@@ -155,7 +155,7 @@ function RegisterServerForm({
             placeholder="wss://your-server.com/ws"
             required
             maxLength={500}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm outline-none transition-colors focus:border-electric-blue/40"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm outline-none transition-colors focus:border-disc-cyan/40"
           />
         </div>
         {error && <p className="text-sm text-red-400">{error}</p>}
@@ -163,7 +163,7 @@ function RegisterServerForm({
           <button
             type="submit"
             disabled={submitting || !name || !wsUrl}
-            className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Registering..." : "Register Server"}
           </button>
@@ -198,7 +198,7 @@ function ServerCard({
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   return (
-    <div className="glass-card rounded-xl p-5 transition-all duration-200 hover:border-electric-blue/20">
+    <div className="glass-card rounded-xl p-5 transition-all duration-200 hover:border-disc-cyan/20">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h3 className="font-semibold">{server.name}</h3>
@@ -346,7 +346,7 @@ export default function OrgServersPage() {
       <div className="flex min-h-screen items-center justify-center pt-20">
         <div className="glass-card rounded-xl p-8 text-center">
           <p className="text-red-400">{error}</p>
-          <Link href="/dashboard" className="mt-4 inline-block text-sm text-electric-blue hover:underline">
+          <Link href="/dashboard" className="mt-4 inline-block text-sm text-disc-cyan hover:underline">
             Back to Dashboard
           </Link>
         </div>
@@ -360,8 +360,8 @@ export default function OrgServersPage() {
     <div className="relative mx-auto max-w-4xl px-6 pt-28 pb-20">
       {/* Background glows */}
       <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="absolute top-0 left-1/2 h-[400px] w-[500px] -translate-x-1/2 rounded-full bg-electric-blue/5 blur-[120px]" />
-        <div className="absolute top-1/4 right-1/4 h-[300px] w-[300px] rounded-full bg-deep-purple/5 blur-[100px]" />
+        <div className="absolute top-0 left-1/2 h-[400px] w-[500px] -translate-x-1/2 rounded-full bg-disc-cyan/5 blur-[120px]" />
+        <div className="absolute top-1/4 right-1/4 h-[300px] w-[300px] rounded-full bg-disc-blue/5 blur-[100px]" />
       </div>
 
       <div className="relative z-10">
@@ -382,7 +382,7 @@ export default function OrgServersPage() {
           {isOwner && !showRegisterForm && (
             <button
               onClick={() => setShowRegisterForm(true)}
-              className="rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
             >
               Register Server
             </button>
@@ -409,8 +409,8 @@ export default function OrgServersPage() {
           {servers.length === 0 && !showRegisterForm ? (
             <div className="glass-card rounded-xl p-8 text-center">
               <div className="mb-4 flex justify-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-electric-blue/10">
-                  <svg className="h-6 w-6 text-electric-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-disc-cyan/10">
+                  <svg className="h-6 w-6 text-disc-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
                   </svg>
                 </div>
@@ -419,7 +419,7 @@ export default function OrgServersPage() {
               {isOwner && (
                 <button
                   onClick={() => setShowRegisterForm(true)}
-                  className="mt-2 rounded-lg bg-gradient-to-r from-electric-blue to-deep-purple px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                 >
                   Register Your First Server
                 </button>

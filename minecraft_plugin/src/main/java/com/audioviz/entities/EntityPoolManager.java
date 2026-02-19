@@ -34,6 +34,9 @@ public class EntityPoolManager {
     // Track entity types for each entity
     private final Map<UUID, EntityType> entityTypes;
 
+    // Cache last applied material per entity to avoid redundant block data updates
+    private final Map<String, String> entityMaterialCache;
+
     // Limits to prevent memory issues
     private static final int MAX_ZONES = 100;
     private final int maxEntitiesPerZone;
@@ -48,6 +51,7 @@ public class EntityPoolManager {
         this.plugin = plugin;
         this.entityPools = new ConcurrentHashMap<>();
         this.entityTypes = new ConcurrentHashMap<>();
+        this.entityMaterialCache = new ConcurrentHashMap<>();
         this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
     }
 
@@ -90,18 +94,32 @@ public class EntityPoolManager {
             }
 
             if (finalCount > currentCount) {
-                // Add more entities
+                // Add more entities — spawn at sibling positions so they
+                // emerge from existing blocks rather than flying from origin.
                 for (int i = currentCount; i < finalCount; i++) {
                     String entityId = "block_" + i;
                     if (pool.containsKey(entityId)) continue;
 
-                    BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
+                    // Spawn at sibling entity's position (block_N % oldCount)
+                    Location entitySpawnLoc = spawnLoc;
+                    if (currentCount > 0) {
+                        String siblingId = "block_" + (i % currentCount);
+                        Entity sibling = pool.get(siblingId);
+                        if (sibling != null && sibling.isValid()) {
+                            entitySpawnLoc = sibling.getLocation().clone();
+                        }
+                    }
+
+                    BlockDisplay display = entitySpawnLoc.getWorld().spawn(entitySpawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(finalMaterial.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(1); // 1 tick keeps motion smooth but snappier
+                        entity.setInterpolationDuration(2); // 2 ticks — completes 50% per tick, matching ~exponential decay
                         entity.setInterpolationDelay(0);
-                        entity.setTeleportDuration(1); // Smooth position changes over 1 tick
-                        entity.setTransformation(createTransformation(0, 0, 0, 0.5f));
+                        entity.setTeleportDuration(1); // Snap position quickly; server already smooths
+                        // Spawn invisible (scale 0) — entities become visible when
+                        // the first batch_update positions them properly. Prevents
+                        // a stack of blocks stuck at the zone origin corner.
+                        entity.setTransformation(createTransformation(0, 0, 0, 0f));
                         entity.setPersistent(false);
                     });
 
@@ -146,9 +164,9 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(Display.Billboard.CENTER);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(1);
+                    entity.setInterpolationDuration(2);
                     entity.setInterpolationDelay(0);
-                    entity.setTeleportDuration(1); // Smooth position changes over 1 tick
+                    entity.setTeleportDuration(1);
                     entity.setPersistent(false);
                 });
 
@@ -167,6 +185,14 @@ public class EntityPoolManager {
         return pool.get(entityId);
     }
 
+    // Cached Brightness instances (0-15). Avoids allocating new Brightness each tick per entity.
+    private static final Display.Brightness[] BRIGHTNESS_CACHE = new Display.Brightness[16];
+    static {
+        for (int i = 0; i < 16; i++) {
+            BRIGHTNESS_CACHE[i] = new Display.Brightness(i, i);
+        }
+    }
+
     /**
      * PERFORMANCE: Batch update multiple entities in a single scheduler task.
      * This is much more efficient than individual updates when updating many entities.
@@ -183,8 +209,9 @@ public class EntityPoolManager {
         // Record stats
         plugin.getEntityUpdateStats().recordUpdates(updates.size());
 
-        // Single scheduler call for ALL updates - major performance improvement
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        // Apply updates directly if on main thread (hot path from MessageQueue.processTick),
+        // otherwise schedule via runTask for thread safety.
+        Runnable applyUpdates = () -> {
             for (EntityUpdate update : updates) {
                 Entity entity = pool.get(update.entityId());
                 if (entity == null || !entity.isValid()) continue;
@@ -201,27 +228,43 @@ public class EntityPoolManager {
                     display.setInterpolationDuration(update.interpolationDuration());
                 }
 
-                // Apply transformation update (only if changed to avoid resetting interpolation)
+                // Apply transformation update
                 if (update.hasTransform() && update.transformation() != null) {
-                    Transformation currentTransform = display.getTransformation();
-                    if (!update.transformation().equals(currentTransform)) {
-                        display.setTransformation(update.transformation());
-                        display.setInterpolationDelay(0); // Start interpolation immediately
-                    }
+                    display.setTransformation(update.transformation());
+                    display.setInterpolationDelay(0); // Start interpolation immediately
                 }
 
-                // Apply brightness update
+                // Apply brightness update (use cached Brightness to avoid allocation)
                 if (update.hasBrightness()) {
                     int brightness = Math.max(0, Math.min(15, update.brightness()));
-                    display.setBrightness(new Display.Brightness(brightness, brightness));
+                    display.setBrightness(BRIGHTNESS_CACHE[brightness]);
                 }
 
                 // Apply glow update
                 if (update.hasGlow()) {
                     entity.setGlowing(update.glow());
                 }
+
+                // Apply material update (only when changed, to avoid redundant block data updates)
+                if (update.hasMaterial() && update.material() != null && entity instanceof BlockDisplay blockDisplay) {
+                    String cacheKey = zoneName.toLowerCase() + ":" + update.entityId();
+                    String lastMaterial = entityMaterialCache.get(cacheKey);
+                    if (!update.material().equals(lastMaterial)) {
+                        Material mat = Material.matchMaterial(update.material());
+                        if (mat != null) {
+                            blockDisplay.setBlock(mat.createBlockData());
+                            entityMaterialCache.put(cacheKey, update.material());
+                        }
+                    }
+                }
             }
-        });
+        };
+
+        if (Bukkit.isPrimaryThread()) {
+            applyUpdates.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, applyUpdates);
+        }
     }
 
     /**
@@ -368,7 +411,7 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(mode);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(1);
+                    entity.setInterpolationDuration(2);
                     entity.setInterpolationDelay(0);
                     entity.setTeleportDuration(1);
                     entity.setPersistent(false);
@@ -419,6 +462,10 @@ public class EntityPoolManager {
     public void cleanupZone(String zoneName) {
         Map<String, Entity> pool = entityPools.remove(zoneName.toLowerCase());
         if (pool == null) return;
+
+        // Clear material cache entries for this zone
+        String prefix = zoneName.toLowerCase() + ":";
+        entityMaterialCache.keySet().removeIf(key -> key.startsWith(prefix));
 
         runEntityMutation(() -> {
             for (Entity entity : pool.values()) {
@@ -543,13 +590,18 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
         if (pool == null) return;
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Runnable apply = () -> {
             for (Entity entity : pool.values()) {
                 if (entity != null && entity.isValid()) {
                     entity.setGlowing(glow);
                 }
             }
-        });
+        };
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
     }
 
     /**
@@ -578,13 +630,18 @@ public class EntityPoolManager {
         int blockLight = Math.max(0, Math.min(15, brightness));
         int skyLight = Math.max(0, Math.min(15, brightness));
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Runnable apply = () -> {
             for (Entity entity : pool.values()) {
                 if (entity instanceof Display display) {
                     display.setBrightness(new Display.Brightness(blockLight, skyLight));
                 }
             }
-        });
+        };
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
     }
 
     /**

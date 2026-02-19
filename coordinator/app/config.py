@@ -1,7 +1,11 @@
-"""Coordinator configuration via pydantic-settings."""
+"""Coordinator configuration via pydantic-settings.
+
+Deployed on Railway with auto-deploy from main branch.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from functools import lru_cache
@@ -69,8 +73,28 @@ class Settings(BaseSettings):
     r2_bucket_name: str = ""
     r2_public_url: str = ""
 
-    # CORS
-    cors_origins: list[str] = ["https://mcav.live", "http://localhost:3000"]
+    # Desktop deep link
+    desktop_deep_link_scheme: str = "mcav"
+
+    # CORS — stored as str to avoid pydantic-settings JSON-parsing env vars.
+    # Use get_cors_origins() to get the parsed list.
+    cors_origins: str = "https://mcav.live,http://localhost:3000,http://localhost:5173,tauri://localhost,http://tauri.localhost,https://tauri.localhost"
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse CORS origins — handles JSON arrays, bracket lists, and comma-separated strings."""
+        v = self.cors_origins.strip()
+        if v.startswith("["):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed]
+            except json.JSONDecodeError:
+                pass
+            # Railway strips inner quotes: [https://mcav.live,http://localhost:3000]
+            inner = v[1:-1] if v.endswith("]") else v[1:]
+            return [item.strip() for item in inner.split(",") if item.strip()]
+        # Plain comma-separated: 'https://mcav.live,http://localhost:3000'
+        return [item.strip() for item in v.split(",") if item.strip()]
 
     model_config = SettingsConfigDict(
         env_prefix="MCAV_",

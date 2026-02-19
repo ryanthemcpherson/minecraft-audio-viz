@@ -1,5 +1,6 @@
 name = "Laser Array"
 description = "Laser beams shooting from center"
+recommended_entities = 64
 category = "Epic"
 static_camera = false
 state = {}

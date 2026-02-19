@@ -11,9 +11,9 @@ const RING_RADII = [4.5, 3.0, 1.8];
 const BLOCK_SIZE = 0.18;
 const BASE_HEIGHT = 0.08;
 
-const COLOR_BLUE = new THREE.Color("#00D4FF");
-const COLOR_PURPLE = new THREE.Color("#8B5CF6");
-const COLOR_PINK = new THREE.Color("#FF006E");
+const COLOR_CYAN = new THREE.Color("#00CCFF");
+const COLOR_BLUE = new THREE.Color("#5B6AFF");
+const COLOR_AMBER = new THREE.Color("#FFAA00");
 
 const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
@@ -74,11 +74,11 @@ function BlockRing({
     for (let i = 0; i < count; i++) {
       const t = i / count;
       if (t < 0.33) {
-        TEMP_COLOR.lerpColors(COLOR_BLUE, COLOR_PURPLE, t / 0.33);
+        TEMP_COLOR.lerpColors(COLOR_CYAN, COLOR_BLUE, t / 0.33);
       } else if (t < 0.66) {
-        TEMP_COLOR.lerpColors(COLOR_PURPLE, COLOR_PINK, (t - 0.33) / 0.33);
+        TEMP_COLOR.lerpColors(COLOR_BLUE, COLOR_AMBER, (t - 0.33) / 0.33);
       } else {
-        TEMP_COLOR.lerpColors(COLOR_PINK, COLOR_BLUE, (t - 0.66) / 0.34);
+        TEMP_COLOR.lerpColors(COLOR_AMBER, COLOR_CYAN, (t - 0.66) / 0.34);
       }
       colors[i * 3] = TEMP_COLOR.r;
       colors[i * 3 + 1] = TEMP_COLOR.g;
@@ -156,9 +156,9 @@ function EqualizerGrid() {
     for (let col = 0; col < GRID_COLS; col++) {
       const t = col / (GRID_COLS - 1);
       if (t < 0.5) {
-        TEMP_COLOR.lerpColors(COLOR_BLUE, COLOR_PURPLE, t / 0.5);
+        TEMP_COLOR.lerpColors(COLOR_CYAN, COLOR_BLUE, t / 0.5);
       } else {
-        TEMP_COLOR.lerpColors(COLOR_PURPLE, COLOR_PINK, (t - 0.5) / 0.5);
+        TEMP_COLOR.lerpColors(COLOR_BLUE, COLOR_AMBER, (t - 0.5) / 0.5);
       }
       for (let row = 0; row < GRID_ROWS; row++) {
         const idx = col * GRID_ROWS + row;
@@ -306,10 +306,10 @@ function VisualizerCanvas({ isVisible }: { isVisible: boolean }) {
       }}
     >
       <ambientLight intensity={0.4} />
-      <pointLight position={[5, 8, 5]} intensity={0.6} color="#00D4FF" />
-      <pointLight position={[-5, 6, -3]} intensity={0.4} color="#8B5CF6" />
-      <pointLight position={[0, 3, -5]} intensity={0.3} color="#FF006E" />
-      <fog attach="fog" args={["#0a0a0a", 8, 24]} />
+      <pointLight position={[5, 8, 5]} intensity={0.6} color="#00CCFF" />
+      <pointLight position={[-5, 6, -3]} intensity={0.4} color="#5B6AFF" />
+      <pointLight position={[0, 3, -5]} intensity={0.3} color="#FFAA00" />
+      <fog attach="fog" args={["#08090d", 8, 24]} />
       <Scene />
       <FrameInvalidator isVisible={isVisible} />
       <EffectComposer>

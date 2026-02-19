@@ -1,5 +1,6 @@
 name = "Skull"
 description = "Clean anatomical skull with animated jaw and glowing eyes"
+recommended_entities = 160
 category = "Epic"
 static_camera = false
 state = {}

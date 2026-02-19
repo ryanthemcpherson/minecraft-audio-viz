@@ -49,7 +49,7 @@ def settings() -> Settings:
         rate_limit_resolve_per_minute=10,
         rate_limit_register_per_hour=5,
         rate_limit_auth_per_minute=100,  # relaxed for tests
-        cors_origins=["http://localhost:3000"],
+        cors_origins="http://localhost:3000",
         user_jwt_secret="test-user-jwt-secret",  # nosec B106
         user_jwt_expiry_minutes=60,
         refresh_token_expiry_days=30,

@@ -10,7 +10,6 @@ class AdminApp {
     constructor() {
         // WebSocket connection - use same host as the page was served from
         const wsHost = window.location.hostname || 'localhost';
-        console.log('[AdminApp] Connecting to WebSocket at:', wsHost, ':8766');
         this.ws = new WebSocketService({
             host: wsHost,
             port: 8766
@@ -49,6 +48,12 @@ class AdminApp {
             minecraftConnected: false,
             // Connect codes state
             connectCodes: [],
+            // Stage data
+            stages: [],
+            selectedStage: null,
+            // Per-zone pattern state
+            selectedZones: new Set(),    // Currently selected zone names
+            zonePatterns: {},            // zone_name -> pattern_name from server
             // Zone settings
             zone: {
                 name: 'main',
@@ -79,6 +84,8 @@ class AdminApp {
                     trail: false
                 }
             },
+            // Band material overrides (per-band block types)
+            bandMaterials: [null, null, null, null, null],
             // Voice chat state
             voiceChat: {
                 available: false,
@@ -89,8 +96,15 @@ class AdminApp {
                 connectedPlayers: 0
             },
             // 3D Preview state
-            entities: []
+            entities: [],
+            zoneEntities: {},               // zone_name → entity[] from server
+            // Scene presets state
+            scenes: [],
+            currentScene: null
         };
+
+        // Zone pattern change tracking (debounce chip re-rendering)
+        this._lastZonePatternsJson = '';
 
         // Tap tempo tracking
         this.tapTimes = [];
@@ -126,6 +140,12 @@ class AdminApp {
         };
         this._threeLoadInFlight = false;
 
+        // Multi-zone preview state
+        this._previewZoneGroups = {};       // zone_name → { group, blocks[], wireframe, sizeX/Y/Z }
+        this._previewStageCenter = { x: 0, y: 0, z: 0 };
+        this._previewStageBounds = null;    // { minX, minY, minZ, maxX, maxY, maxZ }
+        this._previewStageMode = false;
+
         // Preview config
         this._previewConfig = {
             blockSize: 0.8,
@@ -146,11 +166,19 @@ class AdminApp {
         this._setupWebSocket();
         this._setupDJQueueDelegation();
         this._setupDJPendingDelegation();
+        this._updateTabIndicator();
+        window.addEventListener('resize', () => this._updateTabIndicator());
 
         // Start connection
         this.ws.connect();
 
-        console.log('Admin Panel initialized');
+        // Console branding
+        console.log(
+            '%c MCAV %c Control Center',
+            'background:#00D4FF;color:#060611;font-weight:700;padding:4px 8px;border-radius:4px 0 0 4px;font-family:monospace;font-size:14px',
+            'background:#151530;color:#00D4FF;font-weight:500;padding:4px 8px;border-radius:0 4px 4px 0;font-family:monospace;font-size:14px;border:1px solid rgba(0,212,255,0.3)'
+        );
+        console.log('%cKeys: B=Blackout  F=Freeze  T=Tap Tempo  1-8=Patterns', 'color:#7a7aa0;font-family:monospace;font-size:11px');
     }
 
     // === Initialization ===
@@ -202,6 +230,25 @@ class AdminApp {
         // Effect triggers
         this.elements.effectButtons = document.querySelectorAll('.effect-btn');
 
+        // Scene presets
+        this.elements.sceneNameInput = document.getElementById('scene-name-input');
+        this.elements.saveSceneBtn = document.getElementById('save-scene-btn');
+        this.elements.scenesGrid = document.getElementById('scenes-grid');
+
+        // Visual sync controls
+        this.elements.syncMode = document.getElementById('sync-mode');
+        this.elements.ctrlVisualDelay = document.getElementById('ctrl-visual-delay');
+        this.elements.syncDelayRow = document.getElementById('sync-delay-row');
+        this.elements.syncPresetButtons = document.querySelectorAll('.sync-preset-btn');
+        this.elements.syncDashboard = document.getElementById('sync-dashboard');
+        this.elements.metricPing = document.getElementById('metric-ping');
+        this.elements.metricPipeline = document.getElementById('metric-pipeline');
+        this.elements.metricDelay = document.getElementById('metric-delay');
+        this.elements.metricSync = document.getElementById('metric-sync');
+        this.elements.metricJitter = document.getElementById('metric-jitter');
+        this.elements.btnSyncTest = document.getElementById('btn-sync-test');
+        this.elements.syncTestResult = document.getElementById('sync-test-result');
+
         // Particle effects
         this.elements.particleGlobalIntensity = document.getElementById('particle-global-intensity');
         this.elements.particleBeatEffects = document.getElementById('particle-beat-effects');
@@ -242,9 +289,11 @@ class AdminApp {
         this.elements.djPendingSection = document.getElementById('dj-pending-section');
         this.elements.djPendingQueue = document.getElementById('dj-pending-queue');
 
-        // Zone/stage list
-        this.elements.zoneList = document.getElementById('zone-list');
+        // Stage/zone list
+        this.elements.stageZoneList = document.getElementById('stage-zone-list');
         this.elements.btnRefreshZones = document.getElementById('btn-refresh-zones');
+        this.elements.stageSelect = document.getElementById('stage-select');
+        this.elements.zoneChipBar = document.getElementById('zone-chip-bar');
 
         // Toast container
         this.elements.toastContainer = document.getElementById('toast-container');
@@ -298,6 +347,11 @@ class AdminApp {
         this.elements.voiceChannelType = document.getElementById('voice-channel-type');
         this.elements.voiceDistance = document.getElementById('voice-distance');
         this.elements.voiceDistanceRow = document.getElementById('voice-distance-row');
+
+        // Pattern transition elements
+        this.elements.transitionDurationSlider = document.getElementById('transition-duration-slider');
+        this.elements.transitionDurationValue = document.getElementById('transition-duration-value');
+        this.elements.transitionStatus = document.getElementById('transition-status');
     }
 
     _setupEventListeners() {
@@ -372,6 +426,56 @@ class AdminApp {
             this.ws.send({ type: 'set_block_count', count: val });
         }, (val) => `${val}`);
 
+        // Visual sync controls
+        this._setupControl('ctrl-visual-delay', 'val-visual-delay', (val) => {
+            this.state.visualDelayMs = val;
+            this.ws.send({ type: 'set_visual_delay', delay_ms: val });
+        }, (val) => `${val}ms`);
+
+        if (this.elements.syncMode) {
+            this.elements.syncMode.addEventListener('change', () => {
+                const mode = this.elements.syncMode.value;
+                this.state.visualDelayMode = mode;
+                this.ws.send({ type: 'set_visual_delay_mode', mode: mode });
+                // Show/hide manual delay slider
+                if (this.elements.syncDelayRow) {
+                    this.elements.syncDelayRow.style.display = mode === 'manual' ? '' : 'none';
+                }
+                // Clear active sync preset when mode changes
+                this.elements.syncPresetButtons.forEach(b => b.classList.remove('active'));
+            });
+        }
+
+        // Sync preset quick-buttons
+        this.elements.syncPresetButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const delayMs = parseInt(btn.dataset.delay);
+                // Set mode to manual and apply the delay
+                this.ws.send({ type: 'set_visual_delay_mode', mode: 'manual' });
+                this.ws.send({ type: 'set_visual_delay', delay_ms: delayMs });
+                // Update UI
+                if (this.elements.syncMode) this.elements.syncMode.value = 'manual';
+                if (this.elements.ctrlVisualDelay) this.elements.ctrlVisualDelay.value = delayMs;
+                const valEl = document.getElementById('val-visual-delay');
+                if (valEl) valEl.textContent = `${delayMs}ms`;
+                if (this.elements.syncDelayRow) this.elements.syncDelayRow.style.display = '';
+                // Highlight active preset
+                this.elements.syncPresetButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // Sync test button
+        if (this.elements.btnSyncTest) {
+            this.elements.btnSyncTest.addEventListener('click', () => {
+                this._syncTestSentAt = performance.now();
+                this.ws.send({ type: 'sync_test' });
+                if (this.elements.syncTestResult) {
+                    this.elements.syncTestResult.textContent = 'Testing...';
+                }
+            });
+        }
+
         // Quick actions
         this.elements.btnBlackout.addEventListener('click', () => this._toggleBlackout());
         this.elements.btnFreeze.addEventListener('click', () => this._toggleFreeze());
@@ -381,6 +485,16 @@ class AdminApp {
         this.elements.effectButtons.forEach(btn => {
             btn.addEventListener('click', () => this._triggerEffect(btn.dataset.effect));
         });
+
+        // Scene presets
+        if (this.elements.saveSceneBtn) {
+            this.elements.saveSceneBtn.addEventListener('click', () => this._saveScene());
+        }
+        if (this.elements.sceneNameInput) {
+            this.elements.sceneNameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this._saveScene();
+            });
+        }
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this._handleKeyboard(e));
@@ -405,10 +519,27 @@ class AdminApp {
             });
         }
 
-        // Refresh zones button
+        // Refresh stages/zones button
         if (this.elements.btnRefreshZones) {
             this.elements.btnRefreshZones.addEventListener('click', () => {
+                this.ws.send({ type: 'get_stages' });
                 this.ws.send({ type: 'get_zones' });
+            });
+        }
+
+        // Pattern transition duration slider
+        if (this.elements.transitionDurationSlider) {
+            const sendTransitionDuration = debounce((value) => {
+                this.ws.send({ type: 'set_transition_duration', duration: value / 1000 });
+            }, 50);
+
+            this.elements.transitionDurationSlider.addEventListener('input', () => {
+                const ms = parseInt(this.elements.transitionDurationSlider.value);
+                const seconds = (ms / 1000).toFixed(1);
+                if (this.elements.transitionDurationValue) {
+                    this.elements.transitionDurationValue.textContent = `${seconds}s`;
+                }
+                sendTransitionDuration(ms);
             });
         }
 
@@ -643,6 +774,24 @@ class AdminApp {
         this._setupToggle('zone-show-pattern', 'showPattern', sendZoneConfig);
         this._setupToggle('zone-show-bands', 'showBands', sendZoneConfig);
 
+        // Band material overrides
+        const sendBandMaterials = debounce(() => {
+            const materials = [];
+            for (let i = 0; i < 5; i++) {
+                const el = document.getElementById(`band-material-${i}`);
+                materials.push(el && el.value ? el.value : null);
+            }
+            this.state.bandMaterials = materials;
+            this.ws.send({ type: 'set_band_materials', materials });
+        }, 100);
+
+        for (let i = 0; i < 5; i++) {
+            const el = document.getElementById(`band-material-${i}`);
+            if (el) {
+                el.addEventListener('change', sendBandMaterials);
+            }
+        }
+
         // Zone action buttons
         if (this.elements.btnReinitPool) {
             this.elements.btnReinitPool.addEventListener('click', () => this._reinitPool());
@@ -654,7 +803,25 @@ class AdminApp {
             this.elements.btnResetDefaults.addEventListener('click', () => this._resetZoneDefaults());
         }
 
-        // Zone selector
+        // Stage selector
+        if (this.elements.stageSelect) {
+            this.elements.stageSelect.addEventListener('change', () => {
+                this.state.selectedStage = this.elements.stageSelect.value || null;
+                // Auto-select all zones of the new stage
+                this.state.selectedZones.clear();
+                const zones = this.state.allZones || [];
+                const filtered = this.state.selectedStage
+                    ? zones.filter(z => z.stage === this.state.selectedStage)
+                    : zones;
+                filtered.forEach(z => this.state.selectedZones.add(z.name));
+                this._updateZoneSelector();
+                this._renderStageZoneList();
+                this._renderZoneChips();
+                this._updatePatternHighlightForZones();
+            });
+        }
+
+        // Zone selector (hidden, kept for Zone Settings tab compat)
         if (this.elements.zoneSelect) {
             this.elements.zoneSelect.addEventListener('change', () => {
                 this.state.zone.name = this.elements.zoneSelect.value;
@@ -662,6 +829,60 @@ class AdminApp {
                 this._requestZoneStatus();
             });
         }
+
+        // Zone quick-select buttons
+        document.querySelectorAll('.zone-quick-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.select;
+                this._quickSelectZones(action);
+            });
+        });
+
+        // Collapsible mixer sections
+        document.querySelectorAll('.mixer-section.collapsible > .section-title').forEach(title => {
+            title.setAttribute('tabindex', '0');
+            title.setAttribute('role', 'button');
+            const isCollapsed = title.closest('.mixer-section').classList.contains('collapsed');
+            title.setAttribute('aria-expanded', String(!isCollapsed));
+            const toggle = () => {
+                const section = title.closest('.mixer-section');
+                section.classList.toggle('collapsed');
+                title.setAttribute('aria-expanded', String(!section.classList.contains('collapsed')));
+                this._saveSectionStates();
+            };
+            title.addEventListener('click', toggle);
+            title.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggle();
+                }
+            });
+        });
+        this._restoreSectionStates();
+    }
+
+    _saveSectionStates() {
+        const states = {};
+        document.querySelectorAll('.mixer-section.collapsible').forEach(section => {
+            const key = section.querySelector('.section-title')?.textContent.trim();
+            if (key) states[key] = section.classList.contains('collapsed');
+        });
+        try { localStorage.setItem('mcav-section-states', JSON.stringify(states)); } catch(e) {}
+    }
+
+    _restoreSectionStates() {
+        try {
+            const states = JSON.parse(localStorage.getItem('mcav-section-states'));
+            if (!states) return;
+            document.querySelectorAll('.mixer-section.collapsible').forEach(section => {
+                const key = section.querySelector('.section-title')?.textContent.trim();
+                if (key && key in states) {
+                    section.classList.toggle('collapsed', states[key]);
+                    const title = section.querySelector('.section-title');
+                    if (title) title.setAttribute('aria-expanded', String(!states[key]));
+                }
+            });
+        } catch(e) {}
     }
 
     _setZoneControlsLoading(loading) {
@@ -736,13 +957,20 @@ class AdminApp {
             this.state.connected = true;
             this._setConnectionStatus('connected');
             this._showToast('Connected to server', 'success');
+
+            // Connection celebration glow
+            const app = document.getElementById('app');
+            app.classList.add('just-connected');
+            setTimeout(() => app.classList.remove('just-connected'), 900);
             // Request initial state
             this.ws.send({ type: 'get_particle_effects' });
+            this.ws.send({ type: 'get_stages' });
             this.ws.send({ type: 'get_zones' });
             this.ws.send({ type: 'get_zone', zone: this.state.zone.name });
             this.ws.send({ type: 'get_connect_codes' });
             this.ws.send({ type: 'get_pending_djs' });
             this.ws.send({ type: 'get_voice_status' });
+            this.ws.send({ type: 'list_scenes' });
         });
 
         this.ws.addEventListener('disconnected', () => {
@@ -786,6 +1014,22 @@ class AdminApp {
                 if (data.zone !== undefined) {
                     this.state.currentZone = data.zone;
                 }
+                // Handle per-zone pattern state
+                if (data.zone_patterns) {
+                    this.state.zonePatterns = data.zone_patterns;
+                    this._renderZoneChips();
+                    this._updatePatternHighlightForZones();
+                }
+                // Handle stage data from vj_state
+                if (data.stages) {
+                    this._handleStagesList({ stages: data.stages });
+                }
+                if (data.stage !== undefined) {
+                    this.state.selectedStage = data.stage || null;
+                    if (this.elements.stageSelect) {
+                        this.elements.stageSelect.value = data.stage || '';
+                    }
+                }
                 // Handle initial MC status from vj_state
                 if (data.minecraft_connected !== undefined) {
                     this.state.minecraftConnected = data.minecraft_connected;
@@ -799,6 +1043,19 @@ class AdminApp {
                 }
                 if (data.banner_profiles) {
                     this.state.bannerProfiles = data.banner_profiles;
+                }
+                // Handle band materials state
+                if (data.band_materials) {
+                    this._syncBandMaterials(data.band_materials);
+                }
+                // Handle visual sync state
+                if (data.visual_delay_ms !== undefined) {
+                    this.state.visualDelayMs = data.visual_delay_ms;
+                    this._updateVisualDelayDisplay();
+                }
+                if (data.visual_delay_mode !== undefined) {
+                    this.state.visualDelayMode = data.visual_delay_mode;
+                    this._updateVisualDelayModeDisplay();
                 }
                 break;
 
@@ -838,6 +1095,37 @@ class AdminApp {
                 this._handlePresetChanged(data);
                 break;
 
+            case 'transition_duration_sync':
+                // Server synced transition duration
+                if (data.duration !== undefined && this.elements.transitionDurationSlider) {
+                    const ms = Math.round(data.duration * 1000);
+                    this.elements.transitionDurationSlider.value = ms;
+                    if (this.elements.transitionDurationValue) {
+                        this.elements.transitionDurationValue.textContent = `${data.duration.toFixed(1)}s`;
+                    }
+                }
+                break;
+
+            case 'band_materials_sync':
+                if (data.materials) {
+                    this._syncBandMaterials(data.materials);
+                }
+                break;
+
+            case 'visual_delay_sync':
+                if (data.delay_ms !== undefined) {
+                    this.state.visualDelayMs = data.delay_ms;
+                    this._updateVisualDelayDisplay();
+                }
+                break;
+
+            case 'visual_delay_mode_sync':
+                if (data.mode !== undefined) {
+                    this.state.visualDelayMode = data.mode;
+                    this._updateVisualDelayModeDisplay();
+                }
+                break;
+
             case 'state_snapshot':
                 this._handleStateSnapshot(data);
                 break;
@@ -861,6 +1149,14 @@ class AdminApp {
 
             case 'zones':
                 this._handleZonesList(data);
+                break;
+
+            case 'stages':
+                this._handleStagesList(data);
+                break;
+
+            case 'stage_blocks':
+                this._handleStageBlocks(data);
                 break;
 
             case 'connect_code_generated':
@@ -930,29 +1226,292 @@ class AdminApp {
             case 'pool_initialized':
                 this._showToast(`Pool initialized: ${data.count || '?'} entities`, 'success');
                 break;
+
+            case 'scenes_list':
+                this.state.scenes = data.scenes || [];
+                this._renderScenes();
+                break;
+
+            case 'scene_saved':
+                this._showToast(`Scene "${data.name}" saved`, 'success');
+                break;
+
+            case 'scene_loaded':
+                this._showToast(`Scene "${data.name}" loaded`, 'success');
+                this.state.currentScene = data.name;
+                this._renderScenes();
+                break;
+
+            case 'scene_deleted':
+                this._showToast(`Scene "${data.name}" deleted`, 'success');
+                break;
+
+            case 'sync_test_flash': {
+                // Visual flash for sync test — measure round-trip
+                const flashAt = performance.now();
+                document.body.style.transition = 'background 0.05s';
+                document.body.style.background = '#ffffff';
+                setTimeout(() => {
+                    document.body.style.background = '';
+                    document.body.style.transition = '';
+                }, 100);
+                if (this._syncTestSentAt && this.elements.syncTestResult) {
+                    const rtt = Math.round(flashAt - this._syncTestSentAt);
+                    this.elements.syncTestResult.textContent = `Round-trip: ${rtt}ms`;
+                    this._syncTestSentAt = null;
+                }
+                break;
+            }
+
+            case 'link_status':
+                this._handleLinkStatus(data);
+                break;
         }
     }
 
     _handleZonesList(data) {
-        // Populate zone selector
-        if (data.zones && this.elements.zoneSelect) {
-            // Clear existing options
-            this.elements.zoneSelect.innerHTML = '';
+        const zones = data.zones || [];
 
-            // Add zone options
-            data.zones.forEach(zone => {
-                const option = document.createElement('option');
-                option.value = zone.name;
-                option.textContent = zone.name;
-                this.elements.zoneSelect.appendChild(option);
-            });
-
-            // Select current zone
-            this.elements.zoneSelect.value = this.state.zone.name;
+        // Derive stage name from zone name prefix if zone has no stage field.
+        // Zone names follow "{stage}_{role}", e.g. "stone_right_wing".
+        // Find common prefix shared by all zone names to extract the stage.
+        if (zones.length > 0 && !zones[0].stage) {
+            const names = zones.map(z => z.name);
+            let prefix = names[0];
+            for (let i = 1; i < names.length; i++) {
+                while (prefix && !names[i].startsWith(prefix + '_')) {
+                    const lastUnderscore = prefix.lastIndexOf('_');
+                    prefix = lastUnderscore > 0 ? prefix.substring(0, lastUnderscore) : '';
+                }
+            }
+            if (prefix) {
+                zones.forEach(z => { z.stage = prefix; });
+            }
         }
 
-        // Render the zone list in the Zone Settings tab
-        this._renderZoneList(data.zones || []);
+        this.state.allZones = zones;
+
+        // Enrich zones with entity counts from their current pattern's recommended_entities
+        // (server tracks these but Minecraft may report 0 before pool init)
+        const zonePatterns = this.state.zonePatterns || {};
+        const patterns = this.state.patterns || [];
+        if (patterns.length > 0) {
+            const patternMap = {};
+            patterns.forEach(p => { patternMap[p.id] = p; });
+            zones.forEach(z => {
+                if (!z.entity_count || z.entity_count === 0) {
+                    const pat = zonePatterns[z.name] || this.state.currentPattern;
+                    const info = pat && patternMap[pat];
+                    if (info && info.recommended_entities) {
+                        z.entity_count = info.recommended_entities;
+                    }
+                }
+            });
+        }
+
+        // Derive stages from zone data
+        if (zones.length > 0) {
+            const stageNames = [...new Set(zones.map(z => z.stage).filter(Boolean))];
+            if (stageNames.length > 0) {
+                this._handleStagesList({ stages: stageNames.map(n => ({ name: n })) });
+            }
+        }
+
+        // Populate zone selector (filtered by selected stage if any)
+        this._updateZoneSelector();
+
+        // Render the stage/zone hierarchy in the Zone Settings tab
+        this._renderStageZoneList();
+
+        // Auto-select all zones if none currently selected
+        if (this.state.selectedZones.size === 0 && zones.length > 0) {
+            const selectedStage = this.state.selectedStage;
+            const filtered = selectedStage
+                ? zones.filter(z => z.stage === selectedStage)
+                : zones;
+            filtered.forEach(z => this.state.selectedZones.add(z.name));
+        }
+
+        // Render zone chips
+        this._renderZoneChips();
+
+        // Rebuild 3D preview zone layout when zones change
+        if (this._previewInitialized) {
+            this._rebuildPreviewZoneLayout();
+        }
+    }
+
+    _handleStagesList(data) {
+        this.state.stages = data.stages || [];
+
+        // Populate stage selector dropdown
+        if (this.elements.stageSelect) {
+            while (this.elements.stageSelect.firstChild) {
+                this.elements.stageSelect.removeChild(this.elements.stageSelect.firstChild);
+            }
+
+            this.state.stages.forEach(stage => {
+                const option = document.createElement('option');
+                option.value = stage.name;
+                option.textContent = this._formatStageName(stage.name);
+                this.elements.stageSelect.appendChild(option);
+            });
+
+            // Auto-select first stage if none selected
+            if (!this.state.selectedStage && this.state.stages.length > 0) {
+                this.state.selectedStage = this.state.stages[0].name;
+            }
+
+            if (this.state.selectedStage) {
+                this.elements.stageSelect.value = this.state.selectedStage;
+            }
+        }
+
+        // Re-render zone selector, hierarchy, and chips
+        this._updateZoneSelector();
+        this._renderStageZoneList();
+        this._renderZoneChips();
+    }
+
+    // ========== Stage Block Scanning ==========
+
+    _handleStageBlocks(data) {
+        if (data.error) {
+            this._showToast(data.error, 'error');
+            return;
+        }
+        this._stageBlockData = data;
+        this._renderStageBlocks(data);
+        this._showToast(`Scanned ${data.blocks.length} blocks`, 'success');
+    }
+
+    _renderStageBlocks(data) {
+        if (!this._previewInitialized || !this._previewScene) return;
+
+        // Dispose previous stage blocks group
+        this._disposeStageBlocks();
+        // Re-set data since dispose clears it
+        this._stageBlockData = data;
+        this._stageBlocksScanned = true;
+
+        const { palette, blocks } = data;
+        if (!palette || !blocks || blocks.length === 0) return;
+
+        this._stageBlocksGroup = new THREE.Group();
+        this._stageBlocksGroup.name = 'stage-blocks';
+
+        // Use the same center as zone positioning (preview stage center)
+        const center = this._previewStageCenter || { x: 0, y: 0, z: 0 };
+
+        // Group blocks by palette index
+        const blocksByMaterial = new Map();
+        for (const [x, y, z, palIdx] of blocks) {
+            if (!blocksByMaterial.has(palIdx)) {
+                blocksByMaterial.set(palIdx, []);
+            }
+            blocksByMaterial.get(palIdx).push({ x, y, z });
+        }
+
+        // Shared geometry for all instances
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+
+        for (const [palIdx, positions] of blocksByMaterial) {
+            const materialName = palette[palIdx];
+
+            // Try to get procedural texture material, fallback to color
+            let material = null;
+            if (this._textureManager) {
+                material = this._textureManager.getEnvironmentMaterial(materialName, 'side');
+            }
+            if (!material) {
+                material = BlockTextureManager.getBlockColor(materialName);
+            }
+
+            const mesh = new THREE.InstancedMesh(boxGeo, material, positions.length);
+            mesh.receiveShadow = true;
+
+            const matrix = new THREE.Matrix4();
+            for (let i = 0; i < positions.length; i++) {
+                const p = positions[i];
+                // Position block at world coords relative to stage center
+                // +0.5 offset centers the block geometry on its grid position
+                matrix.makeTranslation(
+                    p.x + 0.5 - center.x,
+                    p.y + 0.5 - center.y,
+                    p.z + 0.5 - center.z
+                );
+                mesh.setMatrixAt(i, matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+
+            this._stageBlocksGroup.add(mesh);
+        }
+
+        this._previewScene.add(this._stageBlocksGroup);
+    }
+
+    _disposeStageBlocks() {
+        if (this._stageBlocksGroup) {
+            this._stageBlocksGroup.traverse(child => {
+                if (child.isMesh) {
+                    child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                }
+            });
+            this._previewScene.remove(this._stageBlocksGroup);
+            this._stageBlocksGroup = null;
+        }
+        this._stageBlockData = null;
+        this._stageBlocksScanned = false;
+    }
+
+    _scanStageBlocks() {
+        if (!this.state.selectedStage) {
+            this._showToast('No stage selected', 'warning');
+            return;
+        }
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this._showToast('Not connected', 'error');
+            return;
+        }
+        this.ws.send(JSON.stringify({
+            type: 'scan_stage_blocks',
+            stage: this.state.selectedStage
+        }));
+        this._showToast('Scanning stage blocks...', 'info');
+    }
+
+    _updateZoneSelector() {
+        if (!this.elements.zoneSelect) return;
+        const zones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+
+        while (this.elements.zoneSelect.firstChild) {
+            this.elements.zoneSelect.removeChild(this.elements.zoneSelect.firstChild);
+        }
+
+        const filtered = selectedStage
+            ? zones.filter(z => z.stage === selectedStage)
+            : zones;
+
+        filtered.forEach(zone => {
+            const option = document.createElement('option');
+            option.value = zone.name;
+            // Show role label if zone belongs to a stage
+            option.textContent = zone.stage_role
+                ? `${zone.name} (${zone.stage_role})`
+                : zone.name;
+            this.elements.zoneSelect.appendChild(option);
+        });
+
+        // Keep current zone selected if it's still in the list
+        const currentExists = filtered.some(z => z.name === this.state.zone.name);
+        if (currentExists) {
+            this.elements.zoneSelect.value = this.state.zone.name;
+        } else if (filtered.length > 0) {
+            this.elements.zoneSelect.value = filtered[0].name;
+            this.state.zone.name = filtered[0].name;
+        }
     }
 
     _handleParticleEffects(data) {
@@ -1093,7 +1652,7 @@ class AdminApp {
         if (!this.state.djRoster || this.state.djRoster.length === 0) {
             const emptyEl = document.createElement('div');
             emptyEl.className = 'dj-empty';
-            emptyEl.textContent = 'No DJs connected';
+            emptyEl.textContent = 'No DJs in the booth \u2014 generate a connect code below';
             container.appendChild(emptyEl);
             return;
         }
@@ -1142,6 +1701,31 @@ class AdminApp {
                     statsDiv.appendChild(fpsStat);
                 }
                 infoDiv.appendChild(statsDiv);
+            }
+
+            // Per-DJ sync health badges
+            const syncHealthDiv = document.createElement('div');
+            syncHealthDiv.className = 'dj-sync-health';
+            if (dj.clock_sync_age_s !== undefined && dj.clock_sync_age_s !== null) {
+                const clockBadge = document.createElement('span');
+                clockBadge.className = 'dj-sync-badge ' + (dj.clock_sync_age_s < 60 ? 'fresh' : 'stale');
+                clockBadge.textContent = dj.clock_sync_age_s < 60 ? 'CLK OK' : `CLK ${Math.round(dj.clock_sync_age_s)}s`;
+                syncHealthDiv.appendChild(clockBadge);
+            }
+            if (dj.clock_drift_rate !== undefined && dj.clock_drift_rate > 0.1) {
+                const driftBadge = document.createElement('span');
+                driftBadge.className = 'dj-sync-badge ' + (dj.clock_drift_rate > 5 ? 'stale' : '');
+                driftBadge.textContent = `Drift: ${dj.clock_drift_rate.toFixed(1)}ms/m`;
+                syncHealthDiv.appendChild(driftBadge);
+            }
+            if (dj.jitter_ms !== undefined && dj.jitter_ms > 0) {
+                const jitterBadge = document.createElement('span');
+                jitterBadge.className = 'dj-sync-badge ' + (dj.jitter_ms > 10 ? 'stale' : 'fresh');
+                jitterBadge.textContent = `Jtr: ${dj.jitter_ms.toFixed(1)}ms`;
+                syncHealthDiv.appendChild(jitterBadge);
+            }
+            if (syncHealthDiv.children.length > 0) {
+                infoDiv.appendChild(syncHealthDiv);
             }
 
             // Actions area
@@ -1269,11 +1853,40 @@ class AdminApp {
         this.state.frame = data.frame || 0;
         this.state.entities = data.entities || [];
 
-        // Store latency, BPM, and FPS for throttled update
+        // Store per-zone entities for multi-zone preview
+        if (data.zone_entities) {
+            this.state.zoneEntities = data.zone_entities;
+        }
+
+        // Update zone_patterns from state broadcast (debounced)
+        if (data.zone_patterns) {
+            const newJson = JSON.stringify(data.zone_patterns);
+            if (newJson !== this._lastZonePatternsJson) {
+                this._lastZonePatternsJson = newJson;
+                this.state.zonePatterns = data.zone_patterns;
+                this._renderZoneChips();
+                this._updatePatternHighlightForZones();
+            }
+        }
+
+        // Store latency, BPM, FPS, and sync metrics for throttled update
         if (data.ping_ms !== undefined) {
             this.state.latencyMs = data.ping_ms;
+            this.state.pingMs = data.ping_ms;
         } else if (data.latency_ms !== undefined) {
             this.state.latencyMs = data.latency_ms;
+        }
+        if (data.pipeline_latency_ms !== undefined) {
+            this.state.pipelineLatencyMs = data.pipeline_latency_ms;
+        }
+        if (data.jitter_ms !== undefined) {
+            this.state.jitterMs = data.jitter_ms;
+        }
+        if (data.sync_confidence !== undefined) {
+            this.state.syncConfidence = data.sync_confidence;
+        }
+        if (data.visual_delay_ms !== undefined) {
+            this.state.effectiveDelayMs = data.visual_delay_ms;
         }
         if (data.fps !== undefined) {
             this.state.fps = data.fps;
@@ -1299,6 +1912,9 @@ class AdminApp {
                         this.elements.latencyDisplay.textContent = `Latency: ${this.state.latencyMs.toFixed(1)}ms`;
                         this.elements.latencyDisplay.classList.toggle('warning', this.state.latencyMs > 500);
                     }
+
+                    // Update sync dashboard metrics
+                    this._updateSyncDashboard();
 
                     // Update queue depth display (only show when > 0)
                     this._updateQueueDepthDisplay();
@@ -1343,10 +1959,94 @@ class AdminApp {
         }
     }
 
+    _updateSyncDashboard() {
+        // Ping
+        if (this.elements.metricPing && this.state.pingMs !== undefined) {
+            const ping = this.state.pingMs;
+            this.elements.metricPing.textContent = `Ping: ${Math.round(ping)}ms`;
+            this.elements.metricPing.className = 'sync-metric ' + (ping < 50 ? 'good' : ping < 150 ? 'warn' : 'bad');
+        }
+        // Pipeline
+        if (this.elements.metricPipeline && this.state.pipelineLatencyMs !== undefined) {
+            const pl = this.state.pipelineLatencyMs;
+            this.elements.metricPipeline.textContent = `Pipeline: ${Math.round(pl)}ms`;
+            this.elements.metricPipeline.className = 'sync-metric ' + (pl < 50 ? 'good' : pl < 200 ? 'warn' : 'bad');
+        }
+        // Delay
+        if (this.elements.metricDelay && this.state.effectiveDelayMs !== undefined) {
+            this.elements.metricDelay.textContent = `Delay: ${Math.round(this.state.effectiveDelayMs)}ms`;
+            this.elements.metricDelay.className = 'sync-metric';
+        }
+        // Sync confidence
+        if (this.elements.metricSync && this.state.syncConfidence !== undefined) {
+            const sc = this.state.syncConfidence;
+            this.elements.metricSync.textContent = `Sync: ${Math.round(sc)}%`;
+            this.elements.metricSync.className = 'sync-metric ' + (sc >= 80 ? 'good' : sc >= 50 ? 'warn' : 'bad');
+        }
+        // Jitter
+        if (this.elements.metricJitter && this.state.jitterMs !== undefined) {
+            const jt = this.state.jitterMs;
+            this.elements.metricJitter.textContent = `Jitter: ${jt.toFixed(1)}ms`;
+            this.elements.metricJitter.className = 'sync-metric ' + (jt < 5 ? 'good' : jt < 15 ? 'warn' : 'bad');
+        }
+    }
+
     _handlePatternChanged(data) {
         this.state.currentPattern = data.pattern;
         this._updateCurrentPattern(data.pattern);
-        this._highlightActivePattern(data.pattern);
+
+        // Sync entity counts from pattern recommended_entities
+        // Server already applies these; we just mirror to the UI
+        const patternList = data.patterns || this.state.patterns || [];
+        if (data.patterns) this.state.patterns = patternList;
+        const patternMap = {};
+        patternList.forEach(p => { patternMap[p.id] = p; });
+
+        // Update per-zone pattern map and sync entity counts
+        if (data.zone_patterns) {
+            this.state.zonePatterns = data.zone_patterns;
+
+            // Update allZones entity counts to match each zone's pattern
+            (this.state.allZones || []).forEach(zone => {
+                const pat = data.zone_patterns[zone.name];
+                const info = pat && patternMap[pat];
+                if (info && info.recommended_entities) {
+                    zone.entity_count = info.recommended_entities;
+                }
+            });
+
+            this._renderStageZoneList();
+            this._renderZoneChips();
+        }
+
+        // Update current zone's entity count slider
+        const currentPatInfo = patternMap[data.pattern];
+        if (currentPatInfo && currentPatInfo.recommended_entities) {
+            this.state.zone.entityCount = currentPatInfo.recommended_entities;
+            this._setSliderValue('zone-entity-count', 'val-entity-count',
+                currentPatInfo.recommended_entities, v => `${v}`);
+        }
+
+        // Highlight based on selected zones
+        if (this.state.selectedZones.size > 0) {
+            this._updatePatternHighlightForZones();
+        } else {
+            this._highlightActivePattern(data.pattern);
+        }
+
+        // Show transition status if transitioning
+        if (data.transitioning && this.elements.transitionStatus) {
+            this.elements.transitionStatus.classList.remove('hidden');
+            if (data.transition_duration) {
+                setTimeout(() => {
+                    if (this.elements.transitionStatus) {
+                        this.elements.transitionStatus.classList.add('hidden');
+                    }
+                }, data.transition_duration * 1000);
+            }
+        } else if (this.elements.transitionStatus) {
+            this.elements.transitionStatus.classList.add('hidden');
+        }
     }
 
     _handlePresetChanged(data) {
@@ -1438,6 +2138,13 @@ class AdminApp {
         if (this.state.isBeat) {
             el.classList.add('active');
             setTimeout(() => el.classList.remove('active'), 100);
+
+            // Beat-reactive header glow
+            const header = document.getElementById('header');
+            if (header) {
+                header.classList.add('beat-pulse');
+                setTimeout(() => header.classList.remove('beat-pulse'), 120);
+            }
         }
     }
 
@@ -1467,6 +2174,40 @@ class AdminApp {
         }
     }
 
+    _updateVisualDelayDisplay() {
+        const slider = this.elements.ctrlVisualDelay;
+        const valueDisplay = document.getElementById('val-visual-delay');
+        if (slider) {
+            slider.value = this.state.visualDelayMs || 0;
+        }
+        if (valueDisplay) {
+            valueDisplay.textContent = `${Math.round(this.state.visualDelayMs || 0)}ms`;
+        }
+    }
+
+    _updateVisualDelayModeDisplay() {
+        const select = this.elements.syncMode;
+        if (select) {
+            select.value = this.state.visualDelayMode || 'manual';
+        }
+        // Show/hide manual delay slider based on mode
+        if (this.elements.syncDelayRow) {
+            this.elements.syncDelayRow.style.display =
+                (this.state.visualDelayMode || 'manual') === 'manual' ? '' : 'none';
+        }
+    }
+
+    _syncBandMaterials(materials) {
+        if (!Array.isArray(materials) || materials.length !== 5) return;
+        this.state.bandMaterials = materials;
+        for (let i = 0; i < 5; i++) {
+            const el = document.getElementById(`band-material-${i}`);
+            if (el) {
+                el.value = materials[i] || '';
+            }
+        }
+    }
+
     _updateCurrentPreset(preset) {
         this.elements.currentPreset.textContent = preset || '--';
     }
@@ -1486,32 +2227,72 @@ class AdminApp {
             grid.removeChild(grid.firstChild);
         }
 
-        // Create pattern buttons using safe DOM methods
+        // Group patterns by category
+        const groups = {};
         this.state.patterns.forEach(pattern => {
-            const btn = document.createElement('button');
-            btn.className = 'pattern-btn';
-            btn.dataset.pattern = pattern.id;
-            btn.textContent = pattern.name; // Safe: textContent escapes HTML
-            btn.title = pattern.description || '';
+            const cat = pattern.category || 'Other';
+            if (!groups[cat]) groups[cat] = [];
+            groups[cat].push(pattern);
+        });
 
-            if (pattern.id === this.state.currentPattern) {
-                btn.classList.add('active');
-            }
+        // Render each category group
+        const sortedCategories = Object.keys(groups).sort((a, b) => {
+            if (a === 'Other') return 1;
+            if (b === 'Other') return -1;
+            return a.localeCompare(b);
+        });
 
-            btn.addEventListener('click', () => this._setPattern(pattern.id));
-            grid.appendChild(btn);
+        sortedCategories.forEach(category => {
+            const label = document.createElement('div');
+            label.className = 'pattern-category-label';
+            label.textContent = category;
+            grid.appendChild(label);
+
+            const groupGrid = document.createElement('div');
+            groupGrid.className = 'pattern-category-grid';
+
+            groups[category].forEach(pattern => {
+                const btn = document.createElement('button');
+                btn.className = 'pattern-btn';
+                btn.dataset.pattern = pattern.id;
+                btn.textContent = pattern.name;
+                btn.title = pattern.description || '';
+
+                if (pattern.id === this.state.currentPattern) {
+                    btn.classList.add('active');
+                }
+
+                btn.addEventListener('click', () => this._setPattern(pattern.id));
+                groupGrid.appendChild(btn);
+            });
+
+            grid.appendChild(groupGrid);
         });
     }
 
     _highlightActivePattern(patternId) {
         document.querySelectorAll('.pattern-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.pattern === patternId);
+            const isActive = btn.dataset.pattern === patternId;
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                btn.classList.remove('just-selected');
+                void btn.offsetWidth;
+                btn.classList.add('just-selected');
+                setTimeout(() => btn.classList.remove('just-selected'), 400);
+            }
         });
     }
 
     _highlightActivePreset(preset) {
         this.elements.presetButtons.forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.preset === preset);
+            const isActive = btn.dataset.preset === preset;
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                btn.classList.remove('just-selected');
+                void btn.offsetWidth;
+                btn.classList.add('just-selected');
+                setTimeout(() => btn.classList.remove('just-selected'), 400);
+            }
         });
     }
 
@@ -1572,6 +2353,9 @@ class AdminApp {
             tab.setAttribute('aria-selected', String(isActive));
         });
 
+        // Slide tab indicator
+        this._updateTabIndicator();
+
         // Update panels
         this.elements.tabPanels.forEach(panel => {
             panel.classList.toggle('active', panel.id === `${tabName}-panel`);
@@ -1600,12 +2384,234 @@ class AdminApp {
         }
     }
 
+    _updateTabIndicator() {
+        const bar = document.getElementById('tab-bar');
+        const active = bar?.querySelector('.tab.active');
+        if (!bar || !active) return;
+        const barRect = bar.getBoundingClientRect();
+        const tabRect = active.getBoundingClientRect();
+        bar.style.setProperty('--tab-indicator-left', `${tabRect.left - barRect.left}px`);
+        bar.style.setProperty('--tab-indicator-width', `${tabRect.width}px`);
+    }
+
     _setPattern(patternId) {
-        this.ws.send({ type: 'set_pattern', pattern: patternId });
+        const msg = { type: 'set_pattern', pattern: patternId };
+        const selected = Array.from(this.state.selectedZones);
+        if (selected.length > 0) {
+            msg.zones = selected;
+        }
+        this.ws.send(msg);
+    }
+
+    // --- Zone Chip Bar ---
+
+    _renderZoneChips() {
+        const bar = this.elements.zoneChipBar;
+        if (!bar) return;
+
+        while (bar.firstChild) {
+            bar.removeChild(bar.firstChild);
+        }
+
+        const zones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+        const filtered = selectedStage
+            ? zones.filter(z => z.stage === selectedStage)
+            : zones;
+
+        if (filtered.length === 0) {
+            const empty = document.createElement('span');
+            empty.className = 'zone-chip-empty';
+            empty.textContent = 'No zones';
+            empty.style.color = 'var(--text-muted)';
+            empty.style.fontSize = 'var(--font-size-xs)';
+            bar.appendChild(empty);
+            return;
+        }
+
+        filtered.forEach(zone => {
+            const chip = document.createElement('button');
+            chip.className = 'zone-chip';
+            chip.dataset.zone = zone.name;
+
+            if (this.state.selectedZones.has(zone.name)) {
+                chip.classList.add('selected');
+            }
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'zone-chip-name';
+            nameSpan.textContent = this._formatZoneDisplayName(zone.name, zone.stage);
+            chip.appendChild(nameSpan);
+
+            const patternSpan = document.createElement('span');
+            patternSpan.className = 'zone-chip-pattern';
+            patternSpan.textContent = this.state.zonePatterns[zone.name] || '--';
+            chip.appendChild(patternSpan);
+
+            chip.addEventListener('click', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    // Multi-select toggle
+                    if (this.state.selectedZones.has(zone.name)) {
+                        this.state.selectedZones.delete(zone.name);
+                    } else {
+                        this.state.selectedZones.add(zone.name);
+                    }
+                } else {
+                    // Single-select: clear others, select this one
+                    this.state.selectedZones.clear();
+                    this.state.selectedZones.add(zone.name);
+                    // Also set as active zone for Zone Settings tab
+                    this.state.zone.name = zone.name;
+                    if (this.elements.zoneSelect) {
+                        this.elements.zoneSelect.value = zone.name;
+                    }
+                    this._setZoneControlsLoading(true);
+                    this._requestZoneStatus();
+                }
+                this._renderZoneChips();
+                this._updatePatternHighlightForZones();
+            });
+
+            bar.appendChild(chip);
+        });
+    }
+
+    _quickSelectZones(action) {
+        const zones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+        const filtered = selectedStage
+            ? zones.filter(z => z.stage === selectedStage)
+            : zones;
+
+        this.state.selectedZones.clear();
+
+        if (action === 'all') {
+            filtered.forEach(z => this.state.selectedZones.add(z.name));
+        }
+        // 'none' just clears
+
+        this._renderZoneChips();
+        this._updatePatternHighlightForZones();
+    }
+
+    /**
+     * Format a stage name for display: replace underscores, title case.
+     * e.g. "stone" → "Stone", "my_stage" → "My Stage"
+     */
+    _formatStageName(name) {
+        return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    /**
+     * Format a zone name for display: strip stage prefix, replace underscores, title case.
+     * e.g. "stone_right_wing" with stage "stone" → "Right Wing"
+     */
+    _formatZoneDisplayName(zoneName, stageName) {
+        let display = zoneName;
+        // Strip stage prefix if present
+        if (stageName && display.startsWith(stageName + '_')) {
+            display = display.slice(stageName.length + 1);
+        }
+        // Replace underscores with spaces, title case
+        return display.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    _updatePatternHighlightForZones() {
+        const selected = Array.from(this.state.selectedZones);
+        if (selected.length === 0) {
+            // No zones selected: highlight global current pattern
+            this._highlightActivePattern(this.state.currentPattern);
+            return;
+        }
+
+        // Get unique patterns used by selected zones
+        const patternsInUse = new Set();
+        selected.forEach(zn => {
+            const p = this.state.zonePatterns[zn];
+            if (p) patternsInUse.add(p);
+        });
+
+        const allSame = patternsInUse.size === 1;
+
+        document.querySelectorAll('.pattern-btn').forEach(btn => {
+            const patternId = btn.dataset.pattern;
+            btn.classList.remove('active', 'partial');
+
+            if (patternsInUse.has(patternId)) {
+                if (allSame) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.add('partial');
+                }
+            }
+        });
     }
 
     _setPreset(preset) {
         this.ws.send({ type: 'set_preset', preset: preset });
+    }
+
+    _saveScene() {
+        const name = this.elements.sceneNameInput.value.trim();
+        if (!name) {
+            alert('Please enter a scene name');
+            return;
+        }
+
+        this.ws.send({ type: 'save_scene', name });
+        this.elements.sceneNameInput.value = '';
+    }
+
+    _loadScene(name) {
+        this.ws.send({ type: 'load_scene', name });
+    }
+
+    _deleteScene(name) {
+        if (confirm(`Delete scene "${name}"?`)) {
+            this.ws.send({ type: 'delete_scene', name });
+        }
+    }
+
+    _renderScenes() {
+        if (!this.elements.scenesGrid) return;
+
+        const builtInScenes = ['Chill Lounge', 'EDM Stage', 'Rock Arena', 'Ambient'];
+
+        this.elements.scenesGrid.innerHTML = this.state.scenes.map(scene => {
+            const isBuiltIn = builtInScenes.includes(scene.name);
+            const isActive = this.state.currentScene === scene.name;
+            const activeClass = isActive ? 'active' : '';
+            const builtInClass = isBuiltIn ? 'built-in' : '';
+
+            return `
+                <div class="scene-card ${activeClass} ${builtInClass}" data-scene="${scene.name}">
+                    ${!isBuiltIn ? `<button class="scene-card-delete" data-scene="${scene.name}">×</button>` : ''}
+                    <div class="scene-card-name">${scene.name}</div>
+                    <div class="scene-card-details">
+                        <div class="scene-card-pattern">${scene.pattern}</div>
+                        <div>${scene.preset} · ${scene.entity_count} blocks</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Add click handlers for scene cards
+        this.elements.scenesGrid.querySelectorAll('.scene-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Don't trigger load if clicking delete button
+                if (!e.target.classList.contains('scene-card-delete')) {
+                    this._loadScene(card.dataset.scene);
+                }
+            });
+        });
+
+        // Add click handlers for delete buttons
+        this.elements.scenesGrid.querySelectorAll('.scene-card-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._deleteScene(btn.dataset.scene);
+            });
+        });
     }
 
     _sendBandSensitivity(band, value) {
@@ -1633,6 +2639,7 @@ class AdminApp {
     _toggleBlackout() {
         this.state.blackout = !this.state.blackout;
         this.elements.btnBlackout.classList.toggle('active', this.state.blackout);
+        document.getElementById('app').classList.toggle('mode-blackout', this.state.blackout);
 
         this.ws.send({
             type: 'trigger_effect',
@@ -1644,6 +2651,7 @@ class AdminApp {
     _toggleFreeze() {
         this.state.freeze = !this.state.freeze;
         this.elements.btnFreeze.classList.toggle('active', this.state.freeze);
+        document.getElementById('app').classList.toggle('mode-freeze', this.state.freeze);
 
         this.ws.send({
             type: 'trigger_effect',
@@ -1654,6 +2662,13 @@ class AdminApp {
 
     _tapTempo() {
         const now = Date.now();
+
+        // Visual tap feedback
+        const tapBtn = this.elements.btnTapTempo;
+        if (tapBtn) {
+            tapBtn.classList.add('tapped');
+            setTimeout(() => tapBtn.classList.remove('tapped'), 100);
+        }
 
         // Clear old taps
         if (this.tapTimeout) {
@@ -1682,6 +2697,11 @@ class AdminApp {
             const bpm = Math.round(60000 / avgInterval);
 
             this.elements.tapBpm.textContent = `${bpm} BPM`;
+
+            // BPM display pulse
+            this.elements.tapBpm.classList.remove('pulse');
+            void this.elements.tapBpm.offsetWidth;
+            this.elements.tapBpm.classList.add('pulse');
         }
 
         // Reset after 2 seconds of no taps
@@ -1944,12 +2964,12 @@ class AdminApp {
         }
 
         if (this.elements.particleVizSection) {
-            this.elements.particleVizSection.style.display = showParticles ? 'block' : 'none';
+            this.elements.particleVizSection.classList.toggle('hidden', !showParticles);
         }
 
         // Show Bedrock notice when particles are enabled
         if (this.elements.bedrockNotice) {
-            this.elements.bedrockNotice.style.display = showParticles ? 'flex' : 'none';
+            this.elements.bedrockNotice.classList.toggle('hidden', !showParticles);
         }
     }
 
@@ -1982,7 +3002,7 @@ class AdminApp {
 
                 // Show/hide fixed color picker
                 if (this.elements.fixedColorRow) {
-                    this.elements.fixedColorRow.style.display = mode === 'fixed' ? 'flex' : 'none';
+                    this.elements.fixedColorRow.classList.toggle('hidden', mode !== 'fixed');
                 }
 
                 sendParticleVizConfig();
@@ -2078,7 +3098,7 @@ class AdminApp {
 
         // Show/hide distance slider based on channel type
         if (this.elements.voiceDistanceRow) {
-            this.elements.voiceDistanceRow.style.display = type === 'locational' ? 'flex' : 'none';
+            this.elements.voiceDistanceRow.classList.toggle('hidden', type !== 'locational');
         }
 
         this._sendVoiceConfig();
@@ -2122,6 +3142,17 @@ class AdminApp {
             this._showToast('Voice chat streaming started', 'success');
         } else if (!data.streaming && wasStreaming) {
             this._showToast('Voice chat streaming stopped', 'info');
+        }
+    }
+
+    _handleLinkStatus(data) {
+        this.state.linkEnabled = data.enabled || false;
+        this.state.linkPeers = data.peers || 0;
+        this.state.linkTempo = data.tempo || 0;
+
+        // Update the sync dashboard with Link info if peers > 0
+        if (data.peers > 0) {
+            this._showToast(`Link: ${data.peers} peer(s) @ ${data.tempo} BPM`, 'info');
         }
     }
 
@@ -2198,7 +3229,7 @@ class AdminApp {
 
         // Show/hide distance row based on channel type
         if (distanceRow) {
-            distanceRow.style.display = vc.channelType === 'locational' ? 'flex' : 'none';
+            distanceRow.classList.toggle('hidden', vc.channelType !== 'locational');
         }
     }
 
@@ -2225,12 +3256,13 @@ class AdminApp {
 
     _dismissToast(toast) {
         if (!toast || !toast.parentNode) return;
+        toast.classList.add('hiding');
         toast.classList.remove('show');
         setTimeout(() => {
             if (toast.parentNode) {
                 toast.parentNode.removeChild(toast);
             }
-        }, 300);
+        }, 200);
     }
 
     // === Service Status Indicators ===
@@ -2377,71 +3409,189 @@ class AdminApp {
         container._delegationSetup = true;
     }
 
-    // === Zone/Stage List ===
+    // === Stage/Zone Hierarchy List ===
 
-    _renderZoneList(zones) {
-        const container = this.elements.zoneList;
+    _renderStageZoneList() {
+        const container = this.elements.stageZoneList;
         if (!container) return;
 
         while (container.firstChild) {
             container.removeChild(container.firstChild);
         }
 
-        if (!zones || zones.length === 0) {
+        const stages = this.state.stages || [];
+        const allZones = this.state.allZones || [];
+        const selectedStage = this.state.selectedStage;
+
+        // Group zones by stage
+        const stageZoneMap = new Map();
+        const standaloneZones = [];
+
+        allZones.forEach(zone => {
+            if (zone.stage) {
+                if (!stageZoneMap.has(zone.stage)) {
+                    stageZoneMap.set(zone.stage, []);
+                }
+                stageZoneMap.get(zone.stage).push(zone);
+            } else {
+                standaloneZones.push(zone);
+            }
+        });
+
+        // If filtering by a stage, only show that stage
+        const stagesToRender = selectedStage
+            ? stages.filter(s => s.name === selectedStage)
+            : stages;
+
+        if (stagesToRender.length === 0 && standaloneZones.length === 0 && allZones.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'zone-empty';
-            empty.textContent = 'No stages found';
+            empty.textContent = 'No stages or zones found';
             container.appendChild(empty);
             return;
         }
 
-        zones.forEach(zone => {
-            const item = document.createElement('div');
-            item.className = 'zone-item';
+        // Render each stage as an expandable container
+        stagesToRender.forEach(stage => {
+            const stageEl = document.createElement('div');
+            stageEl.className = 'stage-item';
+            if (stage.active) stageEl.classList.add('active');
 
-            const info = document.createElement('div');
-            info.className = 'zone-info';
+            const stageHeader = document.createElement('div');
+            stageHeader.className = 'stage-header';
 
-            const name = document.createElement('span');
-            name.className = 'zone-name';
-            name.textContent = zone.name;
+            const stageInfo = document.createElement('div');
+            stageInfo.className = 'stage-info';
 
-            const meta = document.createElement('span');
-            meta.className = 'zone-meta';
-            meta.textContent = `${zone.entity_count || 0} entities`;
+            const stageName = document.createElement('span');
+            stageName.className = 'stage-name';
+            stageName.textContent = stage.name;
 
-            info.appendChild(name);
-            info.appendChild(meta);
+            const stageMeta = document.createElement('span');
+            stageMeta.className = 'stage-meta';
+            const stageZones2 = stageZoneMap.get(stage.name) || [];
+            const zoneCount = stageZones2.length || stage.zone_count || Object.keys(stage.zones || {}).length;
+            const totalEntities = stageZones2.reduce((sum, z) => sum + (z.entity_count || 0), 0) || stage.total_entities || 0;
+            stageMeta.textContent = `${stage.template || 'custom'} | ${zoneCount} zone${zoneCount !== 1 ? 's' : ''} | ${totalEntities} entities`;
 
-            const actions = document.createElement('div');
-            actions.className = 'zone-actions';
+            stageInfo.appendChild(stageName);
+            stageInfo.appendChild(stageMeta);
 
-            if (zone.name === this.state.zone.name) {
-                const badge = document.createElement('span');
-                badge.className = 'zone-badge-active';
-                badge.textContent = 'ACTIVE';
-                actions.appendChild(badge);
-            } else {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-small';
-                btn.textContent = 'Select';
-                btn.addEventListener('click', () => {
-                    this.state.zone.name = zone.name;
-                    if (this.elements.zoneSelect) {
-                        this.elements.zoneSelect.value = zone.name;
-                    }
-                    this._setZoneControlsLoading(true);
-                    this._requestZoneStatus();
-                    this.ws.send({ type: 'get_zones' });
-                    this._showToast(`Switched to stage "${zone.name}"`, 'info');
+            const expandIcon = document.createElement('span');
+            expandIcon.className = 'stage-expand-icon';
+            expandIcon.textContent = '\u25B6';
+
+            stageHeader.appendChild(expandIcon);
+            stageHeader.appendChild(stageInfo);
+            stageEl.appendChild(stageHeader);
+
+            // Zone sub-items
+            const zoneContainer = document.createElement('div');
+            zoneContainer.className = 'stage-zones hidden';
+
+            const stageZones = stageZoneMap.get(stage.name) || [];
+            // Also use zones from the stage object if no zone data from zones message
+            if (stageZones.length === 0 && stage.zones) {
+                Object.entries(stage.zones).forEach(([role, zoneInfo]) => {
+                    stageZones.push({
+                        name: zoneInfo.zone_name,
+                        stage: stage.name,
+                        stage_role: role,
+                        entity_count: zoneInfo.entity_count || 0,
+                        display_name: zoneInfo.display_name || role
+                    });
                 });
-                actions.appendChild(btn);
             }
 
-            item.appendChild(info);
-            item.appendChild(actions);
-            container.appendChild(item);
+            stageZones.forEach(zone => {
+                const zoneEl = this._createZoneItem(zone);
+                zoneContainer.appendChild(zoneEl);
+            });
+
+            if (stageZones.length === 0) {
+                const noZones = document.createElement('div');
+                noZones.className = 'zone-empty zone-empty-nested';
+                noZones.textContent = 'No zones in this stage';
+                zoneContainer.appendChild(noZones);
+            }
+
+            stageEl.appendChild(zoneContainer);
+
+            // Toggle expand/collapse on header click
+            stageHeader.addEventListener('click', () => {
+                const isHidden = zoneContainer.classList.contains('hidden');
+                zoneContainer.classList.toggle('hidden');
+                expandIcon.textContent = isHidden ? '\u25BC' : '\u25B6';
+                stageEl.classList.toggle('expanded', isHidden);
+            });
+
+            container.appendChild(stageEl);
         });
+
+        // Render standalone zones (not belonging to any stage)
+        if (!selectedStage && standaloneZones.length > 0) {
+            const standaloneHeader = document.createElement('div');
+            standaloneHeader.className = 'standalone-zones-header';
+            standaloneHeader.textContent = 'Standalone Zones';
+            container.appendChild(standaloneHeader);
+
+            standaloneZones.forEach(zone => {
+                const zoneEl = this._createZoneItem(zone);
+                container.appendChild(zoneEl);
+            });
+        }
+    }
+
+    _createZoneItem(zone) {
+        const item = document.createElement('div');
+        item.className = 'zone-item';
+        if (zone.name === this.state.zone.name) {
+            item.classList.add('active');
+        }
+
+        const info = document.createElement('div');
+        info.className = 'zone-info';
+
+        const name = document.createElement('span');
+        name.className = 'zone-name';
+        name.textContent = zone.display_name || zone.name;
+
+        const meta = document.createElement('span');
+        meta.className = 'zone-meta';
+        const rolePart = zone.stage_role ? `${zone.stage_role} | ` : '';
+        meta.textContent = `${rolePart}${zone.entity_count || 0} entities`;
+
+        info.appendChild(name);
+        info.appendChild(meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'zone-item-actions';
+
+        if (zone.name === this.state.zone.name) {
+            const badge = document.createElement('span');
+            badge.className = 'zone-badge-active';
+            badge.textContent = 'ACTIVE';
+            actions.appendChild(badge);
+        } else {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-small';
+            btn.textContent = 'Select';
+            btn.addEventListener('click', () => {
+                this.state.zone.name = zone.name;
+                if (this.elements.zoneSelect) {
+                    this.elements.zoneSelect.value = zone.name;
+                }
+                this._setZoneControlsLoading(true);
+                this._requestZoneStatus();
+                this.ws.send({ type: 'get_zones' });
+                this._showToast(`Switched to zone "${zone.name}"`, 'info');
+            });
+            actions.appendChild(btn);
+        }
+
+        item.appendChild(info);
+        item.appendChild(actions);
+        return item;
     }
 
     // === 3D Preview Methods ===
@@ -2507,8 +3657,6 @@ class AdminApp {
         }
 
         try {
-            console.log('[Preview] Initializing 3D preview');
-
             // Scene
             this._previewScene = new THREE.Scene();
             this._previewScene.background = new THREE.Color(0x0a0a0f);
@@ -2543,21 +3691,40 @@ class AdminApp {
             pointLight.position.set(0, 5, 0);
             this._previewScene.add(pointLight);
 
-            // Ground plane
-            const groundGeometry = new THREE.PlaneGeometry(30, 30);
-            const groundMaterial = new THREE.MeshStandardMaterial({
-                color: 0x12121a,
-                roughness: 0.9
-            });
-            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            this._previewScene.add(ground);
+            // Block texture manager and Minecraft environment
+            if (typeof BlockTextureManager !== 'undefined' && typeof MinecraftEnvironment !== 'undefined') {
+                this._textureManager = new BlockTextureManager();
+                this._textureManager.preload();
+                this._mcEnvironment = new MinecraftEnvironment(this._previewScene, this._textureManager);
+                this._mcEnvironment.build();
+            } else {
+                // Fallback: flat ground plane
+                const groundGeometry = new THREE.PlaneGeometry(30, 30);
+                const groundMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x12121a,
+                    roughness: 0.9
+                });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                this._previewScene.add(ground);
+            }
 
             // Grid helper
             const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-            gridHelper.position.y = 0.01;
+            gridHelper.position.y = 0.02;
             this._previewScene.add(gridHelper);
+
+            // Pre-create static band-color materials for reuse
+            this._bandColorMaterials = this._previewConfig.colors.map(color =>
+                new THREE.MeshStandardMaterial({
+                    color: color,
+                    roughness: 0.3,
+                    metalness: 0.2,
+                    emissive: new THREE.Color(color),
+                    emissiveIntensity: 0.2
+                })
+            );
 
             // Create initial blocks
             this._createPreviewBlocks(16);
@@ -2581,7 +3748,11 @@ class AdminApp {
 
             this._previewInitialized = true;
             this._previewLastFrameTime = performance.now();
-            console.log('[Preview] 3D preview initialized');
+
+            // If zones are already loaded, build multi-zone layout
+            if ((this.state.allZones || []).length > 1) {
+                this._rebuildPreviewZoneLayout();
+            }
         } catch (error) {
             this._previewFailed = true;
             this._previewInitialized = false;
@@ -2643,6 +3814,275 @@ class AdminApp {
         }
     }
 
+    // === Multi-Zone Preview Methods ===
+
+    /** Compute stage centroid and bounding box from allZones */
+    _computeStageLayout() {
+        const zones = this.state.allZones || [];
+        if (zones.length === 0) {
+            this._previewStageCenter = { x: 0, y: 0, z: 0 };
+            this._previewStageBounds = null;
+            return;
+        }
+
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+        zones.forEach(zone => {
+            const ox = zone.origin?.x || 0;
+            const oy = zone.origin?.y || 0;
+            const oz = zone.origin?.z || 0;
+            const sx = zone.size?.x || 10;
+            const sy = zone.size?.y || 10;
+            const sz = zone.size?.z || 10;
+
+            minX = Math.min(minX, ox);
+            minY = Math.min(minY, oy);
+            minZ = Math.min(minZ, oz);
+            maxX = Math.max(maxX, ox + sx);
+            maxY = Math.max(maxY, oy + sy);
+            maxZ = Math.max(maxZ, oz + sz);
+        });
+
+        this._previewStageCenter = {
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2,
+            z: (minZ + maxZ) / 2
+        };
+        this._previewStageBounds = { minX, minY, minZ, maxX, maxY, maxZ };
+    }
+
+    /** Get wireframe color for a zone based on its role/name */
+    _getZoneWireframeColor(zone) {
+        const role = (zone.stage_role || zone.name || '').toLowerCase();
+        if (role.includes('main') || role.includes('center')) return 0x00D4FF;  // cyan
+        if (role.includes('left') || role.includes('wing_l')) return 0xFF9100;  // orange
+        if (role.includes('right') || role.includes('wing_r')) return 0x00E676; // green
+        if (role.includes('sky') || role.includes('ceiling')) return 0xD500F9;  // purple
+        if (role.includes('audience') || role.includes('floor')) return 0xFFD700; // gold
+        return 0x4488AA; // default teal
+    }
+
+    /** Create or get a THREE.Group for a specific zone */
+    _ensurePreviewZoneGroup(zoneName) {
+        if (this._previewZoneGroups[zoneName]) return this._previewZoneGroups[zoneName];
+
+        const zones = this.state.allZones || [];
+        const zone = zones.find(z => z.name === zoneName);
+        if (!zone) return null;
+
+        const group = new THREE.Group();
+        group.name = `zone-${zoneName}`;
+
+        // Position relative to stage center
+        const ox = (zone.origin?.x || 0) - this._previewStageCenter.x;
+        const oy = (zone.origin?.y || 0) - this._previewStageCenter.y;
+        const oz = (zone.origin?.z || 0) - this._previewStageCenter.z;
+        const sx = zone.size?.x || 10;
+        const sy = zone.size?.y || 10;
+        const sz = zone.size?.z || 10;
+
+        // Group origin = zone origin offset, with size/2 shift so wireframe is centered
+        group.position.set(ox + sx / 2, oy + sy / 2, oz + sz / 2);
+        group.rotation.y = -(zone.rotation || 0) * (Math.PI / 180);
+
+        // Wireframe box showing zone boundaries
+        const boxGeo = new THREE.BoxGeometry(sx, sy, sz);
+        const edgesGeo = new THREE.EdgesGeometry(boxGeo);
+        const wireColor = this._getZoneWireframeColor(zone);
+        const lineMat = new THREE.LineBasicMaterial({ color: wireColor, opacity: 0.35, transparent: true });
+        const wireframe = new THREE.LineSegments(edgesGeo, lineMat);
+        group.add(wireframe);
+        boxGeo.dispose();
+
+        this._previewScene.add(group);
+
+        const zoneGroup = {
+            group,
+            blocks: [],
+            wireframe,
+            sizeX: sx,
+            sizeY: sy,
+            sizeZ: sz,
+            zone
+        };
+        this._previewZoneGroups[zoneName] = zoneGroup;
+        return zoneGroup;
+    }
+
+    /** Ensure a zone group has enough blocks (pool up/down) */
+    _ensureZoneBlockCount(zoneGroup, count) {
+        while (zoneGroup.blocks.length < count) {
+            const block = this._createPreviewBlock(zoneGroup.blocks.length);
+            block.position.set(0, 0, 0);
+            block.visible = true;
+            zoneGroup.group.add(block);
+            zoneGroup.blocks.push(block);
+        }
+        // Hide excess blocks rather than destroying (pooling)
+        for (let i = 0; i < zoneGroup.blocks.length; i++) {
+            zoneGroup.blocks[i].visible = i < count;
+        }
+    }
+
+    /** Update a single block's material from entity data */
+    _updateBlockMaterial(block, entity, bands, config) {
+        const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
+        const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
+        block.userData.bandIndex = bandIndex;
+
+        const entityMaterial = entity.material || '';
+        if (this._textureManager && entityMaterial && entityMaterial !== block.userData.currentMaterial) {
+            const texMat = this._textureManager.getMaterial(entityMaterial);
+            if (texMat) {
+                block.material = texMat;
+                block.userData.currentMaterial = entityMaterial;
+            }
+        } else if (!entityMaterial && block.userData.currentMaterial) {
+            if (this._bandColorMaterials) {
+                block.material = this._bandColorMaterials[bandIndex];
+            }
+            block.userData.currentMaterial = '';
+        } else if (!entityMaterial && !block.userData.currentMaterial) {
+            block.material.color.setHex(config.colors[bandIndex]);
+            block.material.emissive.setHex(config.colors[bandIndex]);
+        }
+
+        const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
+        block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
+    }
+
+    /** Rebuild all zone groups from scratch (on zone list change) */
+    _rebuildPreviewZoneLayout() {
+        if (!this._previewInitialized || !this._previewScene) return;
+
+        // Dispose stage blocks on rebuild (allow re-scan)
+        this._disposeStageBlocks();
+
+        // Dispose old zone groups
+        for (const [name, zg] of Object.entries(this._previewZoneGroups)) {
+            zg.blocks.forEach(block => {
+                block.geometry.dispose();
+                if (block.material && block.material !== this._bandColorMaterials?.[block.userData.bandIndex]) {
+                    block.material.dispose();
+                }
+            });
+            zg.wireframe.geometry.dispose();
+            zg.wireframe.material.dispose();
+            this._previewScene.remove(zg.group);
+        }
+        this._previewZoneGroups = {};
+
+        // Recompute layout
+        this._computeStageLayout();
+
+        const zones = this.state.allZones || [];
+        const hasMultipleZones = zones.length > 1 && zones.some(z => z.origin);
+
+        // Show/hide scan button based on stage mode
+        const scanBtn = document.getElementById('preview-scan-stage');
+
+        if (hasMultipleZones) {
+            this._previewStageMode = true;
+            // Pre-create zone groups
+            zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
+            // Switch environment to stage mode
+            if (this._mcEnvironment) {
+                this._mcEnvironment.setVisible(false);
+                if (typeof MinecraftEnvironment !== 'undefined') {
+                    this._buildStageEnvironment();
+                }
+            }
+            // Frame camera to stage
+            this._frameStage();
+
+            // Show scan button in stage mode
+            if (scanBtn) scanBtn.style.display = '';
+
+            // Auto-scan stage blocks on first multi-zone preview
+            if (!this._stageBlocksScanned && this.state.selectedStage
+                && this.ws && this.ws.readyState === WebSocket.OPEN
+                && this.state.mcStatus === 'connected') {
+                this._stageBlocksScanned = true;
+                this._scanStageBlocks();
+            }
+        } else {
+            this._previewStageMode = false;
+            // Hide scan button in single-zone mode
+            if (scanBtn) scanBtn.style.display = 'none';
+            // Restore single-zone environment
+            if (this._mcEnvironment) {
+                this._mcEnvironment.setVisible(true);
+            }
+            if (this._stageGround) {
+                this._previewScene.remove(this._stageGround);
+                this._stageGround.geometry.dispose();
+                this._stageGround.material.dispose();
+                this._stageGround = null;
+            }
+        }
+    }
+
+    /** Build minimal stage environment (ground plane) for multi-zone mode */
+    _buildStageEnvironment() {
+        // Remove existing stage ground if any
+        if (this._stageGround) {
+            this._previewScene.remove(this._stageGround);
+            this._stageGround.geometry.dispose();
+            this._stageGround.material.dispose();
+        }
+
+        const bounds = this._previewStageBounds;
+        if (!bounds) return;
+
+        const spanX = bounds.maxX - bounds.minX;
+        const spanZ = bounds.maxZ - bounds.minZ;
+        const groundSize = Math.max(spanX, spanZ) * 1.5;
+
+        const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x0a0a14,
+            roughness: 0.95,
+            transparent: true,
+            opacity: 0.6
+        });
+        this._stageGround = new THREE.Mesh(groundGeo, groundMat);
+        this._stageGround.rotation.x = -Math.PI / 2;
+        // Position at bottom of stage bounds, relative to stage center
+        this._stageGround.position.y = (bounds.minY - this._previewStageCenter.y) - 0.1;
+        this._stageGround.receiveShadow = true;
+        this._previewScene.add(this._stageGround);
+    }
+
+    /** Position camera to frame the entire stage */
+    _frameStage() {
+        if (!this._previewCamera || !this._previewStageBounds) return;
+
+        const bounds = this._previewStageBounds;
+        const spanX = bounds.maxX - bounds.minX;
+        const spanY = bounds.maxY - bounds.minY;
+        const spanZ = bounds.maxZ - bounds.minZ;
+        const maxSpan = Math.max(spanX, spanY, spanZ);
+
+        const distance = maxSpan * 1.2;
+        const angle = Math.PI / 4; // 45 degrees
+
+        this._previewCamera.position.set(
+            distance * Math.sin(angle),
+            distance * 0.6,
+            distance * Math.cos(angle)
+        );
+        this._previewCamera.lookAt(0, 0, 0);
+
+        // Update far plane and fog for large stages
+        this._previewCamera.far = Math.max(100, distance * 4);
+        this._previewCamera.updateProjectionMatrix();
+
+        if (this._previewScene.fog) {
+            this._previewScene.fog.far = Math.max(50, distance * 3);
+        }
+    }
+
     _setupPreviewControls() {
         // Reset camera button
         const resetBtn = document.getElementById('preview-reset-camera');
@@ -2666,7 +4106,16 @@ class AdminApp {
                 if (this._previewBlockIndicators) {
                     this._previewBlockIndicators.setVisible(this._previewShowGrid);
                 }
+                if (this._mcEnvironment && !this._previewStageMode) {
+                    this._mcEnvironment.setVisible(this._previewShowGrid);
+                }
             });
+        }
+
+        // Scan stage blocks button
+        const scanBtn = document.getElementById('preview-scan-stage');
+        if (scanBtn) {
+            scanBtn.addEventListener('click', () => this._scanStageBlocks());
         }
 
         // Particles enabled checkbox
@@ -2719,7 +4168,8 @@ class AdminApp {
             spherical.theta -= deltaX * 0.01;
             spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + deltaY * 0.01));
             this._previewCamera.position.setFromSpherical(spherical);
-            this._previewCamera.lookAt(0, 2, 0);
+            const lookY = this._previewStageMode ? 0 : 2;
+            this._previewCamera.lookAt(0, lookY, 0);
 
             previousMousePosition = { x: e.clientX, y: e.clientY };
         });
@@ -2732,12 +4182,16 @@ class AdminApp {
             const zoomSpeed = 0.001;
             const distance = this._previewCamera.position.length();
             const newDistance = distance * (1 + e.deltaY * zoomSpeed);
-            this._previewCamera.position.normalize().multiplyScalar(Math.max(5, Math.min(30, newDistance)));
+            const maxZoom = this._previewStageMode ? 200 : 30;
+            this._previewCamera.position.normalize().multiplyScalar(Math.max(5, Math.min(maxZoom, newDistance)));
         });
     }
 
     _resetPreviewCamera() {
-        if (this._previewCamera) {
+        if (!this._previewCamera) return;
+        if (this._previewStageMode && this._previewStageBounds) {
+            this._frameStage();
+        } else {
             this._previewCamera.position.set(12, 10, 12);
             this._previewCamera.lookAt(0, 2, 0);
         }
@@ -2792,7 +4246,7 @@ class AdminApp {
                 if (fpsEl) fpsEl.textContent = this._previewFps;
             }
 
-            // Smooth block animations
+            // Smooth block animations (legacy single-zone blocks)
             const lerpSpeed = 0.25;
             this._previewBlocks.forEach((block) => {
                 block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
@@ -2805,6 +4259,21 @@ class AdminApp {
                 block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
             });
 
+            // Smooth block animations (multi-zone blocks)
+            for (const zoneGroup of Object.values(this._previewZoneGroups)) {
+                for (const block of zoneGroup.blocks) {
+                    if (!block.visible) continue;
+                    block.position.x += (block.userData.targetX - block.position.x) * lerpSpeed;
+                    block.position.y += (block.userData.targetY - block.position.y) * lerpSpeed;
+                    block.position.z += (block.userData.targetZ - block.position.z) * lerpSpeed;
+
+                    const targetScale = block.userData.targetScale || 1;
+                    block.scale.x += (targetScale - block.scale.x) * lerpSpeed;
+                    block.scale.y += (targetScale - block.scale.y) * lerpSpeed;
+                    block.scale.z += (targetScale - block.scale.z) * lerpSpeed;
+                }
+            }
+
             // Update particle system
             if (this._previewParticleSystem) {
                 this._previewParticleSystem.update(dt);
@@ -2816,7 +4285,8 @@ class AdminApp {
                 spherical.setFromVector3(this._previewCamera.position);
                 spherical.theta += 0.002;
                 this._previewCamera.position.setFromSpherical(spherical);
-                this._previewCamera.lookAt(0, 3, 0);
+                const lookY = this._previewStageMode ? 0 : 3;
+                this._previewCamera.lookAt(0, lookY, 0);
             }
 
             this._previewRenderer.render(this._previewScene, this._previewCamera);
@@ -2832,7 +4302,6 @@ class AdminApp {
         if (!this._previewInitialized || this._previewFailed) return;
 
         try {
-            const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
             const bands = Array.isArray(this.state.bands) ? this.state.bands : [0, 0, 0, 0, 0];
             const isBeat = !!this.state.isBeat;
             const beatIntensity = Number.isFinite(this.state.beatIntensity) ? this.state.beatIntensity : 0;
@@ -2840,36 +4309,22 @@ class AdminApp {
             // Update preview meters overlay
             this._updatePreviewMeters();
 
-            // Update block positions from entities
-            if (entities.length > 0) {
-                this._ensurePreviewBlockCount(entities.length);
+            // Multi-zone path: use zone_entities when available and stage mode is active
+            const zoneEntities = this.state.zoneEntities;
+            const hasZoneEntities = this._previewStageMode && zoneEntities && Object.keys(zoneEntities).length > 0;
 
-                const config = this._previewConfig;
-                this._previewBlocks.forEach((block, i) => {
-                    const entity = entities[i];
-                    if (!entity || typeof entity !== 'object') return;
-
-                    const x = Number.isFinite(entity.x) ? entity.x : 0.5;
-                    const y = Number.isFinite(entity.y) ? entity.y : 0.0;
-                    const z = Number.isFinite(entity.z) ? entity.z : 0.5;
-                    const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
-
-                    block.userData.targetX = (x * config.zoneSize) - config.centerOffset;
-                    block.userData.targetY = y * config.zoneSize;
-                    block.userData.targetZ = (z * config.zoneSize) - config.centerOffset;
-                    block.userData.targetScale = scale * 1.5;
-
-                    const rawBand = Number.isFinite(entity.band) ? entity.band : 0;
-                    const bandIndex = Math.max(0, Math.min(4, Math.round(rawBand)));
-                    if (block.userData.bandIndex !== bandIndex) {
-                        block.userData.bandIndex = bandIndex;
-                        block.material.color.setHex(config.colors[bandIndex]);
-                        block.material.emissive.setHex(config.colors[bandIndex]);
-                    }
-
-                    const bandValue = Number.isFinite(bands[bandIndex]) ? bands[bandIndex] : 0;
-                    block.material.emissiveIntensity = 0.3 + bandValue * 1.0;
-                });
+            if (hasZoneEntities) {
+                this._updatePreviewMultiZone(zoneEntities, bands);
+                // Hide legacy single-zone blocks
+                this._previewBlocks.forEach(b => { b.visible = false; });
+            } else {
+                // Legacy single-zone path
+                this._updatePreviewSingleZone(bands);
+                // Hide multi-zone blocks
+                for (const zg of Object.values(this._previewZoneGroups)) {
+                    zg.blocks.forEach(b => { b.visible = false; });
+                    zg.wireframe.visible = false;
+                }
             }
 
             // Update block indicators
@@ -2901,6 +4356,72 @@ class AdminApp {
             this._stopPreviewAnimation();
             this._showToast('3D Preview update failed; disabled for this session', 'warning');
         }
+    }
+
+    /** Update preview blocks for all zones simultaneously */
+    _updatePreviewMultiZone(zoneEntities, bands) {
+        const config = this._previewConfig;
+
+        for (const [zoneName, entities] of Object.entries(zoneEntities)) {
+            if (!Array.isArray(entities)) continue;
+
+            const zoneGroup = this._ensurePreviewZoneGroup(zoneName);
+            if (!zoneGroup) continue;
+
+            zoneGroup.wireframe.visible = true;
+            this._ensureZoneBlockCount(zoneGroup, entities.length);
+
+            const sx = zoneGroup.sizeX;
+            const sy = zoneGroup.sizeY;
+            const sz = zoneGroup.sizeZ;
+
+            for (let i = 0; i < entities.length; i++) {
+                const entity = entities[i];
+                const block = zoneGroup.blocks[i];
+                if (!entity || typeof entity !== 'object' || !block) continue;
+
+                const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+                const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+                const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+                const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
+
+                // Position in zone-local space (centered: -size/2 to +size/2)
+                block.userData.targetX = (x - 0.5) * sx;
+                block.userData.targetY = (y - 0.5) * sy;
+                block.userData.targetZ = (z - 0.5) * sz;
+                block.userData.targetScale = scale * 1.5;
+
+                this._updateBlockMaterial(block, entity, bands, config);
+            }
+        }
+    }
+
+    /** Legacy single-zone preview update */
+    _updatePreviewSingleZone(bands) {
+        const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
+        if (entities.length === 0) return;
+
+        this._ensurePreviewBlockCount(entities.length);
+        // Make sure legacy blocks are visible
+        this._previewBlocks.forEach(b => { b.visible = true; });
+
+        const config = this._previewConfig;
+        this._previewBlocks.forEach((block, i) => {
+            const entity = entities[i];
+            if (!entity || typeof entity !== 'object') return;
+
+            const x = Number.isFinite(entity.x) ? entity.x : 0.5;
+            const y = Number.isFinite(entity.y) ? entity.y : 0.0;
+            const z = Number.isFinite(entity.z) ? entity.z : 0.5;
+            const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
+
+            block.userData.targetX = (x * config.zoneSize) - config.centerOffset;
+            block.userData.targetY = y * config.zoneSize;
+            block.userData.targetZ = (z * config.zoneSize) - config.centerOffset;
+            block.userData.targetScale = scale * 1.5;
+
+            this._updateBlockMaterial(block, entity, bands, config);
+        });
     }
 
     _updatePreviewMeters() {
@@ -3011,8 +4532,8 @@ class AdminApp {
                 const mode = btn.dataset.bannerMode;
                 const textSettings = document.getElementById('banner-text-settings');
                 const imageSettings = document.getElementById('banner-image-settings');
-                if (textSettings) textSettings.style.display = mode === 'text' ? '' : 'none';
-                if (imageSettings) imageSettings.style.display = mode === 'image' ? '' : 'none';
+                if (textSettings) textSettings.classList.toggle('hidden', mode !== 'text');
+                if (imageSettings) imageSettings.classList.toggle('hidden', mode !== 'image');
             });
         });
 
@@ -3021,7 +4542,7 @@ class AdminApp {
         if (colorModeSelect) {
             colorModeSelect.addEventListener('change', () => {
                 const fixedRow = document.getElementById('banner-fixed-color-row');
-                if (fixedRow) fixedRow.style.display = colorModeSelect.value === 'fixed' ? '' : 'none';
+                if (fixedRow) fixedRow.classList.toggle('hidden', colorModeSelect.value !== 'fixed');
             });
         }
 
@@ -3197,8 +4718,8 @@ class AdminApp {
         });
         const textSettings = document.getElementById('banner-text-settings');
         const imageSettings = document.getElementById('banner-image-settings');
-        if (textSettings) textSettings.style.display = p.banner_mode === 'image' ? 'none' : '';
-        if (imageSettings) imageSettings.style.display = p.banner_mode === 'image' ? '' : 'none';
+        if (textSettings) textSettings.classList.toggle('hidden', p.banner_mode === 'image');
+        if (imageSettings) imageSettings.classList.toggle('hidden', p.banner_mode !== 'image');
 
         // Set text fields
         const textStyle = document.getElementById('banner-text-style');
@@ -3208,7 +4729,7 @@ class AdminApp {
         if (colorMode) {
             colorMode.value = p.text_color_mode || 'frequency';
             const fixedRow = document.getElementById('banner-fixed-color-row');
-            if (fixedRow) fixedRow.style.display = colorMode.value === 'fixed' ? '' : 'none';
+            if (fixedRow) fixedRow.classList.toggle('hidden', colorMode.value !== 'fixed');
         }
 
         const fixedColor = document.getElementById('banner-text-fixed-color');

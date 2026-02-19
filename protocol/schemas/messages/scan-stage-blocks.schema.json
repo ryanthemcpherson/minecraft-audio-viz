@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scan-stage-blocks.schema.json",
+  "title": "ScanStageBlocksMessage",
+  "description": "Request to scan all non-air blocks surrounding a stage's zones for 3D preview rendering.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "scan_stage_blocks"
+    },
+    "stage": {
+      "type": "string",
+      "description": "Name of the stage to scan blocks for."
+    },
+    "v": {
+      "type": "string"
+    }
+  },
+  "required": ["type", "stage"]
+}

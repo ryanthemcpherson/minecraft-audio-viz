@@ -110,9 +110,18 @@ jobs:
             --exclude '__pycache__' \
             --exclude '*.pyc' \
             --exclude '.env' \
+            --exclude '.venv' \
             --exclude 'dj_client/src-tauri/target' \
             --exclude 'minecraft_plugin/target' \
             "$GITHUB_WORKSPACE/" "${{ env.DEPLOY_PATH }}/"
+
+      # --- Keep git state in sync (rsync excludes .git, so HEAD drifts) ---
+      - name: Sync git HEAD to deployed commit
+        run: |
+          cd "${{ env.DEPLOY_PATH }}"
+          git fetch origin main --quiet
+          git reset --hard origin/main --quiet
+          echo "Git HEAD now at: $(git log --oneline -1)"
 
       # --- Copy plugin JAR ---
       - name: Copy plugin JAR to plugins directory

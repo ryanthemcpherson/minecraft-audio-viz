@@ -1,5 +1,6 @@
 name = "Vortex"
 description = "Swirling tunnel - spiral into infinity"
+recommended_entities = 80
 category = "Epic"
 static_camera = false
 state = {}

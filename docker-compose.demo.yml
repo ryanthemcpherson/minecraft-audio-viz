@@ -1,0 +1,86 @@
+# MCAV Full-Stack Demo
+#
+# Quick start: docker compose -f docker-compose.demo.yml up
+# Then open in your browser:
+#   - http://localhost:8080 - 3D Preview (Three.js visualization)
+#   - http://localhost:8081 - Admin Panel (DJ controls)
+#
+# This demo runs:
+#   1. VJ Server - Pattern engine and WebSocket hub (no-auth mode)
+#   2. Audio Simulator - Sends simulated DJ audio frames at 128 BPM
+#   3. Nginx - Serves preview tool and admin panel
+#
+# The visualization runs entirely in your browser with simulated audio.
+# For Minecraft integration, see README.md
+#
+# Note: Admin panel is served by VJ server on port 8080, preview is on nginx:8081
+
+version: '3.8'
+
+services:
+  # VJ Server - Multi-DJ visualization server with built-in HTTP server
+  vj_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcav-vj-server
+    ports:
+      - "9000:9000"  # DJ connections (internal)
+      - "8766:8766"  # Browser WebSocket (used by both frontends)
+      - "8080:8080"  # Admin panel HTTP server
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      --dj-port 9000
+      --broadcast-port 8766
+      --http-port 8080
+      --no-auth
+      --pattern spectrum
+      --entities 32
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - mcav
+    restart: unless-stopped
+
+  # Audio Simulator - Sends simulated DJ audio frames
+  audio_simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    container_name: mcav-audio-simulator
+    depends_on:
+      vj_server:
+        condition: service_healthy
+    environment:
+      - VJ_HOST=vj_server
+      - VJ_PORT=9000
+      - BPM=128
+      - INTENSITY=0.7
+      - FPS=21.5
+    networks:
+      - mcav
+    restart: unless-stopped
+
+  # Preview Web Server - Serves 3D preview tool
+  preview:
+    image: nginx:alpine
+    container_name: mcav-preview
+    ports:
+      - "8081:80"  # 3D Preview tool
+    volumes:
+      - ./preview_tool/frontend:/usr/share/nginx/html:ro
+      - ./demo/nginx-preview.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - vj_server
+    networks:
+      - mcav
+    restart: unless-stopped
+
+networks:
+  mcav:
+    driver: bridge

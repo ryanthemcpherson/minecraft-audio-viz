@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { check, type Update } from '@tauri-apps/plugin-updater';
@@ -7,6 +7,10 @@ import AudioSourceSelect from './components/AudioSourceSelect';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
 import BeatIndicator from './components/BeatIndicator';
+import AuthModal from './components/AuthModal';
+import ProfileChip from './components/ProfileChip';
+import { useAuth } from './hooks/useAuth';
+import * as api from './lib/api';
 
 interface AudioSource {
   id: string;
@@ -45,11 +49,15 @@ const MCAV_LOGO_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAKCAYAAABrGwT5AAAA3ElEQVR4AWyRvQ3CMBCFLx4jBQ0FyhppaNiAggFgAApKCgaAASjYgIYma0QUNBQZA3PfiTOOlUgv9+79OJYSZOJpmiaWmIhJKufhtm2lRO77QVbGyMOYqjGECXJf94gZIBgs73CyMPzx3MhldZTdfC193yPZDiFf13W0LyNQnH32FoSjbe8HRiqxc6CJ+kplil6Cqye+U9Ib2iFwPGBlv5aXCC4XV2E/v27k7EZe9HxQUnVdZ6by0aSF5hMOyA/DUNmX1bQDEAGBEugO8or/f9alcngon+79pg6RLwAAAP//ucby7wAAAAZJREFUAwBHiZkQ43EK0gAAAABJRU5ErkJggg==';
 
 function App() {
+  // Auth state
+  const auth = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const lastAutoFilledName = useRef<string | null>(null);
+
   // Connection state
-  const [serverHost, setServerHost] = useState('192.168.1.204');
-  const [serverPort, setServerPort] = useState(9000);
   const [djName, setDjName] = useState('');
   const [connectCode, setConnectCode] = useState(['', '', '', '', '', '', '', '']);
+  const [showName, setShowName] = useState<string | null>(null);
 
   // Audio state
   const [audioSources, setAudioSources] = useState<AudioSource[]>([]);
@@ -85,7 +93,6 @@ function App() {
     error: null,
   });
   const [isConnecting, setIsConnecting] = useState(false);
-  const [showServerSettings, setShowServerSettings] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
@@ -93,24 +100,99 @@ function App() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
+  const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
+
+  // Test audio state
+  const [isTestingAudio, setIsTestingAudio] = useState(false);
+  const [testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
+
+  // Keyboard shortcuts state
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+
+  // Keyboard shortcuts handler
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in input fields
+      const target = event.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modifierKey = isMac ? event.metaKey : event.ctrlKey;
+
+      // Ctrl/Cmd + D - Disconnect
+      if (modifierKey && event.key === 'd') {
+        event.preventDefault();
+        if (status.connected) {
+          void handleDisconnect();
+        }
+      }
+
+      // Ctrl/Cmd + R - Refresh audio sources
+      if (modifierKey && event.key === 'r') {
+        event.preventDefault();
+        void loadAudioSources();
+      }
+
+      // Ctrl/Cmd + T - Toggle test audio
+      if (modifierKey && event.key === 't') {
+        event.preventDefault();
+        if (selectedSource && !status.connected) {
+          if (isTestingAudio) {
+            void handleStopTest();
+          } else {
+            void handleStartTest();
+          }
+        }
+      }
+
+      // Escape - Close auth modal, welcome overlay, or stop test audio
+      if (event.key === 'Escape') {
+        if (showAuthModal) {
+          setShowAuthModal(false);
+        } else if (showWelcomeOverlay) {
+          handleDismissWelcome();
+        } else if (isTestingAudio) {
+          void handleStopTest();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [status.connected, showWelcomeOverlay, showAuthModal, isTestingAudio, selectedSource]);
+
+  // Auto-close auth modal when signed in
+  useEffect(() => {
+    if (auth.isSignedIn && showAuthModal) {
+      setShowAuthModal(false);
+    }
+  }, [auth.isSignedIn, showAuthModal]);
+
+  // Auto-fill DJ name from profile when signed in
+  useEffect(() => {
+    if (!auth.isSignedIn || !auth.user?.dj_profile?.dj_name) return;
+    const profileDjName = auth.user.dj_profile.dj_name;
+    // Only auto-fill if the field is empty or still holds the previous auto-filled value
+    if (!djName || djName === lastAutoFilledName.current) {
+      setDjName(profileDjName);
+      lastAutoFilledName.current = profileDjName;
+    }
+  }, [auth.isSignedIn, auth.user?.dj_profile?.dj_name]);
 
   // Restore last-used settings and load audio sources on mount.
   useEffect(() => {
     const storedName = localStorage.getItem('mcav.djName');
-    const storedHost = localStorage.getItem('mcav.serverHost');
-    const storedPort = localStorage.getItem('mcav.serverPort');
+    const onboardingComplete = localStorage.getItem('mcav.onboardingComplete');
 
     if (storedName) {
       setDjName(storedName);
     }
-    if (storedHost) {
-      setServerHost(storedHost);
-    }
-    if (storedPort) {
-      const parsedPort = parseInt(storedPort, 10);
-      if (!Number.isNaN(parsedPort)) {
-        setServerPort(parsedPort);
-      }
+
+    // Show welcome overlay if first run
+    if (!onboardingComplete) {
+      setShowWelcomeOverlay(true);
     }
 
     loadAudioSources();
@@ -128,14 +210,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem('mcav.djName', djName);
   }, [djName]);
-
-  useEffect(() => {
-    localStorage.setItem('mcav.serverHost', serverHost);
-  }, [serverHost]);
-
-  useEffect(() => {
-    localStorage.setItem('mcav.serverPort', String(serverPort));
-  }, [serverPort]);
 
   useEffect(() => {
     if (selectedSource) {
@@ -156,7 +230,17 @@ function App() {
     }
   }, []);
 
-  // Listen for audio levels and status events pushed from the backend
+  // Always listen for dj-status so reconnection events reach the frontend.
+  // Without this, a brief disconnect removes all listeners and the UI stays
+  // stuck on DISCONNECTED even after the bridge task auto-reconnects.
+  useEffect(() => {
+    const unlisten = listen<ConnectionStatus>('dj-status', (event) => {
+      setStatus(event.payload);
+    });
+    return () => { unlisten.then((fn) => fn()).catch(() => {}); };
+  }, []);
+
+  // Listen for audio levels, voice, and preset events only while connected
   useEffect(() => {
     if (!status.connected) return;
 
@@ -166,12 +250,6 @@ function App() {
       listen<AudioLevels>('audio-levels', (event) => {
         setBands(event.payload.bands);
         setIsBeat(event.payload.is_beat);
-      })
-    );
-
-    unlisteners.push(
-      listen<ConnectionStatus>('dj-status', (event) => {
-        setStatus(event.payload);
       })
     );
 
@@ -306,9 +384,25 @@ function App() {
     }
 
     setIsConnecting(true);
+    setStatus(prev => ({ ...prev, error: null }));
     try {
+      // Stop test audio if running
+      if (isTestingAudio) {
+        await handleStopTest();
+      }
+
       // Format code as XXXX-XXXX
       const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
+
+      // Resolve connect code through the coordinator
+      const resolved = await api.resolveConnectCode(formattedCode);
+
+      // Parse host and port from the websocket URL
+      const wsUrl = new URL(resolved.websocket_url);
+      const serverHost = wsUrl.hostname;
+      const serverPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
+
+      setShowName(resolved.show_name);
 
       await invoke('connect_with_code', {
         code: formattedCode,
@@ -324,10 +418,34 @@ function App() {
 
       setStatus(prev => ({ ...prev, connected: true }));
     } catch (e) {
-      setStatus(prev => ({ ...prev, error: String(e) }));
+      const errStr = String(e);
+      let errorMessage = errStr;
+
+      if (e instanceof api.ApiError) {
+        if (e.status === 404) {
+          errorMessage = 'Connect code not found. Check the code and try again.';
+        } else if (e.status === 409) {
+          errorMessage = 'Show is full — maximum DJ limit reached.';
+        } else if (e.status === 503) {
+          errorMessage = 'Server is currently offline. Try again later.';
+        } else {
+          errorMessage = e.message;
+        }
+      } else if (errStr.includes('timeout') || errStr.includes('timed out') || errStr.includes('connection refused')) {
+        errorMessage = "Can't reach server. Check that the VJ server is running.";
+      } else if (errStr.includes('auth') || errStr.includes('invalid') || errStr.includes('unauthorized')) {
+        errorMessage = 'Authentication failed. Ask your VJ operator for a new code.';
+      }
+
+      setStatus(prev => ({ ...prev, error: errorMessage }));
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  const handleDismissWelcome = () => {
+    localStorage.setItem('mcav.onboardingComplete', 'true');
+    setShowWelcomeOverlay(false);
   };
 
   const handleDisconnect = async () => {
@@ -344,6 +462,7 @@ function App() {
         active_dj_name: null,
         error: null,
       });
+      setShowName(null);
       setBands([0, 0, 0, 0, 0]);
       setIsBeat(false);
       setVoiceEnabled(false);
@@ -396,8 +515,95 @@ function App() {
     return `${str.slice(0, 4)}-${str.slice(4)}`;
   };
 
+  const handleStartTest = async () => {
+    if (!selectedSource) return;
+
+    try {
+      setIsTestingAudio(true);
+      await invoke('start_capture', { sourceId: selectedSource });
+
+      // Poll audio levels for 10 seconds
+      const interval = setInterval(async () => {
+        try {
+          const levels = await invoke<AudioLevels>('get_audio_levels');
+          setTestBands(levels.bands);
+        } catch (err) {
+          console.error('Failed to get audio levels:', err);
+        }
+      }, 50);
+
+      // Auto-stop after 10 seconds
+      setTimeout(() => {
+        clearInterval(interval);
+        void handleStopTest();
+      }, 10000);
+    } catch (err) {
+      console.error('Failed to start test audio:', err);
+      setIsTestingAudio(false);
+    }
+  };
+
+  const handleStopTest = async () => {
+    try {
+      await invoke('stop_capture');
+      setIsTestingAudio(false);
+      setTestBands([0, 0, 0, 0, 0]);
+    } catch (err) {
+      console.error('Failed to stop test audio:', err);
+    }
+  };
+
   return (
     <div className="app">
+      {showWelcomeOverlay && (
+        <div className="welcome-overlay">
+          <div className="welcome-modal">
+            <h2>Welcome to MCAV DJ Client</h2>
+            <p className="welcome-subtitle">Stream your audio to Minecraft visualizations</p>
+
+            <div className="welcome-steps">
+              <div className="welcome-step">
+                <div className="step-number">1</div>
+                <div className="step-content">
+                  <h3>Get a connect code</h3>
+                  <p>Request a code from your VJ operator or server admin</p>
+                </div>
+              </div>
+
+              <div className="welcome-step">
+                <div className="step-number">2</div>
+                <div className="step-content">
+                  <h3>Select audio source</h3>
+                  <p>Choose which audio to stream: system audio, specific app, or microphone</p>
+                </div>
+              </div>
+
+              <div className="welcome-step">
+                <div className="step-number">3</div>
+                <div className="step-content">
+                  <h3>Connect and go live</h3>
+                  <p>Hit connect and start streaming to Minecraft</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="welcome-actions">
+              <button className="btn btn-connect" onClick={handleDismissWelcome} type="button">
+                Get Started
+              </button>
+              <a
+                className="btn btn-link"
+                href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Learn More
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="app-header">
         <div className="brand">
           <img className="brand-logo" src={MCAV_LOGO_DATA_URI} alt="MCAV logo" />
@@ -406,8 +612,74 @@ function App() {
             <h1>DJ Client</h1>
           </div>
         </div>
-        <BeatIndicator active={isBeat && status.connected} />
+        <div className="header-actions">
+          {auth.isSignedIn && auth.user ? (
+            <ProfileChip user={auth.user} onSignOut={auth.signOut} />
+          ) : (
+            <button
+              className="btn-signin"
+              onClick={() => setShowAuthModal(true)}
+              type="button"
+            >
+              Sign In
+            </button>
+          )}
+          <button
+            className="help-link"
+            onClick={() => setShowShortcutsHelp(prev => !prev)}
+            title="Keyboard Shortcuts"
+            type="button"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <rect x="3" y="6" width="14" height="9" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <rect x="5" y="8" width="2" height="2" fill="currentColor"/>
+              <rect x="8" y="8" width="2" height="2" fill="currentColor"/>
+              <rect x="11" y="8" width="2" height="2" fill="currentColor"/>
+              <rect x="5" y="11" width="2" height="2" fill="currentColor"/>
+              <rect x="8" y="11" width="5" height="2" fill="currentColor"/>
+              <rect x="14" y="11" width="2" height="2" fill="currentColor"/>
+            </svg>
+          </button>
+          <a
+            className="help-link"
+            href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Help & Documentation"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M10 14v-1m0-4c0-.55.2-1.02.59-1.41C10.98 7.2 11.45 7 12 7c.55 0 1.02.2 1.41.59.39.39.59.86.59 1.41 0 .28-.07.54-.2.78-.14.24-.32.45-.55.63l-.77.6c-.24.19-.43.4-.57.63-.14.24-.21.5-.21.78" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </a>
+          <BeatIndicator active={isBeat && status.connected} />
+        </div>
       </header>
+
+      {showShortcutsHelp && (
+        <div className="shortcuts-help">
+          <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '14px' }}>Keyboard Shortcuts</h3>
+          <div style={{ display: 'grid', gap: '8px', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Disconnect</span>
+              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + D</kbd>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Refresh audio sources</span>
+              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + R</kbd>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Toggle test audio</span>
+              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + T</kbd>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Close overlay / Stop test</span>
+              <kbd>Esc</kbd>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="app-main">
         {(availableUpdate && !dismissUpdateBanner) || isCheckingUpdate || updateMessage || updateError ? (
@@ -462,41 +734,24 @@ function App() {
           <>
             <section className="section hero-section">
               <p>Enter your DJ name, paste your connect code, pick audio, then connect.</p>
-              <button
-                className="btn btn-link"
-                onClick={() => setShowServerSettings(prev => !prev)}
-                type="button"
-              >
-                {showServerSettings ? 'Hide server settings' : 'Server settings'}
-              </button>
             </section>
 
-            {showServerSettings && (
-              <section className="section server-section">
-                <label className="input-label">
-                  Server
-                  <div className="server-inputs">
-                    <input
-                      type="text"
-                      value={serverHost}
-                      onChange={e => setServerHost(e.target.value)}
-                      placeholder="hostname"
-                      className="input server-host"
-                    />
-                    <span className="server-separator">:</span>
-                    <input
-                      type="number"
-                      value={serverPort}
-                      onChange={e => setServerPort(parseInt(e.target.value) || 9000)}
-                      placeholder="port"
-                      className="input server-port"
-                    />
-                  </div>
-                </label>
-              </section>
-            )}
-
             <section className="section">
+              {auth.isSignedIn && auth.user?.dj_profile && (
+                <div className="profile-card">
+                  {auth.user.avatar_url ? (
+                    <img className="profile-card-avatar" src={auth.user.avatar_url} alt="" />
+                  ) : (
+                    <span className="profile-card-avatar-initials">
+                      {auth.user.display_name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
+                    </span>
+                  )}
+                  <div className="profile-card-inner">
+                    <span className="profile-card-name">{auth.user.dj_profile.dj_name}</span>
+                    <span className="profile-card-sub">Signed in as {auth.user.display_name}</span>
+                  </div>
+                </div>
+              )}
               <label className="input-label">
                 Step 1 - DJ Name
                 <input
@@ -511,10 +766,13 @@ function App() {
             </section>
 
             <section className="section">
+              <div className="label-with-help">
+                <span className="input-label">Step 2 - Connect Code</span>
+                <span className="help-text">Get this from your VJ operator or server admin</span>
+              </div>
               <ConnectCode
                 value={connectCode}
                 onChange={setConnectCode}
-                label="Step 2 - Connect Code"
               />
               <div className="code-display">
                 {formatCode(connectCode) || 'XXXX-XXXX'}
@@ -522,13 +780,52 @@ function App() {
             </section>
 
             <section className="section">
-              <AudioSourceSelect
-                sources={audioSources}
-                value={selectedSource}
-                onChange={setSelectedSource}
-                onRefresh={loadAudioSources}
-                label="Step 3 - Audio Source"
-              />
+              <div className="label-with-help">
+                <span className="input-label">Step 3 - Audio Source</span>
+                <span className="help-text">System: all PC audio, Application: specific app, Input Device: microphone/line-in</span>
+              </div>
+              {audioSources.length === 0 ? (
+                <div className="empty-state">
+                  <p>No audio sources found. Make sure your audio devices are connected and enabled.</p>
+                  <button className="btn btn-link" onClick={loadAudioSources} type="button">
+                    Refresh
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="audio-source-row">
+                    <AudioSourceSelect
+                      sources={audioSources}
+                      value={selectedSource}
+                      onChange={setSelectedSource}
+                      onRefresh={loadAudioSources}
+                    />
+                    <button
+                      className={`btn btn-test ${isTestingAudio ? 'testing' : ''}`}
+                      onClick={isTestingAudio ? handleStopTest : handleStartTest}
+                      disabled={!selectedSource}
+                      type="button"
+                    >
+                      {isTestingAudio ? 'Stop Test' : 'Test'}
+                    </button>
+                  </div>
+                  {isTestingAudio && (
+                    <div className="test-meter">
+                      {testBands.map((level, i) => (
+                        <div key={i} className="test-bar">
+                          <div
+                            className="test-fill"
+                            style={{
+                              width: `${Math.min(100, level * 100)}%`,
+                              background: `hsl(${180 + i * 40}, 70%, 50%)`,
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </section>
 
             {status.error && (
@@ -537,18 +834,22 @@ function App() {
               </div>
             )}
 
-            <div className="connect-buttons">
-              <button
-                className="btn btn-connect"
-                onClick={handleConnect}
-                disabled={isConnecting || connectCode.join('').length !== 8 || !djName.trim()}
-              >
-                {isConnecting ? 'Connecting...' : 'Connect'}
-              </button>
-            </div>
+            <button
+              className="btn btn-connect"
+              onClick={handleConnect}
+              disabled={isConnecting || connectCode.join('').length !== 8 || !djName.trim()}
+            >
+              {isConnecting ? 'Connecting...' : 'Connect'}
+            </button>
           </>
         ) : (
           <>
+            {showName && (
+              <section className="section" style={{ textAlign: 'center', padding: '10px 16px' }}>
+                <span className="input-label" style={{ margin: 0 }}>{showName}</span>
+              </section>
+            )}
+
             <section className="section">
               <FrequencyMeter bands={bands} />
             </section>
@@ -649,6 +950,10 @@ function App() {
           </>
         )}
       </main>
+
+      {showAuthModal && (
+        <AuthModal auth={auth} onClose={() => setShowAuthModal(false)} />
+      )}
     </div>
   );
 }

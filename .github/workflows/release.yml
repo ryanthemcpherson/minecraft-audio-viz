@@ -121,6 +121,44 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 
+      # --- Windows Code Signing Setup (Certum / Authenticode) ---
+      - name: Import Windows code signing certificate
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          $certPath = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          # Import to CurrentUser store so signtool can find it
+          $securePass = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePass
+          # Export thumbprint for signtool
+          $cert = Get-PfxCertificate -FilePath $certPath
+          echo "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          Remove-Item $certPath
+
+      # --- macOS Code Signing Setup (Apple Developer) ---
+      - name: Import macOS code signing certificate
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE_BASE64 != ''
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm "$CERTIFICATE_PATH"
+
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -134,12 +172,35 @@ jobs:
         working-directory: dj_client
         run: npm run build
 
+      - name: Disable updater artifacts when signing key is missing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            node -e "const fs=require('fs'); const path='dj_client/src-tauri/tauri.conf.json'; const conf=JSON.parse(fs.readFileSync(path,'utf8')); if (conf.bundle && conf.bundle.createUpdaterArtifacts) { conf.bundle.createUpdaterArtifacts=false; fs.writeFileSync(path, JSON.stringify(conf, null, 2)+'\n'); console.log('Disabled bundle.createUpdaterArtifacts for unsigned build'); }"
+          fi
+
+      # Set Windows sign command if certificate was imported
+      - name: Configure Windows code signing command
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_THUMBPRINT != ''
+        shell: bash
+        run: |
+          echo "TAURI_WINDOWS_SIGN_COMMAND=signtool sign /sha1 $WINDOWS_CERTIFICATE_THUMBPRINT /fd sha256 /td sha256 /tr http://time.certum.pl \"%1\"" >> $GITHUB_ENV
+
       - name: Build Tauri app
         working-directory: dj_client
         run: npm run tauri build -- --target ${{ matrix.rust_target }}
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # Tauri updater signing (minisign)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS signing identity
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # Collect all platform-specific bundles
       - name: Collect Linux bundles
@@ -162,6 +223,11 @@ jobs:
         run: |
           mkdir -p release-artifacts
           cp dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg release-artifacts/ || true
+
+      # --- macOS Keychain Cleanup ---
+      - name: Cleanup macOS keychain
+        if: runner.os == 'macOS' && always()
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6

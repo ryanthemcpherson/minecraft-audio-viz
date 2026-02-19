@@ -2,60 +2,42 @@
 .git
 .gitignore
 
-# IDE
-.idea
-.vscode
-*.swp
-*.swo
-
 # Python
 __pycache__
 *.pyc
 *.pyo
 *.pyd
 .Python
+*.so
+*.egg
 *.egg-info
-.eggs
 dist
 build
-*.egg
-
-# Java/Maven
-minecraft_plugin/target
-*.jar
-*.class
+venv
+env
+.venv
 
 # Node
 node_modules
-.npm
+npm-debug.log
 
-# Environment
-.env
-.env.local
-.env.*.local
-*.local.json
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
 
-# Documentation
-*.md
-!INSTALLATION.md
-docs/
-
-# Tests
-**/tests
-**/*.test.js
-**/*.test.py
-.pytest_cache
-.coverage
-
-# Temporary
-*.log
-*.tmp
+# OS
 .DS_Store
 Thumbs.db
 
-# Subprojects not needed for VJ server image
-site/
-dj_client/
-
-# Scratchpad
-scratchpad/
+# Project specific
+minecraft_plugin
+dj_client
+coordinator
+site
+worker
+archive
+*.jar
+*.mp4
+*.tgz

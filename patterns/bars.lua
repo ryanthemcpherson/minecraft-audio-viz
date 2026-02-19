@@ -40,8 +40,8 @@ function calculate(audio, config, dt)
         state.peak_heights[i] = math.max(0, state.peak_heights[i])
     end
 
-    -- Interpolated virtual bars: more blocks = more horizontal granularity.
-    local num_bars = math.max(5, math.min(28, math.floor(n / 4)))
+    -- Fewer bars = more blocks per bar = taller vertical columns
+    local num_bars = math.max(5, math.min(10, math.floor(n / 10)))
     num_bars = math.max(1, math.min(num_bars, n))
     local blocks_per_bar = math.max(1, math.floor(n / num_bars))
     local span = 0.72

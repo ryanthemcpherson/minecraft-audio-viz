@@ -1,0 +1,11 @@
+{
+  "pattern": "bass_columns",
+  "preset": "edm",
+  "transition_duration": 0.5,
+  "band_sensitivity": [1.5, 0.8, 0.9, 1.2, 1.0],
+  "attack": 0.7,
+  "release": 0.15,
+  "beat_threshold": 1.1,
+  "entity_count": 64,
+  "block_type": "SEA_LANTERN"
+}

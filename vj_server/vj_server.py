@@ -17,6 +17,7 @@ Architecture:
 
 import argparse
 import asyncio
+import bisect
 import http.server
 import json
 import logging
@@ -31,7 +32,7 @@ import threading
 import time
 import urllib.parse
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -45,8 +46,17 @@ try:
 except ImportError:
     HAS_WEBSOCKETS = False
 
+try:
+    import aalink
+
+    HAS_LINK = True
+except ImportError:
+    HAS_LINK = False
+
 from python_client.viz_client import VizClient
+from vj_server.beat_predictor import BeatPredictor
 from vj_server.config import PRESETS as AUDIO_PRESETS
+from vj_server.coordinator_client import CoordinatorClient
 from vj_server.patterns import (
     AudioState,
     PatternConfig,
@@ -287,6 +297,12 @@ class DJConnection:
     # Positive offset means DJ clock is behind server clock
     clock_offset: float = 0.0  # seconds
     clock_sync_done: bool = False
+    _clock_sync_count: int = 0  # Number of successful clock syncs
+    _last_clock_resync: float = 0.0  # Timestamp of last successful resync
+    _clock_drift_rate: float = 0.0  # ms/sec drift rate
+    _rtt_samples: deque = field(
+        default_factory=lambda: deque(maxlen=30)
+    )  # Recent RTT samples for variance
 
     # Direct mode support
     direct_mode: bool = False  # Whether this DJ is using direct Minecraft connection
@@ -295,6 +311,16 @@ class DJConnection:
 
     # Voice streaming state
     voice_streaming: bool = False  # Whether this DJ is sending voice audio
+
+    # Frame buffer for visual delay (timestamped audio state ring buffer)
+    _frame_buffer: deque = field(default_factory=deque)  # (timestamp, data) pairs; trimmed manually
+
+    # Jitter tracking
+    _jitter_ms: float = 0.0  # Smoothed frame arrival jitter
+    _frame_gaps: deque = field(
+        default_factory=lambda: deque(maxlen=60)
+    )  # Recent inter-frame intervals
+    _last_frame_arrival: float = 0.0  # Timestamp of last frame arrival
 
     # Rate limiting (token bucket: 120 tokens/sec, 2x expected 60fps)
     _rate_tokens: float = 120.0
@@ -320,6 +346,25 @@ class DJConnection:
         cutoff = now - 1.0
         self._fps_samples = [t for t in self._fps_samples if t > cutoff]
         self.frames_per_second = len(self._fps_samples)
+
+
+@dataclass
+class ZonePatternState:
+    """Per-zone pattern state for independent zone patterns."""
+
+    pattern_name: str = "spectrum"
+    pattern: Any = None  # LuaPattern instance
+    config: Optional["PatternConfig"] = None
+    entity_count: int = 16
+    # Per-zone crossfade transition
+    transitioning: bool = False
+    transition_start: float = 0.0
+    transition_duration: float = 1.0
+    old_pattern: Any = None
+    old_pattern_name: Optional[str] = None
+    transition_pending_resize: Optional[int] = None
+    minecraft_pool_size: int = 0
+    last_entities: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -518,6 +563,10 @@ class VJServer:
         auth_config: Optional[DJAuthConfig] = None,
         require_auth: bool = True,
         show_spectrograph: bool = True,
+        metrics_port: Optional[int] = 9001,
+        visual_delay_ms: float = 0.0,
+        visual_delay_mode: str = "manual",
+        enable_link: bool = False,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -528,6 +577,7 @@ class VJServer:
         self.entity_count = entity_count
         self.auth_config = auth_config or DJAuthConfig()
         self.require_auth = require_auth
+        self.metrics_port = metrics_port
 
         # DJ management
         self._djs: Dict[str, DJConnection] = {}
@@ -546,9 +596,15 @@ class VJServer:
         # Connect codes for DJ client authentication
         self._connect_codes: Dict[str, ConnectCode] = {}  # code -> ConnectCode
         self._code_cleanup_task: Optional[asyncio.Task] = None
+        self._code_show_ids: Dict[str, str] = {}  # code -> coordinator show_id
+
+        # Coordinator integration (for centralized connect codes)
+        self._coordinator: Optional["CoordinatorClient"] = None
+        self._coordinator_heartbeat_task: Optional[asyncio.Task] = None
 
         # Browser clients
         self._broadcast_clients: Set = set()
+        self._voice_subscribers: Set = set()  # Clients subscribed to voice_audio frames
         self._browser_heartbeat_task: Optional[asyncio.Task] = None
         self._browser_pong_pending: Dict = {}  # websocket -> missed_pong_count
         self._browser_last_pong: Dict = {}  # websocket -> timestamp of last pong
@@ -561,8 +617,11 @@ class VJServer:
 
         # Pattern system
         self._pattern_config = PatternConfig(entity_count=entity_count)
-        self._current_pattern = get_pattern("spectrum", self._pattern_config)
-        self._pattern_name = "spectrum"
+        self._zone_patterns: Dict[str, ZonePatternState] = {}
+        self._default_transition_duration = 1.0  # Default crossfade duration for new zones
+
+        # Initialize default zone pattern state
+        self._get_zone_state(zone)
 
         # Spectrograph
         self.spectrograph = TerminalSpectrograph() if show_spectrograph else None
@@ -575,7 +634,6 @@ class VJServer:
         self._blackout = False
         self._freeze = False
         self._active_effects = {}  # Active effects with end times
-        self._last_entities = []  # For freeze effect
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
         # Visual-state shaping for snappier motion with less low-level wobble.
         self._visual_band_state = [0.0] * 5
@@ -592,6 +650,39 @@ class VJServer:
         self._health_log_task: Optional[asyncio.Task] = None
         self._last_health_log = time.time()
         self._last_profile_log = time.monotonic()
+
+        # Metrics tracking
+        self._start_time = time.time()
+        self._frames_processed = 0
+        self._pattern_changes = 0
+
+        # Visual delay buffer for audio-visual sync
+        self._visual_delay_ms: float = max(0.0, min(500.0, visual_delay_ms))
+        self._visual_delay_mode: str = (
+            visual_delay_mode
+            if visual_delay_mode in ("manual", "auto", "discord", "svc")
+            else "manual"
+        )
+
+        # Beat predictor for phase-locked beat firing during delayed playback
+        self._beat_predictor = BeatPredictor()
+
+        # Ableton Link integration
+        self._link_enabled = enable_link and HAS_LINK
+        self._link: Optional[Any] = None
+        self._link_task: Optional[asyncio.Task] = None
+        self._link_peers: int = 0
+        self._link_tempo: float = 0.0
+        self._link_beat_phase: float = 0.0
+        if self._link_enabled:
+            try:
+                self._link = aalink.Link(120.0)
+                self._link.enabled = True
+                logger.info("Ableton Link enabled (waiting for peers)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Ableton Link: {e}")
+                self._link_enabled = False
+                self._link = None
 
         # Fallback state (used when no DJ is active)
         self._fallback_bands = [0.0] * 5
@@ -619,6 +710,114 @@ class VJServer:
         self._dj_banner_profiles: Dict[str, dict] = {}
         self._load_banner_profiles()
 
+        # Pattern hot-reload
+        self._pattern_hot_reload_enabled = True  # Can be disabled via CLI arg
+        self._pattern_hot_reload_task: Optional[asyncio.Task] = None
+        self._pattern_file_mtimes: Dict[str, float] = {}  # filename -> mtime
+
+    # --- Per-zone pattern helpers & backward-compat properties ---
+
+    def _get_zone_state(self, zone_name: str) -> ZonePatternState:
+        """Get or create a ZonePatternState for the given zone."""
+        if zone_name not in self._zone_patterns:
+            config = PatternConfig(entity_count=self._pattern_config.entity_count)
+            pattern = get_pattern("spectrum", config)
+            self._zone_patterns[zone_name] = ZonePatternState(
+                pattern_name="spectrum",
+                pattern=pattern,
+                config=config,
+                entity_count=self._pattern_config.entity_count,
+                transition_duration=self._default_transition_duration,
+            )
+        return self._zone_patterns[zone_name]
+
+    @property
+    def _current_pattern(self):
+        """Backward-compat: delegates to active zone's pattern."""
+        return self._get_zone_state(self.zone).pattern
+
+    @_current_pattern.setter
+    def _current_pattern(self, value):
+        self._get_zone_state(self.zone).pattern = value
+
+    @property
+    def _pattern_name(self):
+        """Backward-compat: delegates to active zone's pattern name."""
+        return self._get_zone_state(self.zone).pattern_name
+
+    @_pattern_name.setter
+    def _pattern_name(self, value):
+        self._get_zone_state(self.zone).pattern_name = value
+
+    @property
+    def _transitioning(self):
+        """Backward-compat: delegates to active zone's transition state."""
+        return self._get_zone_state(self.zone).transitioning
+
+    @_transitioning.setter
+    def _transitioning(self, value):
+        self._get_zone_state(self.zone).transitioning = value
+
+    @property
+    def _transition_start(self):
+        return self._get_zone_state(self.zone).transition_start
+
+    @_transition_start.setter
+    def _transition_start(self, value):
+        self._get_zone_state(self.zone).transition_start = value
+
+    @property
+    def _transition_duration(self):
+        return self._get_zone_state(self.zone).transition_duration
+
+    @_transition_duration.setter
+    def _transition_duration(self, value):
+        self._get_zone_state(self.zone).transition_duration = value
+
+    @property
+    def _old_pattern(self):
+        return self._get_zone_state(self.zone).old_pattern
+
+    @_old_pattern.setter
+    def _old_pattern(self, value):
+        self._get_zone_state(self.zone).old_pattern = value
+
+    @property
+    def _old_pattern_name(self):
+        return self._get_zone_state(self.zone).old_pattern_name
+
+    @_old_pattern_name.setter
+    def _old_pattern_name(self, value):
+        self._get_zone_state(self.zone).old_pattern_name = value
+
+    @property
+    def _transition_pending_resize(self):
+        return self._get_zone_state(self.zone).transition_pending_resize
+
+    @_transition_pending_resize.setter
+    def _transition_pending_resize(self, value):
+        self._get_zone_state(self.zone).transition_pending_resize = value
+
+    @property
+    def _minecraft_pool_size(self):
+        return self._get_zone_state(self.zone).minecraft_pool_size
+
+    @_minecraft_pool_size.setter
+    def _minecraft_pool_size(self, value):
+        self._get_zone_state(self.zone).minecraft_pool_size = value
+
+    @property
+    def _last_entities(self):
+        return self._get_zone_state(self.zone).last_entities
+
+    @_last_entities.setter
+    def _last_entities(self, value):
+        self._get_zone_state(self.zone).last_entities = value
+
+    def _get_zone_patterns_dict(self) -> Dict[str, str]:
+        """Get a dict mapping zone_name -> pattern_name for all zones."""
+        return {zn: zs.pattern_name for zn, zs in self._zone_patterns.items()}
+
     @property
     def active_dj(self) -> Optional[DJConnection]:
         """Get the currently active DJ."""
@@ -628,6 +827,10 @@ class VJServer:
         if active_id:
             return djs.get(active_id)
         return None
+
+    def _get_active_dj(self) -> Optional[DJConnection]:
+        """Get the currently active DJ (non-property version for metrics)."""
+        return self.active_dj
 
     async def _get_active_dj_safe(self) -> Optional[DJConnection]:
         """Thread-safe version of getting active DJ."""
@@ -669,6 +872,12 @@ class VJServer:
                     "direct_mode": dj.direct_mode,
                     "mc_connected": dj.mc_connected if dj.direct_mode else None,
                     "queue_position": queue_pos,
+                    "jitter_ms": round(dj._jitter_ms, 1),
+                    "clock_sync_count": dj._clock_sync_count,
+                    "clock_drift_rate": round(dj._clock_drift_rate * 60 * 1000, 1),  # ms/min
+                    "clock_sync_age_s": round(time.time() - dj._last_clock_resync, 0)
+                    if dj._last_clock_resync > 0
+                    else None,
                 }
             )
         # Sort by queue position (respects manual reordering)
@@ -798,6 +1007,25 @@ class VJServer:
                 # Code-based authentication (from DJ client)
                 code = data.get("code", "").upper()
                 dj_name = data.get("dj_name", "DJ")
+
+                # Slur filter on DJ name
+                try:
+                    from vj_server.content_filter import contains_slur as _contains_slur
+
+                    if _contains_slur(dj_name):
+                        logger.warning("DJ code auth rejected: DJ name failed content filter")
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "auth_error",
+                                    "error": "DJ name contains language that is not allowed",
+                                }
+                            )
+                        )
+                        await websocket.close(4005, "Content policy violation")
+                        return
+                except ImportError:
+                    pass  # better-profanity not installed — skip filter
 
                 # Validate connect code (locked to prevent race condition
                 # where two concurrent auths could both pass is_valid())
@@ -967,6 +1195,8 @@ class VJServer:
                             else:
                                 dj.clock_offset = clock_offset
                                 dj.clock_sync_done = True
+                                dj._last_clock_resync = time.time()
+                                dj._clock_sync_count = 1
                                 logger.info(
                                     f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
                                 )
@@ -1018,6 +1248,7 @@ class VJServer:
                                 else:
                                     dj.network_rtt_ms = rtt_ms
                                 dj.latency_ms = dj.network_rtt_ms
+                                dj._rtt_samples.append(rtt_ms)
                             if dj.direct_mode:
                                 dj.mc_connected = frame_data.get("mc_connected", False)
                             await websocket.send(
@@ -1029,6 +1260,19 @@ class VJServer:
                                     }
                                 )
                             )
+                            # Periodic clock resync (every 30s)
+                            if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
+                                try:
+                                    await websocket.send(
+                                        json.dumps(
+                                            {"type": "clock_sync_request", "server_time": now}
+                                        )
+                                    )
+                                    dj._last_clock_resync = now
+                                except Exception:
+                                    pass
+                        elif frame_type == "clock_sync_response":
+                            self._apply_clock_resync(dj, frame_data)
                         elif frame_type == "voice_audio":
                             # Relay voice audio from active DJ to Minecraft
                             dj.voice_streaming = True
@@ -1053,6 +1297,25 @@ class VJServer:
                 dj_id = data.get("dj_id", "")
                 dj_key = data.get("dj_key", "")
                 dj_name = data.get("dj_name", dj_id)
+
+                # Slur filter on DJ name
+                try:
+                    from vj_server.content_filter import contains_slur as _contains_slur
+
+                    if _contains_slur(dj_name):
+                        logger.warning("DJ auth rejected: DJ name failed content filter")
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "auth_error",
+                                    "error": "DJ name contains language that is not allowed",
+                                }
+                            )
+                        )
+                        await websocket.close(4005, "Content policy violation")
+                        return
+                except ImportError:
+                    pass  # better-profanity not installed — skip filter
 
                 # Verify credentials
                 if self.require_auth:
@@ -1169,6 +1432,8 @@ class VJServer:
                         else:
                             dj.clock_offset = clock_offset
                             dj.clock_sync_done = True
+                            dj._last_clock_resync = time.time()
+                            dj._clock_sync_count = 1
                             logger.info(
                                 f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
                             )
@@ -1230,6 +1495,7 @@ class VJServer:
                             else:
                                 dj.network_rtt_ms = rtt_ms
                             dj.latency_ms = dj.network_rtt_ms
+                            dj._rtt_samples.append(rtt_ms)
                         # Track Minecraft connection status for direct mode DJs
                         if dj.direct_mode:
                             dj.mc_connected = data.get("mc_connected", False)
@@ -1242,6 +1508,18 @@ class VJServer:
                                 }
                             )
                         )
+                        # Periodic clock resync (every 30s)
+                        if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
+                            try:
+                                await websocket.send(
+                                    json.dumps({"type": "clock_sync_request", "server_time": now})
+                                )
+                                dj._last_clock_resync = now
+                            except Exception:
+                                pass
+
+                    elif msg_type == "clock_sync_response":
+                        self._apply_clock_resync(dj, data)
 
                     elif msg_type == "voice_audio":
                         # Relay voice audio from active DJ to Minecraft
@@ -1316,6 +1594,42 @@ class VJServer:
         dj.frame_count += 1
         dj.update_fps()
 
+        # Track jitter from frame arrival times
+        now = dj.last_frame_at
+        if dj._last_frame_arrival > 0:
+            gap = (now - dj._last_frame_arrival) * 1000.0  # ms
+            dj._frame_gaps.append(gap)
+            if len(dj._frame_gaps) >= 4:
+                mean_gap = sum(dj._frame_gaps) / len(dj._frame_gaps)
+                variance = sum((g - mean_gap) ** 2 for g in dj._frame_gaps) / len(dj._frame_gaps)
+                jitter = variance**0.5
+                dj._jitter_ms = dj._jitter_ms * 0.8 + jitter * 0.2
+        dj._last_frame_arrival = now
+
+        # Append timestamped frame to buffer (for visual delay feature)
+        frame_data_snapshot = {
+            "bands": list(dj.bands),
+            "peak": dj.peak,
+            "is_beat": dj.is_beat,
+            "beat_intensity": dj.beat_intensity,
+            "bpm": dj.bpm,
+            "tempo_confidence": dj.tempo_confidence,
+            "beat_phase": dj.beat_phase,
+            "instant_bass": dj.instant_bass,
+            "instant_kick": dj.instant_kick,
+        }
+        dj._frame_buffer.append((now, frame_data_snapshot))
+
+        # Adaptive buffer trimming: keep only what's needed + margin
+        effective_delay = self._get_effective_delay_ms(dj)
+        max_frames = max(60, int(effective_delay / 16.0 * 2))
+        while len(dj._frame_buffer) > max_frames:
+            dj._frame_buffer.popleft()
+
+        # Feed beats to predictor when this is the active DJ
+        if dj.dj_id == self._active_dj_id:
+            self._beat_predictor.process_onset(dj.is_beat, dj.beat_intensity)
+
         # Calculate latency if timestamp provided
         # Apply clock offset to correct for clock skew between DJ and server
         ts = safe["ts"]
@@ -1343,6 +1657,152 @@ class VJServer:
                 dj.latency_ms = dj.network_rtt_ms
             else:
                 dj.latency_ms = dj.pipeline_latency_ms
+
+    def _apply_clock_resync(self, dj: DJConnection, data: dict) -> None:
+        """Process an incoming clock_sync_response for periodic drift correction."""
+        t4 = time.time()
+        t2 = data.get("dj_recv_time")
+        t3 = data.get("dj_send_time")
+        if (
+            not isinstance(t2, (int, float))
+            or not isinstance(t3, (int, float))
+            or not math.isfinite(t2)
+            or not math.isfinite(t3)
+        ):
+            return
+        # Estimate the server_time (t1) from the response's context
+        t1 = data.get("server_time")
+        if not isinstance(t1, (int, float)) or not math.isfinite(t1):
+            return
+        rtt = (t4 - t1) - (t3 - t2)
+        if rtt < 0 or rtt > 30:
+            return
+        new_offset = ((t2 - t1) + (t3 - t4)) / 2
+        old_offset = dj.clock_offset
+        # Blend with existing offset using EMA (slow adaptation)
+        dj.clock_offset = old_offset * 0.9 + new_offset * 0.1
+        dj._clock_sync_count += 1
+        # Track drift rate (offset change per second)
+        if dj._last_clock_resync > 0:
+            elapsed = t4 - dj._last_clock_resync
+            if elapsed > 1.0:
+                drift_ms_per_sec = abs(new_offset - old_offset) * 1000.0 / elapsed
+                dj._clock_drift_rate = dj._clock_drift_rate * 0.7 + drift_ms_per_sec * 0.3
+                # Warn if drift > 5ms/minute (0.083ms/sec)
+                if dj._clock_drift_rate > 0.083:
+                    logger.warning(
+                        f"[CLOCK DRIFT] {dj.dj_name}: drift={dj._clock_drift_rate * 60:.1f}ms/min"
+                    )
+        dj._last_clock_resync = t4
+        logger.debug(
+            f"[CLOCK RESYNC] {dj.dj_name}: offset={dj.clock_offset * 1000:.1f}ms, "
+            f"RTT={rtt * 1000:.1f}ms, syncs={dj._clock_sync_count}"
+        )
+
+    def _calculate_sync_confidence(self, dj: DJConnection) -> float:
+        """Calculate sync quality score 0-100 for a DJ connection.
+
+        Score based on 4 components (25 pts each):
+        - Clock sync freshness (penalty if > 5 min since last sync)
+        - RTT stability (low variance = good)
+        - Beat predictor phase lock status
+        - Frame delivery consistency (low jitter)
+        """
+        score = 0.0
+
+        # 1. Clock sync age (0-25): full marks if < 60s, zero if > 300s
+        if dj.clock_sync_done and dj._last_clock_resync > 0:
+            age = time.time() - dj._last_clock_resync
+            if age < 60:
+                score += 25.0
+            elif age < 300:
+                score += 25.0 * (1.0 - (age - 60) / 240.0)
+            # else: 0 points
+        # No sync done = 0 points
+
+        # 2. RTT stability (0-25): based on variance of recent RTT samples
+        if len(dj._rtt_samples) >= 3:
+            samples = list(dj._rtt_samples)
+            mean_rtt = sum(samples) / len(samples)
+            variance = sum((s - mean_rtt) ** 2 for s in samples) / len(samples)
+            std_dev = variance**0.5
+            # < 5ms std dev = full marks, > 50ms = 0
+            if std_dev < 5.0:
+                score += 25.0
+            elif std_dev < 50.0:
+                score += 25.0 * (1.0 - (std_dev - 5.0) / 45.0)
+        elif dj.network_rtt_ms > 0:
+            # Few samples but have RTT - give partial credit
+            score += 10.0
+
+        # 3. Beat predictor phase lock (0-25)
+        if self._beat_predictor.is_phase_locked:
+            score += 25.0
+        elif self._beat_predictor.tempo_confidence > 0.5:
+            score += 25.0 * self._beat_predictor.tempo_confidence
+
+        # 4. Frame delivery consistency (0-25): based on jitter
+        if dj._jitter_ms < 3.0:
+            score += 25.0
+        elif dj._jitter_ms < 20.0:
+            score += 25.0 * (1.0 - (dj._jitter_ms - 3.0) / 17.0)
+        # else: 0 for high jitter
+
+        return max(0.0, min(100.0, score))
+
+    def _get_effective_delay_ms(self, dj: Optional[DJConnection] = None) -> float:
+        """Calculate effective visual delay based on mode and DJ metrics."""
+        mode = self._visual_delay_mode
+        if mode == "manual":
+            return self._visual_delay_ms
+        if dj is None:
+            return self._visual_delay_ms
+
+        rtt_half = (dj.network_rtt_ms / 2.0) if dj.network_rtt_ms > 0 else 0.0
+        if mode == "discord":
+            return 200.0 + rtt_half
+        elif mode == "svc":
+            return 80.0 + rtt_half
+        elif mode == "auto":
+            return dj.pipeline_latency_ms + 80.0
+        return self._visual_delay_ms
+
+    def _read_delayed_frame(self, dj: DJConnection, delay_ms: float) -> Optional[dict]:
+        """Read a frame from the DJ's buffer at `now - delay_ms`.
+
+        Uses bisect for O(log n) lookup on timestamps extracted from the buffer.
+        Returns an audio state dict matching the main loop's expected fields,
+        or None if the buffer is empty or delay is zero (use live state).
+        """
+        if delay_ms <= 0 or not dj._frame_buffer:
+            return None
+
+        buf = dj._frame_buffer
+        target_time = time.time() - (delay_ms / 1000.0)
+
+        # Extract timestamps from buffer tuples for bisect lookup.
+        # Buffer is typically 60-100 entries, so this is cheap.
+        timestamps = [t for t, _ in buf]
+
+        # bisect_left finds insertion point for target_time in sorted timestamps
+        idx = bisect.bisect_left(timestamps, target_time)
+
+        # Choose the closest frame (idx-1 or idx)
+        best_idx = None
+        if idx == 0:
+            best_idx = 0
+        elif idx >= len(timestamps):
+            best_idx = len(timestamps) - 1
+        else:
+            # Compare neighbours
+            if abs(timestamps[idx] - target_time) < abs(timestamps[idx - 1] - target_time):
+                best_idx = idx
+            else:
+                best_idx = idx - 1
+
+        if best_idx is not None and best_idx < len(buf):
+            return buf[best_idx][1]
+        return None
 
     def _stabilize_bpm(self, dj: DJConnection, raw_bpm: float) -> float:
         """Normalize octave errors and smooth BPM per-DJ."""
@@ -1397,8 +1857,10 @@ class VJServer:
         beat_intensity: float,
         instant_bass: float,
         instant_kick: bool,
+        dt: float = 0.016,
     ) -> tuple:
         """Shape audio state for visuals: less wobble, higher contrast, snappier transients."""
+        dt_ratio = dt / 0.016
         shaped = [0.0] * 5
         for i in range(5):
             src = bands[i] if i < len(bands) else 0.0
@@ -1421,7 +1883,9 @@ class VJServer:
                 enhanced = min(1.0, enhanced + beat_punch)
 
             # Fast attack, controlled release: responsive but still smooth.
-            alpha = 0.85 if enhanced > prev else 0.42
+            # dt-aware so smoothing is consistent regardless of frame rate.
+            base_alpha = 0.85 if enhanced > prev else 0.42
+            alpha = 1.0 - (1.0 - base_alpha) ** dt_ratio
             out = prev + (enhanced - prev) * alpha
             shaped[i] = out
             self._visual_band_state[i] = out
@@ -1446,6 +1910,7 @@ class VJServer:
             return
 
         self._active_dj_id = dj_id
+        self._beat_predictor.reset()
 
         logger.info(f"Active DJ: {self._djs[dj_id].dj_name}")
 
@@ -1664,6 +2129,133 @@ class VJServer:
             logger.error(f"Failed to process logo image: {e}")
             return None
 
+    def _capture_current_state(self) -> dict:
+        """Capture the current VJ state for saving as a scene."""
+        return {
+            "pattern": self._pattern_name,
+            "preset": self._pattern_config.preset
+            if hasattr(self._pattern_config, "preset")
+            else "auto",
+            "transition_duration": self._transition_duration,
+            "band_sensitivity": self._band_sensitivity.copy(),
+            "attack": self._pattern_config.attack,
+            "release": self._pattern_config.release,
+            "beat_threshold": self._pattern_config.beat_threshold,
+            "entity_count": self.entity_count,
+            "block_type": "SEA_LANTERN",
+            "zone_patterns": self._get_zone_patterns_dict(),
+        }
+
+    def _save_scene_to_file(self, name: str, scene_data: dict):
+        """Save a scene to disk as JSON."""
+        scenes_dir = Path("configs/scenes")
+        scenes_dir.mkdir(parents=True, exist_ok=True)
+
+        scene_path = scenes_dir / f"{name}.json"
+        with open(scene_path, "w") as f:
+            json.dump(scene_data, f, indent=2)
+
+    def _load_scene_from_file(self, name: str) -> dict:
+        """Load a scene from disk."""
+        scene_path = Path("configs/scenes") / f"{name}.json"
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene '{name}' not found")
+
+        with open(scene_path, "r") as f:
+            return json.load(f)
+
+    def _delete_scene_file(self, name: str):
+        """Delete a scene file from disk."""
+        scene_path = Path("configs/scenes") / f"{name}.json"
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene '{name}' not found")
+        scene_path.unlink()
+
+    def _list_scenes(self) -> list:
+        """List all available scenes."""
+        scenes_dir = Path("configs/scenes")
+        if not scenes_dir.exists():
+            return []
+
+        scenes = []
+        for scene_file in scenes_dir.glob("*.json"):
+            try:
+                with open(scene_file, "r") as f:
+                    scene_data = json.load(f)
+                scenes.append(
+                    {
+                        "name": scene_file.stem,
+                        "pattern": scene_data.get("pattern", "unknown"),
+                        "preset": scene_data.get("preset", "auto"),
+                        "entity_count": scene_data.get("entity_count", 16),
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to load scene {scene_file.stem}: {e}")
+
+        return scenes
+
+    async def _apply_scene_state(self, scene_data: dict):
+        """Apply a saved scene state with crossfade transition."""
+        # Apply pattern with crossfade (use existing transition system)
+        pattern_name = scene_data.get("pattern", "spectrum")
+        if pattern_name != self._pattern_name:
+            # Start crossfade transition
+            self._old_pattern = self._current_pattern
+            self._old_pattern_name = self._pattern_name
+            self._transitioning = True
+            self._transition_start = time.monotonic()
+
+            # Load new pattern
+            self._pattern_name = pattern_name
+            self._current_pattern = get_pattern(pattern_name, self._pattern_config)
+            self._pattern_changes += 1
+
+            logger.info(
+                f"Scene transition: {self._old_pattern_name} -> {pattern_name} ({self._transition_duration}s)"
+            )
+
+        # Apply audio settings
+        if "band_sensitivity" in scene_data:
+            self._band_sensitivity = scene_data["band_sensitivity"].copy()
+        if "attack" in scene_data:
+            self._pattern_config.attack = scene_data["attack"]
+        if "release" in scene_data:
+            self._pattern_config.release = scene_data["release"]
+        if "beat_threshold" in scene_data:
+            self._pattern_config.beat_threshold = scene_data["beat_threshold"]
+
+        # Apply transition duration
+        if "transition_duration" in scene_data:
+            self._transition_duration = scene_data["transition_duration"]
+
+        # Apply entity count
+        if "entity_count" in scene_data:
+            new_count = scene_data["entity_count"]
+            if new_count != self.entity_count:
+                self.entity_count = new_count
+                self._pattern_config.entity_count = new_count
+                # Reinit pattern with new count
+                self._current_pattern = get_pattern(self._pattern_name, self._pattern_config)
+
+        # Restore per-zone patterns if present
+        saved_zone_patterns = scene_data.get("zone_patterns")
+        if saved_zone_patterns and isinstance(saved_zone_patterns, dict):
+            for zn, pname in saved_zone_patterns.items():
+                if _lua_pattern_exists(pname):
+                    zs = self._get_zone_state(zn)
+                    await self._set_pattern_for_zone(zs, zn, pname)
+
+        # Broadcast state to all connected clients
+        await self._broadcast_config_to_browsers()
+        await self._broadcast_pattern_change()
+
+        # Sync audio settings to DJs
+        preset_name = scene_data.get("preset", "auto")
+        if preset_name in AUDIO_PRESETS:
+            config = AUDIO_PRESETS[preset_name]
+            await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
+
     async def _auto_switch_dj(self):
         """Automatically switch to next available DJ."""
         async with self._dj_lock:
@@ -1673,6 +2265,7 @@ class VJServer:
         """Automatically switch to next available DJ (caller must hold _dj_lock)."""
         if not self._dj_queue:
             self._active_dj_id = None
+            self._beat_predictor.reset()
             logger.info("No DJs available")
             await self._send_dj_info_to_minecraft(None)
             return
@@ -1685,6 +2278,7 @@ class VJServer:
             await self._set_active_dj_locked(available[0])
         else:
             self._active_dj_id = None
+            self._beat_predictor.reset()
             await self._send_dj_info_to_minecraft(None)
 
     async def _handle_browser_client(self, websocket):
@@ -1712,11 +2306,17 @@ class VJServer:
                     "current_pattern": self._pattern_name,
                     "entity_count": self.entity_count,
                     "zone": self.zone,
+                    "zone_patterns": self._get_zone_patterns_dict(),
                     "dj_roster": self._get_dj_roster(),
                     "active_dj": self._active_dj_id,
                     "health_stats": self.get_health_stats(),
                     "minecraft_connected": mc_connected,
                     "pending_djs": pending_list,
+                    "visual_delay_ms": self._visual_delay_ms,
+                    "visual_delay_mode": self._visual_delay_mode,
+                    "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
+                    "beat_predictor_bpm": self._beat_predictor.tempo_bpm,
+                    "beat_predictor_locked": self._beat_predictor.is_phase_locked,
                     "banner_profiles": {
                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                         for did, prof in self._dj_banner_profiles.items()
@@ -1757,11 +2357,17 @@ class VJServer:
                                     "current_pattern": self._pattern_name,
                                     "entity_count": self.entity_count,
                                     "zone": self.zone,
+                                    "zone_patterns": self._get_zone_patterns_dict(),
                                     "dj_roster": self._get_dj_roster(),
                                     "active_dj": self._active_dj_id,
                                     "health_stats": self.get_health_stats(),
                                     "minecraft_connected": mc_status,
                                     "pending_djs": pending,
+                                    "visual_delay_ms": self._visual_delay_ms,
+                                    "visual_delay_mode": self._visual_delay_mode,
+                                    "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
+                                    "beat_predictor_bpm": self._beat_predictor.tempo_bpm,
+                                    "beat_predictor_locked": self._beat_predictor.is_phase_locked,
                                     "banner_profiles": {
                                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                                         for did, prof in self._dj_banner_profiles.items()
@@ -1773,23 +2379,21 @@ class VJServer:
                     elif msg_type == "set_pattern":
                         pattern_name = data.get("pattern", "spectrum")
                         if _lua_pattern_exists(pattern_name):
+                            target_zones = data.get("zones", None)
+                            if target_zones is None:
+                                # No zones specified: apply to all known zones (backward compat)
+                                zones_to_update = list(self._zone_patterns.keys()) or [self.zone]
+                            else:
+                                # Only allow zones that are already registered
+                                zones_to_update = [
+                                    zn for zn in target_zones if zn in self._zone_patterns
+                                ]
+                                if not zones_to_update:
+                                    zones_to_update = [self.zone]
                             old_count = self.entity_count
-                            recommended = get_recommended_entity_count(pattern_name, old_count)
-                            if recommended != self.entity_count:
-                                self.entity_count = recommended
-                                self._pattern_config.entity_count = recommended
-                            self._pattern_name = pattern_name
-                            self._current_pattern = get_pattern(pattern_name, self._pattern_config)
-                            if self.viz_client and self.viz_client.connected:
-                                try:
-                                    await self.viz_client.cleanup_zone(self.zone)
-                                    await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, "SEA_LANTERN"
-                                    )
-                                except Exception as e:
-                                    logger.warning(
-                                        f"Failed to apply recommended entity count for pattern '{pattern_name}': {e}"
-                                    )
+                            for zn in zones_to_update:
+                                zs = self._get_zone_state(zn)
+                                await self._set_pattern_for_zone(zs, zn, pattern_name)
                             await self._broadcast_pattern_change()
                             if old_count != self.entity_count:
                                 await self._broadcast_config_sync_to_djs()
@@ -1817,7 +2421,13 @@ class VJServer:
                     elif msg_type == "generate_connect_code":
                         # Generate a new connect code for DJ client auth
                         ttl_minutes = data.get("ttl_minutes", 30)
-                        connect_code = ConnectCode.generate(ttl_minutes)
+
+                        # Try coordinator first (centralized codes)
+                        connect_code = await self._coordinator_create_show(ttl_minutes)
+                        if connect_code is None:
+                            # Fallback to local code generation
+                            connect_code = ConnectCode.generate(ttl_minutes)
+
                         self._connect_codes[connect_code.code] = connect_code
 
                         # Clean up expired codes
@@ -2015,6 +2625,79 @@ class VJServer:
                                     "value": float(value),
                                 }
                             )
+
+                    elif msg_type == "set_visual_delay":
+                        delay = data.get("delay_ms", 0)
+                        self._visual_delay_ms = max(0.0, min(500.0, float(delay)))
+                        logger.info(f"Visual delay set to {self._visual_delay_ms:.0f}ms")
+                        await self._broadcast_to_browsers(
+                            json.dumps(
+                                {
+                                    "type": "visual_delay_sync",
+                                    "delay_ms": self._visual_delay_ms,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "set_visual_delay_mode":
+                        mode = data.get("mode", "manual")
+                        if mode in ("manual", "auto", "discord", "svc"):
+                            self._visual_delay_mode = mode
+                            logger.info(f"Visual delay mode set to {mode}")
+                            await self._broadcast_to_browsers(
+                                json.dumps(
+                                    {
+                                        "type": "visual_delay_mode_sync",
+                                        "mode": self._visual_delay_mode,
+                                    }
+                                )
+                            )
+
+                    elif msg_type == "set_transition_duration":
+                        # Set pattern crossfade transition duration for all zones
+                        duration = data.get("duration", 1.0)
+                        clamped = max(0.0, min(3.0, float(duration)))
+                        self._default_transition_duration = clamped
+                        for zs in self._zone_patterns.values():
+                            zs.transition_duration = clamped
+                        logger.info(f"Pattern transition duration set to {clamped}s")
+                        # Broadcast to all browsers
+                        await self._broadcast_to_browsers(
+                            json.dumps(
+                                {
+                                    "type": "transition_duration_sync",
+                                    "duration": clamped,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "sync_test":
+                        # Sync test: send flash to all browser clients and tone request to active DJ
+                        logger.info("[SYNC TEST] Triggered by admin")
+                        test_ts = time.time()
+                        # Flash all browsers
+                        await self._broadcast_to_browsers(
+                            json.dumps(
+                                {
+                                    "type": "sync_test_flash",
+                                    "server_time": test_ts,
+                                }
+                            )
+                        )
+                        # Request tone from active DJ
+                        dj = self.active_dj
+                        if dj:
+                            try:
+                                await dj.websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "sync_test_tone",
+                                            "server_time": test_ts,
+                                        }
+                                    )
+                                )
+                            except Exception:
+                                pass
 
                     elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
@@ -2247,6 +2930,185 @@ class VJServer:
                                 )
                             )
 
+                    elif msg_type == "scan_stage_blocks":
+                        # Forward to Minecraft and relay block scan response
+                        stage = data.get("stage", "")
+                        if self.viz_client and self.viz_client.connected:
+                            result = await self.viz_client.scan_stage_blocks(stage)
+                            if result:
+                                await websocket.send(json.dumps(result))
+                            else:
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "stage_blocks",
+                                            "error": "Scan failed or timed out",
+                                        }
+                                    )
+                                )
+                        else:
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "stage_blocks",
+                                        "error": "Minecraft not connected",
+                                    }
+                                )
+                            )
+
+                    elif msg_type == "subscribe_voice":
+                        self._voice_subscribers.add(websocket)
+                        logger.info(
+                            f"Voice subscriber added. Total: {len(self._voice_subscribers)}"
+                        )
+                        await websocket.send(json.dumps({"type": "subscribe_voice_ack"}))
+
+                    elif msg_type == "unsubscribe_voice":
+                        self._voice_subscribers.discard(websocket)
+                        logger.info(
+                            f"Voice subscriber removed. Total: {len(self._voice_subscribers)}"
+                        )
+                        await websocket.send(json.dumps({"type": "unsubscribe_voice_ack"}))
+
+                    elif msg_type == "save_scene":
+                        # Save current VJ state as a named scene
+                        scene_name = data.get("name", "").strip()
+                        if not scene_name:
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Scene name is required"})
+                            )
+                            continue
+
+                        # Slur filter on scene name
+                        try:
+                            from vj_server.content_filter import contains_slur as _contains_slur
+
+                            if _contains_slur(scene_name):
+                                await websocket.send(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "message": "Scene name contains language that is not allowed",
+                                        }
+                                    )
+                                )
+                                continue
+                        except ImportError:
+                            pass
+
+                        try:
+                            scene_data = self._capture_current_state()
+                            self._save_scene_to_file(scene_name, scene_data)
+                            logger.info(f"Scene saved: {scene_name}")
+                            await websocket.send(
+                                json.dumps({"type": "scene_saved", "name": scene_name})
+                            )
+                            # Broadcast updated scene list to all browsers
+                            scenes = self._list_scenes()
+                            await self._broadcast_to_browsers(
+                                json.dumps({"type": "scenes_list", "scenes": scenes})
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to save scene '{scene_name}': {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Failed to save scene: {str(e)}"}
+                                )
+                            )
+
+                    elif msg_type == "load_scene":
+                        # Load a saved scene
+                        scene_name = data.get("name", "").strip()
+                        if not scene_name:
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Scene name is required"})
+                            )
+                            continue
+
+                        try:
+                            scene_data = self._load_scene_from_file(scene_name)
+                            await self._apply_scene_state(scene_data)
+                            logger.info(f"Scene loaded: {scene_name}")
+                            await websocket.send(
+                                json.dumps({"type": "scene_loaded", "name": scene_name})
+                            )
+                        except FileNotFoundError:
+                            logger.warning(f"Scene not found: {scene_name}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Scene '{scene_name}' not found"}
+                                )
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to load scene '{scene_name}': {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Failed to load scene: {str(e)}"}
+                                )
+                            )
+
+                    elif msg_type == "delete_scene":
+                        # Delete a saved scene
+                        scene_name = data.get("name", "").strip()
+                        if not scene_name:
+                            await websocket.send(
+                                json.dumps({"type": "error", "message": "Scene name is required"})
+                            )
+                            continue
+
+                        # Prevent deletion of built-in scenes
+                        if scene_name in ["Chill Lounge", "EDM Stage", "Rock Arena", "Ambient"]:
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": "Cannot delete built-in scenes"}
+                                )
+                            )
+                            continue
+
+                        try:
+                            self._delete_scene_file(scene_name)
+                            logger.info(f"Scene deleted: {scene_name}")
+                            await websocket.send(
+                                json.dumps({"type": "scene_deleted", "name": scene_name})
+                            )
+                            # Broadcast updated scene list to all browsers
+                            scenes = self._list_scenes()
+                            await self._broadcast_to_browsers(
+                                json.dumps({"type": "scenes_list", "scenes": scenes})
+                            )
+                        except FileNotFoundError:
+                            logger.warning(f"Scene not found: {scene_name}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Scene '{scene_name}' not found"}
+                                )
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to delete scene '{scene_name}': {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "message": f"Failed to delete scene: {str(e)}",
+                                    }
+                                )
+                            )
+
+                    elif msg_type == "list_scenes":
+                        # List all saved scenes
+                        try:
+                            scenes = self._list_scenes()
+                            await websocket.send(
+                                json.dumps({"type": "scenes_list", "scenes": scenes})
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to list scenes: {e}")
+                            await websocket.send(
+                                json.dumps(
+                                    {"type": "error", "message": f"Failed to list scenes: {str(e)}"}
+                                )
+                            )
+
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
                         # Sync local state when zone config changes entity count,
@@ -2317,6 +3179,7 @@ class VJServer:
             pass
         finally:
             self._broadcast_clients.discard(websocket)
+            self._voice_subscribers.discard(websocket)
             # Clean up heartbeat tracking for this client
             self._browser_pong_pending.pop(websocket, None)
             self._browser_last_pong.pop(websocket, None)
@@ -2479,6 +3342,78 @@ class VJServer:
 
         await self._broadcast_dj_roster()
 
+    # ------------------------------------------------------------------
+    # Coordinator integration
+    # ------------------------------------------------------------------
+
+    async def _init_coordinator(self):
+        """Register with the coordinator if configured."""
+        url = os.environ.get("COORDINATOR_URL")
+        api_key = os.environ.get("COORDINATOR_API_KEY")
+        if not url or not api_key:
+            logger.info(
+                "Coordinator integration disabled (set COORDINATOR_URL and COORDINATOR_API_KEY to enable)"
+            )
+            return
+
+        ws_url = os.environ.get("COORDINATOR_WS_URL")
+        if not ws_url:
+            ws_url = f"ws://localhost:{self.dj_port}"
+            logger.warning(
+                "COORDINATOR_WS_URL not set, using %s (DJs may not be able to reach this)", ws_url
+            )
+
+        server_name = os.environ.get("COORDINATOR_SERVER_NAME", "VJ Server")
+
+        self._coordinator = CoordinatorClient(url, api_key)
+        try:
+            await self._coordinator.register(server_name, ws_url)
+            logger.info(
+                "Coordinator integration active (server_id=%s)", self._coordinator.server_id
+            )
+            # Start periodic heartbeat
+            self._coordinator_heartbeat_task = asyncio.create_task(
+                self._coordinator_heartbeat_loop()
+            )
+        except Exception as exc:
+            logger.error("Failed to register with coordinator: %s", exc)
+            self._coordinator = None
+
+    async def _coordinator_heartbeat_loop(self):
+        """Send periodic heartbeats to the coordinator."""
+        while True:
+            await asyncio.sleep(120)  # every 2 minutes
+            if self._coordinator:
+                try:
+                    await self._coordinator.heartbeat()
+                except Exception as exc:
+                    logger.warning("Coordinator heartbeat failed: %s", exc)
+
+    async def _coordinator_create_show(self, ttl_minutes: int = 30) -> Optional[ConnectCode]:
+        """Create a show on the coordinator and return a local ConnectCode with the same code."""
+        if not self._coordinator:
+            return None
+        try:
+            show_info = await self._coordinator.create_show(
+                name="Live Show",
+                max_djs=8,
+            )
+            # Create a local ConnectCode with the coordinator-generated code
+            code = ConnectCode(
+                code=show_info.connect_code,
+                expires_at=time.time() + ttl_minutes * 60,
+            )
+            self._code_show_ids[show_info.connect_code] = show_info.show_id
+            logger.info(
+                "Created show on coordinator: code=%s show_id=%s",
+                show_info.connect_code,
+                show_info.show_id,
+            )
+            return code
+        except Exception as exc:
+            logger.error("Failed to create show on coordinator: %s", exc)
+            return None
+
     def _cleanup_expired_codes(self):
         """Remove expired or used connect codes."""
         expired = [code for code, obj in self._connect_codes.items() if not obj.is_valid()]
@@ -2518,6 +3453,9 @@ class VJServer:
                 "type": "pattern_changed",
                 "pattern": self._pattern_name,
                 "patterns": list_patterns(),
+                "transitioning": self._transitioning,
+                "transition_duration": self._transition_duration if self._transitioning else 0,
+                "zone_patterns": self._get_zone_patterns_dict(),
             }
         )
         dead_clients = set()
@@ -2684,6 +3622,7 @@ class VJServer:
         instant_kick: bool = False,
         tempo_confidence: float = 0.0,
         beat_phase: float = 0.0,
+        zone_entities: Dict[str, List[dict]] | None = None,
     ):
         """Broadcast visualization state to browser clients."""
         if not self._broadcast_clients:
@@ -2699,6 +3638,9 @@ class VJServer:
         pipeline_latency_ms = 0.0
         bpm = 0.0
         fps = 0.0
+        jitter_ms = 0.0
+        sync_confidence = 0.0
+        visual_delay_ms = self._visual_delay_ms
         if self._active_dj_id and self._active_dj_id in self._djs:
             dj = self._djs[self._active_dj_id]
             latency_ms = dj.latency_ms
@@ -2706,6 +3648,9 @@ class VJServer:
             pipeline_latency_ms = dj.pipeline_latency_ms
             bpm = dj.bpm
             fps = dj.frames_per_second
+            jitter_ms = dj._jitter_ms
+            sync_confidence = self._calculate_sync_confidence(dj)
+            visual_delay_ms = self._get_effective_delay_ms(dj)
 
         message = json.dumps(
             {
@@ -2725,12 +3670,18 @@ class VJServer:
                 "ping_ms": round(ping_ms, 1),
                 "pipeline_latency_ms": round(pipeline_latency_ms, 1),
                 "fps": round(fps, 1),
+                "jitter_ms": round(jitter_ms, 1),
+                "sync_confidence": round(sync_confidence, 0),
+                "visual_delay_ms": round(visual_delay_ms, 0),
+                "visual_delay_mode": self._visual_delay_mode,
                 "zone_status": {
                     "bpm_estimate": round(bpm, 1),
                     "tempo_confidence": round(tempo_confidence, 3),
                     "beat_phase": round(beat_phase, 3),
                 },
+                "zone_patterns": self._get_zone_patterns_dict(),
                 "perf": self._latest_perf_snapshot,
+                **({"zone_entities": zone_entities} if zone_entities else {}),
             }
         )
 
@@ -2790,6 +3741,10 @@ class VJServer:
             else:
                 logger.error("No zones available!")
                 return False
+
+        # Initialize per-zone pattern states for all discovered zones
+        for zn in zone_names:
+            self._get_zone_state(zn)
 
         try:
             await asyncio.wait_for(
@@ -2947,6 +3902,164 @@ class VJServer:
                 logger.error(f"[BROWSER HEARTBEAT] Loop error: {e}")
                 await asyncio.sleep(ping_interval)
 
+    async def _pattern_hot_reload_loop(self):
+        """
+        Monitor pattern files for changes and reload them automatically.
+
+        Polls the patterns/ directory every 2.5 seconds for file modifications.
+        When a pattern file changes:
+        - Reload its Lua script
+        - If it's the active pattern, switch to the reloaded version
+        - Broadcast updated pattern list to browsers
+        """
+        check_interval = 2.5  # Check every 2.5 seconds
+        patterns_dir = Path(__file__).parent.parent / "patterns"
+
+        # Initialize mtime cache
+        if patterns_dir.exists():
+            for lua_file in patterns_dir.glob("*.lua"):
+                try:
+                    self._pattern_file_mtimes[lua_file.name] = lua_file.stat().st_mtime
+                except Exception:
+                    pass
+
+        while self._running:
+            try:
+                await asyncio.sleep(check_interval)
+
+                if not self._pattern_hot_reload_enabled or not patterns_dir.exists():
+                    continue
+
+                # Track changes
+                changed_patterns = []
+                new_patterns = []
+                deleted_patterns = []
+                lib_changed = False
+
+                # Check if lib.lua changed (affects all patterns)
+                lib_file = patterns_dir / "lib.lua"
+                if lib_file.exists():
+                    try:
+                        lib_mtime = lib_file.stat().st_mtime
+                        last_lib_mtime = self._pattern_file_mtimes.get("lib.lua")
+                        if last_lib_mtime is None:
+                            self._pattern_file_mtimes["lib.lua"] = lib_mtime
+                        elif lib_mtime > last_lib_mtime:
+                            lib_changed = True
+                            self._pattern_file_mtimes["lib.lua"] = lib_mtime
+                            logger.info(
+                                "[PATTERN RELOAD] Detected change in 'lib.lua' (affects all patterns)"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[PATTERN RELOAD] Error checking lib.lua: {e}")
+
+                # Get current pattern files
+                current_files = set()
+                for lua_file in patterns_dir.glob("*.lua"):
+                    if lua_file.name == "lib.lua":
+                        continue
+                    current_files.add(lua_file.name)
+
+                    try:
+                        current_mtime = lua_file.stat().st_mtime
+                        last_mtime = self._pattern_file_mtimes.get(lua_file.name)
+
+                        if last_mtime is None:
+                            # New file
+                            new_patterns.append(lua_file.stem)
+                            self._pattern_file_mtimes[lua_file.name] = current_mtime
+                        elif current_mtime > last_mtime or lib_changed:
+                            # Modified file or lib.lua changed
+                            changed_patterns.append(lua_file.stem)
+                            self._pattern_file_mtimes[lua_file.name] = current_mtime
+                    except Exception as e:
+                        logger.debug(f"[PATTERN RELOAD] Error checking {lua_file.name}: {e}")
+
+                # Check for deleted files
+                cached_files = set(self._pattern_file_mtimes.keys())
+                for filename in cached_files - current_files:
+                    pattern_key = Path(filename).stem
+                    deleted_patterns.append(pattern_key)
+                    del self._pattern_file_mtimes[filename]
+
+                # Handle changes
+                if changed_patterns:
+                    for pattern_key in changed_patterns:
+                        logger.info(f"[PATTERN RELOAD] Detected change in '{pattern_key}.lua'")
+
+                        # Reload in any zone using this pattern
+                        for zn, zs in self._zone_patterns.items():
+                            if zs.pattern_name == pattern_key:
+                                try:
+                                    old_state = (
+                                        zs.pattern._entity_state.copy()
+                                        if hasattr(zs.pattern, "_entity_state")
+                                        else {}
+                                    )
+                                    zs.pattern = get_pattern(pattern_key, zs.config)
+                                    if old_state:
+                                        zs.pattern.seed_entity_state(old_state)
+                                    logger.info(
+                                        f"[PATTERN RELOAD] Reloaded pattern '{pattern_key}' in zone '{zn}'"
+                                    )
+                                    if zs.transitioning and zs.old_pattern_name == pattern_key:
+                                        zs.old_pattern = get_pattern(pattern_key, zs.config)
+                                except Exception as e:
+                                    logger.error(
+                                        f"[PATTERN RELOAD] Failed to reload pattern '{pattern_key}' in zone '{zn}': {e}"
+                                    )
+
+                    # Broadcast updated pattern list to browsers
+                    await self._broadcast_pattern_list()
+
+                if new_patterns:
+                    for pattern_key in new_patterns:
+                        logger.info(f"[PATTERN RELOAD] New pattern discovered: '{pattern_key}.lua'")
+                    await self._broadcast_pattern_list()
+
+                if deleted_patterns:
+                    for pattern_key in deleted_patterns:
+                        logger.info(f"[PATTERN RELOAD] Pattern deleted: '{pattern_key}.lua'")
+
+                        # Switch any zone using deleted pattern to fallback
+                        for zn, zs in self._zone_patterns.items():
+                            if zs.pattern_name == pattern_key:
+                                fallback = "spectrum"
+                                logger.warning(
+                                    f"[PATTERN RELOAD] Pattern '{pattern_key}' deleted, zone '{zn}' switching to '{fallback}'"
+                                )
+                                zs.pattern_name = fallback
+                                zs.pattern = get_pattern(fallback, zs.config)
+                                zs.transitioning = False
+
+                        await self._broadcast_pattern_change()
+
+                    await self._broadcast_pattern_list()
+
+            except asyncio.CancelledError:
+                logger.debug("[PATTERN RELOAD] Pattern reload loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"[PATTERN RELOAD] Loop error: {e}")
+                await asyncio.sleep(check_interval)
+
+    async def _broadcast_pattern_list(self):
+        """Broadcast updated pattern list to all browser clients."""
+        message = json.dumps(
+            {
+                "type": "patterns",
+                "patterns": list_patterns(),
+                "current_pattern": self._pattern_name,
+            }
+        )
+        dead_clients = set()
+        for client in list(self._broadcast_clients):
+            try:
+                await client.send(message)
+            except Exception:
+                dead_clients.add(client)
+        self._broadcast_clients -= dead_clients
+
     def _apply_effects(self, entities: List[dict], bands: List[float]) -> List[dict]:
         """Apply active timed effects (flash, strobe, pulse, wave, etc.) to entities."""
         if not self._active_effects:
@@ -3010,18 +4123,296 @@ class VJServer:
 
         return modified
 
-    def _calculate_entities(
-        self, bands: List[float], peak: float, is_beat: bool, beat_intensity: float
+    async def _set_pattern_for_zone(
+        self, zone_state: ZonePatternState, zone_name: str, pattern_name: str
+    ):
+        """Set pattern on a specific zone with crossfade support."""
+        if not _lua_pattern_exists(pattern_name):
+            return
+
+        old_count = zone_state.entity_count
+        recommended = get_recommended_entity_count(pattern_name, old_count)
+        if recommended != zone_state.entity_count:
+            zone_state.entity_count = recommended
+            zone_state.config.entity_count = recommended
+
+        if zone_state.transition_duration > 0 and pattern_name != zone_state.pattern_name:
+            zone_state.old_pattern = zone_state.pattern
+            zone_state.old_pattern_name = zone_state.pattern_name
+            if old_count != zone_state.entity_count:
+                zone_state.old_pattern.config = replace(
+                    zone_state.old_pattern.config, entity_count=old_count
+                )
+            zone_state.pattern = get_pattern(pattern_name, zone_state.config)
+            if (
+                hasattr(zone_state.old_pattern, "_entity_state")
+                and zone_state.old_pattern._entity_state
+            ):
+                zone_state.pattern.seed_entity_state(zone_state.old_pattern._entity_state)
+            zone_state.pattern_name = pattern_name
+            self._pattern_changes += 1
+            zone_state.transitioning = True
+            zone_state.transition_start = time.monotonic()
+            zone_state.transition_pending_resize = None
+
+            if (
+                old_count != zone_state.entity_count
+                and self.viz_client
+                and self.viz_client.connected
+            ):
+                try:
+                    if zone_state.entity_count > old_count:
+                        await self.viz_client.init_pool(
+                            zone_name, zone_state.entity_count, "SEA_LANTERN"
+                        )
+                    else:
+                        zone_state.transition_pending_resize = zone_state.entity_count
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resize pool for pattern '{pattern_name}' in zone '{zone_name}': {e}"
+                    )
+
+            logger.info(
+                f"Starting {zone_state.transition_duration}s crossfade in zone '{zone_name}': "
+                f"{zone_state.old_pattern_name} -> {pattern_name}"
+            )
+        else:
+            if pattern_name != zone_state.pattern_name:
+                self._pattern_changes += 1
+            zone_state.pattern_name = pattern_name
+            zone_state.pattern = get_pattern(pattern_name, zone_state.config)
+            zone_state.transitioning = False
+
+            if (
+                old_count != zone_state.entity_count
+                and self.viz_client
+                and self.viz_client.connected
+            ):
+                try:
+                    await self.viz_client.cleanup_zone(zone_name)
+                    await self.viz_client.init_pool(
+                        zone_name, zone_state.entity_count, "SEA_LANTERN"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to apply entity count for pattern '{pattern_name}' in zone '{zone_name}': {e}"
+                    )
+
+        # Sync entity_count on the active zone to self.entity_count for backward compat
+        if zone_name == self.zone:
+            self.entity_count = zone_state.entity_count
+            self._pattern_config.entity_count = zone_state.entity_count
+
+    def _calculate_entities_for_zone(
+        self, zone_state: ZonePatternState, audio_state: "AudioState", zone_name: str = ""
     ) -> List[dict]:
-        """Calculate entity positions from audio state."""
+        """Calculate entity positions for a specific zone, with crossfade support."""
+        if zone_state.transitioning:
+            elapsed = time.monotonic() - zone_state.transition_start
+
+            if elapsed >= zone_state.transition_duration:
+                zone_state.transitioning = False
+                zone_state.old_pattern = None
+                zone_state.old_pattern_name = None
+                if zone_state.transition_pending_resize is not None:
+                    pending = zone_state.transition_pending_resize
+                    zone_state.transition_pending_resize = None
+                    if self.viz_client and self.viz_client.connected:
+                        asyncio.ensure_future(
+                            self.viz_client.init_pool(
+                                zone_name or self.zone, pending, "SEA_LANTERN"
+                            )
+                        )
+                return zone_state.pattern.calculate_entities(audio_state)
+
+            t = elapsed / zone_state.transition_duration
+            alpha = self._smoothstep(t)
+            old_entities = zone_state.old_pattern.calculate_entities(audio_state)
+            new_entities = zone_state.pattern.calculate_entities(audio_state)
+            return self._blend_entities(old_entities, new_entities, alpha)
+
+        return zone_state.pattern.calculate_entities(audio_state)
+
+    def _calculate_entities(
+        self,
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+        bpm: float = 0.0,
+        beat_phase: float = 0.0,
+    ) -> List[dict]:
+        """Calculate entity positions from audio state, with pattern crossfade support."""
         audio_state = AudioState(
             bands=bands,
             amplitude=peak,
             is_beat=is_beat,
             beat_intensity=beat_intensity,
             frame=self._frame_count,
+            bpm=bpm,
+            beat_phase=beat_phase,
         )
+
+        # Check if we're transitioning between patterns
+        if self._transitioning:
+            elapsed = time.monotonic() - self._transition_start
+
+            # Check if transition is complete
+            if elapsed >= self._transition_duration:
+                self._transitioning = False
+                self._old_pattern = None
+                self._old_pattern_name = None
+                # Deferred pool shrink: remove excess entities after merge animation
+                if self._transition_pending_resize is not None:
+                    pending = self._transition_pending_resize
+                    self._transition_pending_resize = None
+                    if self.viz_client and self.viz_client.connected:
+                        asyncio.ensure_future(
+                            self.viz_client.init_pool(self.zone, pending, "SEA_LANTERN")
+                        )
+                entities = self._current_pattern.calculate_entities(audio_state)
+                logger.info(
+                    f"Crossfade complete: now on {self._pattern_name}, "
+                    f"entity_count={self.entity_count}, config_count={self._pattern_config.entity_count}, "
+                    f"pattern_returned={len(entities)}, pending_resize={pending if self._transition_pending_resize is None else 'done'}"
+                )
+                return entities
+
+            # Calculate blend alpha using smoothstep easing
+            t = elapsed / self._transition_duration
+            alpha = self._smoothstep(t)
+
+            # Get entities from both patterns
+            old_entities = self._old_pattern.calculate_entities(audio_state)
+            new_entities = self._current_pattern.calculate_entities(audio_state)
+
+            # Blend the entities
+            blended = self._blend_entities(old_entities, new_entities, alpha)
+            if self._frame_count % 30 == 0:
+                logger.debug(
+                    f"Transition alpha={alpha:.2f}, old={len(old_entities)}, "
+                    f"new={len(new_entities)}, blended={len(blended)}"
+                )
+            return blended
+
+        # No transition - just return current pattern
         return self._current_pattern.calculate_entities(audio_state)
+
+    def _smoothstep(self, t: float) -> float:
+        """Smoothstep interpolation for smooth easing (0->1)."""
+        t = max(0.0, min(1.0, t))
+        return t * t * (3.0 - 2.0 * t)
+
+    def _blend_entities(
+        self, old_entities: List[dict], new_entities: List[dict], alpha: float
+    ) -> List[dict]:
+        """
+        Blend between old and new entity lists using alpha (0=old, 1=new).
+        Split/merge: new-only entities emerge from a sibling's position (split),
+        old-only entities collapse into a sibling's position (merge).
+        """
+        # Build dictionaries by entity ID for fast lookup
+        old_dict = {e.get("id", f"e{i}"): e for i, e in enumerate(old_entities)}
+        new_dict = {e.get("id", f"e{i}"): e for i, e in enumerate(new_entities)}
+        old_count = len(old_entities)
+        new_count = len(new_entities)
+
+        # All entity IDs from both patterns
+        all_ids = set(old_dict.keys()) | set(new_dict.keys())
+
+        blended = []
+        for eid in all_ids:
+            old_e = old_dict.get(eid)
+            new_e = new_dict.get(eid)
+
+            if old_e and new_e:
+                # Entity exists in both patterns - lerp all properties
+                blended_e = {
+                    "id": eid,
+                    "x": self._lerp(old_e.get("x", 0.5), new_e.get("x", 0.5), alpha),
+                    "y": self._lerp(old_e.get("y", 0.5), new_e.get("y", 0.5), alpha),
+                    "z": self._lerp(old_e.get("z", 0.5), new_e.get("z", 0.5), alpha),
+                    "scale": self._lerp(old_e.get("scale", 0.5), new_e.get("scale", 0.5), alpha),
+                    "rotation": self._lerp_angle(
+                        old_e.get("rotation", 0.0), new_e.get("rotation", 0.0), alpha
+                    ),
+                    "band": new_e.get("band", old_e.get("band", 0)),
+                    "visible": True,
+                }
+            elif new_e:
+                # Split: entity only in new pattern — emerge from a sibling's position
+                sibling_id = self._get_sibling_id(eid, old_count)
+                sibling = old_dict.get(sibling_id)
+                if sibling:
+                    blended_e = {
+                        "id": eid,
+                        "x": self._lerp(sibling.get("x", 0.5), new_e.get("x", 0.5), alpha),
+                        "y": self._lerp(sibling.get("y", 0.5), new_e.get("y", 0.5), alpha),
+                        "z": self._lerp(sibling.get("z", 0.5), new_e.get("z", 0.5), alpha),
+                        "scale": self._lerp(
+                            sibling.get("scale", 0.5), new_e.get("scale", 0.5), alpha
+                        ),
+                        "rotation": self._lerp_angle(
+                            sibling.get("rotation", 0.0), new_e.get("rotation", 0.0), alpha
+                        ),
+                        "band": new_e.get("band", 0),
+                        "visible": True,
+                    }
+                else:
+                    # No sibling found — fade in
+                    blended_e = new_e.copy()
+                    blended_e["scale"] = new_e.get("scale", 0.5) * alpha
+            else:
+                # Merge: entity only in old pattern — collapse into a sibling's position
+                sibling_id = self._get_sibling_id(eid, new_count)
+                sibling = new_dict.get(sibling_id)
+                if sibling:
+                    blended_e = {
+                        "id": eid,
+                        "x": self._lerp(old_e.get("x", 0.5), sibling.get("x", 0.5), alpha),
+                        "y": self._lerp(old_e.get("y", 0.5), sibling.get("y", 0.5), alpha),
+                        "z": self._lerp(old_e.get("z", 0.5), sibling.get("z", 0.5), alpha),
+                        "scale": self._lerp(
+                            old_e.get("scale", 0.5), sibling.get("scale", 0.5), alpha
+                        ),
+                        "rotation": self._lerp_angle(
+                            old_e.get("rotation", 0.0), sibling.get("rotation", 0.0), alpha
+                        ),
+                        "band": old_e.get("band", 0),
+                        "visible": True,
+                    }
+                else:
+                    # No sibling found — fade out
+                    blended_e = old_e.copy()
+                    blended_e["scale"] = old_e.get("scale", 0.5) * (1.0 - alpha)
+
+            blended.append(blended_e)
+
+        return blended
+
+    @staticmethod
+    def _get_sibling_id(eid: str, sibling_count: int) -> Optional[str]:
+        """Map an entity to its sibling in the other pattern via modulo wrapping."""
+        if sibling_count <= 0:
+            return None
+        # Extract index from "block_N" format
+        if eid.startswith("block_"):
+            try:
+                idx = int(eid[6:])
+                return f"block_{idx % sibling_count}"
+            except ValueError:
+                pass
+        return None
+
+    def _lerp(self, a: float, b: float, t: float) -> float:
+        """Linear interpolation between a and b."""
+        return a + (b - a) * t
+
+    @staticmethod
+    def _lerp_angle(a: float, b: float, t: float) -> float:
+        """Shortest-path angle interpolation (degrees)."""
+        delta = ((b - a + 180.0) % 360.0) - 180.0
+        return (a + delta * t) % 360.0
 
     async def _update_minecraft(
         self,
@@ -3039,8 +4430,25 @@ class VJServer:
             return
 
         try:
+            # Track the high-water mark of entities in the Minecraft pool.
+            # Hide any pool entities not covered by the current frame to
+            # prevent "ghost" blocks stuck at their last position.
+            entity_count = len(entities)
+            self._minecraft_pool_size = max(self._minecraft_pool_size, entity_count)
+            if entity_count < self._minecraft_pool_size:
+                covered_ids = {e.get("id") for e in entities}
+                for i in range(self._minecraft_pool_size):
+                    eid = f"block_{i}"
+                    if eid not in covered_ids:
+                        entities.append({"id": eid, "scale": 0})
+            # After a deferred pool shrink completes, lower the high-water mark
+            if not self._transitioning and self._transition_pending_resize is None:
+                self._minecraft_pool_size = self.entity_count
+
             # Sanitize entity data before forwarding to Minecraft
-            entities = _sanitize_entities(entities, max_count=self.entity_count * 2)
+            entities = _sanitize_entities(
+                entities, max_count=max(len(entities), self.entity_count * 2)
+            )
 
             particles = []
             if is_beat and beat_intensity > 0.2:
@@ -3069,6 +4477,67 @@ class VJServer:
         except Exception as e:
             logger.error(f"Minecraft update error: {e}")
 
+    async def _update_minecraft_zone(
+        self,
+        zone_name: str,
+        zone_state: Optional[ZonePatternState],
+        entities: List[dict],
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+        bpm: float = 0.0,
+        tempo_confidence: float = 0.0,
+        beat_phase: float = 0.0,
+    ):
+        """Send entities for a specific zone to Minecraft."""
+        if not self.viz_client or not self.viz_client.connected:
+            return
+        if zone_state is None:
+            return
+
+        try:
+            entity_count = len(entities)
+            zone_state.minecraft_pool_size = max(zone_state.minecraft_pool_size, entity_count)
+            if entity_count < zone_state.minecraft_pool_size:
+                covered_ids = {e.get("id") for e in entities}
+                for i in range(zone_state.minecraft_pool_size):
+                    eid = f"block_{i}"
+                    if eid not in covered_ids:
+                        entities.append({"id": eid, "scale": 0})
+            if not zone_state.transitioning and zone_state.transition_pending_resize is None:
+                zone_state.minecraft_pool_size = zone_state.entity_count
+
+            entities = _sanitize_entities(
+                entities, max_count=max(len(entities), zone_state.entity_count * 2)
+            )
+
+            particles = []
+            if is_beat and beat_intensity > 0.2:
+                particles.append(
+                    {
+                        "particle": "NOTE",
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "count": max(1, min(100, int(20 * beat_intensity))),
+                    }
+                )
+
+            safe_bands = [max(0.0, min(1.0, b)) for b in bands[:5]]
+            audio = {
+                "bands": safe_bands,
+                "amplitude": max(0.0, min(5.0, peak)),
+                "is_beat": bool(is_beat),
+                "beat_intensity": max(0.0, min(5.0, beat_intensity)),
+                "bpm": max(0.0, min(300.0, bpm)),
+                "tempo_confidence": max(0.0, min(1.0, tempo_confidence)),
+                "beat_phase": max(0.0, min(1.0, beat_phase)),
+            }
+            await self.viz_client.batch_update_fast(zone_name, entities, particles, audio)
+        except Exception as e:
+            logger.error(f"Minecraft update error for zone '{zone_name}': {e}")
+
     async def _relay_voice_audio(self, data: dict):
         """Relay a voice_audio message from the active DJ to Minecraft."""
         if not self.viz_client or not self.viz_client.connected:
@@ -3085,6 +4554,24 @@ class VJServer:
         except Exception:
             pass  # Fire and forget
 
+        # Broadcast to voice subscribers (Discord bot, etc.)
+        if self._voice_subscribers:
+            voice_msg = json.dumps(
+                {
+                    "type": "voice_audio",
+                    "data": pcm_data,
+                    "seq": seq,
+                    "codec": data.get("codec", "pcm"),
+                }
+            )
+            dead_clients = set()
+            for client in list(self._voice_subscribers):
+                try:
+                    await client.send(voice_msg)
+                except Exception:
+                    dead_clients.add(client)
+            self._voice_subscribers -= dead_clients
+
     async def _forward_voice_config(self, config: dict):
         """Forward voice_config to the Minecraft plugin and relay voice_status response."""
         if not self.viz_client or not self.viz_client.connected:
@@ -3099,39 +4586,116 @@ class VJServer:
         """Broadcast voice_status to all connected browser clients."""
         await self._broadcast_to_browsers(json.dumps(status))
 
+    async def _link_sync_loop(self):
+        """Poll Ableton Link for tempo/beat/phase at ~60Hz."""
+        prev_peers = 0
+        while self._running:
+            try:
+                if self._link is None:
+                    await asyncio.sleep(1.0)
+                    continue
+
+                state = self._link.captureSessionState()
+                tempo = state.tempo()
+                beat = state.beatAtTime(self._link.clock(), 4)
+                phase = beat % 1.0  # 0.0 - 1.0 within a beat
+                peers = self._link.numPeers()
+
+                self._link_tempo = tempo
+                self._link_beat_phase = max(0.0, min(1.0, phase))
+                self._link_peers = peers
+
+                # Override active DJ's tempo/phase when Link has peers
+                if peers > 0:
+                    dj = self.active_dj
+                    if dj:
+                        dj.bpm = tempo
+                        dj.beat_phase = self._link_beat_phase
+
+                    # Log peer changes
+                    if peers != prev_peers:
+                        logger.info(f"[LINK] Peers: {peers}, Tempo: {tempo:.1f} BPM")
+                        # Broadcast Link status to admin panel
+                        await self._broadcast_to_browsers(
+                            json.dumps(
+                                {
+                                    "type": "link_status",
+                                    "enabled": True,
+                                    "peers": peers,
+                                    "tempo": round(tempo, 1),
+                                }
+                            )
+                        )
+
+                prev_peers = peers
+                await asyncio.sleep(1.0 / 60.0)  # ~60Hz
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(f"[LINK] Error in sync loop: {e}")
+                await asyncio.sleep(1.0)
+
     async def _main_loop(self):
         """Main visualization loop."""
         frame_interval = 0.016  # 60 FPS simulation/preview loop
         mc_frame_interval = 0.05  # 20 TPS-aligned Minecraft update pacing
         next_mc_send_at = time.monotonic()
         next_frame_at = time.perf_counter()
+        last_frame_start = time.perf_counter()
         consecutive_errors = 0
         max_consecutive_errors = 50  # After 50 errors in a row, slow down
 
         while self._running:
             try:
                 frame_start = time.perf_counter()
+                loop_dt = min(frame_start - last_frame_start, 0.05)  # Cap at 50ms
+                last_frame_start = frame_start
                 calc_ms = 0.0
                 effects_ms = 0.0
                 mc_ms = 0.0
                 broadcast_ms = 0.0
                 entities_count = 0
                 self._frame_count += 1
+                self._frames_processed += 1
 
                 # Get audio from active DJ or use fallback
                 dj = self.active_dj
                 if dj:
-                    bands = dj.bands
-                    peak = dj.peak
-                    is_beat = dj.is_beat
-                    beat_intensity = dj.beat_intensity
-                    instant_bass = dj.instant_bass
-                    instant_kick = dj.instant_kick
-                    tempo_confidence = dj.tempo_confidence
-                    beat_phase = dj.beat_phase
+                    # Check for delayed frame (audio-visual sync)
+                    effective_delay = self._get_effective_delay_ms(dj)
+                    delayed = self._read_delayed_frame(dj, effective_delay)
+                    if delayed:
+                        bands = delayed["bands"]
+                        peak = delayed["peak"]
+                        is_beat = delayed["is_beat"]
+                        beat_intensity = delayed["beat_intensity"]
+                        instant_bass = delayed["instant_bass"]
+                        instant_kick = delayed["instant_kick"]
+                        tempo_confidence = delayed["tempo_confidence"]
+                        beat_phase = delayed["beat_phase"]
+                    else:
+                        bands = dj.bands
+                        peak = dj.peak
+                        is_beat = dj.is_beat
+                        beat_intensity = dj.beat_intensity
+                        instant_bass = dj.instant_bass
+                        instant_kick = dj.instant_kick
+                        tempo_confidence = dj.tempo_confidence
+                        beat_phase = dj.beat_phase
                     is_beat, beat_intensity = self._apply_phase_beat_assist(
                         dj, is_beat, beat_intensity
                     )
+
+                    # Beat prediction: when delay is active, use predictor for tighter sync
+                    if effective_delay > 0 and self._beat_predictor.tempo_confidence > 0.6:
+                        self._beat_predictor.prediction_lookahead = effective_delay / 1000.0
+                        predicted_fire, predicted_intensity = (
+                            self._beat_predictor.should_fire_beat()
+                        )
+                        if predicted_fire:
+                            is_beat = True
+                            beat_intensity = max(beat_intensity, predicted_intensity)
                 else:
                     # No active DJ - fade to silence
                     bands = self._fallback_bands
@@ -3143,26 +4707,31 @@ class VJServer:
                     tempo_confidence = 0.0
                     beat_phase = 0.0
 
-                    # Decay fallback values
+                    # Decay fallback values (dt-aware for consistent fade rate)
+                    decay = 0.95 ** (loop_dt / 0.016)
                     for i in range(5):
-                        self._fallback_bands[i] *= 0.95
-                    self._fallback_peak *= 0.95
+                        self._fallback_bands[i] *= decay
+                    self._fallback_peak *= decay
 
                 # Apply band sensitivity
                 adjusted_bands = [
                     bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
                 ]
                 visual_bands, visual_peak, visual_beat_intensity = self._enhance_visual_state(
-                    adjusted_bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
+                    adjusted_bands,
+                    peak,
+                    is_beat,
+                    beat_intensity,
+                    instant_bass,
+                    instant_kick,
+                    dt=loop_dt,
                 )
 
-                # Send to Minecraft - skip if active DJ is using direct mode and connected.
-                # In direct mode, the DJ app publishes directly (dual output path).
+                # Always send to Minecraft via the VJ server's full pattern engine.
+                # The server handles multi-zone patterns and transitions correctly;
+                # the DJ client's direct publish is a low-latency supplement for the
+                # DJ's own zone but the server remains the authoritative source.
                 should_send_to_mc = True
-                if dj and dj.direct_mode and dj.mc_connected:
-                    should_send_to_mc = False
-                elif dj and dj.direct_mode and not dj.mc_connected:
-                    should_send_to_mc = True
 
                 # Clean up expired effects
                 now = time.time()
@@ -3193,24 +4762,34 @@ class VJServer:
 
                 # Calculate entities only when needed (MC send tick or active browser previews).
                 need_entities = should_send_mc_this_frame or bool(self._broadcast_clients)
+                # Per-zone entity calculation
+                zone_entities: Dict[str, List[dict]] = {}
                 if need_entities:
-                    if self._freeze and self._last_entities:
-                        entities = self._last_entities
-                    elif self._blackout:
-                        entities = []
-                    else:
-                        calc_start = time.perf_counter()
-                        entities = self._calculate_entities(
-                            visual_bands, visual_peak, is_beat, visual_beat_intensity
-                        )
-                        calc_ms = (time.perf_counter() - calc_start) * 1000.0
-                        # Apply timed effects (flash, strobe, pulse, wave, etc.)
-                        effects_start = time.perf_counter()
-                        entities = self._apply_effects(entities, visual_bands)
-                        effects_ms = (time.perf_counter() - effects_start) * 1000.0
-                        self._last_entities = entities
-                else:
-                    entities = []
+                    audio_state = AudioState(
+                        bands=visual_bands,
+                        amplitude=visual_peak,
+                        is_beat=is_beat,
+                        beat_intensity=visual_beat_intensity,
+                        frame=self._frame_count,
+                        bpm=dj.bpm if dj else 0.0,
+                        beat_phase=beat_phase,
+                    )
+                    calc_start = time.perf_counter()
+                    for zone_name, zone_state in self._zone_patterns.items():
+                        if self._freeze and zone_state.last_entities:
+                            zone_entities[zone_name] = zone_state.last_entities
+                        elif self._blackout:
+                            zone_entities[zone_name] = []
+                        else:
+                            zents = self._calculate_entities_for_zone(
+                                zone_state, audio_state, zone_name
+                            )
+                            zents = self._apply_effects(zents, visual_bands)
+                            zone_state.last_entities = zents
+                            zone_entities[zone_name] = zents
+                    calc_ms = (time.perf_counter() - calc_start) * 1000.0
+                # For backward compat: entities for the active zone (used by browser broadcast)
+                entities = zone_entities.get(self.zone, [])
                 entities_count = len(entities)
 
                 # Update spectrograph
@@ -3237,16 +4816,20 @@ class VJServer:
 
                 if should_send_mc_this_frame:
                     mc_start = time.perf_counter()
-                    await self._update_minecraft(
-                        entities,
-                        visual_bands,
-                        visual_peak,
-                        is_beat,
-                        visual_beat_intensity,
-                        bpm=dj.bpm if dj else 0.0,
-                        tempo_confidence=tempo_confidence,
-                        beat_phase=beat_phase,
-                    )
+                    for zn, zents in zone_entities.items():
+                        zs = self._zone_patterns.get(zn)
+                        await self._update_minecraft_zone(
+                            zn,
+                            zs,
+                            zents,
+                            visual_bands,
+                            visual_peak,
+                            is_beat,
+                            visual_beat_intensity,
+                            bpm=dj.bpm if dj else 0.0,
+                            tempo_confidence=tempo_confidence,
+                            beat_phase=beat_phase,
+                        )
                     mc_ms = (time.perf_counter() - mc_start) * 1000.0
 
                 # Send to browser clients (always, for preview)
@@ -3261,6 +4844,7 @@ class VJServer:
                     instant_kick,
                     tempo_confidence,
                     beat_phase,
+                    zone_entities=zone_entities if zone_entities else None,
                 )
                 broadcast_ms = (time.perf_counter() - broadcast_start) * 1000.0
 
@@ -3348,6 +4932,16 @@ class VJServer:
         )
         logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
 
+        # Start metrics HTTP server if enabled
+        metrics_server = None
+        if self.metrics_port is not None:
+            from vj_server.metrics import start_metrics_server
+
+            metrics_server = await start_metrics_server(self, self.metrics_port)
+
+        # Register with coordinator if configured
+        await self._init_coordinator()
+
         logger.info("VJ Server ready. Waiting for DJ connections...")
 
         # Start Minecraft reconnection loop (runs in background)
@@ -3361,6 +4955,18 @@ class VJServer:
         # Start browser heartbeat loop (runs in background)
         self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
         logger.debug("Started browser heartbeat monitor")
+
+        # Start pattern hot-reload loop (runs in background)
+        if self._pattern_hot_reload_enabled:
+            self._pattern_hot_reload_task = asyncio.create_task(self._pattern_hot_reload_loop())
+            logger.info("Pattern hot-reload enabled (checking every 2.5s)")
+        else:
+            logger.info("Pattern hot-reload disabled")
+
+        # Start Ableton Link sync loop (runs in background)
+        if self._link_enabled and self._link is not None:
+            self._link_task = asyncio.create_task(self._link_sync_loop())
+            logger.info("Ableton Link sync loop started")
 
         try:
             await self._main_loop()
@@ -3379,8 +4985,31 @@ class VJServer:
                     await self._browser_heartbeat_task
                 except asyncio.CancelledError:
                     pass
+            # Cancel pattern hot-reload task
+            if self._pattern_hot_reload_task:
+                self._pattern_hot_reload_task.cancel()
+                try:
+                    await self._pattern_hot_reload_task
+                except asyncio.CancelledError:
+                    pass
+            # Cancel Link sync task
+            if self._link_task:
+                self._link_task.cancel()
+                try:
+                    await self._link_task
+                except asyncio.CancelledError:
+                    pass
+            # Disable Link
+            if self._link is not None:
+                try:
+                    self._link.enabled = False
+                except Exception:
+                    pass
             dj_server.close()
             broadcast_server.close()
+            if metrics_server:
+                metrics_server.close()
+                await metrics_server.wait_closed()
             await dj_server.wait_closed()
             await broadcast_server.wait_closed()
 
@@ -3403,6 +5032,14 @@ class VJServer:
             self._browser_heartbeat_task.cancel()
             try:
                 await self._browser_heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cancel pattern hot-reload task if running
+        if self._pattern_hot_reload_task and not self._pattern_hot_reload_task.done():
+            self._pattern_hot_reload_task.cancel()
+            try:
+                await self._pattern_hot_reload_task
             except asyncio.CancelledError:
                 pass
 
@@ -3480,6 +5117,11 @@ async def main():
     parser.add_argument(
         "--no-spectrograph", action="store_true", help="Disable terminal spectrograph"
     )
+    parser.add_argument(
+        "--no-hot-reload",
+        action="store_true",
+        help="Disable pattern hot-reload (default: enabled)",
+    )
 
     args = parser.parse_args()
 
@@ -3515,6 +5157,10 @@ async def main():
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Configure hot-reload
+    if args.no_hot_reload:
+        server._pattern_hot_reload_enabled = False
 
     # Connect to Minecraft
     if args.no_minecraft:

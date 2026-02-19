@@ -150,7 +150,7 @@ export default function AccountSettingsPage() {
   if (authLoading || loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-electric-blue" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
       </div>
     );
   }
@@ -184,7 +184,7 @@ export default function AccountSettingsPage() {
                   autoComplete="name"
                   value={nameValue}
                   onChange={(e) => setNameValue(e.target.value)}
-                  className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                  className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") saveName();
@@ -195,7 +195,7 @@ export default function AccountSettingsPage() {
                   type="button"
                   onClick={saveName}
                   disabled={nameSaving || !nameValue.trim()}
-                  className="rounded-lg bg-electric-blue/20 px-3 py-1.5 text-xs font-medium text-electric-blue transition-colors hover:bg-electric-blue/30 disabled:opacity-50"
+                  className="rounded-lg bg-disc-cyan/20 px-3 py-1.5 text-xs font-medium text-disc-cyan transition-colors hover:bg-disc-cyan/30 disabled:opacity-50"
                 >
                   {nameSaving ? "Saving..." : "Save"}
                 </button>
@@ -323,7 +323,7 @@ export default function AccountSettingsPage() {
                 required
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               />
             </div>
 
@@ -343,7 +343,7 @@ export default function AccountSettingsPage() {
                 minLength={8}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               />
             </div>
 
@@ -363,7 +363,7 @@ export default function AccountSettingsPage() {
                 minLength={8}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-electric-blue/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               />
             </div>
 

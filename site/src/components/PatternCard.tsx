@@ -46,14 +46,15 @@ interface PatternCardProps {
   description: string;
   category: string;
   staticCamera: boolean;
+  startBlocks: number | null;
   createPattern: () => PatternInstance;
   index: number;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  Original: "bg-electric-blue/15 text-electric-blue border-electric-blue/30",
-  Epic: "bg-hot-pink/15 text-hot-pink border-hot-pink/30",
-  Cosmic: "bg-deep-purple/15 text-deep-purple border-deep-purple/30",
+  Original: "bg-disc-cyan/15 text-disc-cyan border-disc-cyan/30",
+  Epic: "bg-noteblock-amber/15 text-noteblock-amber border-noteblock-amber/30",
+  Cosmic: "bg-disc-blue/15 text-disc-blue border-disc-blue/30",
   Organic: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
   Spectrum: "bg-amber-500/15 text-amber-400 border-amber-500/30",
 };
@@ -63,6 +64,7 @@ export default function PatternCard({
   description,
   category,
   staticCamera,
+  startBlocks,
   createPattern,
   index,
 }: PatternCardProps) {
@@ -159,7 +161,7 @@ export default function PatternCard({
   return (
     <div
       ref={containerRef}
-      className="group glass-card overflow-hidden rounded-2xl transition-shadow duration-300 hover:ring-1 hover:ring-white/20 hover:shadow-lg hover:shadow-electric-blue/5"
+      className="group glass-card overflow-hidden rounded-2xl transition-shadow duration-300 hover:ring-1 hover:ring-white/20 hover:shadow-lg hover:shadow-disc-cyan/5"
       style={{
         animationDelay: `${index * 0.05}s`,
       }}
@@ -174,7 +176,7 @@ export default function PatternCard({
                   {[0, 1, 2, 3, 4].map((i) => (
                     <div
                       key={i}
-                      className="eq-bar w-1 rounded-full bg-gradient-to-t from-electric-blue to-deep-purple"
+                      className="eq-bar w-1 rounded-full bg-gradient-to-t from-disc-cyan to-disc-blue"
                       style={{ height: "20px" }}
                     />
                   ))}
@@ -214,7 +216,7 @@ export default function PatternCard({
               {[0, 1, 2, 3, 4].map((i) => (
                 <div
                   key={i}
-                  className="eq-bar w-1 rounded-full bg-gradient-to-t from-electric-blue/40 to-deep-purple/40"
+                  className="eq-bar w-1 rounded-full bg-gradient-to-t from-disc-cyan/40 to-disc-blue/40"
                   style={{ height: "20px" }}
                 />
               ))}
@@ -230,6 +232,15 @@ export default function PatternCard({
             {category}
           </span>
         </div>
+
+        {/* Entity count badge */}
+        {startBlocks && (
+          <div className="absolute top-3 right-3 z-10">
+            <span className="rounded-full border border-white/10 bg-black/40 px-2.5 py-0.5 text-[10px] font-semibold text-white/80 backdrop-blur-sm">
+              {startBlocks} blocks
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Info */}

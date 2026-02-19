@@ -1,6 +1,7 @@
 -- Pattern metadata
 name = "Floating Platforms"
 description = "6 levitating platforms - one per frequency"
+recommended_entities = 50
 category = "Original"
 static_camera = false
 

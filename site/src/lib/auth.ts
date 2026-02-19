@@ -19,6 +19,7 @@ export interface User {
   discord_username: string | null;
   avatar_url: string | null;
   onboarding_completed: boolean;
+  is_admin?: boolean;
 }
 
 export interface OrgSummary {
@@ -47,6 +48,7 @@ export interface DJProfile {
 
 export interface UserProfile extends User {
   user_type: string | null;
+  is_admin: boolean;
   dj_profile: DJProfile | null;
   organizations: OrgSummary[];
 }
@@ -587,6 +589,141 @@ export async function removeOrgServer(
 ): Promise<void> {
   return api<void>(`/api/v1/orgs/${orgId}/servers/${serverId}`, {
     method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin types & endpoints
+// ---------------------------------------------------------------------------
+
+export interface AdminUserRow {
+  id: string;
+  display_name: string;
+  email: string | null;
+  discord_username: string | null;
+  avatar_url: string | null;
+  is_active: boolean;
+  is_admin: boolean;
+  user_type: string | null;
+  created_at: string;
+  last_login_at: string | null;
+  org_count: number;
+  has_dj_profile: boolean;
+}
+
+export interface AdminOrgRow {
+  id: string;
+  name: string;
+  slug: string;
+  owner_name: string;
+  member_count: number;
+  server_count: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminServerRow {
+  id: string;
+  name: string;
+  websocket_url: string;
+  org_name: string | null;
+  is_active: boolean;
+  last_heartbeat: string | null;
+  active_show_count: number;
+  created_at: string;
+}
+
+export interface AdminShowRow {
+  id: string;
+  name: string;
+  server_name: string;
+  connect_code: string | null;
+  status: string;
+  current_djs: number;
+  max_djs: number;
+  created_at: string;
+  ended_at: string | null;
+}
+
+export interface AdminStats {
+  total_users: number;
+  total_organizations: number;
+  total_servers: number;
+  total_shows: number;
+  active_shows: number;
+  users_last_30_days: number;
+  dj_profiles: number;
+}
+
+export async function fetchAdminStats(accessToken: string): Promise<AdminStats> {
+  return api<AdminStats>("/api/v1/admin/stats", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function fetchAdminUsers(
+  accessToken: string,
+  opts?: { limit?: number; offset?: number; search?: string }
+): Promise<AdminUserRow[]> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  if (opts?.search) params.set("search", opts.search);
+  const qs = params.toString();
+  return api<AdminUserRow[]>(`/api/v1/admin/users${qs ? `?${qs}` : ""}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function updateAdminUser(
+  accessToken: string,
+  userId: string,
+  data: { is_active?: boolean; is_admin?: boolean }
+): Promise<AdminUserRow> {
+  return api<AdminUserRow>(`/api/v1/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function fetchAdminOrgs(
+  accessToken: string,
+  opts?: { limit?: number; offset?: number }
+): Promise<AdminOrgRow[]> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return api<AdminOrgRow[]>(`/api/v1/admin/organizations${qs ? `?${qs}` : ""}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function fetchAdminServers(
+  accessToken: string,
+  opts?: { limit?: number; offset?: number }
+): Promise<AdminServerRow[]> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return api<AdminServerRow[]>(`/api/v1/admin/servers${qs ? `?${qs}` : ""}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function fetchAdminShows(
+  accessToken: string,
+  opts?: { limit?: number; offset?: number; status?: string }
+): Promise<AdminShowRow[]> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  if (opts?.status) params.set("status", opts.status);
+  const qs = params.toString();
+  return api<AdminShowRow[]>(`/api/v1/admin/shows${qs ? `?${qs}` : ""}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 }
