@@ -160,10 +160,6 @@ if [ "$PLUGIN_ONLY" = false ]; then
     scp -q "$PROJECT_ROOT"/vj_server/*.py "${SSH_TARGET}:${REMOTE_PROJECT}/vj_server/"
     echo "  VJ server synced"
 
-    # --- python_client library ---
-    scp -q "$PROJECT_ROOT"/python_client/*.py "${SSH_TARGET}:${REMOTE_PROJECT}/python_client/"
-    echo "  python_client synced"
-
     # --- Admin Panel ---
     scp -q "$PROJECT_ROOT"/admin_panel/index.html "${SSH_TARGET}:${REMOTE_PROJECT}/admin_panel/"
     scp -q "$PROJECT_ROOT"/admin_panel/js/*.js "${SSH_TARGET}:${REMOTE_PROJECT}/admin_panel/js/"

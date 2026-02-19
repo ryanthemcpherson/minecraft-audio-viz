@@ -38,7 +38,7 @@
       "icons/icon.ico"
     ],
     "publisher": "MCAV",
-    "copyright": "Copyright (c) 2024-2025 Ryan McPherson",
+    "copyright": "Copyright (c) 2024-2026 Ryan McPherson",
     "shortDescription": "Real-time audio visualization for Minecraft",
     "longDescription": "MCAV DJ Client captures system audio and streams real-time frequency analysis to Minecraft servers, powering beat-reactive visualizations built with Display Entities.",
     "windows": {

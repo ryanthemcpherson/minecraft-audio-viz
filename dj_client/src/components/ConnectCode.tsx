@@ -74,7 +74,7 @@ function ConnectCode({ value, onChange, label = 'Connect Code' }: ConnectCodePro
 
   return (
     <div className="connect-code">
-      <label className="input-label">{label}</label>
+      {label && <label className="input-label">{label}</label>}
       <div className="code-inputs">
         <div className="code-group">
           {[0, 1, 2, 3].map(i => (

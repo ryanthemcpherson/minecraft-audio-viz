@@ -29,7 +29,7 @@ RUNTIME_PATHS=(
   "vj_server/vj_server.py"
   "vj_server/patterns.py"
   "vj_server/spectrograph.py"
-  "python_client/viz_client.py"
+  "vj_server/viz_client.py"
   "patterns/*.lua"
 )
 
