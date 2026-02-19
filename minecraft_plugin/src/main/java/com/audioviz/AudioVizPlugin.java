@@ -117,17 +117,44 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // Start WebSocket server
+        // Start WebSocket server with retry (port may linger briefly after restart)
         int wsPort = getConfig().getInt("websocket.port", 8765);
-        try {
-            webSocketServer = new VizWebSocketServer(this, wsPort);
-            webSocketServer.start();
-            getLogger().info("WebSocket server started on port " + wsPort);
-        } catch (Exception e) {
-            getLogger().log(Level.SEVERE, "Failed to start WebSocket server", e);
-        }
+        startWebSocketWithRetry(wsPort, 5, 2000);
 
         getLogger().info("AudioViz plugin enabled!");
+    }
+
+    /**
+     * Start the WebSocket server with retries to handle port still held by a
+     * previous process (e.g. zombie Java after restart). Each attempt waits
+     * {@code delayMs} before retrying, up to {@code maxRetries} times.
+     */
+    private void startWebSocketWithRetry(int port, int maxRetries, long delayMs) {
+        getServer().getScheduler().runTaskAsynchronously(this, () -> {
+            for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    VizWebSocketServer server = new VizWebSocketServer(this, port);
+                    server.start();
+                    // Wait briefly to let the selector thread bind
+                    Thread.sleep(500);
+                    // Check if it actually started by verifying onStart was reached
+                    webSocketServer = server;
+                    getLogger().info("WebSocket server started on port " + port +
+                        (attempt > 1 ? " (attempt " + attempt + ")" : ""));
+                    return;
+                } catch (Exception e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    if (attempt < maxRetries) {
+                        getLogger().warning("WebSocket bind attempt " + attempt + "/" + maxRetries +
+                            " failed: " + msg + " — retrying in " + (delayMs / 1000) + "s");
+                        try { Thread.sleep(delayMs); } catch (InterruptedException ignored) { return; }
+                    } else {
+                        getLogger().log(Level.SEVERE,
+                            "Failed to start WebSocket server after " + maxRetries + " attempts", e);
+                    }
+                }
+            }
+        });
     }
 
     @Override

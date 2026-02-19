@@ -1,4 +1,4 @@
-# Dockerfile for AudioViz VJ Server
+# Dockerfile for MCAV VJ Server
 # Note: Audio capture requires Windows, this is for VJ server mode only
 
 FROM python:3.12-slim
@@ -11,22 +11,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY pyproject.toml ./
-COPY audio_processor/ ./audio_processor/
-COPY python_client/ ./python_client/
+# Copy package definitions first for caching
+COPY vj_server/pyproject.toml ./vj_server/pyproject.toml
 
-# Install Python dependencies (minimal set for VJ server)
-RUN pip install --no-cache-dir \
-    numpy>=1.24.0 \
-    scipy>=1.11.0 \
-    websockets>=12.0 \
-    python-dotenv>=1.0.0
+# Install Python dependencies
+RUN pip install --no-cache-dir ./vj_server[full]
 
 # Copy application code
+COPY vj_server/ ./vj_server/
+COPY python_client/ ./python_client/
 COPY admin_panel/ ./admin_panel/
 COPY preview_tool/ ./preview_tool/
 COPY configs/ ./configs/
+
+# Reinstall with source (editable not needed in container)
+RUN pip install --no-cache-dir ./vj_server[full]
 
 # Create non-root user
 RUN useradd -m -u 1000 audioviz
@@ -43,5 +42,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 9000)); s.close()"
 
 # Default command: VJ server mode
-ENTRYPOINT ["python", "-m", "audio_processor.vj_server"]
+ENTRYPOINT ["audioviz-vj"]
 CMD ["--dj-port", "9000", "--broadcast-port", "8766", "--http-port", "8080"]

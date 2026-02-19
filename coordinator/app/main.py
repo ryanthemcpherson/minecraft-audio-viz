@@ -1,4 +1,8 @@
-"""FastAPI application entry-point for the MCAV DJ Coordinator."""
+"""FastAPI application entry-point for the MCAV DJ Coordinator.
+
+Serves the REST API for DJ authentication, show management,
+organization management, and the unified dashboard.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from app.routers import (
     servers,
     shows,
     tenants,
+    uploads,
 )
 from app.services.rate_limiter import RateLimitExceeded
 
@@ -72,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(onboarding.router, prefix="/api/v1")
     application.include_router(dj_profiles.router, prefix="/api/v1")
     application.include_router(tenants.router, prefix="/api/v1")
+    application.include_router(uploads.router, prefix="/api/v1")
     application.include_router(dashboard.router, prefix="/api/v1")
 
     # -- Exception handlers ----------------------------------------------------

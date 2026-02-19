@@ -4,6 +4,7 @@
 //! audio visualizations to Minecraft.
 
 pub mod audio;
+pub mod patterns;
 pub mod protocol;
 pub mod state;
 pub mod voice;
@@ -235,11 +236,19 @@ async fn connect_with_code(
         ..Default::default()
     };
 
-    // Brief lock: store metadata, check not already connected
+    // If a previous bridge task is still running (e.g. reconnecting after
+    // server restart), shut it down before starting a new connection.
     {
-        let app_state = state.0.lock();
-        if app_state.bridge_shutdown_tx.is_some() {
-            return Err("Already connected".to_string());
+        let old_tx = state.0.lock().bridge_shutdown_tx.take();
+        if let Some(tx) = old_tx {
+            log::info!("Shutting down existing bridge task before reconnecting");
+            let _ = tx.send(()).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            // Clean up old client
+            let old_client = state.0.lock().client.take();
+            if let Some(c) = old_client {
+                let _ = c.disconnect().await;
+            }
         }
     }
 
@@ -250,7 +259,6 @@ async fn connect_with_code(
         app_state.server_host = server_host;
         app_state.server_port = server_port;
     }
-    // Lock dropped
 
     // Create and connect client (async, no mutex held)
     let mut client = DjClient::new(config);
@@ -295,11 +303,17 @@ async fn connect_direct(
         ..Default::default()
     };
 
-    // Brief lock: check not already connected
+    // If a previous bridge task is still running, shut it down first.
     {
-        let app_state = state.0.lock();
-        if app_state.bridge_shutdown_tx.is_some() {
-            return Err("Already connected".to_string());
+        let old_tx = state.0.lock().bridge_shutdown_tx.take();
+        if let Some(tx) = old_tx {
+            log::info!("Shutting down existing bridge task before reconnecting");
+            let _ = tx.send(()).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let old_client = state.0.lock().client.take();
+            if let Some(c) = old_client {
+                let _ = c.disconnect().await;
+            }
         }
     }
 
@@ -360,6 +374,7 @@ async fn run_bridge(
         let mut next_mc_connect_attempt = Instant::now();
         let mut last_phase_predicted_beat_at = 0.0_f64;
         let mut last_mc_send = Instant::now() - Duration::from_secs(1);
+        let mut pattern_engine: Option<patterns::PatternEngine> = None;
         // Throttle UI events: audio-levels ~30fps, status/voice ~4fps
         let mut last_audio_emit = Instant::now() - Duration::from_secs(1);
         let mut last_status_emit = Instant::now() - Duration::from_secs(1);
@@ -536,8 +551,16 @@ async fn run_bridge(
                                     mc_pool_key = Some(pool_key);
                                 }
 
-                                let entities =
-                                    build_direct_entities(analysis, route.entity_count as usize, seq);
+                                let entities = if let Some(ref engine) = pattern_engine {
+                                    let lua_entities = engine.calculate_entities(analysis, seq);
+                                    if lua_entities.is_empty() {
+                                        build_direct_entities(analysis, route.entity_count as usize, seq)
+                                    } else {
+                                        lua_entities
+                                    }
+                                } else {
+                                    build_direct_entities(analysis, route.entity_count as usize, seq)
+                                };
                                 let particles = if out_is_beat && out_beat_intensity > 0.2 {
                                     vec![json!({
                                         "particle": "NOTE",
@@ -628,6 +651,51 @@ async fn run_bridge(
                                     }
                                     app_state.active_preset = preset.name.clone();
                                     preset_event = Some(preset.name.clone());
+                                }
+                            }
+                        }
+
+                        // Consume pending pattern data from server
+                        if let Some(ref client) = app_state.client {
+                            // Load pattern scripts
+                            if let Some(scripts) = client.take_pending_pattern_scripts() {
+                                let engine = pattern_engine.get_or_insert_with(patterns::PatternEngine::new);
+                                // Look for lib script first
+                                if let Some(lib_src) = scripts.get("lib") {
+                                    if let Err(e) = engine.load_lib(lib_src) {
+                                        log::warn!("Failed to load lib.lua: {}", e);
+                                    }
+                                }
+                                for (name, src) in &scripts {
+                                    if name != "lib" {
+                                        engine.load_pattern(name, src);
+                                    }
+                                }
+                                log::info!("Loaded {} pattern scripts from server", scripts.len());
+                            }
+
+                            // Switch pattern
+                            if let Some(pattern_name) = client.take_pending_pattern_change() {
+                                if let Some(ref mut engine) = pattern_engine {
+                                    if let Err(e) = engine.set_pattern(&pattern_name) {
+                                        log::warn!("Failed to switch pattern: {}", e);
+                                    }
+                                }
+                            }
+
+                            // Update band sensitivity
+                            if let Some(sensitivity) = client.take_pending_band_sensitivity() {
+                                if let Some(ref mut engine) = pattern_engine {
+                                    engine.set_band_sensitivity(sensitivity);
+                                }
+                            }
+
+                            // Update config (entity_count, zone)
+                            if let Some((entity_count, _zone)) = client.take_pending_config_change() {
+                                if let Some(ref mut engine) = pattern_engine {
+                                    let mut cfg = patterns::PatternConfig::default();
+                                    cfg.entity_count = entity_count;
+                                    engine.set_config(cfg);
                                 }
                             }
                         }

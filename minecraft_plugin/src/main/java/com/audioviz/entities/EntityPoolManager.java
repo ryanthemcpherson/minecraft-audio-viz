@@ -98,7 +98,7 @@ public class EntityPoolManager {
                     BlockDisplay display = spawnLoc.getWorld().spawn(spawnLoc, BlockDisplay.class, entity -> {
                         entity.setBlock(finalMaterial.createBlockData());
                         entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(2); // 2 ticks - responsive interpolation
+                        entity.setInterpolationDuration(1); // 1 tick keeps motion smooth but snappier
                         entity.setInterpolationDelay(0);
                         entity.setTeleportDuration(1); // Smooth position changes over 1 tick
                         entity.setTransformation(createTransformation(0, 0, 0, 0.5f));
@@ -146,7 +146,7 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(Display.Billboard.CENTER);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(2);
+                    entity.setInterpolationDuration(1);
                     entity.setInterpolationDelay(0);
                     entity.setTeleportDuration(1); // Smooth position changes over 1 tick
                     entity.setPersistent(false);
@@ -266,9 +266,11 @@ public class EntityPoolManager {
         if (entity == null || !(entity instanceof Display display)) return;
 
         Bukkit.getScheduler().runTask(plugin, () -> {
+            float rotRad = (float) Math.toRadians(rotationY);
+            Vector3f translation = centeredScaleTranslation(tx, ty, tz, scale, rotRad);
             Transformation transform = new Transformation(
-                new Vector3f(tx, ty, tz),  // translation
-                new AxisAngle4f((float) Math.toRadians(rotationY), 0, 1, 0), // left rotation
+                translation,
+                new AxisAngle4f(rotRad, 0, 1, 0), // left rotation
                 new Vector3f(scale, scale, scale), // scale
                 new AxisAngle4f(0, 0, 0, 1) // right rotation
             );
@@ -295,8 +297,9 @@ public class EntityPoolManager {
 
                 Transformation current = display.getTransformation();
                 float scale = change.getValue() ? 0.5f : 0f;
+                Vector3f translation = centeredScaleTranslation(0f, 0f, 0f, scale);
                 display.setTransformation(new Transformation(
-                    current.getTranslation(),
+                    translation,
                     current.getLeftRotation(),
                     new Vector3f(scale, scale, scale),
                     current.getRightRotation()
@@ -316,8 +319,9 @@ public class EntityPoolManager {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Transformation current = display.getTransformation();
             float scale = visible ? 0.5f : 0f;
+            Vector3f translation = centeredScaleTranslation(0f, 0f, 0f, scale);
             display.setTransformation(new Transformation(
-                current.getTranslation(),
+                translation,
                 current.getLeftRotation(),
                 new Vector3f(scale, scale, scale),
                 current.getRightRotation()
@@ -364,7 +368,7 @@ public class EntityPoolManager {
                     entity.setText("");
                     entity.setBillboard(mode);
                     entity.setBrightness(new Display.Brightness(15, 15));
-                    entity.setInterpolationDuration(2);
+                    entity.setInterpolationDuration(1);
                     entity.setInterpolationDelay(0);
                     entity.setTeleportDuration(1);
                     entity.setPersistent(false);
@@ -485,12 +489,37 @@ public class EntityPoolManager {
      * Create a standard transformation.
      */
     private Transformation createTransformation(float tx, float ty, float tz, float scale) {
+        Vector3f translation = centeredScaleTranslation(tx, ty, tz, scale);
         return new Transformation(
-            new Vector3f(tx, ty, tz),
+            translation,
             new AxisAngle4f(0, 0, 0, 1),
             new Vector3f(scale, scale, scale),
             new AxisAngle4f(0, 0, 0, 1)
         );
+    }
+
+    /**
+     * Offset translation so scaling happens around block center instead of a corner.
+     */
+    private Vector3f centeredScaleTranslation(float tx, float ty, float tz, float scale) {
+        float pivotOffset = (1.0f - scale) * 0.5f;
+        return new Vector3f(tx + pivotOffset, ty + pivotOffset, tz + pivotOffset);
+    }
+
+    /**
+     * Rotation-aware pivot: compute translation that keeps the scaled+rotated
+     * block centered at (0.5, 0.5, 0.5) within its unit cell.
+     * LeftRotation rotates the scaled model around (0,0,0), shifting its center;
+     * this compensates so the visual center stays put.
+     */
+    private Vector3f centeredScaleTranslation(float tx, float ty, float tz, float scale, float rotationRadians) {
+        float halfScale = scale * 0.5f;
+        float cosR = (float) Math.cos(rotationRadians);
+        float sinR = (float) Math.sin(rotationRadians);
+        float px = 0.5f - halfScale * (cosR + sinR);
+        float py = 0.5f - halfScale;
+        float pz = 0.5f - halfScale * (cosR - sinR);
+        return new Vector3f(tx + px, ty + py, tz + pz);
     }
 
     // === Display Entity Feature Methods ===
@@ -604,10 +633,12 @@ public class EntityPoolManager {
         int blockLight = Math.max(0, Math.min(15, brightness));
 
         Bukkit.getScheduler().runTask(plugin, () -> {
-            // Set transformation
+            // Set transformation with rotation-aware pivot
+            float rotRad = (float) Math.toRadians(rotationY);
+            Vector3f translation = centeredScaleTranslation(tx, ty, tz, scale, rotRad);
             Transformation transform = new Transformation(
-                new Vector3f(tx, ty, tz),
-                new AxisAngle4f((float) Math.toRadians(rotationY), 0, 1, 0),
+                translation,
+                new AxisAngle4f(rotRad, 0, 1, 0),
                 new Vector3f(scale, scale, scale),
                 new AxisAngle4f(0, 0, 0, 1)
             );

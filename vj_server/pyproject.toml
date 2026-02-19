@@ -11,6 +11,7 @@ dependencies = [
     "websockets>=12.0",
     "numpy>=1.24.0",
     "python-dotenv>=1.0.0",
+    "lupa>=1.14",
 ]
 
 [project.optional-dependencies]

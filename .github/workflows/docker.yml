@@ -5,7 +5,7 @@ on:
     branches: [main]
     tags: ['v*']
     paths:
-      - 'audio_processor/**'
+      - 'vj_server/**'
       - 'python_client/**'
       - 'Dockerfile'
       - 'docker-compose.yml'
@@ -66,4 +66,4 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker build -t audioviz-test .
-          docker run --rm audioviz-test python -c "from audio_processor import vj_server; print('OK')"
+          docker run --rm audioviz-test python -c "from vj_server import vj_server; print('OK')"

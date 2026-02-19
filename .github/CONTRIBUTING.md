@@ -4,7 +4,7 @@ Thanks for your interest in contributing to the Minecraft Audio Visualizer!
 
 ## Prerequisites
 
-- **Python 3.11+** (audio processor, coordinator)
+- **Python 3.11+** (VJ server, coordinator)
 - **Java 21** (Minecraft plugin, Paper API)
 - **Node.js 18+** (site, admin panel, DJ client)
 - **Rust** (DJ client via Tauri)
@@ -13,9 +13,9 @@ Thanks for your interest in contributing to the Minecraft Audio Visualizer!
 ## Local Setup
 
 ```bash
-# Python audio processor
-pip install -e ".[dev]"
-pytest audio_processor/tests/
+# Python VJ server
+cd vj_server && pip install -e ".[dev]"
+pytest vj_server/tests/
 
 # Minecraft plugin
 cd minecraft_plugin && mvn package
@@ -65,7 +65,7 @@ cd dj_client && npm install && npm run tauri dev
 
 ## Testing Requirements
 
-- Python changes: add or update tests in `audio_processor/tests/`
+- Python changes: add or update tests in `vj_server/tests/`
 - Coordinator changes: add or update tests in `coordinator/tests/`
 - Java changes: build must succeed (`mvn package`)
 - Site changes: lint and build must pass

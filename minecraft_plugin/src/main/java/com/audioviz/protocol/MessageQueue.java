@@ -148,6 +148,8 @@ public class MessageQueue {
     private void processTick() {
         // Collect entity updates per zone (supports multi-zone messages)
         Map<String, List<EntityUpdate>> updatesByZone = new java.util.HashMap<>();
+        // Coalesce high-frequency frame messages: keep only newest batch_update per zone.
+        Map<String, JsonObject> latestBatchByZone = new java.util.HashMap<>();
 
         // Process all queued messages
         JsonObject msg;
@@ -158,13 +160,12 @@ public class MessageQueue {
 
             // Handle batch_update specially for performance
             if ("batch_update".equals(type)) {
-                // Extract zone from message, default to "main"
+                // Keep only the latest frame for each zone to avoid replaying stale updates.
                 String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(zoneName, k -> new ArrayList<>());
-                extractEntityUpdates(msg, zoneName, zoneUpdates);
-
-                // Process audio/beat info for beat effects and particle visualization
-                processAudioInfo(msg, zoneName);
+                JsonObject replaced = latestBatchByZone.put(zoneName, msg);
+                if (replaced != null) {
+                    messagesDropped.incrementAndGet();
+                }
             } else {
                 // Process other message types through normal handler
                 try {
@@ -173,6 +174,15 @@ public class MessageQueue {
                     plugin.getLogger().log(Level.WARNING, "Error handling message type: " + type, e);
                 }
             }
+        }
+
+        // Process only the freshest batch_update per zone this tick.
+        for (Map.Entry<String, JsonObject> entry : latestBatchByZone.entrySet()) {
+            String zoneName = entry.getKey();
+            JsonObject batch = entry.getValue();
+            List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(zoneName, k -> new ArrayList<>());
+            extractEntityUpdates(batch, zoneName, zoneUpdates);
+            processAudioInfo(batch, zoneName);
         }
 
         // Also drain the entity update queue (these are from direct enqueue calls)
@@ -229,10 +239,22 @@ public class MessageQueue {
             float rotationY = InputSanitizer.sanitizeRotation(
                 entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0f);
 
+            // Rotation-aware pivot: the block model spans [0,s] after scaling.
+            // LeftRotation rotates the scaled model around (0,0,0), shifting its
+            // center away from (s/2, s/2, s/2). Compute the translation that puts
+            // the rotated center back at (0.5, 0.5, 0.5) within the unit cell.
+            float halfScale = scale * 0.5f;
+            float rotRad = (float) Math.toRadians(rotationY);
+            float cosR = (float) Math.cos(rotRad);
+            float sinR = (float) Math.sin(rotRad);
+            float pivotX = 0.5f - halfScale * (cosR + sinR);
+            float pivotY = 0.5f - halfScale;
+            float pivotZ = 0.5f - halfScale * (cosR - sinR);
+
             // Create transformation with rotation
             Transformation transform = new Transformation(
-                new Vector3f(0, 0, 0),
-                new AxisAngle4f((float) Math.toRadians(rotationY), 0, 1, 0),
+                new Vector3f(pivotX, pivotY, pivotZ),
+                new AxisAngle4f(rotRad, 0, 1, 0),
                 new Vector3f(scale, scale, scale),
                 new AxisAngle4f(0, 0, 0, 1)
             );

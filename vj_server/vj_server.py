@@ -30,9 +30,10 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -47,10 +48,11 @@ except ImportError:
 from python_client.viz_client import VizClient
 from vj_server.config import PRESETS as AUDIO_PRESETS
 from vj_server.patterns import (
-    PATTERNS,
     AudioState,
     PatternConfig,
+    _lua_pattern_exists,
     get_pattern,
+    get_recommended_entity_count,
     list_patterns,
 )
 from vj_server.spectrograph import TerminalSpectrograph
@@ -575,6 +577,11 @@ class VJServer:
         self._active_effects = {}  # Active effects with end times
         self._last_entities = []  # For freeze effect
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
+        # Visual-state shaping for snappier motion with less low-level wobble.
+        self._visual_band_state = [0.0] * 5
+        self._visual_deadzone = 0.03
+        self._visual_gamma = 1.55
+        self._visual_transient_gain = 0.45
 
         # Connection health metrics
         self._dj_connects = 0
@@ -584,11 +591,29 @@ class VJServer:
         self._mc_reconnect_count = 0
         self._health_log_task: Optional[asyncio.Task] = None
         self._last_health_log = time.time()
+        self._last_profile_log = time.monotonic()
 
         # Fallback state (used when no DJ is active)
         self._fallback_bands = [0.0] * 5
         self._fallback_peak = 0.0
         self._last_frame_time = time.time()
+        # Live profiling for end-to-end frame timing.
+        self._live_profile_enabled = True
+        self._live_profile_interval_sec = 10.0
+        self._profile_samples = deque(maxlen=300)
+        self._latest_perf_snapshot: Dict[str, Any] = {
+            "enabled": True,
+            "window_samples": 0,
+            "entities_avg": 0.0,
+            "frame_ms_avg": 0.0,
+            "frame_ms_max": 0.0,
+            "calc_ms_avg": 0.0,
+            "effects_ms_avg": 0.0,
+            "mc_ms_avg": 0.0,
+            "broadcast_ms_avg": 0.0,
+            "sleep_ms_avg": 0.0,
+            "loop_hz_avg": 0.0,
+        }
 
         # DJ banner profiles: dj_id -> banner config dict
         self._dj_banner_profiles: Dict[str, dict] = {}
@@ -676,6 +701,75 @@ class VJServer:
             "current_browsers": browsers_count,
             "mc_connected": self.viz_client is not None and self.viz_client.connected,
         }
+
+    def _update_live_profile(
+        self,
+        frame_ms: float,
+        calc_ms: float,
+        effects_ms: float,
+        mc_ms: float,
+        broadcast_ms: float,
+        sleep_ms: float,
+        entities_count: int,
+    ) -> None:
+        """Track rolling frame timings and emit periodic profiling logs."""
+        if not self._live_profile_enabled:
+            return
+
+        sample = {
+            "frame_ms": float(frame_ms),
+            "calc_ms": float(calc_ms),
+            "effects_ms": float(effects_ms),
+            "mc_ms": float(mc_ms),
+            "broadcast_ms": float(broadcast_ms),
+            "sleep_ms": float(sleep_ms),
+            "entities": float(entities_count),
+        }
+        self._profile_samples.append(sample)
+        n = len(self._profile_samples)
+        if n <= 0:
+            return
+
+        samples = list(self._profile_samples)
+
+        def avg(key: str) -> float:
+            return sum(s[key] for s in samples) / n
+
+        frame_avg = avg("frame_ms")
+        frame_max = max(s["frame_ms"] for s in samples)
+        loop_hz = 1000.0 / frame_avg if frame_avg > 0.0 else 0.0
+        self._latest_perf_snapshot = {
+            "enabled": True,
+            "window_samples": n,
+            "entities_avg": round(avg("entities"), 1),
+            "frame_ms_avg": round(frame_avg, 3),
+            "frame_ms_max": round(frame_max, 3),
+            "calc_ms_avg": round(avg("calc_ms"), 3),
+            "effects_ms_avg": round(avg("effects_ms"), 3),
+            "mc_ms_avg": round(avg("mc_ms"), 3),
+            "broadcast_ms_avg": round(avg("broadcast_ms"), 3),
+            "sleep_ms_avg": round(avg("sleep_ms"), 3),
+            "loop_hz_avg": round(loop_hz, 2),
+        }
+
+        now = time.monotonic()
+        if now - self._last_profile_log >= self._live_profile_interval_sec:
+            p = self._latest_perf_snapshot
+            logger.info(
+                "[PROFILE] n=%s frame=%.2fms(max=%.2f) calc=%.2f effects=%.2f mc=%.2f "
+                "broadcast=%.2f sleep=%.2f hz=%.1f entities=%.1f",
+                p["window_samples"],
+                p["frame_ms_avg"],
+                p["frame_ms_max"],
+                p["calc_ms_avg"],
+                p["effects_ms_avg"],
+                p["mc_ms_avg"],
+                p["broadcast_ms_avg"],
+                p["sleep_ms_avg"],
+                p["loop_hz_avg"],
+                p["entities_avg"],
+            )
+            self._last_profile_log = now
 
     async def _handle_dj_connection(self, websocket):
         """Handle an incoming DJ connection."""
@@ -821,6 +915,73 @@ class VJServer:
                 # They were approved - run the frame handling loop
                 dj = self._djs[dj_id]
 
+                # Perform clock synchronization (same as dj_auth path).
+                # The DJ's heartbeat task may already be running, so we drain
+                # any non-sync messages while waiting for the sync response.
+                try:
+                    t1 = time.time()
+                    await websocket.send(
+                        json.dumps({"type": "clock_sync_request", "server_time": t1})
+                    )
+                    sync_deadline = asyncio.get_event_loop().time() + 5.0
+                    while True:
+                        remaining = sync_deadline - asyncio.get_event_loop().time()
+                        if remaining <= 0:
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: timeout waiting for sync response"
+                            )
+                            break
+                        raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+                        t4 = time.time()
+                        sync_data = json.loads(raw)
+
+                        if sync_data.get("type") != "clock_sync_response":
+                            # Interleaved heartbeat or other message — process and retry
+                            if sync_data.get("type") == "dj_heartbeat":
+                                dj.last_heartbeat = t4
+                            continue
+
+                        t2 = sync_data.get("dj_recv_time", t1)
+                        t3 = sync_data.get("dj_send_time", t4)
+
+                        if (
+                            not isinstance(t2, (int, float))
+                            or not isinstance(t3, (int, float))
+                            or not math.isfinite(t2)
+                            or not math.isfinite(t3)
+                        ):
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: non-finite timestamps, skipping"
+                            )
+                        elif abs(t2 - t1) > 3600 or abs(t3 - t4) > 3600:
+                            logger.warning(
+                                f"[DJ CLOCK SYNC] {dj_name}: timestamps too far, skipping"
+                            )
+                        else:
+                            clock_offset = ((t2 - t1) + (t3 - t4)) / 2
+                            rtt = (t4 - t1) - (t3 - t2)
+                            if rtt < 0 or rtt > 30:
+                                logger.warning(
+                                    f"[DJ CLOCK SYNC] {dj_name}: invalid RTT={rtt * 1000:.1f}ms"
+                                )
+                            else:
+                                dj.clock_offset = clock_offset
+                                dj.clock_sync_done = True
+                                logger.info(
+                                    f"[DJ CLOCK SYNC] {dj_name}: offset={clock_offset * 1000:.1f}ms, RTT={rtt * 1000:.1f}ms"
+                                )
+                        break
+                except asyncio.TimeoutError:
+                    logger.warning(f"[DJ CLOCK SYNC] {dj_name}: timeout waiting for sync response")
+                except Exception as e:
+                    logger.warning(f"[DJ CLOCK SYNC] {dj_name}: sync failed: {e}")
+
+                # Send explicit stream route (same as dj_auth path)
+                try:
+                    await websocket.send(json.dumps(self._build_stream_route_message(dj_id, dj)))
+                except Exception as e:
+                    logger.debug(f"Failed to send stream route to DJ {dj_id}: {e}")
+
                 # Handle incoming frames (same pattern as credentialed DJs)
                 async for message in websocket:
                     try:
@@ -832,12 +993,26 @@ class VJServer:
                         elif frame_type == "dj_heartbeat":
                             now = time.time()
                             dj.last_heartbeat = now
+                            reported_latency_ms = frame_data.get("latency_ms")
                             heartbeat_ts = frame_data.get("ts")
-                            if isinstance(heartbeat_ts, (int, float)) and math.isfinite(
+                            rtt_ms = None
+                            if isinstance(reported_latency_ms, (int, float)) and math.isfinite(
+                                reported_latency_ms
+                            ):
+                                # Prefer client-measured RTT from heartbeat_ack; avoids long-session
+                                # drift from wall-clock skew between DJ and server.
+                                rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
+                            elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(
                                 heartbeat_ts
                             ):
-                                rtt_ms = (now - float(heartbeat_ts)) * 1000.0
-                                rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
+                                # Fallback: estimate from DJ send timestamp corrected by clock offset.
+                                corrected_ts = (
+                                    float(heartbeat_ts) - dj.clock_offset
+                                    if dj.clock_sync_done
+                                    else float(heartbeat_ts)
+                                )
+                                rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
+                            if rtt_ms is not None:
                                 if dj.network_rtt_ms > 0:
                                     dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
                                 else:
@@ -1032,10 +1207,24 @@ class VJServer:
                     elif msg_type == "dj_heartbeat":
                         now = time.time()
                         dj.last_heartbeat = now
+                        reported_latency_ms = data.get("latency_ms")
                         heartbeat_ts = data.get("ts")
-                        if isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
-                            rtt_ms = (now - float(heartbeat_ts)) * 1000.0
-                            rtt_ms = max(0.0, min(rtt_ms, 60_000.0))
+                        rtt_ms = None
+                        if isinstance(reported_latency_ms, (int, float)) and math.isfinite(
+                            reported_latency_ms
+                        ):
+                            # Prefer client-measured RTT from heartbeat_ack; avoids long-session
+                            # drift from wall-clock skew between DJ and server.
+                            rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
+                        elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
+                            # Fallback: estimate from DJ send timestamp corrected by clock offset.
+                            corrected_ts = (
+                                float(heartbeat_ts) - dj.clock_offset
+                                if dj.clock_sync_done
+                                else float(heartbeat_ts)
+                            )
+                            rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
+                        if rtt_ms is not None:
                             if dj.network_rtt_ms > 0:
                                 dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
                             else:
@@ -1200,6 +1389,51 @@ class VJServer:
 
         return is_beat, beat_intensity
 
+    def _enhance_visual_state(
+        self,
+        bands: List[float],
+        peak: float,
+        is_beat: bool,
+        beat_intensity: float,
+        instant_bass: float,
+        instant_kick: bool,
+    ) -> tuple:
+        """Shape audio state for visuals: less wobble, higher contrast, snappier transients."""
+        shaped = [0.0] * 5
+        for i in range(5):
+            src = bands[i] if i < len(bands) else 0.0
+            src = max(0.0, min(1.0, float(src)))
+            prev = self._visual_band_state[i]
+
+            # Gate tiny fluctuations, then apply contrast curve.
+            gated = max(0.0, src - self._visual_deadzone) / (1.0 - self._visual_deadzone)
+            contrasted = gated**self._visual_gamma
+
+            # Emphasize rising edges to reduce mushy wobble.
+            transient = max(0.0, contrasted - prev)
+            enhanced = min(1.0, contrasted + transient * self._visual_transient_gain)
+
+            # Beat punch focused on bass/low-mid for stronger rhythmic definition.
+            beat_punch = max(beat_intensity * 0.12, instant_bass * 0.16)
+            if instant_kick:
+                beat_punch += 0.14
+            if i <= 1 and beat_punch > 0.0:
+                enhanced = min(1.0, enhanced + beat_punch)
+
+            # Fast attack, controlled release: responsive but still smooth.
+            alpha = 0.85 if enhanced > prev else 0.42
+            out = prev + (enhanced - prev) * alpha
+            shaped[i] = out
+            self._visual_band_state[i] = out
+
+        shaped_peak = max(float(peak), max(shaped) * 1.15, instant_bass * 0.75)
+        shaped_peak = max(0.0, min(5.0, shaped_peak))
+        shaped_beat = max(
+            float(beat_intensity), instant_bass * 0.55 + (0.25 if instant_kick else 0.0)
+        )
+        shaped_beat = max(0.0, min(5.0, shaped_beat))
+        return shaped, shaped_peak, shaped_beat
+
     async def _set_active_dj(self, dj_id: str):
         """Set the active DJ."""
         async with self._dj_lock:
@@ -1263,6 +1497,8 @@ class VJServer:
                 "base_scale": self._pattern_config.base_scale,
                 "max_scale": self._pattern_config.max_scale,
             },
+            "pattern_scripts": self._get_pattern_scripts(),
+            "band_sensitivity": list(self._band_sensitivity),
             "relay_fallback": True,
             "reason": "active_direct_dj" if route_mode == "dual" else "standby_or_relay_mode",
         }
@@ -1536,10 +1772,32 @@ class VJServer:
 
                     elif msg_type == "set_pattern":
                         pattern_name = data.get("pattern", "spectrum")
-                        if pattern_name in PATTERNS:
+                        if _lua_pattern_exists(pattern_name):
+                            old_count = self.entity_count
+                            recommended = get_recommended_entity_count(pattern_name, old_count)
+                            if recommended != self.entity_count:
+                                self.entity_count = recommended
+                                self._pattern_config.entity_count = recommended
                             self._pattern_name = pattern_name
                             self._current_pattern = get_pattern(pattern_name, self._pattern_config)
+                            if self.viz_client and self.viz_client.connected:
+                                try:
+                                    await self.viz_client.cleanup_zone(self.zone)
+                                    await self.viz_client.init_pool(
+                                        self.zone, self.entity_count, "SEA_LANTERN"
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Failed to apply recommended entity count for pattern '{pattern_name}': {e}"
+                                    )
                             await self._broadcast_pattern_change()
+                            if old_count != self.entity_count:
+                                await self._broadcast_config_sync_to_djs()
+                                await self._broadcast_config_to_browsers()
+                                await self._broadcast_stream_routes()
+                                logger.info(
+                                    f"Pattern '{pattern_name}' default blocks: {old_count} -> {self.entity_count}"
+                                )
 
                     elif msg_type == "set_active_dj":
                         dj_id = data.get("dj_id")
@@ -1729,6 +1987,13 @@ class VJServer:
                         if 0 <= band < 5:
                             self._band_sensitivity[band] = max(0.0, min(2.0, sensitivity))
                             logger.debug(f"Band {band} sensitivity: {sensitivity}")
+                            # Sync to DJs
+                            await self._broadcast_to_djs(
+                                {
+                                    "type": "band_sensitivity_sync",
+                                    "sensitivity": list(self._band_sensitivity),
+                                }
+                            )
 
                     elif msg_type == "set_audio_setting":
                         # Apply audio settings locally (not forwarded to MC)
@@ -1742,6 +2007,14 @@ class VJServer:
                             elif setting == "beat_threshold":
                                 self._pattern_config.beat_threshold = float(value)
                             logger.debug(f"Audio setting {setting}: {value}")
+                            # Sync to DJs
+                            await self._broadcast_to_djs(
+                                {
+                                    "type": "audio_setting_sync",
+                                    "setting": setting,
+                                    "value": float(value),
+                                }
+                            )
 
                     elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
@@ -1996,6 +2269,9 @@ class VJServer:
                                     logger.info(
                                         f"Entity count synced from zone config: {old_count} -> {new_count}"
                                     )
+                                    # Sync to all DJs and browser clients
+                                    await self._broadcast_config_sync_to_djs()
+                                    await self._broadcast_config_to_browsers()
                                 # Sync scale settings to pattern config
                                 if "base_scale" in config:
                                     self._pattern_config.base_scale = float(config["base_scale"])
@@ -2117,12 +2393,13 @@ class VJServer:
         self._dj_connects += 1
         logger.info(f"[DJ APPROVED] {info['dj_name']} ({dj_id})")
 
-        # Send auth_approved to the DJ
+        # Send auth_success to the DJ (same type as dj_auth path,
+        # so the Rust client handles it via the existing ServerMessage enum)
         try:
             await ws.send(
                 json.dumps(
                     {
-                        "type": "auth_approved",
+                        "type": "auth_success",
                         "dj_id": dj_id,
                         "dj_name": info["dj_name"],
                         "is_active": self._active_dj_id == dj_id,
@@ -2138,7 +2415,7 @@ class VJServer:
                 )
             )
         except Exception as e:
-            logger.warning(f"Failed to send auth_approved to DJ {dj_id}: {e}")
+            logger.warning(f"Failed to send auth_success to DJ {dj_id}: {e}")
 
         # If no active DJ, make this one active
         if self._active_dj_id is None:
@@ -2357,6 +2634,32 @@ class VJServer:
             except Exception:
                 pass
 
+    async def _broadcast_to_djs(self, msg: dict):
+        """Broadcast a message dict to all connected DJs."""
+        message = json.dumps(msg)
+        for dj in list(self._djs.values()):
+            try:
+                await dj.websocket.send(message)
+            except Exception as e:
+                logger.debug(f"Failed to broadcast to DJ {dj.dj_id}: {e}")
+
+    def _get_pattern_scripts(self) -> dict:
+        """Load all Lua pattern scripts for sending to DJs."""
+        scripts = {}
+        patterns_dir = Path(__file__).parent.parent / "patterns"
+        if not patterns_dir.exists():
+            return scripts
+        # Load lib.lua
+        lib_path = patterns_dir / "lib.lua"
+        if lib_path.exists():
+            scripts["lib"] = lib_path.read_text(encoding="utf-8")
+        # Load all pattern files
+        for lua_file in patterns_dir.glob("*.lua"):
+            if lua_file.name != "lib.lua":
+                key = lua_file.stem
+                scripts[key] = lua_file.read_text(encoding="utf-8")
+        return scripts
+
     async def _send_with_timeout(
         self, client, message: str, dead_clients: set, timeout: float = 0.5
     ):
@@ -2385,6 +2688,10 @@ class VJServer:
         """Broadcast visualization state to browser clients."""
         if not self._broadcast_clients:
             return
+        # Browser/admin meters expect normalized amplitude in [0, 1].
+        # Internal pipeline may run amplitude in [0, 5], so normalize here.
+        raw_amplitude = max(0.0, float(peak))
+        norm_amplitude = min(1.0, raw_amplitude if raw_amplitude <= 1.25 else (raw_amplitude / 5.0))
 
         # Get stats from active DJ
         latency_ms = 0.0
@@ -2405,7 +2712,8 @@ class VJServer:
                 "type": "state",
                 "entities": entities,
                 "bands": bands,
-                "amplitude": peak,
+                "amplitude": norm_amplitude,
+                "amplitude_raw": raw_amplitude,
                 "is_beat": is_beat,
                 "beat_intensity": beat_intensity,
                 "instant_bass": instant_bass,  # Bass lane energy (instant, ~1ms latency)
@@ -2422,6 +2730,7 @@ class VJServer:
                     "tempo_confidence": round(tempo_confidence, 3),
                     "beat_phase": round(beat_phase, 3),
                 },
+                "perf": self._latest_perf_snapshot,
             }
         )
 
@@ -2499,11 +2808,11 @@ class VJServer:
         Continuously monitor Minecraft connection and attempt reconnection.
 
         Checks connection every 5 seconds. On disconnect, attempts reconnection
-        with exponential backoff (1.5x multiplier, max 60s). Resets backoff on
+        with exponential backoff (1.5x multiplier, max 10s). Resets backoff on
         successful reconnection.
         """
         check_interval = 5.0  # Check connection every 5 seconds
-        max_backoff = 60.0  # Maximum backoff time in seconds
+        max_backoff = 10.0  # Maximum backoff time in seconds
         backoff_multiplier = 1.5
 
         while self._running:
@@ -2792,12 +3101,21 @@ class VJServer:
 
     async def _main_loop(self):
         """Main visualization loop."""
-        frame_interval = 0.016  # 60 FPS
+        frame_interval = 0.016  # 60 FPS simulation/preview loop
+        mc_frame_interval = 0.05  # 20 TPS-aligned Minecraft update pacing
+        next_mc_send_at = time.monotonic()
+        next_frame_at = time.perf_counter()
         consecutive_errors = 0
         max_consecutive_errors = 50  # After 50 errors in a row, slow down
 
         while self._running:
             try:
+                frame_start = time.perf_counter()
+                calc_ms = 0.0
+                effects_ms = 0.0
+                mc_ms = 0.0
+                broadcast_ms = 0.0
+                entities_count = 0
                 self._frame_count += 1
 
                 # Get audio from active DJ or use fallback
@@ -2834,6 +3152,9 @@ class VJServer:
                 adjusted_bands = [
                     bands[i] * self._band_sensitivity[i] for i in range(min(5, len(bands)))
                 ]
+                visual_bands, visual_peak, visual_beat_intensity = self._enhance_visual_state(
+                    adjusted_bands, peak, is_beat, beat_intensity, instant_bass, instant_kick
+                )
 
                 # Send to Minecraft - skip if active DJ is using direct mode and connected.
                 # In direct mode, the DJ app publishes directly (dual output path).
@@ -2858,22 +3179,39 @@ class VJServer:
                         self._freeze = False
                     del self._active_effects[k]
 
-                # Calculate entities only when needed (MC relay path or active browser previews).
-                need_entities = should_send_to_mc or bool(self._broadcast_clients)
+                # Pace Minecraft sends to a stable 20Hz cadence.
+                now_mono = time.monotonic()
+                should_send_mc_this_frame = False
+                if should_send_to_mc:
+                    if now_mono >= next_mc_send_at:
+                        should_send_mc_this_frame = True
+                        while next_mc_send_at <= now_mono:
+                            next_mc_send_at += mc_frame_interval
+                else:
+                    # Reset cadence when MC relay is inactive (e.g., DJ direct path).
+                    next_mc_send_at = now_mono + mc_frame_interval
+
+                # Calculate entities only when needed (MC send tick or active browser previews).
+                need_entities = should_send_mc_this_frame or bool(self._broadcast_clients)
                 if need_entities:
                     if self._freeze and self._last_entities:
                         entities = self._last_entities
                     elif self._blackout:
                         entities = []
                     else:
+                        calc_start = time.perf_counter()
                         entities = self._calculate_entities(
-                            adjusted_bands, peak, is_beat, beat_intensity
+                            visual_bands, visual_peak, is_beat, visual_beat_intensity
                         )
+                        calc_ms = (time.perf_counter() - calc_start) * 1000.0
                         # Apply timed effects (flash, strobe, pulse, wave, etc.)
-                        entities = self._apply_effects(entities, adjusted_bands)
+                        effects_start = time.perf_counter()
+                        entities = self._apply_effects(entities, visual_bands)
+                        effects_ms = (time.perf_counter() - effects_start) * 1000.0
                         self._last_entities = entities
                 else:
                     entities = []
+                entities_count = len(entities)
 
                 # Update spectrograph
                 if self.spectrograph:
@@ -2897,30 +3235,34 @@ class VJServer:
                         beat_intensity=beat_intensity,
                     )
 
-                if should_send_to_mc:
+                if should_send_mc_this_frame:
+                    mc_start = time.perf_counter()
                     await self._update_minecraft(
                         entities,
-                        bands,
-                        peak,
+                        visual_bands,
+                        visual_peak,
                         is_beat,
-                        beat_intensity,
+                        visual_beat_intensity,
                         bpm=dj.bpm if dj else 0.0,
                         tempo_confidence=tempo_confidence,
                         beat_phase=beat_phase,
                     )
+                    mc_ms = (time.perf_counter() - mc_start) * 1000.0
 
                 # Send to browser clients (always, for preview)
+                broadcast_start = time.perf_counter()
                 await self._broadcast_viz_state(
                     entities,
-                    bands,
-                    peak,
+                    visual_bands,
+                    visual_peak,
                     is_beat,
-                    beat_intensity,
+                    visual_beat_intensity,
                     instant_bass,
                     instant_kick,
                     tempo_confidence,
                     beat_phase,
                 )
+                broadcast_ms = (time.perf_counter() - broadcast_start) * 1000.0
 
                 # Log health summary every 60 seconds
                 current_time = time.time()
@@ -2934,7 +3276,27 @@ class VJServer:
                     self._last_health_log = current_time
 
                 consecutive_errors = 0  # Reset on successful frame
-                await asyncio.sleep(frame_interval)
+                next_frame_at += frame_interval
+                sleep_for = next_frame_at - time.perf_counter()
+                if sleep_for < 0.0:
+                    # If we fell behind, skip sleeping and realign on large stalls.
+                    if sleep_for < -0.25:
+                        next_frame_at = time.perf_counter()
+                    sleep_for = 0.0
+
+                sleep_start = time.perf_counter()
+                await asyncio.sleep(sleep_for)
+                sleep_ms = (time.perf_counter() - sleep_start) * 1000.0
+                frame_ms = (time.perf_counter() - frame_start) * 1000.0
+                self._update_live_profile(
+                    frame_ms=frame_ms,
+                    calc_ms=calc_ms,
+                    effects_ms=effects_ms,
+                    mc_ms=mc_ms,
+                    broadcast_ms=broadcast_ms,
+                    sleep_ms=sleep_ms,
+                    entities_count=entities_count,
+                )
 
             except asyncio.CancelledError:
                 raise  # Let cancellation propagate

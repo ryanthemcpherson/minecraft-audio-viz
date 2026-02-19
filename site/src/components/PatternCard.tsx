@@ -5,7 +5,7 @@ import { Canvas } from "@react-three/fiber";
 import type { RootState } from "@react-three/fiber";
 import * as THREE from "three";
 import PatternScene from "./PatternScene";
-import type { VisualizationPattern } from "@/lib/patterns/base";
+import type { PatternInstance } from "@/lib/patterns";
 
 // ── WebGL context slot manager ──────────────────────────────────
 // Browsers limit active WebGL contexts (~8-16). We use 14 to cover a full
@@ -46,7 +46,7 @@ interface PatternCardProps {
   description: string;
   category: string;
   staticCamera: boolean;
-  createPattern: () => VisualizationPattern;
+  createPattern: () => PatternInstance;
   index: number;
 }
 

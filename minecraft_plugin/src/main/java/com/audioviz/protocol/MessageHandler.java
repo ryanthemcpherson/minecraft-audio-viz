@@ -250,8 +250,9 @@ public class MessageHandler {
                     float scale = InputSanitizer.sanitizeScale(entity.get("scale").getAsFloat());
                     float rotation = InputSanitizer.sanitizeRotation(
                         entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0);
+                    float pivotOffset = (1.0f - scale) * 0.5f;
                     builder.transformation(new Transformation(
-                        new Vector3f(0, 0, 0),
+                        new Vector3f(pivotOffset, pivotOffset, pivotOffset),
                         new AxisAngle4f((float) Math.toRadians(rotation), 0, 1, 0),
                         new Vector3f(scale, scale, scale),
                         new AxisAngle4f(0, 0, 0, 1)

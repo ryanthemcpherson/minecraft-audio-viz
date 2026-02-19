@@ -29,13 +29,13 @@ repos:
     hooks:
       - id: site-eslint
         name: ESLint (site)
-        entry: npx --prefix site eslint
+        entry: npx --prefix site eslint --config site/eslint.config.mjs
         language: system
         files: ^site/src/.*\.(ts|tsx|js|jsx)$
         types: [file]
       - id: site-typecheck
         name: TypeScript (site)
-        entry: npx --prefix site tsc --noEmit
+        entry: npx --prefix site tsc --noEmit -p site/tsconfig.json
         language: system
         files: ^site/src/.*\.(ts|tsx)$
         types: [file]

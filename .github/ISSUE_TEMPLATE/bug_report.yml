@@ -1,0 +1,73 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the sections below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+      placeholder: What happened? What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Start the VJ server with `audioviz-vj`
+        2. Connect a DJ client
+        3. Switch to pattern X
+        4. See error...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the system is affected?
+      options:
+        - DJ Client (Rust/Tauri)
+        - VJ Server (Python)
+        - Minecraft Plugin (Java)
+        - Admin Panel
+        - 3D Browser Preview
+        - Coordinator API
+        - Site (mcav.live)
+        - Worker (Tenant Router)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Relevant version info.
+      placeholder: |
+        - OS: Windows 11
+        - Python: 3.12
+        - Java: 21
+        - Minecraft: Paper 1.21.1
+      render: markdown
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Error Output
+      description: Paste any relevant log output or error messages.
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain the problem.

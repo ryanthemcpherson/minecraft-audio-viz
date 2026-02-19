@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "generate-patterns": "node scripts/generate-patterns.mjs",
+    "prebuild": "node scripts/generate-patterns.mjs",
+    "dev": "node scripts/generate-patterns.mjs && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint ."
@@ -12,17 +14,18 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",
+    "fengari": "^0.1.5",
     "next": "^16.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.182.0"
   },
   "devDependencies": {
-    "@types/three": "^0.182.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "^0.182.0",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
     "tailwindcss": "^4",

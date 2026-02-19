@@ -1,6 +1,7 @@
 //! Message types for VJ server protocol
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// DJ authentication message (traditional credentials)
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +110,9 @@ pub struct HeartbeatMessage {
     pub msg_type: String,
     /// Client timestamp when heartbeat was sent (for RTT calculation)
     pub ts: f64,
+    /// Client-measured RTT from heartbeat_ack (stable across clock skew)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mc_connected: Option<bool>,
 }
@@ -121,6 +125,7 @@ impl HeartbeatMessage {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64(),
+            latency_ms: None,
             mc_connected: None,
         }
     }
@@ -259,6 +264,12 @@ pub enum ServerMessage {
 
     #[serde(rename = "voice_status")]
     VoiceStatus(VoiceStatusMessage),
+
+    #[serde(rename = "band_sensitivity_sync")]
+    BandSensitivitySync(BandSensitivitySyncMessage),
+
+    #[serde(rename = "audio_setting_sync")]
+    AudioSettingSync(AudioSettingSyncMessage),
 }
 
 /// Auth success response
@@ -338,6 +349,19 @@ pub struct EffectTriggeredMessage {
     pub effect: String,
 }
 
+/// Band sensitivity sync from VJ server
+#[derive(Debug, Clone, Deserialize)]
+pub struct BandSensitivitySyncMessage {
+    pub sensitivity: Vec<f32>,
+}
+
+/// Audio setting sync from VJ server
+#[derive(Debug, Clone, Deserialize)]
+pub struct AudioSettingSyncMessage {
+    pub setting: String,
+    pub value: f64,
+}
+
 /// Stream routing policy from VJ server.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamRouteMessage {
@@ -354,6 +378,12 @@ pub struct StreamRouteMessage {
     pub entity_count: Option<u32>,
     #[serde(default)]
     pub pattern_config: Option<PatternConfigInfo>,
+    #[serde(default)]
+    pub current_pattern: Option<String>,
+    #[serde(default)]
+    pub pattern_scripts: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub band_sensitivity: Option<Vec<f32>>,
 }
 
 /// Voice status update from server

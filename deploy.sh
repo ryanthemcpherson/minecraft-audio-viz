@@ -54,13 +54,13 @@ if git diff --name-only "$LOCAL" "$REMOTE" 2>/dev/null | grep -q "^preview_tool/
     restart_http preview "$PROJECT_DIR/preview_tool/frontend" 8080
 fi
 
-# Restart VJ server if audio_processor changed
-if git diff --name-only "$LOCAL" "$REMOTE" 2>/dev/null | grep -q "^audio_processor/" || [ "${1:-}" = "--force" ]; then
+# Restart VJ server if vj_server changed
+if git diff --name-only "$LOCAL" "$REMOTE" 2>/dev/null | grep -q "^vj_server/" || [ "${1:-}" = "--force" ]; then
     echo ">> Restarting VJ server..."
-    pkill -f "audio_processor.vj_server" 2>/dev/null || true
+    pkill -f "audioviz-vj" 2>/dev/null || true
     sleep 2
     source .venv/bin/activate
-    nohup python -m audio_processor.vj_server --host 0.0.0.0 > vj_server.log 2>&1 &
+    nohup audioviz-vj --host 0.0.0.0 > vj_server.log 2>&1 &
     echo ">> VJ server PID: $!"
 fi
 

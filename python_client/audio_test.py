@@ -13,9 +13,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import click
-from viz_client import VizClient
-
 from audio_processor.processor import AudioFrame, AudioProcessor
+from viz_client import VizClient
 
 
 class AudioVisualizer:

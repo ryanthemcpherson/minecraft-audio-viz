@@ -143,6 +143,15 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
 
+class UpdateAccountRequest(BaseModel):
+    display_name: str | None = Field(None, min_length=1, max_length=100)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=200)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 
@@ -170,6 +179,12 @@ class DJProfileResponse(BaseModel):
     bio: str | None
     genres: str | None
     avatar_url: str | None
+    banner_url: str | None
+    color_palette: list[str] | None
+    slug: str | None
+    soundcloud_url: str | None = None
+    spotify_url: str | None = None
+    website_url: str | None = None
     is_public: bool
     created_at: datetime
 
@@ -352,16 +367,131 @@ class JoinOrgResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$")
+HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+SOUNDCLOUD_URL_PATTERN = re.compile(r"^https?://(www\.)?soundcloud\.com/.+")
+SPOTIFY_URL_PATTERN = re.compile(r"^https?://open\.spotify\.com/(artist|user|playlist)/.+")
+WEBSITE_URL_PATTERN = re.compile(r"^https?://.+")
+
+
 class CreateDJProfileRequest(BaseModel):
     dj_name: str = Field(..., min_length=1, max_length=100)
     bio: str | None = Field(None, max_length=500)
     genres: str | None = Field(None, max_length=500)
+    slug: str | None = Field(None, min_length=3, max_length=30)
+    color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+    soundcloud_url: str | None = Field(None, max_length=500)
+    spotify_url: str | None = Field(None, max_length=500)
+    website_url: str | None = Field(None, max_length=500)
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: str | None) -> str | None:
+        if v is not None and not SLUG_PATTERN.match(v):
+            raise ValueError(
+                "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
+                "starting and ending with alphanumeric"
+            )
+        return v
+
+    @field_validator("color_palette")
+    @classmethod
+    def validate_color_palette(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for color in v:
+                if not HEX_COLOR_PATTERN.match(color):
+                    raise ValueError(f"Invalid hex color: {color}")
+        return v
+
+    @field_validator("soundcloud_url")
+    @classmethod
+    def validate_soundcloud_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SOUNDCLOUD_URL_PATTERN.match(v):
+            raise ValueError("Invalid SoundCloud URL")
+        return v
+
+    @field_validator("spotify_url")
+    @classmethod
+    def validate_spotify_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SPOTIFY_URL_PATTERN.match(v):
+            raise ValueError("Invalid Spotify URL")
+        return v
+
+    @field_validator("website_url")
+    @classmethod
+    def validate_website_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not WEBSITE_URL_PATTERN.match(v):
+            raise ValueError("Invalid website URL — must start with http:// or https://")
+        return v
 
 
 class UpdateDJProfileRequest(BaseModel):
     dj_name: str | None = Field(None, min_length=1, max_length=100)
     bio: str | None = Field(None, max_length=500)
     genres: str | None = Field(None, max_length=500)
+    slug: str | None = Field(None, min_length=3, max_length=30)
+    color_palette: list[str] | None = Field(None, min_length=3, max_length=5)
+    avatar_url: str | None = Field(None, max_length=500)
+    banner_url: str | None = Field(None, max_length=500)
+    is_public: bool | None = None
+    soundcloud_url: str | None = Field(None, max_length=500)
+    spotify_url: str | None = Field(None, max_length=500)
+    website_url: str | None = Field(None, max_length=500)
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: str | None) -> str | None:
+        if v is not None and not SLUG_PATTERN.match(v):
+            raise ValueError(
+                "Slug must be 3-30 chars, lowercase alphanumeric + hyphens, "
+                "starting and ending with alphanumeric"
+            )
+        return v
+
+    @field_validator("color_palette")
+    @classmethod
+    def validate_color_palette(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for color in v:
+                if not HEX_COLOR_PATTERN.match(color):
+                    raise ValueError(f"Invalid hex color: {color}")
+        return v
+
+    @field_validator("soundcloud_url")
+    @classmethod
+    def validate_soundcloud_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SOUNDCLOUD_URL_PATTERN.match(v):
+            raise ValueError("Invalid SoundCloud URL")
+        return v
+
+    @field_validator("spotify_url")
+    @classmethod
+    def validate_spotify_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not SPOTIFY_URL_PATTERN.match(v):
+            raise ValueError("Invalid Spotify URL")
+        return v
+
+    @field_validator("website_url")
+    @classmethod
+    def validate_website_url(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not WEBSITE_URL_PATTERN.match(v):
+            raise ValueError("Invalid website URL — must start with http:// or https://")
+        return v
+
+
+class UploadUrlRequest(BaseModel):
+    context: str = Field(..., pattern=r"^(avatar|banner)$")
+    content_type: str = Field(..., pattern=r"^image/(jpeg|png|webp)$")
+
+
+class UploadUrlResponse(BaseModel):
+    upload_url: str
+    public_url: str
+    expires_in: int
+
+
+class SlugCheckResponse(BaseModel):
+    available: bool
 
 
 # ---------------------------------------------------------------------------
@@ -421,3 +551,25 @@ class DJDashboardData(BaseModel):
 class GenericDashboard(BaseModel):
     user_type: str = "generic"
     organizations: list[OrgDashboardSummary]
+
+
+class DJDashboardSection(BaseModel):
+    dj_name: str
+    bio: str | None
+    genres: str | None
+    slug: str | None
+    soundcloud_url: str | None = None
+    spotify_url: str | None = None
+    website_url: str | None = None
+    session_count: int
+    recent_sessions: list[RecentShowSummary]
+
+
+class UnifiedDashboard(BaseModel):
+    user_type: str | None
+    checklist: ServerOwnerChecklist | None
+    organizations: list[OrgDashboardSummary]
+    recent_shows: list[RecentShowSummary]
+    dj: DJDashboardSection | None
+    has_dj_profile: bool
+    has_orgs: bool

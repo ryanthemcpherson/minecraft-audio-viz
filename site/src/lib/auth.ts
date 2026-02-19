@@ -6,7 +6,7 @@
  */
 
 const COORDINATOR_URL =
-  process.env.NEXT_PUBLIC_COORDINATOR_URL || "http://localhost:8090";
+  process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +35,12 @@ export interface DJProfile {
   bio: string | null;
   genres: string | null;
   avatar_url: string | null;
+  banner_url: string | null;
+  color_palette: string[] | null;
+  slug: string | null;
+  soundcloud_url: string | null;
+  spotify_url: string | null;
+  website_url: string | null;
   is_public: boolean;
   created_at: string;
 }
@@ -116,6 +122,28 @@ export type DashboardSummary =
   | TeamMemberDashboard
   | DJDashboardData
   | GenericDashboard;
+
+export interface DJDashboardSection {
+  dj_name: string;
+  bio: string | null;
+  genres: string | null;
+  slug: string | null;
+  soundcloud_url: string | null;
+  spotify_url: string | null;
+  website_url: string | null;
+  session_count: number;
+  recent_sessions: RecentShowSummary[];
+}
+
+export interface UnifiedDashboard {
+  user_type: string | null;
+  checklist: ServerOwnerChecklist | null;
+  organizations: OrgDashboardSummary[];
+  recent_shows: RecentShowSummary[];
+  dj: DJDashboardSection | null;
+  has_dj_profile: boolean;
+  has_orgs: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Org server management types
@@ -311,6 +339,32 @@ export async function logout(refreshTokenValue: string): Promise<void> {
   });
 }
 
+export async function updateAccount(
+  accessToken: string,
+  data: { display_name?: string }
+): Promise<UserProfile> {
+  return api<UserProfile>("/api/v1/auth/me", {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function changePassword(
+  accessToken: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<UserProfile> {
+  return api<UserProfile>("/api/v1/auth/change-password", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Onboarding & org endpoints
 // ---------------------------------------------------------------------------
@@ -370,7 +424,7 @@ export async function createInvite(
 
 export async function createDJProfile(
   accessToken: string,
-  data: { dj_name: string; bio?: string; genres?: string }
+  data: { dj_name: string; bio?: string; genres?: string; slug?: string; color_palette?: string[]; soundcloud_url?: string; spotify_url?: string; website_url?: string }
 ): Promise<DJProfile> {
   return api<DJProfile>("/api/v1/dj/profile", {
     method: "POST",
@@ -379,10 +433,63 @@ export async function createDJProfile(
   });
 }
 
+export async function updateDJProfile(
+  accessToken: string,
+  data: {
+    dj_name?: string;
+    bio?: string;
+    genres?: string;
+    slug?: string;
+    color_palette?: string[];
+    avatar_url?: string;
+    banner_url?: string;
+    is_public?: boolean;
+    soundcloud_url?: string;
+    spotify_url?: string;
+    website_url?: string;
+  }
+): Promise<DJProfile> {
+  return api<DJProfile>("/api/v1/dj/profile", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function checkSlugAvailability(
+  slug: string
+): Promise<{ available: boolean }> {
+  return api<{ available: boolean }>(`/api/v1/dj/slug-check/${slug}`);
+}
+
+export async function getPresignedUploadUrl(
+  accessToken: string,
+  context: "avatar" | "banner",
+  contentType: string
+): Promise<{ upload_url: string; public_url: string; expires_in: number }> {
+  return api("/api/v1/uploads/presigned-url", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ context, content_type: contentType }),
+  });
+}
+
+export async function getDJProfileBySlug(slug: string): Promise<DJProfile> {
+  return api<DJProfile>(`/api/v1/dj/by-slug/${slug}`);
+}
+
 export async function fetchDashboardSummary(
   accessToken: string
 ): Promise<DashboardSummary> {
   return api<DashboardSummary>("/api/v1/dashboard/summary", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function fetchUnifiedDashboard(
+  accessToken: string
+): Promise<UnifiedDashboard> {
+  return api<UnifiedDashboard>("/api/v1/dashboard/unified", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 }

@@ -65,6 +65,10 @@ public class VizWebSocketServer extends WebSocketServer {
         this.clients = new ConcurrentHashMap<>();
         this.lastPongTime = new ConcurrentHashMap<>();
 
+        // Allow rebinding the port immediately after a server restart
+        // (prevents "Address already in use" from zombie/lingering sockets)
+        setReuseAddr(true);
+
         // Set connection timeout
         setConnectionLostTimeout(30);
 

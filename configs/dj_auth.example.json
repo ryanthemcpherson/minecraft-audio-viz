@@ -18,5 +18,5 @@
       "permissions": ["control", "kick_dj", "pattern", "crossfade"]
     }
   },
-  "_comment": "Copy to configs/dj_auth.json and generate real hashes with: python -m audio_processor.auth hash \"your_password\""
+  "_comment": "Copy to configs/dj_auth.json and generate real hashes with: python -m vj_server.auth hash \"your_password\""
 }

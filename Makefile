@@ -32,16 +32,16 @@ dev-install: ## Install Python package with dev dependencies
 	pip install -e ".[dev]"
 
 test: ## Run Python tests
-	pytest audio_processor/tests/ -v --tb=short
+	pytest vj_server/tests/ -v --tb=short
 
 lint: ## Run ruff linter
-	ruff check audio_processor/ python_client/
+	ruff check vj_server/ python_client/
 
 format: ## Auto-format Python code with ruff
-	ruff format audio_processor/ python_client/
+	ruff format vj_server/ python_client/
 
 format-check: ## Check Python formatting without changes
-	ruff format --check audio_processor/ python_client/
+	ruff format --check vj_server/ python_client/
 
 # ---------------------------------------------------------------------------
 # Java (Minecraft Plugin)

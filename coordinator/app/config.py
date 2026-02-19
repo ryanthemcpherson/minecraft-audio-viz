@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     rate_limit_register_per_hour: int = 5
     rate_limit_auth_per_minute: int = 20
 
+    # R2 Storage (Cloudflare R2, S3-compatible)
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = ""
+    r2_public_url: str = ""
+
     # CORS
     cors_origins: list[str] = ["https://mcav.live", "http://localhost:3000"]
 

@@ -1,6 +1,6 @@
 python:
   - changed-files:
-    - any-glob-to-any-file: ['audio_processor/**', 'python_client/**', 'pyproject.toml']
+    - any-glob-to-any-file: ['vj_server/**', 'python_client/**', 'pyproject.toml']
 
 java:
   - changed-files:
