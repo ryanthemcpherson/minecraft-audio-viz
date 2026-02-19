@@ -10,7 +10,7 @@ import path from "path";
 import fs from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const outfile = path.resolve(__dirname, "../src/lib/patterns/fengari-browser.js");
+const outfile = path.resolve(__dirname, "../public/fengari-browser.js");
 
 /** Plugin that stubs Node.js modules fengari tries to require */
 const nodeStubPlugin = {
@@ -65,7 +65,8 @@ const forceBrowserPlugin = {
 await build({
   entryPoints: [path.resolve(__dirname, "fengari-entry.mjs")],
   bundle: true,
-  format: "esm",
+  format: "iife",
+  globalName: "__fengari",
   outfile,
   platform: "browser",
   target: "es2020",

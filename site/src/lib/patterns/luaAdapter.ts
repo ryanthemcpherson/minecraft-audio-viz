@@ -2,26 +2,73 @@
  * Lua Pattern Adapter
  * Executes Lua pattern scripts in the browser via fengari.
  *
- * Uses a pre-bundled fengari-browser.js (built by scripts/bundle-fengari.mjs)
- * that stubs all Node.js dependencies, making it safe for Turbopack/browser.
+ * Fengari is loaded as an IIFE from public/fengari-browser.js (built by
+ * scripts/bundle-fengari.mjs). This bypasses Turbopack's module transformation
+ * which mangles fengari's internal Lua compiler state.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { EntityData, AudioState, PatternConfig } from "./base";
 import { DEFAULT_CONFIG } from "./base";
-import {
-  lua, lauxlib, to_luastring,
-  luaopen_base, luaopen_math, luaopen_string,
-  luaopen_table, luaopen_coroutine, luaopen_utf8,
-} from "./fengari-browser.js";
 
-const luaL_requiref: any = lauxlib.luaL_requiref;
+// --- Fengari globals (populated by script load) ---
+let lua: any = null;
+let lauxlib: any = null;
+let to_luastring: (s: string) => Uint8Array;
+let luaopen_base: any = null;
+let luaopen_math: any = null;
+let luaopen_string: any = null;
+let luaopen_table: any = null;
+let luaopen_coroutine: any = null;
+let luaopen_utf8: any = null;
+let luaL_requiref: any = null;
 
-const fengariReady = true;
+let fengariReady = false;
+let loadPromise: Promise<void> | null = null;
+
+function bindGlobals(): void {
+  const f = (window as any).__fengari;
+  if (!f) throw new Error("__fengari global not found after script load");
+  lua = f.lua;
+  lauxlib = f.lauxlib;
+  to_luastring = f.to_luastring;
+  luaopen_base = f.luaopen_base;
+  luaopen_math = f.luaopen_math;
+  luaopen_string = f.luaopen_string;
+  luaopen_table = f.luaopen_table;
+  luaopen_coroutine = f.luaopen_coroutine;
+  luaopen_utf8 = f.luaopen_utf8;
+  luaL_requiref = lauxlib.luaL_requiref;
+  fengariReady = true;
+}
 
 export function ensureFengari(): Promise<void> {
-  return Promise.resolve();
+  if (fengariReady) return Promise.resolve();
+  if (loadPromise) return loadPromise;
+
+  // Already loaded by another script tag (e.g. test harness)
+  if (typeof window !== "undefined" && (window as any).__fengari) {
+    bindGlobals();
+    return Promise.resolve();
+  }
+
+  loadPromise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/fengari-browser.js";
+    script.onload = () => {
+      try {
+        bindGlobals();
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    };
+    script.onerror = () => reject(new Error("Failed to load fengari-browser.js"));
+    document.head.appendChild(script);
+  });
+
+  return loadPromise;
 }
 
 export function isFengariReady(): boolean {
