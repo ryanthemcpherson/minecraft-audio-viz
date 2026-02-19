@@ -4,6 +4,8 @@ import { useRef, useMemo, useEffect, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
+import { getVizBlockTexture } from "@/lib/blockTextures";
+import MinecraftStage from "./MinecraftStage";
 
 // --- Constants ---
 const BLOCKS_PER_RING = [48, 36, 24];
@@ -58,6 +60,8 @@ function BlockRing({
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const prevHeights = useRef<Float32Array>(new Float32Array(count));
+
+  const vizTex = useMemo(() => getVizBlockTexture(), []);
 
   // Pre-compute static angles
   const angles = useMemo(() => {
@@ -130,11 +134,12 @@ function BlockRing({
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
       <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
       <meshStandardMaterial
+        map={vizTex}
         toneMapped={false}
         transparent
         opacity={0.85}
-        roughness={0.3}
-        metalness={0.3}
+        roughness={0.5}
+        metalness={0.1}
       />
     </instancedMesh>
   );
@@ -150,6 +155,7 @@ const GRID_BLOCK = 0.14;
 function EqualizerGrid() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const prevHeights = useRef<Float32Array>(new Float32Array(GRID_TOTAL));
+  const vizTex = useMemo(() => getVizBlockTexture(), []);
 
   const colorArray = useMemo(() => {
     const colors = new Float32Array(GRID_TOTAL * 3);
@@ -222,11 +228,12 @@ function EqualizerGrid() {
     <instancedMesh ref={meshRef} args={[undefined, undefined, GRID_TOTAL]}>
       <boxGeometry args={[GRID_BLOCK, GRID_BLOCK, GRID_BLOCK]} />
       <meshStandardMaterial
+        map={vizTex}
         toneMapped={false}
         transparent
         opacity={0.7}
-        roughness={0.4}
-        metalness={0.3}
+        roughness={0.5}
+        metalness={0.1}
       />
     </instancedMesh>
   );
@@ -253,6 +260,7 @@ function Scene() {
         />
       ))}
       <EqualizerGrid />
+      <MinecraftStage size={11} layers={3} yOffset={-3.0} />
     </group>
   );
 }

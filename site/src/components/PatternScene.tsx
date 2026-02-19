@@ -1,11 +1,13 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { EntityData } from "@/lib/patterns/base";
 import type { PatternInstance } from "@/lib/patterns";
 import { generateAudioState } from "@/lib/audioSim";
+import { getVizBlockTexture } from "@/lib/blockTextures";
+import MinecraftStage from "./MinecraftStage";
 
 const BLOCK_SIZE = 0.22;
 const TEMP_OBJECT = new THREE.Object3D();
@@ -33,6 +35,7 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
   const prevPositions = useRef<Float32Array | null>(null);
   const smoothCenter = useRef({ x: 0.5, y: 0.35, z: 0.5 });
   const frameCount = useRef(0);
+  const vizTexture = useMemo(() => getVizBlockTexture(), []);
 
   // Pre-allocate position tracking
   useEffect(() => {
@@ -126,7 +129,7 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
 
         // Color by band
         const bandColor = BAND_COLORS[Math.min(e.band, 4)];
-        const brightness = 0.6 + e.scale * 2.5;
+        const brightness = 0.8 + e.scale * 3.5;
         TEMP_COLOR.copy(bandColor).multiplyScalar(brightness);
         mesh.setColorAt(i, TEMP_COLOR);
       } else {
@@ -162,13 +165,13 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
         <instancedMesh ref={meshRef} args={[undefined, undefined, maxCount]}>
           <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
           <meshStandardMaterial
+            map={vizTexture}
             toneMapped={false}
-            transparent
-            opacity={0.9}
-            roughness={0.15}
-            metalness={0.4}
+            roughness={0.5}
+            metalness={0.1}
           />
         </instancedMesh>
+        <MinecraftStage size={5} layers={2} yOffset={-1.8} />
       </group>
     </>
   );
