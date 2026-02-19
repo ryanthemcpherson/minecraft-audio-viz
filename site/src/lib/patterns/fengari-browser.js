@@ -1,7 +1,28 @@
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // node_modules/fengari/src/luaconf.js
 var require_luaconf = __commonJS({
@@ -11,7 +32,7 @@ var require_luaconf = __commonJS({
     var {
       LUA_VERSION_MAJOR,
       LUA_VERSION_MINOR,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var LUA_PATH_SEP = ";";
     module.exports.LUA_PATH_SEP = LUA_PATH_SEP;
@@ -28,11 +49,11 @@ var require_luaconf = __commonJS({
       module.exports.LUA_LDIR = LUA_LDIR;
       const LUA_JSDIR = LUA_LDIR;
       module.exports.LUA_JSDIR = LUA_JSDIR;
-      const LUA_PATH_DEFAULT = to_luastring(
+      const LUA_PATH_DEFAULT = to_luastring2(
         LUA_LDIR + "?.lua;" + LUA_LDIR + "?/init.lua;./?.lua;./?/init.lua"
       );
       module.exports.LUA_PATH_DEFAULT = LUA_PATH_DEFAULT;
-      const LUA_JSPATH_DEFAULT = to_luastring(
+      const LUA_JSPATH_DEFAULT = to_luastring2(
         LUA_JSDIR + "?.js;" + LUA_JSDIR + "loadall.js;./?.js"
       );
       module.exports.LUA_JSPATH_DEFAULT = LUA_JSPATH_DEFAULT;
@@ -45,11 +66,11 @@ var require_luaconf = __commonJS({
       module.exports.LUA_JSDIR = LUA_JSDIR;
       const LUA_SHRDIR = "!\\..\\share\\lua\\" + LUA_VDIR + "\\";
       module.exports.LUA_SHRDIR = LUA_SHRDIR;
-      const LUA_PATH_DEFAULT = to_luastring(
+      const LUA_PATH_DEFAULT = to_luastring2(
         LUA_LDIR + "?.lua;" + LUA_LDIR + "?\\init.lua;" + LUA_JSDIR + "?.lua;" + LUA_JSDIR + "?\\init.lua;" + LUA_SHRDIR + "?.lua;" + LUA_SHRDIR + "?\\init.lua;.\\?.lua;.\\?\\init.lua"
       );
       module.exports.LUA_PATH_DEFAULT = LUA_PATH_DEFAULT;
-      const LUA_JSPATH_DEFAULT = to_luastring(
+      const LUA_JSPATH_DEFAULT = to_luastring2(
         LUA_JSDIR + "?.js;" + LUA_JSDIR + "..\\share\\lua\\" + LUA_VDIR + "\\?.js;" + LUA_JSDIR + "loadall.js;.\\?.js"
       );
       module.exports.LUA_JSPATH_DEFAULT = LUA_JSPATH_DEFAULT;
@@ -65,11 +86,11 @@ var require_luaconf = __commonJS({
       const LUA_JSDIR = LUA_LDIR;
       module.exports.LUA_JSDIR = LUA_JSDIR;
       const LUA_JSDIR2 = LUA_LDIR2;
-      const LUA_PATH_DEFAULT = to_luastring(
+      const LUA_PATH_DEFAULT = to_luastring2(
         LUA_LDIR + "?.lua;" + LUA_LDIR + "?/init.lua;" + LUA_LDIR2 + "?.lua;" + LUA_LDIR2 + "?/init.lua;./?.lua;./?/init.lua"
       );
       module.exports.LUA_PATH_DEFAULT = LUA_PATH_DEFAULT;
-      const LUA_JSPATH_DEFAULT = to_luastring(
+      const LUA_JSPATH_DEFAULT = to_luastring2(
         LUA_JSDIR + "?.js;" + LUA_JSDIR + "loadall.js;" + LUA_JSDIR2 + "?.js;" + LUA_JSDIR2 + "loadall.js;./?.js"
       );
       module.exports.LUA_JSPATH_DEFAULT = LUA_JSPATH_DEFAULT;
@@ -290,7 +311,7 @@ var require_defs = __commonJS({
       return s;
     };
     var to_luastring_cache = {};
-    var to_luastring = function(str, cache) {
+    var to_luastring2 = function(str, cache) {
       if (typeof str !== "string") throw new TypeError("to_luastring expects a javascript string");
       if (cache) {
         let cached = to_luastring_cache[str];
@@ -333,7 +354,7 @@ var require_defs = __commonJS({
     var from_userstring = function(str) {
       if (!is_luastring(str)) {
         if (typeof str === "string") {
-          str = to_luastring(str);
+          str = to_luastring2(str);
         } else {
           throw new TypeError("expects an array of bytes or javascript string");
         }
@@ -347,9 +368,9 @@ var require_defs = __commonJS({
     module.exports.luastring_eq = luastring_eq;
     module.exports.to_jsstring = to_jsstring;
     module.exports.to_uristring = to_uristring;
-    module.exports.to_luastring = to_luastring;
+    module.exports.to_luastring = to_luastring2;
     module.exports.from_userstring = from_userstring;
-    var LUA_SIGNATURE = to_luastring("\x1BLua");
+    var LUA_SIGNATURE = to_luastring2("\x1BLua");
     var LUA_VERSION_MAJOR = "5";
     var LUA_VERSION_MINOR = "3";
     var LUA_VERSION_NUM = 503;
@@ -871,7 +892,7 @@ var require_lstring = __commonJS({
       is_luastring,
       luastring_eq,
       luastring_from,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var { lua_assert } = require_llimits();
     var TString = class {
@@ -914,7 +935,7 @@ var require_lstring = __commonJS({
       return luaS_bless(L, luastring_from(str));
     };
     var luaS_newliteral = function(L, str) {
-      return luaS_bless(L, to_luastring(str));
+      return luaS_bless(L, to_luastring2(str));
     };
     module.exports.luaS_eqlngstr = luaS_eqlngstr;
     module.exports.luaS_hash = luaS_hash;
@@ -946,7 +967,7 @@ var require_ltable = __commonJS({
         LUA_TTHREAD,
         LUA_TUSERDATA
       },
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var {
       LUA_MAXINTEGER
@@ -971,10 +992,10 @@ var require_ltable = __commonJS({
     var table_hash = function(L, key) {
       switch (key.type) {
         case LUA_TNIL:
-          return ldebug.luaG_runerror(L, to_luastring("table index is nil", true));
+          return ldebug.luaG_runerror(L, to_luastring2("table index is nil", true));
         case LUA_TNUMFLT:
           if (isNaN(key.value))
-            return ldebug.luaG_runerror(L, to_luastring("table index is NaN", true));
+            return ldebug.luaG_runerror(L, to_luastring2("table index is NaN", true));
         /* fall through */
         case LUA_TNUMINT:
         /* takes advantage of floats and integers being same in JS */
@@ -1163,7 +1184,7 @@ var require_ltable = __commonJS({
         } else {
           entry = table.dead_weak && table.dead_weak.get(hash) || table.dead_strong.get(hash);
           if (!entry)
-            return ldebug.luaG_runerror(L, to_luastring("invalid key to 'next'"));
+            return ldebug.luaG_runerror(L, to_luastring2("invalid key to 'next'"));
           do {
             entry = entry.n;
             if (!entry)
@@ -1608,7 +1629,7 @@ var require_lvm = __commonJS({
         LUA_TTABLE,
         LUA_TUSERDATA
       },
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var {
       INDEXK,
@@ -2165,13 +2186,13 @@ var require_lvm = __commonJS({
               } else {
                 let nlimit, nstep, ninit;
                 if ((nlimit = tonumber(plimit)) === false)
-                  ldebug.luaG_runerror(L, to_luastring("'for' limit must be a number", true));
+                  ldebug.luaG_runerror(L, to_luastring2("'for' limit must be a number", true));
                 L.stack[ra + 1].setfltvalue(nlimit);
                 if ((nstep = tonumber(pstep)) === false)
-                  ldebug.luaG_runerror(L, to_luastring("'for' step must be a number", true));
+                  ldebug.luaG_runerror(L, to_luastring2("'for' step must be a number", true));
                 L.stack[ra + 2].setfltvalue(nstep);
                 if ((ninit = tonumber(init)) === false)
-                  ldebug.luaG_runerror(L, to_luastring("'for' initial value must be a number", true));
+                  ldebug.luaG_runerror(L, to_luastring2("'for' initial value must be a number", true));
                 L.stack[ra].setfltvalue(ninit - nstep);
               }
               ci.l_savedpc += i.sBx;
@@ -2413,7 +2434,7 @@ var require_lvm = __commonJS({
         default: {
           tm = ltm.luaT_gettmbyobj(L, rb, ltm.TMS.TM_LEN);
           if (tm.ttisnil())
-            ldebug.luaG_typeerror(L, rb, to_luastring("get length of", true));
+            ldebug.luaG_typeerror(L, rb, to_luastring2("get length of", true));
           break;
         }
       }
@@ -2428,12 +2449,12 @@ var require_lvm = __commonJS({
     };
     var luaV_div = function(L, m, n) {
       if (n === 0)
-        ldebug.luaG_runerror(L, to_luastring("attempt to divide by zero"));
+        ldebug.luaG_runerror(L, to_luastring2("attempt to divide by zero"));
       return Math.floor(m / n) | 0;
     };
     var luaV_mod = function(L, m, n) {
       if (n === 0)
-        ldebug.luaG_runerror(L, to_luastring("attempt to perform 'n%%0'"));
+        ldebug.luaG_runerror(L, to_luastring2("attempt to perform 'n%%0'"));
       return m - Math.floor(m / n) * n | 0;
     };
     var NBITS = 32;
@@ -2535,7 +2556,7 @@ var require_lvm = __commonJS({
         if (!t.ttistable()) {
           tm = ltm.luaT_gettmbyobj(L, t, ltm.TMS.TM_INDEX);
           if (tm.ttisnil())
-            ldebug.luaG_typeerror(L, t, to_luastring("index", true));
+            ldebug.luaG_typeerror(L, t, to_luastring2("index", true));
         } else {
           let slot = ltable.luaH_get(L, t.value, key);
           if (!slot.ttisnil()) {
@@ -2555,7 +2576,7 @@ var require_lvm = __commonJS({
         }
         t = tm;
       }
-      ldebug.luaG_runerror(L, to_luastring("'__index' chain too long; possible loop", true));
+      ldebug.luaG_runerror(L, to_luastring2("'__index' chain too long; possible loop", true));
     };
     var settable = function(L, t, key, val) {
       for (let loop = 0; loop < MAXTAGLOOP; loop++) {
@@ -2570,7 +2591,7 @@ var require_lvm = __commonJS({
           }
         } else {
           if ((tm = ltm.luaT_gettmbyobj(L, t, ltm.TMS.TM_NEWINDEX)).ttisnil())
-            ldebug.luaG_typeerror(L, t, to_luastring("index", true));
+            ldebug.luaG_typeerror(L, t, to_luastring2("index", true));
         }
         if (tm.ttisfunction()) {
           ltm.luaT_callTM(L, tm, t, key, val, 0);
@@ -2578,7 +2599,7 @@ var require_lvm = __commonJS({
         }
         t = tm;
       }
-      ldebug.luaG_runerror(L, to_luastring("'__newindex' chain too long; possible loop", true));
+      ldebug.luaG_runerror(L, to_luastring2("'__newindex' chain too long; possible loop", true));
     };
     module.exports.cvt2str = cvt2str;
     module.exports.cvt2num = cvt2num;
@@ -2611,7 +2632,7 @@ var require_ltm = __commonJS({
         LUA_TTABLE,
         LUA_TUSERDATA
       },
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var { lua_assert } = require_llimits();
     var lobject = require_lobject();
@@ -2637,7 +2658,7 @@ var require_ltm = __commonJS({
       "thread",
       "proto"
       /* this last case is used for tests only */
-    ].map((e) => to_luastring(e));
+    ].map((e) => to_luastring2(e));
     var ttypename = function(t) {
       return luaT_typenames_[t + 1];
     };
@@ -2671,32 +2692,32 @@ var require_ltm = __commonJS({
       /* number of elements in the enum */
     };
     var luaT_init = function(L) {
-      L.l_G.tmname[TMS.TM_INDEX] = new luaS_new(L, to_luastring("__index", true));
-      L.l_G.tmname[TMS.TM_NEWINDEX] = new luaS_new(L, to_luastring("__newindex", true));
-      L.l_G.tmname[TMS.TM_GC] = new luaS_new(L, to_luastring("__gc", true));
-      L.l_G.tmname[TMS.TM_MODE] = new luaS_new(L, to_luastring("__mode", true));
-      L.l_G.tmname[TMS.TM_LEN] = new luaS_new(L, to_luastring("__len", true));
-      L.l_G.tmname[TMS.TM_EQ] = new luaS_new(L, to_luastring("__eq", true));
-      L.l_G.tmname[TMS.TM_ADD] = new luaS_new(L, to_luastring("__add", true));
-      L.l_G.tmname[TMS.TM_SUB] = new luaS_new(L, to_luastring("__sub", true));
-      L.l_G.tmname[TMS.TM_MUL] = new luaS_new(L, to_luastring("__mul", true));
-      L.l_G.tmname[TMS.TM_MOD] = new luaS_new(L, to_luastring("__mod", true));
-      L.l_G.tmname[TMS.TM_POW] = new luaS_new(L, to_luastring("__pow", true));
-      L.l_G.tmname[TMS.TM_DIV] = new luaS_new(L, to_luastring("__div", true));
-      L.l_G.tmname[TMS.TM_IDIV] = new luaS_new(L, to_luastring("__idiv", true));
-      L.l_G.tmname[TMS.TM_BAND] = new luaS_new(L, to_luastring("__band", true));
-      L.l_G.tmname[TMS.TM_BOR] = new luaS_new(L, to_luastring("__bor", true));
-      L.l_G.tmname[TMS.TM_BXOR] = new luaS_new(L, to_luastring("__bxor", true));
-      L.l_G.tmname[TMS.TM_SHL] = new luaS_new(L, to_luastring("__shl", true));
-      L.l_G.tmname[TMS.TM_SHR] = new luaS_new(L, to_luastring("__shr", true));
-      L.l_G.tmname[TMS.TM_UNM] = new luaS_new(L, to_luastring("__unm", true));
-      L.l_G.tmname[TMS.TM_BNOT] = new luaS_new(L, to_luastring("__bnot", true));
-      L.l_G.tmname[TMS.TM_LT] = new luaS_new(L, to_luastring("__lt", true));
-      L.l_G.tmname[TMS.TM_LE] = new luaS_new(L, to_luastring("__le", true));
-      L.l_G.tmname[TMS.TM_CONCAT] = new luaS_new(L, to_luastring("__concat", true));
-      L.l_G.tmname[TMS.TM_CALL] = new luaS_new(L, to_luastring("__call", true));
+      L.l_G.tmname[TMS.TM_INDEX] = new luaS_new(L, to_luastring2("__index", true));
+      L.l_G.tmname[TMS.TM_NEWINDEX] = new luaS_new(L, to_luastring2("__newindex", true));
+      L.l_G.tmname[TMS.TM_GC] = new luaS_new(L, to_luastring2("__gc", true));
+      L.l_G.tmname[TMS.TM_MODE] = new luaS_new(L, to_luastring2("__mode", true));
+      L.l_G.tmname[TMS.TM_LEN] = new luaS_new(L, to_luastring2("__len", true));
+      L.l_G.tmname[TMS.TM_EQ] = new luaS_new(L, to_luastring2("__eq", true));
+      L.l_G.tmname[TMS.TM_ADD] = new luaS_new(L, to_luastring2("__add", true));
+      L.l_G.tmname[TMS.TM_SUB] = new luaS_new(L, to_luastring2("__sub", true));
+      L.l_G.tmname[TMS.TM_MUL] = new luaS_new(L, to_luastring2("__mul", true));
+      L.l_G.tmname[TMS.TM_MOD] = new luaS_new(L, to_luastring2("__mod", true));
+      L.l_G.tmname[TMS.TM_POW] = new luaS_new(L, to_luastring2("__pow", true));
+      L.l_G.tmname[TMS.TM_DIV] = new luaS_new(L, to_luastring2("__div", true));
+      L.l_G.tmname[TMS.TM_IDIV] = new luaS_new(L, to_luastring2("__idiv", true));
+      L.l_G.tmname[TMS.TM_BAND] = new luaS_new(L, to_luastring2("__band", true));
+      L.l_G.tmname[TMS.TM_BOR] = new luaS_new(L, to_luastring2("__bor", true));
+      L.l_G.tmname[TMS.TM_BXOR] = new luaS_new(L, to_luastring2("__bxor", true));
+      L.l_G.tmname[TMS.TM_SHL] = new luaS_new(L, to_luastring2("__shl", true));
+      L.l_G.tmname[TMS.TM_SHR] = new luaS_new(L, to_luastring2("__shr", true));
+      L.l_G.tmname[TMS.TM_UNM] = new luaS_new(L, to_luastring2("__unm", true));
+      L.l_G.tmname[TMS.TM_BNOT] = new luaS_new(L, to_luastring2("__bnot", true));
+      L.l_G.tmname[TMS.TM_LT] = new luaS_new(L, to_luastring2("__lt", true));
+      L.l_G.tmname[TMS.TM_LE] = new luaS_new(L, to_luastring2("__le", true));
+      L.l_G.tmname[TMS.TM_CONCAT] = new luaS_new(L, to_luastring2("__concat", true));
+      L.l_G.tmname[TMS.TM_CALL] = new luaS_new(L, to_luastring2("__call", true));
     };
-    var __name = to_luastring("__name", true);
+    var __name = to_luastring2("__name", true);
     var luaT_objtypename = function(L, o) {
       let mt;
       if (o.ttistable() && (mt = o.value.metatable) !== null || o.ttisfulluserdata() && (mt = o.value.metatable) !== null) {
@@ -2747,10 +2768,10 @@ var require_ltm = __commonJS({
             if (n1 !== false && n2 !== false)
               return ldebug.luaG_tointerror(L, p1, p2);
             else
-              return ldebug.luaG_opinterror(L, p1, p2, to_luastring("perform bitwise operation on", true));
+              return ldebug.luaG_opinterror(L, p1, p2, to_luastring2("perform bitwise operation on", true));
           }
           default:
-            return ldebug.luaG_opinterror(L, p1, p2, to_luastring("perform arithmetic on", true));
+            return ldebug.luaG_opinterror(L, p1, p2, to_luastring2("perform arithmetic on", true));
         }
       }
     };
@@ -3012,7 +3033,7 @@ var require_lobject = __commonJS({
       luastring_indexOf,
       luastring_of,
       to_jsstring,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var {
       lisdigit,
@@ -3250,9 +3271,9 @@ var require_lobject = __commonJS({
         this.endpc = NaN;
       }
     };
-    var RETS = to_luastring("...");
-    var PRE = to_luastring('[string "');
-    var POS = to_luastring('"]');
+    var RETS = to_luastring2("...");
+    var PRE = to_luastring2('[string "');
+    var POS = to_luastring2('"]');
     var luaO_chunkid = function(source, bufflen) {
       let l = source.length;
       let out;
@@ -3471,13 +3492,13 @@ var require_lobject = __commonJS({
     var luaO_tostring = function(L, obj) {
       let buff;
       if (obj.ttisinteger())
-        buff = to_luastring(lua_integer2str(obj.value));
+        buff = to_luastring2(lua_integer2str(obj.value));
       else {
         let str = lua_number2str(obj.value);
         if (!LUA_COMPAT_FLOATSTRING && /^[-0123456789]+$/.test(str)) {
           str += ".0";
         }
-        buff = to_luastring(str);
+        buff = to_luastring2(str);
       }
       obj.setsvalue(luaS_bless(L, buff));
     };
@@ -3497,7 +3518,7 @@ var require_lobject = __commonJS({
         switch (fmt[e + 1]) {
           case 115: {
             let s = argp[a++];
-            if (s === null) s = to_luastring("(null)", true);
+            if (s === null) s = to_luastring2("(null)", true);
             else {
               s = from_userstring(s);
               let i2 = luastring_indexOf(s, 0);
@@ -3512,7 +3533,7 @@ var require_lobject = __commonJS({
             if (lisprint(buff))
               pushstr(L, luastring_of(buff));
             else
-              luaO_pushfstring(L, to_luastring("<\\%d>", true), buff);
+              luaO_pushfstring(L, to_luastring2("<\\%d>", true), buff);
             break;
           }
           case 100:
@@ -3529,24 +3550,24 @@ var require_lobject = __commonJS({
           case 112: {
             let v = argp[a++];
             if (v instanceof lstate.lua_State || v instanceof ltable.Table || v instanceof Udata || v instanceof LClosure || v instanceof CClosure) {
-              pushstr(L, to_luastring("0x" + v.id.toString(16)));
+              pushstr(L, to_luastring2("0x" + v.id.toString(16)));
             } else {
               switch (typeof v) {
                 case "undefined":
-                  pushstr(L, to_luastring("undefined"));
+                  pushstr(L, to_luastring2("undefined"));
                   break;
                 case "number":
-                  pushstr(L, to_luastring("Number(" + v + ")"));
+                  pushstr(L, to_luastring2("Number(" + v + ")"));
                   break;
                 case "string":
-                  pushstr(L, to_luastring("String(" + JSON.stringify(v) + ")"));
+                  pushstr(L, to_luastring2("String(" + JSON.stringify(v) + ")"));
                   break;
                 case "boolean":
-                  pushstr(L, to_luastring(v ? "Boolean(true)" : "Boolean(false)"));
+                  pushstr(L, to_luastring2(v ? "Boolean(true)" : "Boolean(false)"));
                   break;
                 case "object":
                   if (v === null) {
-                    pushstr(L, to_luastring("null"));
+                    pushstr(L, to_luastring2("null"));
                     break;
                   }
                 /* fall through */
@@ -3556,11 +3577,11 @@ var require_lobject = __commonJS({
                     id = L.l_G.id_counter++;
                     L.l_G.ids.set(v, id);
                   }
-                  pushstr(L, to_luastring("0x" + id.toString(16)));
+                  pushstr(L, to_luastring2("0x" + id.toString(16)));
                   break;
                 }
                 default:
-                  pushstr(L, to_luastring("<id NYI>"));
+                  pushstr(L, to_luastring2("<id NYI>"));
               }
             }
             break;
@@ -3572,10 +3593,10 @@ var require_lobject = __commonJS({
             break;
           }
           case 37:
-            pushstr(L, to_luastring("%", true));
+            pushstr(L, to_luastring2("%", true));
             break;
           default:
-            ldebug.luaG_runerror(L, to_luastring("invalid option '%%%c' to 'lua_pushfstring'"), fmt[e + 1]);
+            ldebug.luaG_runerror(L, to_luastring2("invalid option '%%%c' to 'lua_pushfstring'"), fmt[e + 1]);
         }
         n += 2;
         i = e + 2;
@@ -3870,7 +3891,7 @@ var require_llex = __commonJS({
     var {
       constant_types: { LUA_TBOOLEAN, LUA_TLNGSTR },
       thread_status: { LUA_ERRSYNTAX },
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var {
       LUA_MINBUFFER,
@@ -3902,7 +3923,7 @@ var require_llex = __commonJS({
       luaZ_resizebuffer
     } = require_lzio();
     var FIRST_RESERVED = 257;
-    var LUA_ENV = to_luastring("_ENV", true);
+    var LUA_ENV = to_luastring2("_ENV", true);
     var TK_AND = FIRST_RESERVED;
     var TK_BREAK = FIRST_RESERVED + 1;
     var TK_DO = FIRST_RESERVED + 2;
@@ -4017,7 +4038,7 @@ var require_llex = __commonJS({
       "<integer>",
       "<name>",
       "<string>"
-    ].map((e, i) => to_luastring(e));
+    ].map((e, i) => to_luastring2(e));
     var SemInfo = class {
       constructor() {
         this.r = NaN;
@@ -4052,7 +4073,7 @@ var require_llex = __commonJS({
       let b = ls.buff;
       if (b.n + 1 > b.buffer.length) {
         if (b.buffer.length >= MAX_INT / 2)
-          lexerror(ls, to_luastring("lexical element too long", true), 0);
+          lexerror(ls, to_luastring2("lexical element too long", true), 0);
         let newsize = b.buffer.length * 2;
         luaZ_resizebuffer(ls.L, b, newsize);
       }
@@ -4060,11 +4081,11 @@ var require_llex = __commonJS({
     };
     var luaX_token2str = function(ls, token) {
       if (token < FIRST_RESERVED) {
-        return lobject.luaO_pushfstring(ls.L, to_luastring("'%c'", true), token);
+        return lobject.luaO_pushfstring(ls.L, to_luastring2("'%c'", true), token);
       } else {
         let s = luaX_tokens[token - FIRST_RESERVED];
         if (token < TK_EOS)
-          return lobject.luaO_pushfstring(ls.L, to_luastring("'%s'", true), s);
+          return lobject.luaO_pushfstring(ls.L, to_luastring2("'%s'", true), s);
         else
           return s;
       }
@@ -4099,7 +4120,7 @@ var require_llex = __commonJS({
       if (currIsNewline(ls) && ls.current !== old)
         next(ls);
       if (++ls.linenumber >= MAX_INT)
-        lexerror(ls, to_luastring("chunk has too many lines", true), 0);
+        lexerror(ls, to_luastring2("chunk has too many lines", true), 0);
     };
     var luaX_setinput = function(L, ls, z, source, firstchar) {
       ls.t = {
@@ -4152,7 +4173,7 @@ var require_llex = __commonJS({
       }
       let obj = new lobject.TValue();
       if (lobject.luaO_str2num(luaZ_buffer(ls.buff), obj) === 0)
-        lexerror(ls, to_luastring("malformed number", true), TK_FLT);
+        lexerror(ls, to_luastring2("malformed number", true), TK_FLT);
       if (obj.ttisinteger()) {
         seminfo.i = obj.value;
         return TK_INT;
@@ -4168,7 +4189,7 @@ var require_llex = __commonJS({
         case TK_STRING:
         case TK_FLT:
         case TK_INT:
-          return lobject.luaO_pushfstring(ls.L, to_luastring("'%s'", true), luaZ_buffer(ls.buff));
+          return lobject.luaO_pushfstring(ls.L, to_luastring2("'%s'", true), luaZ_buffer(ls.buff));
         default:
           return luaX_token2str(ls, token);
       }
@@ -4176,7 +4197,7 @@ var require_llex = __commonJS({
     var lexerror = function(ls, msg, token) {
       msg = ldebug.luaG_addinfo(ls.L, msg, ls.source, ls.linenumber);
       if (token)
-        lobject.luaO_pushfstring(ls.L, to_luastring("%s near %s"), msg, txtToken(ls, token));
+        lobject.luaO_pushfstring(ls.L, to_luastring2("%s near %s"), msg, txtToken(ls, token));
       ldo.luaD_throw(ls.L, LUA_ERRSYNTAX);
     };
     var luaX_syntaxerror = function(ls, msg) {
@@ -4207,7 +4228,7 @@ var require_llex = __commonJS({
           case EOZ: {
             let what = seminfo ? "string" : "comment";
             let msg = `unfinished long ${what} (starting at line ${line})`;
-            lexerror(ls, to_luastring(msg), TK_EOS);
+            lexerror(ls, to_luastring2(msg), TK_EOS);
             break;
           }
           case 93: {
@@ -4246,7 +4267,7 @@ var require_llex = __commonJS({
     };
     var gethexa = function(ls) {
       save_and_next(ls);
-      esccheck(ls, lisxdigit(ls.current), to_luastring("hexadecimal digit expected", true));
+      esccheck(ls, lisxdigit(ls.current), to_luastring2("hexadecimal digit expected", true));
       return lobject.luaO_hexavalue(ls.current);
     };
     var readhexaesc = function(ls) {
@@ -4258,16 +4279,16 @@ var require_llex = __commonJS({
     var readutf8desc = function(ls) {
       let i = 4;
       save_and_next(ls);
-      esccheck(ls, ls.current === 123, to_luastring("missing '{'", true));
+      esccheck(ls, ls.current === 123, to_luastring2("missing '{'", true));
       let r = gethexa(ls);
       save_and_next(ls);
       while (lisxdigit(ls.current)) {
         i++;
         r = (r << 4) + lobject.luaO_hexavalue(ls.current);
-        esccheck(ls, r <= 1114111, to_luastring("UTF-8 value too large", true));
+        esccheck(ls, r <= 1114111, to_luastring2("UTF-8 value too large", true));
         save_and_next(ls);
       }
-      esccheck(ls, ls.current === 125, to_luastring("missing '}'", true));
+      esccheck(ls, ls.current === 125, to_luastring2("missing '}'", true));
       next(ls);
       luaZ_buffremove(ls.buff, i);
       return r;
@@ -4285,7 +4306,7 @@ var require_llex = __commonJS({
         r = 10 * r + ls.current - 48;
         save_and_next(ls);
       }
-      esccheck(ls, r <= 255, to_luastring("decimal escape too large", true));
+      esccheck(ls, r <= 255, to_luastring2("decimal escape too large", true));
       luaZ_buffremove(ls.buff, i);
       return r;
     };
@@ -4294,11 +4315,11 @@ var require_llex = __commonJS({
       while (ls.current !== del) {
         switch (ls.current) {
           case EOZ:
-            lexerror(ls, to_luastring("unfinished string", true), TK_EOS);
+            lexerror(ls, to_luastring2("unfinished string", true), TK_EOS);
             break;
           case 10:
           case 13:
-            lexerror(ls, to_luastring("unfinished string", true), TK_STRING);
+            lexerror(ls, to_luastring2("unfinished string", true), TK_STRING);
             break;
           case 92: {
             save_and_next(ls);
@@ -4368,7 +4389,7 @@ var require_llex = __commonJS({
                 break;
               }
               default: {
-                esccheck(ls, lisdigit(ls.current), to_luastring("invalid escape sequence", true));
+                esccheck(ls, lisdigit(ls.current), to_luastring2("invalid escape sequence", true));
                 c = readdecesc(ls);
                 will = "only_save";
                 break;
@@ -4435,7 +4456,7 @@ var require_llex = __commonJS({
               read_long_string(ls, seminfo, sep);
               return TK_STRING;
             } else if (sep !== -1)
-              lexerror(ls, to_luastring("invalid long string delimiter", true), TK_STRING);
+              lexerror(ls, to_luastring2("invalid long string delimiter", true), TK_STRING);
             return 91;
           }
           case 61: {
@@ -4617,7 +4638,7 @@ var require_lcode = __commonJS({
         LUA_TNUMINT,
         LUA_TTABLE
       },
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var { lua_assert } = require_llimits();
     var llex = require_llex();
@@ -4717,7 +4738,7 @@ var require_lcode = __commonJS({
       let offset = dest - (pc + 1);
       lua_assert(dest !== NO_JUMP);
       if (Math.abs(offset) > lopcodes.MAXARG_sBx)
-        llex.luaX_syntaxerror(fs.ls, to_luastring("control structure too long", true));
+        llex.luaX_syntaxerror(fs.ls, to_luastring2("control structure too long", true));
       lopcodes.SETARG_sBx(jmp, offset);
     };
     var luaK_concat = function(fs, l1, l2) {
@@ -4855,7 +4876,7 @@ var require_lcode = __commonJS({
       let newstack = fs.freereg + n;
       if (newstack > fs.f.maxstacksize) {
         if (newstack >= MAXREGS)
-          llex.luaX_syntaxerror(fs.ls, to_luastring("function or expression needs too many registers", true));
+          llex.luaX_syntaxerror(fs.ls, to_luastring2("function or expression needs too many registers", true));
         fs.f.maxstacksize = newstack;
       }
     };
@@ -5485,7 +5506,7 @@ var require_lcode = __commonJS({
         luaK_codeABC(fs, OpCodesI.OP_SETLIST, base, b, 0);
         codeextraarg(fs, c);
       } else
-        llex.luaX_syntaxerror(fs.ls, to_luastring("constructor too long", true));
+        llex.luaX_syntaxerror(fs.ls, to_luastring2("constructor too long", true));
       fs.freereg = base + 1;
     };
     module.exports.BinOpr = BinOpr;
@@ -5539,7 +5560,7 @@ var require_lparser = __commonJS({
     "use strict";
     var {
       LUA_MULTRET,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var {
       BinOpr: {
@@ -5796,15 +5817,15 @@ var require_lparser = __commonJS({
       llex.luaX_syntaxerror(ls, msg);
     };
     var error_expected = function(ls, token) {
-      llex.luaX_syntaxerror(ls, lobject.luaO_pushfstring(ls.L, to_luastring("%s expected", true), llex.luaX_token2str(ls, token)));
+      llex.luaX_syntaxerror(ls, lobject.luaO_pushfstring(ls.L, to_luastring2("%s expected", true), llex.luaX_token2str(ls, token)));
     };
     var errorlimit = function(fs, limit, what) {
       let L = fs.ls.L;
       let line = fs.f.linedefined;
-      let where = line === 0 ? to_luastring("main function", true) : lobject.luaO_pushfstring(L, to_luastring("function at line %d", true), line);
+      let where = line === 0 ? to_luastring2("main function", true) : lobject.luaO_pushfstring(L, to_luastring2("function at line %d", true), line);
       let msg = lobject.luaO_pushfstring(
         L,
-        to_luastring("too many %s (limit is %d) in %s", true),
+        to_luastring2("too many %s (limit is %d) in %s", true),
         what,
         limit,
         where
@@ -5840,7 +5861,7 @@ var require_lparser = __commonJS({
         else
           llex.luaX_syntaxerror(ls, lobject.luaO_pushfstring(
             ls.L,
-            to_luastring("%s expected (to close %s at line %d)"),
+            to_luastring2("%s expected (to close %s at line %d)"),
             llex.luaX_token2str(ls, what),
             llex.luaX_token2str(ls, who),
             where
@@ -5875,13 +5896,13 @@ var require_lparser = __commonJS({
       let fs = ls.fs;
       let dyd = ls.dyd;
       let reg = registerlocalvar(ls, name);
-      checklimit(fs, dyd.actvar.n + 1 - fs.firstlocal, MAXVARS, to_luastring("local variables", true));
+      checklimit(fs, dyd.actvar.n + 1 - fs.firstlocal, MAXVARS, to_luastring2("local variables", true));
       dyd.actvar.arr[dyd.actvar.n] = new Vardesc();
       dyd.actvar.arr[dyd.actvar.n].idx = reg;
       dyd.actvar.n++;
     };
     var new_localvarliteral = function(ls, name) {
-      new_localvar(ls, llex.luaX_newstring(ls, to_luastring(name, true)));
+      new_localvar(ls, llex.luaX_newstring(ls, to_luastring2(name, true)));
     };
     var getlocvar = function(fs, i) {
       let idx = fs.ls.dyd.actvar.arr[fs.firstlocal + i].idx;
@@ -5909,7 +5930,7 @@ var require_lparser = __commonJS({
     };
     var newupvalue = function(fs, name, v) {
       let f = fs.f;
-      checklimit(fs, fs.nups + 1, lfunc.MAXUPVAL, to_luastring("upvalues", true));
+      checklimit(fs, fs.nups + 1, lfunc.MAXUPVAL, to_luastring2("upvalues", true));
       f.upvalues[fs.nups] = {
         instack: v.k === expkind.VLOCAL,
         idx: v.u.info,
@@ -5985,7 +6006,7 @@ var require_lparser = __commonJS({
     var enterlevel = function(ls) {
       let L = ls.L;
       ++L.nCcalls;
-      checklimit(ls.fs, L.nCcalls, LUAI_MAXCCALLS, to_luastring("JS levels", true));
+      checklimit(ls.fs, L.nCcalls, LUAI_MAXCCALLS, to_luastring2("JS levels", true));
     };
     var leavelevel = function(ls) {
       return ls.L.nCcalls--;
@@ -5999,7 +6020,7 @@ var require_lparser = __commonJS({
         let vname = getlocvar(fs, gt.nactvar).varname;
         let msg = lobject.luaO_pushfstring(
           ls.L,
-          to_luastring("<goto %s> at line %d jumps into the scope of local '%s'"),
+          to_luastring2("<goto %s> at line %d jumps into the scope of local '%s'"),
           gt.name.getstr(),
           gt.line,
           vname.getstr()
@@ -6077,7 +6098,7 @@ var require_lparser = __commonJS({
     };
     var undefgoto = function(ls, gt) {
       let msg = llex.isreserved(gt.name) ? "<%s> at line %d not inside a loop" : "no visible label '%s' for <goto> at line %d";
-      msg = lobject.luaO_pushfstring(ls.L, to_luastring(msg), gt.name.getstr(), gt.line);
+      msg = lobject.luaO_pushfstring(ls.L, to_luastring2(msg), gt.name.getstr(), gt.line);
       semerror(ls, msg);
     };
     var addprototype = function(ls) {
@@ -6195,7 +6216,7 @@ var require_lparser = __commonJS({
       let key = new expdesc();
       let val = new expdesc();
       if (ls.t.token === R.TK_NAME) {
-        checklimit(fs, cc.nh, MAX_INT, to_luastring("items in a constructor", true));
+        checklimit(fs, cc.nh, MAX_INT, to_luastring2("items in a constructor", true));
         checkname(ls, key);
       } else
         yindex(ls, key);
@@ -6233,7 +6254,7 @@ var require_lparser = __commonJS({
     };
     var listfield = function(ls, cc) {
       expr(ls, cc.v);
-      checklimit(ls.fs, cc.na, MAX_INT, to_luastring("items in a constructor", true));
+      checklimit(ls.fs, cc.na, MAX_INT, to_luastring2("items in a constructor", true));
       cc.na++;
       cc.tostore++;
     };
@@ -6309,7 +6330,7 @@ var require_lparser = __commonJS({
               break;
             }
             default:
-              llex.luaX_syntaxerror(ls, to_luastring("<name> or '...' expected", true));
+              llex.luaX_syntaxerror(ls, to_luastring2("<name> or '...' expected", true));
           }
         } while (!f.is_vararg && testnext(
           ls,
@@ -6387,7 +6408,7 @@ var require_lparser = __commonJS({
           break;
         }
         default: {
-          llex.luaX_syntaxerror(ls, to_luastring("function arguments expected", true));
+          llex.luaX_syntaxerror(ls, to_luastring2("function arguments expected", true));
         }
       }
       lua_assert(f.k === expkind.VNONRELOC);
@@ -6419,7 +6440,7 @@ var require_lparser = __commonJS({
           return;
         }
         default: {
-          llex.luaX_syntaxerror(ls, to_luastring("unexpected symbol", true));
+          llex.luaX_syntaxerror(ls, to_luastring2("unexpected symbol", true));
         }
       }
     };
@@ -6490,7 +6511,7 @@ var require_lparser = __commonJS({
         }
         case R.TK_DOTS: {
           let fs = ls.fs;
-          check_condition(ls, fs.f.is_vararg, to_luastring("cannot use '...' outside a vararg function", true));
+          check_condition(ls, fs.f.is_vararg, to_luastring2("cannot use '...' outside a vararg function", true));
           init_exp(v, expkind.VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 1, 0));
           break;
         }
@@ -6671,7 +6692,7 @@ var require_lparser = __commonJS({
     };
     var assignment = function(ls, lh, nvars) {
       let e = new expdesc();
-      check_condition(ls, vkisvar(lh.v.k), to_luastring("syntax error", true));
+      check_condition(ls, vkisvar(lh.v.k), to_luastring2("syntax error", true));
       if (testnext(
         ls,
         44
@@ -6682,7 +6703,7 @@ var require_lparser = __commonJS({
         suffixedexp(ls, nv.v);
         if (nv.v.k !== expkind.VINDEXED)
           check_conflict(ls, lh, nv.v);
-        checklimit(ls.fs, nvars + ls.L.nCcalls, LUAI_MAXCCALLS, to_luastring("JS levels", true));
+        checklimit(ls.fs, nvars + ls.L.nCcalls, LUAI_MAXCCALLS, to_luastring2("JS levels", true));
         assignment(ls, nv, nvars + 1);
       } else {
         checknext(
@@ -6726,7 +6747,7 @@ var require_lparser = __commonJS({
         if (eqstr(label, ll.arr[i].name)) {
           let msg = lobject.luaO_pushfstring(
             fs.ls.L,
-            to_luastring("label '%s' already defined on line %d", true),
+            to_luastring2("label '%s' already defined on line %d", true),
             label.getstr(),
             ll.arr[i].line
           );
@@ -6882,7 +6903,7 @@ var require_lparser = __commonJS({
           forlist(ls, varname);
           break;
         default:
-          llex.luaX_syntaxerror(ls, to_luastring("'=' or 'in' expected", true));
+          llex.luaX_syntaxerror(ls, to_luastring2("'=' or 'in' expected", true));
       }
       check_match(ls, R.TK_END, R.TK_FOR, line);
       leaveblock(fs);
@@ -6993,7 +7014,7 @@ var require_lparser = __commonJS({
         v.prev = null;
         assignment(ls, v, 1);
       } else {
-        check_condition(ls, v.v.k === expkind.VCALL, to_luastring("syntax error", true));
+        check_condition(ls, v.v.k === expkind.VCALL, to_luastring2("syntax error", true));
         SETARG_C(getinstruction(fs, v.v), 1);
       }
     };
@@ -7155,7 +7176,7 @@ var require_lundump = __commonJS({
       thread_status: { LUA_ERRSYNTAX },
       is_luastring,
       luastring_eq,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var ldo = require_ldo();
     var lfunc = require_lfunc();
@@ -7194,7 +7215,7 @@ var require_lundump = __commonJS({
         if (name[0] === 64 || name[0] === 61)
           this.name = name.subarray(1);
         else if (name[0] == LUA_SIGNATURE[0])
-          this.name = to_luastring("binary string", true);
+          this.name = to_luastring2("binary string", true);
         else
           this.name = name;
         this.L = L;
@@ -7368,7 +7389,7 @@ var require_lundump = __commonJS({
           this.error("float format mismatch in");
       }
       error(why) {
-        lobject.luaO_pushfstring(this.L, to_luastring("%s: %s precompiled chunk"), this.name, to_luastring(why));
+        lobject.luaO_pushfstring(this.L, to_luastring2("%s: %s precompiled chunk"), this.name, to_luastring2(why));
         ldo.luaD_throw(this.L, LUA_ERRSYNTAX);
       }
       checksize(byte, size, tname) {
@@ -7421,7 +7442,7 @@ var require_ldo = __commonJS({
       },
       lua_Debug,
       luastring_indexOf,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var lapi = require_lapi();
     var ldebug = require_ldebug();
@@ -7488,7 +7509,7 @@ var require_ldo = __commonJS({
         if (newsize < needed) newsize = needed;
         if (newsize > LUAI_MAXSTACK) {
           luaD_reallocstack(L, ERRORSTACKSIZE);
-          ldebug.luaG_runerror(L, to_luastring("stack overflow", true));
+          ldebug.luaG_runerror(L, to_luastring2("stack overflow", true));
         } else
           luaD_reallocstack(L, newsize);
       }
@@ -7680,7 +7701,7 @@ var require_ldo = __commonJS({
     var tryfuncTM = function(L, off, func) {
       let tm = ltm.luaT_gettmbyobj(L, func, ltm.TMS.TM_CALL);
       if (!tm.ttisfunction(tm))
-        ldebug.luaG_typeerror(L, func, to_luastring("call", true));
+        ldebug.luaG_typeerror(L, func, to_luastring2("call", true));
       lobject.pushobj2s(L, L.stack[L.top - 1]);
       for (let p = L.top - 2; p > off; p--)
         lobject.setobjs2s(L, p, p - 1);
@@ -7688,7 +7709,7 @@ var require_ldo = __commonJS({
     };
     var stackerror = function(L) {
       if (L.nCcalls === LUAI_MAXCCALLS)
-        ldebug.luaG_runerror(L, to_luastring("JS stack overflow", true));
+        ldebug.luaG_runerror(L, to_luastring2("JS stack overflow", true));
       else if (L.nCcalls >= LUAI_MAXCCALLS + (LUAI_MAXCCALLS >> 3))
         luaD_throw(L, LUA_ERRERR);
     };
@@ -7882,9 +7903,9 @@ var require_ldo = __commonJS({
       lapi.api_checknelems(L, nresults);
       if (L.nny > 0) {
         if (L !== L.l_G.mainthread)
-          ldebug.luaG_runerror(L, to_luastring("attempt to yield across a JS-call boundary", true));
+          ldebug.luaG_runerror(L, to_luastring2("attempt to yield across a JS-call boundary", true));
         else
-          ldebug.luaG_runerror(L, to_luastring("attempt to yield from outside a coroutine", true));
+          ldebug.luaG_runerror(L, to_luastring2("attempt to yield from outside a coroutine", true));
       }
       L.status = LUA_YIELD;
       ci.extra = ci.funcOff;
@@ -7940,7 +7961,7 @@ var require_ldo = __commonJS({
       if (mode && luastring_indexOf(mode, x[0]) === -1) {
         lobject.luaO_pushfstring(
           L,
-          to_luastring("attempt to load a %s chunk (mode is '%s')"),
+          to_luastring2("attempt to load a %s chunk (mode is '%s')"),
           x,
           mode
         );
@@ -7951,10 +7972,10 @@ var require_ldo = __commonJS({
       let cl;
       let c = p.z.zgetc();
       if (c === LUA_SIGNATURE[0]) {
-        checkmode(L, p.mode, to_luastring("binary", true));
+        checkmode(L, p.mode, to_luastring2("binary", true));
         cl = lundump.luaU_undump(L, p.z, p.name);
       } else {
-        checkmode(L, p.mode, to_luastring("text", true));
+        checkmode(L, p.mode, to_luastring2("text", true));
         cl = lparser.luaY_parser(L, p.z, p.buff, p.dyd, p.name, c);
       }
       lua_assert(cl.nupvalues === cl.p.upvalues.length);
@@ -8009,7 +8030,7 @@ var require_ldebug = __commonJS({
       from_userstring,
       luastring_eq,
       luastring_indexOf,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var {
       api_check,
@@ -8079,7 +8100,7 @@ var require_ldebug = __commonJS({
     var upvalname = function(p, uv) {
       lua_assert(uv < p.upvalues.length);
       let s = p.upvalues[uv].name;
-      if (s === null) return to_luastring("?", true);
+      if (s === null) return to_luastring2("?", true);
       return s.getstr();
     };
     var findvararg = function(ci, n) {
@@ -8089,7 +8110,7 @@ var require_ldebug = __commonJS({
       else {
         return {
           pos: ci.funcOff + nparams + n,
-          name: to_luastring("(*vararg)", true)
+          name: to_luastring2("(*vararg)", true)
           /* generic name for any vararg */
         };
       }
@@ -8108,7 +8129,7 @@ var require_ldebug = __commonJS({
       if (name === null) {
         let limit = ci === L.ci ? L.top : ci.next.funcOff;
         if (limit - base >= n && n > 0)
-          name = to_luastring("(*temporary)", true);
+          name = to_luastring2("(*temporary)", true);
         else
           return null;
       }
@@ -8154,16 +8175,16 @@ var require_ldebug = __commonJS({
     };
     var funcinfo = function(ar, cl) {
       if (cl === null || cl instanceof lobject.CClosure) {
-        ar.source = to_luastring("=[JS]", true);
+        ar.source = to_luastring2("=[JS]", true);
         ar.linedefined = -1;
         ar.lastlinedefined = -1;
-        ar.what = to_luastring("J", true);
+        ar.what = to_luastring2("J", true);
       } else {
         let p = cl.p;
-        ar.source = p.source ? p.source.getstr() : to_luastring("=?", true);
+        ar.source = p.source ? p.source.getstr() : to_luastring2("=?", true);
         ar.linedefined = p.linedefined;
         ar.lastlinedefined = p.lastlinedefined;
-        ar.what = ar.linedefined === 0 ? to_luastring("main", true) : to_luastring("Lua", true);
+        ar.what = ar.linedefined === 0 ? to_luastring2("main", true) : to_luastring2("Lua", true);
       }
       ar.short_src = lobject.luaO_chunkid(ar.source, LUA_IDSIZE);
     };
@@ -8189,8 +8210,8 @@ var require_ldebug = __commonJS({
       if (ci === null)
         return null;
       else if (ci.callstatus & lstate.CIST_FIN) {
-        r.name = to_luastring("__gc", true);
-        r.funcname = to_luastring("metamethod", true);
+        r.name = to_luastring2("__gc", true);
+        r.funcname = to_luastring2("metamethod", true);
         return r;
       } else if (!(ci.callstatus & lstate.CIST_TAIL) && ci.previous.callstatus & lstate.CIST_LUA)
         return funcnamefromcode(L, ci.previous);
@@ -8226,7 +8247,7 @@ var require_ldebug = __commonJS({
           case 110: {
             let r = getfuncname(L, ci);
             if (r === null) {
-              ar.namewhat = to_luastring("", true);
+              ar.namewhat = to_luastring2("", true);
               ar.name = null;
             } else {
               ar.namewhat = r.funcname;
@@ -8294,7 +8315,7 @@ var require_ldebug = __commonJS({
           return what;
         }
       }
-      r.name = to_luastring("?", true);
+      r.name = to_luastring2("?", true);
       return r;
     };
     var filterpc = function(pc, jmptarget) {
@@ -8350,7 +8371,7 @@ var require_ldebug = __commonJS({
         funcname: null
       };
       if (r.name) {
-        r.funcname = to_luastring("local", true);
+        r.funcname = to_luastring2("local", true);
         return r;
       }
       let pc = findsetreg(p, lastpc, reg);
@@ -8370,12 +8391,12 @@ var require_ldebug = __commonJS({
             let t = i.B;
             let vn = i.opcode === OCi.OP_GETTABLE ? lfunc.luaF_getlocalname(p, t + 1, pc) : upvalname(p, t);
             r.name = kname(p, pc, k).name;
-            r.funcname = vn && luastring_eq(vn, llex.LUA_ENV) ? to_luastring("global", true) : to_luastring("field", true);
+            r.funcname = vn && luastring_eq(vn, llex.LUA_ENV) ? to_luastring2("global", true) : to_luastring2("field", true);
             return r;
           }
           case OCi.OP_GETUPVAL: {
             r.name = upvalname(p, i.B);
-            r.funcname = to_luastring("upvalue", true);
+            r.funcname = to_luastring2("upvalue", true);
             return r;
           }
           case OCi.OP_LOADK:
@@ -8383,7 +8404,7 @@ var require_ldebug = __commonJS({
             let b = i.opcode === OCi.OP_LOADK ? i.Bx : p.code[pc + 1].Ax;
             if (p.k[b].ttisstring()) {
               r.name = p.k[b].svalue();
-              r.funcname = to_luastring("constant", true);
+              r.funcname = to_luastring2("constant", true);
               return r;
             }
             break;
@@ -8391,7 +8412,7 @@ var require_ldebug = __commonJS({
           case OCi.OP_SELF: {
             let k = i.C;
             r.name = kname(p, pc, k).name;
-            r.funcname = to_luastring("method", true);
+            r.funcname = to_luastring2("method", true);
             return r;
           }
           default:
@@ -8411,8 +8432,8 @@ var require_ldebug = __commonJS({
       let i = p.code[pc];
       let OCi = lopcodes.OpCodesI;
       if (ci.callstatus & lstate.CIST_HOOKED) {
-        r.name = to_luastring("?", true);
-        r.funcname = to_luastring("hook", true);
+        r.name = to_luastring2("?", true);
+        r.funcname = to_luastring2("hook", true);
         return r;
       }
       switch (i.opcode) {
@@ -8421,8 +8442,8 @@ var require_ldebug = __commonJS({
           return getobjname(p, pc, i.A);
         /* get function name */
         case OCi.OP_TFORCALL:
-          r.name = to_luastring("for iterator", true);
-          r.funcname = to_luastring("for iterator", true);
+          r.name = to_luastring2("for iterator", true);
+          r.funcname = to_luastring2("for iterator", true);
           return r;
         /* other instructions can do calls through metamethods */
         case OCi.OP_SELF:
@@ -8495,7 +8516,7 @@ var require_ldebug = __commonJS({
           return null;
       }
       r.name = L.l_G.tmname[tm].getstr();
-      r.funcname = to_luastring("metamethod", true);
+      r.funcname = to_luastring2("metamethod", true);
       return r;
     };
     var isinstack = function(L, ci, o) {
@@ -8511,7 +8532,7 @@ var require_ldebug = __commonJS({
         if (c.upvals[i] === o) {
           return {
             name: upvalname(c.p, i),
-            funcname: to_luastring("upvalue", true)
+            funcname: to_luastring2("upvalue", true)
           };
         }
       }
@@ -8526,15 +8547,15 @@ var require_ldebug = __commonJS({
         if (!kind && stkid)
           kind = getobjname(ci.func.value.p, currentpc(ci), stkid - ci.l_base);
       }
-      return kind ? lobject.luaO_pushfstring(L, to_luastring(" (%s '%s')", true), kind.funcname, kind.name) : to_luastring("", true);
+      return kind ? lobject.luaO_pushfstring(L, to_luastring2(" (%s '%s')", true), kind.funcname, kind.name) : to_luastring2("", true);
     };
     var luaG_typeerror = function(L, o, op) {
       let t = ltm.luaT_objtypename(L, o);
-      luaG_runerror(L, to_luastring("attempt to %s a %s value%s", true), op, t, varinfo(L, o));
+      luaG_runerror(L, to_luastring2("attempt to %s a %s value%s", true), op, t, varinfo(L, o));
     };
     var luaG_concaterror = function(L, p1, p2) {
       if (p1.ttisstring() || lvm.cvt2str(p1)) p1 = p2;
-      luaG_typeerror(L, p1, to_luastring("concatenate", true));
+      luaG_typeerror(L, p1, to_luastring2("concatenate", true));
     };
     var luaG_opinterror = function(L, p1, p2, msg) {
       if (lvm.tonumber(p1) === false)
@@ -8545,17 +8566,17 @@ var require_ldebug = __commonJS({
       let t1 = ltm.luaT_objtypename(L, p1);
       let t2 = ltm.luaT_objtypename(L, p2);
       if (luastring_eq(t1, t2))
-        luaG_runerror(L, to_luastring("attempt to compare two %s values", true), t1);
+        luaG_runerror(L, to_luastring2("attempt to compare two %s values", true), t1);
       else
-        luaG_runerror(L, to_luastring("attempt to compare %s with %s", true), t1, t2);
+        luaG_runerror(L, to_luastring2("attempt to compare %s with %s", true), t1, t2);
     };
     var luaG_addinfo = function(L, msg, src, line) {
       let buff;
       if (src)
         buff = lobject.luaO_chunkid(src.getstr(), LUA_IDSIZE);
       else
-        buff = to_luastring("?", true);
-      return lobject.luaO_pushfstring(L, to_luastring("%s:%d: %s", true), buff, line, msg);
+        buff = to_luastring2("?", true);
+      return lobject.luaO_pushfstring(L, to_luastring2("%s:%d: %s", true), buff, line, msg);
     };
     var luaG_runerror = function(L, fmt, ...argp) {
       let ci = L.ci;
@@ -8577,7 +8598,7 @@ var require_ldebug = __commonJS({
       let temp = lvm.tointeger(p1);
       if (temp === false)
         p2 = p1;
-      luaG_runerror(L, to_luastring("number%s has no integer representation", true), varinfo(L, p2));
+      luaG_runerror(L, to_luastring2("number%s has no integer representation", true), varinfo(L, p2));
     };
     var luaG_traceexec = function(L) {
       let ci = L.ci;
@@ -8849,7 +8870,7 @@ var require_lapi = __commonJS({
       },
       thread_status: { LUA_OK },
       from_userstring,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_defs();
     var { api_check } = require_llimits();
     var ldebug = require_ldebug();
@@ -9045,7 +9066,7 @@ var require_lapi = __commonJS({
       fengari_argcheckinteger(len);
       let ts;
       if (len === 0) {
-        s = to_luastring("", true);
+        s = to_luastring2("", true);
         ts = luaS_bless(L, s);
       } else {
         s = from_userstring(s);
@@ -9263,7 +9284,7 @@ var require_lapi = __commonJS({
           let f = fi.value;
           if (!(1 <= n && n <= f.nupvalues)) return null;
           return {
-            name: to_luastring("", true),
+            name: to_luastring2("", true),
             val: f.upvalue[n - 1]
           };
         }
@@ -9273,7 +9294,7 @@ var require_lapi = __commonJS({
           if (!(1 <= n && n <= p.upvalues.length)) return null;
           let name = p.upvalues[n - 1].name;
           return {
-            name: name ? name.getstr() : to_luastring("(*no name)", true),
+            name: name ? name.getstr() : to_luastring2("(*no name)", true),
             val: f.upvals[n - 1]
           };
         }
@@ -9571,7 +9592,7 @@ var require_lapi = __commonJS({
       lobject.luaO_arith(L, op, L.stack[L.top - 2], L.stack[L.top - 1], L.stack[L.top - 2]);
       delete L.stack[--L.top];
     };
-    var default_chunkname = to_luastring("?");
+    var default_chunkname = to_luastring2("?");
     var lua_load = function(L, reader, data, chunkname, mode) {
       if (!chunkname) chunkname = default_chunkname;
       else chunkname = from_userstring(chunkname);
@@ -9694,7 +9715,7 @@ var require_lapi = __commonJS({
       if (n >= 2)
         lvm.luaV_concat(L, n);
       else if (n === 0) {
-        lobject.pushsvalue2s(L, luaS_bless(L, to_luastring("", true)));
+        lobject.pushsvalue2s(L, luaS_bless(L, to_luastring2("", true)));
         api_check(L, L.top <= L.ci.top, "stack overflow");
       }
     };
@@ -10146,16 +10167,16 @@ var require_lauxlib = __commonJS({
     var {
       from_userstring,
       luastring_eq,
-      to_luastring,
+      to_luastring: to_luastring2,
       to_uristring
     } = require_fengaricore();
     var LUA_ERRFILE = LUA_ERRERR + 1;
-    var LUA_LOADED_TABLE = to_luastring("_LOADED");
-    var LUA_PRELOAD_TABLE = to_luastring("_PRELOAD");
-    var LUA_FILEHANDLE = to_luastring("FILE*");
+    var LUA_LOADED_TABLE = to_luastring2("_LOADED");
+    var LUA_PRELOAD_TABLE = to_luastring2("_PRELOAD");
+    var LUA_FILEHANDLE = to_luastring2("FILE*");
     var LUAL_NUMSIZES = 4 * 16 + 8;
-    var __name = to_luastring("__name");
-    var __tostring = to_luastring("__tostring");
+    var __name = to_luastring2("__name");
+    var __tostring = to_luastring2("__tostring");
     var empty = new Uint8Array(0);
     var luaL_Buffer = class {
       constructor() {
@@ -10189,7 +10210,7 @@ var require_lauxlib = __commonJS({
     };
     var pushglobalfuncname = function(L, ar) {
       let top = lua_gettop(L);
-      lua_getinfo(L, to_luastring("f"), ar);
+      lua_getinfo(L, to_luastring2("f"), ar);
       lua_getfield(L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
       if (findfield(L, top + 1, 2)) {
         let name = lua_tostring(L, -1);
@@ -10207,14 +10228,14 @@ var require_lauxlib = __commonJS({
     };
     var pushfuncname = function(L, ar) {
       if (pushglobalfuncname(L, ar)) {
-        lua_pushfstring(L, to_luastring("function '%s'"), lua_tostring(L, -1));
+        lua_pushfstring(L, to_luastring2("function '%s'"), lua_tostring(L, -1));
         lua_remove(L, -2);
       } else if (ar.namewhat.length !== 0)
-        lua_pushfstring(L, to_luastring("%s '%s'"), ar.namewhat, ar.name);
+        lua_pushfstring(L, to_luastring2("%s '%s'"), ar.namewhat, ar.name);
       else if (ar.what && ar.what[0] === 109)
         lua_pushliteral(L, "main chunk");
       else if (ar.what && ar.what[0] === 76)
-        lua_pushfstring(L, to_luastring("function <%s:%d>"), ar.short_src, ar.linedefined);
+        lua_pushfstring(L, to_luastring2("function <%s:%d>"), ar.short_src, ar.linedefined);
       else
         lua_pushliteral(L, "?");
     };
@@ -10239,7 +10260,7 @@ var require_lauxlib = __commonJS({
       let last = lastlevel(L1);
       let n1 = last - level > LEVELS1 + LEVELS2 ? LEVELS1 : -1;
       if (msg)
-        lua_pushfstring(L, to_luastring("%s\n"), msg);
+        lua_pushfstring(L, to_luastring2("%s\n"), msg);
       luaL_checkstack(L, 10, null);
       lua_pushliteral(L, "stack traceback:");
       while (lua_getstack(L1, level++, ar)) {
@@ -10247,8 +10268,8 @@ var require_lauxlib = __commonJS({
           lua_pushliteral(L, "\n	...");
           level = last - LEVELS2 + 1;
         } else {
-          lua_getinfo(L1, to_luastring("Slnt", true), ar);
-          lua_pushfstring(L, to_luastring("\n	%s:"), ar.short_src);
+          lua_getinfo(L1, to_luastring2("Slnt", true), ar);
+          lua_pushfstring(L, to_luastring2("\n	%s:"), ar.short_src);
           if (ar.currentline > 0)
             lua_pushliteral(L, `${ar.currentline}:`);
           lua_pushliteral(L, " in ");
@@ -10267,38 +10288,38 @@ var require_lauxlib = __commonJS({
     var luaL_argerror = function(L, arg, extramsg) {
       let ar = new lua_Debug();
       if (!lua_getstack(L, 0, ar))
-        return luaL_error(L, to_luastring("bad argument #%d (%s)"), arg, extramsg);
-      lua_getinfo(L, to_luastring("n"), ar);
-      if (luastring_eq(ar.namewhat, to_luastring("method"))) {
+        return luaL_error(L, to_luastring2("bad argument #%d (%s)"), arg, extramsg);
+      lua_getinfo(L, to_luastring2("n"), ar);
+      if (luastring_eq(ar.namewhat, to_luastring2("method"))) {
         arg--;
         if (arg === 0)
-          return luaL_error(L, to_luastring("calling '%s' on bad self (%s)"), ar.name, extramsg);
+          return luaL_error(L, to_luastring2("calling '%s' on bad self (%s)"), ar.name, extramsg);
       }
       if (ar.name === null)
-        ar.name = pushglobalfuncname(L, ar) ? lua_tostring(L, -1) : to_luastring("?");
-      return luaL_error(L, to_luastring("bad argument #%d to '%s' (%s)"), arg, ar.name, extramsg);
+        ar.name = pushglobalfuncname(L, ar) ? lua_tostring(L, -1) : to_luastring2("?");
+      return luaL_error(L, to_luastring2("bad argument #%d to '%s' (%s)"), arg, ar.name, extramsg);
     };
     var typeerror = function(L, arg, tname) {
       let typearg;
       if (luaL_getmetafield(L, arg, __name) === LUA_TSTRING)
         typearg = lua_tostring(L, -1);
       else if (lua_type(L, arg) === LUA_TLIGHTUSERDATA)
-        typearg = to_luastring("light userdata", true);
+        typearg = to_luastring2("light userdata", true);
       else
         typearg = luaL_typename(L, arg);
-      let msg = lua_pushfstring(L, to_luastring("%s expected, got %s"), tname, typearg);
+      let msg = lua_pushfstring(L, to_luastring2("%s expected, got %s"), tname, typearg);
       return luaL_argerror(L, arg, msg);
     };
     var luaL_where = function(L, level) {
       let ar = new lua_Debug();
       if (lua_getstack(L, level, ar)) {
-        lua_getinfo(L, to_luastring("Sl", true), ar);
+        lua_getinfo(L, to_luastring2("Sl", true), ar);
         if (ar.currentline > 0) {
-          lua_pushfstring(L, to_luastring("%s:%d: "), ar.short_src, ar.currentline);
+          lua_pushfstring(L, to_luastring2("%s:%d: "), ar.short_src, ar.currentline);
           return;
         }
       }
-      lua_pushstring(L, to_luastring(""));
+      lua_pushstring(L, to_luastring2(""));
     };
     var luaL_error = function(L, fmt, ...argp) {
       luaL_where(L, 1);
@@ -10321,9 +10342,9 @@ var require_lauxlib = __commonJS({
           errno = 0;
         }
         if (fname)
-          lua_pushfstring(L, to_luastring("%s: %s"), fname, to_luastring(message));
+          lua_pushfstring(L, to_luastring2("%s: %s"), fname, to_luastring2(message));
         else
-          lua_pushstring(L, to_luastring(message));
+          lua_pushstring(L, to_luastring2(message));
         lua_pushinteger(L, errno);
         return 3;
       }
@@ -10390,7 +10411,7 @@ var require_lauxlib = __commonJS({
       for (let i = 0; lst[i]; i++)
         if (luastring_eq(lst[i], name))
           return i;
-      return luaL_argerror(L, arg, lua_pushfstring(L, to_luastring("invalid option '%s'"), name));
+      return luaL_argerror(L, arg, lua_pushfstring(L, to_luastring2("invalid option '%s'"), name));
     };
     var tag_error = function(L, arg, tag) {
       typeerror(L, arg, lua_typename(L, tag));
@@ -10408,7 +10429,7 @@ var require_lauxlib = __commonJS({
     };
     var luaL_checkany = function(L, arg) {
       if (lua_type(L, arg) === LUA_TNONE)
-        luaL_argerror(L, arg, to_luastring("value expected", true));
+        luaL_argerror(L, arg, to_luastring2("value expected", true));
     };
     var luaL_checktype = function(L, arg, t) {
       if (lua_type(L, arg) !== t)
@@ -10428,7 +10449,7 @@ var require_lauxlib = __commonJS({
     var luaL_optstring = luaL_optlstring;
     var interror = function(L, arg) {
       if (lua_isnumber(L, arg))
-        luaL_argerror(L, arg, to_luastring("number has no integer representation", true));
+        luaL_argerror(L, arg, to_luastring2("number has no integer representation", true));
       else
         tag_error(L, arg, LUA_TNUMBER);
     };
@@ -10550,16 +10571,16 @@ var require_lauxlib = __commonJS({
       lua_len(L, idx);
       let l = lua_tointegerx(L, -1);
       if (l === false)
-        luaL_error(L, to_luastring("object length is not an integer", true));
+        luaL_error(L, to_luastring2("object length is not an integer", true));
       lua_pop(L, 1);
       return l;
     };
-    var p_I = to_luastring("%I");
-    var p_f = to_luastring("%f");
+    var p_I = to_luastring2("%I");
+    var p_f = to_luastring2("%f");
     var luaL_tolstring = function(L, idx) {
       if (luaL_callmeta(L, idx, __tostring)) {
         if (!lua_isstring(L, -1))
-          luaL_error(L, to_luastring("'__tostring' must return a string"));
+          luaL_error(L, to_luastring2("'__tostring' must return a string"));
       } else {
         let t = lua_type(L, idx);
         switch (t) {
@@ -10582,7 +10603,7 @@ var require_lauxlib = __commonJS({
           default: {
             let tt = luaL_getmetafield(L, idx, __name);
             let kind = tt === LUA_TSTRING ? lua_tostring(L, -1) : luaL_typename(L, idx);
-            lua_pushfstring(L, to_luastring("%s: %p"), kind, lua_topointer(L, idx));
+            lua_pushfstring(L, to_luastring2("%s: %p"), kind, lua_topointer(L, idx));
             if (tt !== LUA_TNIL)
               lua_remove(L, -2);
             break;
@@ -10644,21 +10665,21 @@ var require_lauxlib = __commonJS({
       }
     };
     var luaL_setfuncs = function(L, l, nup) {
-      luaL_checkstack(L, nup, to_luastring("too many upvalues", true));
+      luaL_checkstack(L, nup, to_luastring2("too many upvalues", true));
       for (let lib in l) {
         for (let i = 0; i < nup; i++)
           lua_pushvalue(L, -nup);
         lua_pushcclosure(L, l[lib], nup);
-        lua_setfield(L, -(nup + 2), to_luastring(lib));
+        lua_setfield(L, -(nup + 2), to_luastring2(lib));
       }
       lua_pop(L, nup);
     };
     var luaL_checkstack = function(L, space, msg) {
       if (!lua_checkstack(L, space)) {
         if (msg)
-          luaL_error(L, to_luastring("stack overflow (%s)"), msg);
+          luaL_error(L, to_luastring2("stack overflow (%s)"), msg);
         else
-          luaL_error(L, to_luastring("stack overflow", true));
+          luaL_error(L, to_luastring2("stack overflow", true));
       }
     };
     var luaL_newlibtable = function(L) {
@@ -10700,7 +10721,7 @@ var require_lauxlib = __commonJS({
     var errfile = function(L, what, fnameindex, error) {
       let serr = error.message;
       let filename = lua_tostring(L, fnameindex).subarray(1);
-      lua_pushfstring(L, to_luastring("cannot %s %s: %s"), to_luastring(what), filename, to_luastring(serr));
+      lua_pushfstring(L, to_luastring2("cannot %s %s: %s"), to_luastring2(what), filename, to_luastring2(serr));
       lua_remove(L, fnameindex);
       return LUA_ERRFILE;
     };
@@ -10769,7 +10790,7 @@ var require_lauxlib = __commonJS({
         if (filename === null) {
           throw new Error("Can't read stdin in the browser");
         } else {
-          lua_pushfstring(L, to_luastring("@%s"), filename);
+          lua_pushfstring(L, to_luastring2("@%s"), filename);
           let path = to_uristring(filename);
           let xhr = new XMLHttpRequest();
           xhr.open("GET", path, false);
@@ -10779,7 +10800,7 @@ var require_lauxlib = __commonJS({
           xhr.send();
           if (xhr.status >= 200 && xhr.status <= 299) {
             if (typeof xhr.response === "string") {
-              lf.f = to_luastring(xhr.response);
+              lf.f = to_luastring2(xhr.response);
             } else {
               lf.f = new Uint8Array(xhr.response);
             }
@@ -10853,7 +10874,7 @@ var require_lauxlib = __commonJS({
           lua_pushliteral(L, "=stdin");
           lf.f = process.stdin.fd;
         } else {
-          lua_pushfstring(L, to_luastring("@%s"), filename);
+          lua_pushfstring(L, to_luastring2("@%s"), filename);
           try {
             lf.f = fs.openSync(filename, "r");
           } catch (e) {
@@ -10904,11 +10925,11 @@ var require_lauxlib = __commonJS({
     var luaL_checkversion_ = function(L, ver, sz) {
       let v = lua_version(L);
       if (sz != LUAL_NUMSIZES)
-        luaL_error(L, to_luastring("core and library have incompatible numeric types"));
+        luaL_error(L, to_luastring2("core and library have incompatible numeric types"));
       if (v != lua_version(null))
-        luaL_error(L, to_luastring("multiple Lua VMs detected"));
+        luaL_error(L, to_luastring2("multiple Lua VMs detected"));
       else if (v !== ver)
-        luaL_error(L, to_luastring("version mismatch: app. needs %f, Lua core provides %f"), ver, v);
+        luaL_error(L, to_luastring2("version mismatch: app. needs %f, Lua core provides %f"), ver, v);
     };
     var luaL_checkversion = function(L) {
       luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_NUMSIZES);
@@ -11060,7 +11081,7 @@ var require_lbaselib = __commonJS({
     } = require_lauxlib();
     var {
       to_jsstring,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_fengaricore();
     var lua_writestring;
     var lua_writeline;
@@ -11104,15 +11125,15 @@ var require_lbaselib = __commonJS({
     }
     var luaB_print = function(L) {
       let n = lua_gettop(L);
-      lua_getglobal(L, to_luastring("tostring", true));
+      lua_getglobal(L, to_luastring2("tostring", true));
       for (let i = 1; i <= n; i++) {
         lua_pushvalue(L, -1);
         lua_pushvalue(L, i);
         lua_call(L, 1, 1);
         let s = lua_tolstring(L, -1);
         if (s === null)
-          return luaL_error(L, to_luastring("'tostring' must return a string to 'print'"));
-        if (i > 1) lua_writestring(to_luastring("	"));
+          return luaL_error(L, to_luastring2("'tostring' must return a string to 'print'"));
+        if (i > 1) lua_writestring(to_luastring2("	"));
         lua_writestring(s);
         lua_pop(L, 1);
       }
@@ -11130,15 +11151,15 @@ var require_lbaselib = __commonJS({
         lua_pushnil(L);
         return 1;
       }
-      luaL_getmetafield(L, 1, to_luastring("__metatable", true));
+      luaL_getmetafield(L, 1, to_luastring2("__metatable", true));
       return 1;
     };
     var luaB_setmetatable = function(L) {
       let t = lua_type(L, 2);
       luaL_checktype(L, 1, LUA_TTABLE);
       luaL_argcheck(L, t === LUA_TNIL || t === LUA_TTABLE, 2, "nil or table expected");
-      if (luaL_getmetafield(L, 1, to_luastring("__metatable", true)) !== LUA_TNIL)
-        return luaL_error(L, to_luastring("cannot change a protected metatable"));
+      if (luaL_getmetafield(L, 1, to_luastring2("__metatable", true)) !== LUA_TNIL)
+        return luaL_error(L, to_luastring2("cannot change a protected metatable"));
       lua_settop(L, 2);
       lua_setmetatable(L, 1);
       return 1;
@@ -11179,11 +11200,11 @@ var require_lbaselib = __commonJS({
       "setpause",
       "setstepmul",
       "isrunning"
-    ].map((e) => to_luastring(e));
+    ].map((e) => to_luastring2(e));
     var luaB_collectgarbage = function(L) {
       luaL_checkoption(L, 1, "collect", opts);
       luaL_optinteger(L, 2, 0);
-      luaL_error(L, to_luastring("lua_gc not implemented"));
+      luaL_error(L, to_luastring2("lua_gc not implemented"));
     };
     var luaB_type = function(L) {
       let t = lua_type(L, 1);
@@ -11215,7 +11236,7 @@ var require_lbaselib = __commonJS({
       }
     };
     var luaB_pairs = function(L) {
-      return pairsmeta(L, to_luastring("__pairs", true), 0, luaB_next);
+      return pairsmeta(L, to_luastring2("__pairs", true), 0, luaB_next);
     };
     var ipairsaux = function(L) {
       let i = luaL_checkinteger(L, 2) + 1;
@@ -11347,7 +11368,7 @@ var require_lbaselib = __commonJS({
         lua_pop(L, 1);
         return null;
       } else if (!lua_isstring(L, -1))
-        luaL_error(L, to_luastring("reader function must return a string"));
+        luaL_error(L, to_luastring2("reader function must return a string"));
       lua_replace(L, RESERVEDSLOT);
       return lua_tostring(L, RESERVEDSLOT);
     };
@@ -11409,16 +11430,16 @@ var require_lbaselib = __commonJS({
       "type": luaB_type,
       "xpcall": luaB_xpcall
     };
-    var luaopen_base = function(L) {
+    var luaopen_base2 = function(L) {
       lua_pushglobaltable(L);
       luaL_setfuncs(L, base_funcs, 0);
       lua_pushvalue(L, -1);
-      lua_setfield(L, -2, to_luastring("_G"));
+      lua_setfield(L, -2, to_luastring2("_G"));
       lua_pushliteral(L, LUA_VERSION);
-      lua_setfield(L, -2, to_luastring("_VERSION"));
+      lua_setfield(L, -2, to_luastring2("_VERSION"));
       return 1;
     };
-    module.exports.luaopen_base = luaopen_base;
+    module.exports.luaopen_base = luaopen_base2;
   }
 });
 
@@ -11460,7 +11481,7 @@ var require_lmathlib = __commonJS({
       LUA_MININTEGER,
       lua_numbertointeger
     } = require_luaconf();
-    var { to_luastring } = require_fengaricore();
+    var { to_luastring: to_luastring2 } = require_fengaricore();
     var rand_state;
     var l_rand = function() {
       rand_state = 1103515245 * rand_state + 12345 & 2147483647;
@@ -11698,19 +11719,19 @@ var require_lmathlib = __commonJS({
       "type": math_type,
       "ult": math_ult
     };
-    var luaopen_math = function(L) {
+    var luaopen_math2 = function(L) {
       luaL_newlib(L, mathlib);
       lua_pushnumber(L, Math.PI);
-      lua_setfield(L, -2, to_luastring("pi", true));
+      lua_setfield(L, -2, to_luastring2("pi", true));
       lua_pushnumber(L, Infinity);
-      lua_setfield(L, -2, to_luastring("huge", true));
+      lua_setfield(L, -2, to_luastring2("huge", true));
       lua_pushinteger(L, LUA_MAXINTEGER);
-      lua_setfield(L, -2, to_luastring("maxinteger", true));
+      lua_setfield(L, -2, to_luastring2("maxinteger", true));
       lua_pushinteger(L, LUA_MININTEGER);
-      lua_setfield(L, -2, to_luastring("mininteger", true));
+      lua_setfield(L, -2, to_luastring2("mininteger", true));
       return 1;
     };
-    module.exports.luaopen_math = luaopen_math;
+    module.exports.luaopen_math = luaopen_math2;
   }
 });
 
@@ -12068,11 +12089,11 @@ var require_lcorolib = __commonJS({
       "wrap": luaB_cowrap,
       "yield": luaB_yield
     };
-    var luaopen_coroutine = function(L) {
+    var luaopen_coroutine2 = function(L) {
       luaL_newlib(L, co_funcs);
       return 1;
     };
-    module.exports.luaopen_coroutine = luaopen_coroutine;
+    module.exports.luaopen_coroutine = luaopen_coroutine2;
   }
 });
 
@@ -12128,7 +12149,7 @@ var require_ltablib = __commonJS({
       luaL_typename
     } = require_lauxlib();
     var lualib = require_lualib();
-    var { to_luastring } = require_fengaricore();
+    var { to_luastring: to_luastring2 } = require_fengaricore();
     var TAB_R = 1;
     var TAB_W = 2;
     var TAB_L = 4;
@@ -12141,7 +12162,7 @@ var require_ltablib = __commonJS({
       if (lua_type(L, arg) !== LUA_TTABLE) {
         let n = 1;
         if (lua_getmetatable(L, arg) && /* must have metatable */
-        (!(what & TAB_R) || checkfield(L, to_luastring("__index", true), ++n)) && (!(what & TAB_W) || checkfield(L, to_luastring("__newindex", true), ++n)) && (!(what & TAB_L) || checkfield(L, to_luastring("__len", true), ++n))) {
+        (!(what & TAB_R) || checkfield(L, to_luastring2("__index", true), ++n)) && (!(what & TAB_W) || checkfield(L, to_luastring2("__newindex", true), ++n)) && (!(what & TAB_L) || checkfield(L, to_luastring2("__len", true), ++n))) {
           lua_pop(L, n);
         } else
           luaL_checktype(L, arg, LUA_TTABLE);
@@ -12156,7 +12177,7 @@ var require_ltablib = __commonJS({
       if (!lua_isstring(L, -1))
         luaL_error(
           L,
-          to_luastring("invalid value (%s) at index %d in table for 'concat'"),
+          to_luastring2("invalid value (%s) at index %d in table for 'concat'"),
           luaL_typename(L, -1),
           i
         );
@@ -12249,7 +12270,7 @@ var require_ltablib = __commonJS({
       for (let i = n; i >= 1; i--)
         lua_seti(L, 1, i);
       lua_pushinteger(L, n);
-      lua_setfield(L, 1, to_luastring("n"));
+      lua_setfield(L, 1, to_luastring2("n"));
       return 1;
     };
     var unpack = function(L) {
@@ -12258,7 +12279,7 @@ var require_ltablib = __commonJS({
       if (i > e) return 0;
       let n = e - i;
       if (n >= Number.MAX_SAFE_INTEGER || !lua_checkstack(L, ++n))
-        return luaL_error(L, to_luastring("too many results to unpack"));
+        return luaL_error(L, to_luastring2("too many results to unpack"));
       for (; i < e; i++)
         lua_geti(L, 1, i);
       lua_geti(L, 1, e);
@@ -12291,12 +12312,12 @@ var require_ltablib = __commonJS({
       for (; ; ) {
         while (lua_geti(L, 1, ++i), sort_comp(L, -1, -2)) {
           if (i == up - 1)
-            luaL_error(L, to_luastring("invalid order function for sorting"));
+            luaL_error(L, to_luastring2("invalid order function for sorting"));
           lua_pop(L, 1);
         }
         while (lua_geti(L, 1, --j), sort_comp(L, -3, -1)) {
           if (j < i)
-            luaL_error(L, to_luastring("invalid order function for sorting"));
+            luaL_error(L, to_luastring2("invalid order function for sorting"));
           lua_pop(L, 1);
         }
         if (j < i) {
@@ -12381,11 +12402,11 @@ var require_ltablib = __commonJS({
       "sort": sort,
       "unpack": unpack
     };
-    var luaopen_table = function(L) {
+    var luaopen_table2 = function(L) {
       luaL_newlib(L, tab_funcs);
       return 1;
     };
-    module.exports.luaopen_table = luaopen_table;
+    module.exports.luaopen_table = luaopen_table2;
   }
 });
 
@@ -12437,12 +12458,12 @@ var require_loslib = __commonJS({
     var {
       luastring_eq,
       to_jsstring,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_fengaricore();
-    var LUA_STRFTIMEOPTIONS = to_luastring("aAbBcCdDeFhHIjklmMnpPrRStTuUwWxXyYzZ%");
+    var LUA_STRFTIMEOPTIONS = to_luastring2("aAbBcCdDeFhHIjklmMnpPrRStTuUwWxXyYzZ%");
     var setfield = function(L, key, value) {
       lua_pushinteger(L, value);
-      lua_setfield(L, -2, to_luastring(key, true));
+      lua_setfield(L, -2, to_luastring2(key, true));
     };
     var setallfields = function(L, time, utc) {
       setfield(L, "sec", utc ? time.getUTCSeconds() : time.getSeconds());
@@ -12461,40 +12482,40 @@ var require_loslib = __commonJS({
     };
     var L_MAXDATEFIELD = Number.MAX_SAFE_INTEGER / 2;
     var getfield = function(L, key, d, delta) {
-      let t = lua_getfield(L, -1, to_luastring(key, true));
+      let t = lua_getfield(L, -1, to_luastring2(key, true));
       let res = lua_tointegerx(L, -1);
       if (res === false) {
         if (t !== LUA_TNIL)
-          return luaL_error(L, to_luastring("field '%s' is not an integer"), key);
+          return luaL_error(L, to_luastring2("field '%s' is not an integer"), key);
         else if (d < 0)
-          return luaL_error(L, to_luastring("field '%s' missing in date table"), key);
+          return luaL_error(L, to_luastring2("field '%s' missing in date table"), key);
         res = d;
       } else {
         if (!(-L_MAXDATEFIELD <= res && res <= L_MAXDATEFIELD))
-          return luaL_error(L, to_luastring("field '%s' is out-of-bound"), key);
+          return luaL_error(L, to_luastring2("field '%s' is out-of-bound"), key);
         res -= delta;
       }
       lua_pop(L, 1);
       return res;
     };
     var locale = {
-      days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((s) => to_luastring(s)),
-      shortDays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((s) => to_luastring(s)),
-      months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((s) => to_luastring(s)),
-      shortMonths: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((s) => to_luastring(s)),
-      AM: to_luastring("AM"),
-      PM: to_luastring("PM"),
-      am: to_luastring("am"),
-      pm: to_luastring("pm"),
+      days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((s) => to_luastring2(s)),
+      shortDays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((s) => to_luastring2(s)),
+      months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((s) => to_luastring2(s)),
+      shortMonths: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((s) => to_luastring2(s)),
+      AM: to_luastring2("AM"),
+      PM: to_luastring2("PM"),
+      am: to_luastring2("am"),
+      pm: to_luastring2("pm"),
       formats: {
-        c: to_luastring("%a %b %e %H:%M:%S %Y"),
-        D: to_luastring("%m/%d/%y"),
-        F: to_luastring("%Y-%m-%d"),
-        R: to_luastring("%H:%M"),
-        r: to_luastring("%I:%M:%S %p"),
-        T: to_luastring("%H:%M:%S"),
-        X: to_luastring("%T"),
-        x: to_luastring("%D")
+        c: to_luastring2("%a %b %e %H:%M:%S %Y"),
+        D: to_luastring2("%m/%d/%y"),
+        F: to_luastring2("%Y-%m-%d"),
+        R: to_luastring2("%H:%M"),
+        r: to_luastring2("%I:%M:%S %p"),
+        T: to_luastring2("%H:%M:%S"),
+        X: to_luastring2("%T"),
+        x: to_luastring2("%D")
       }
     };
     var week_number = function(date, start_of_week) {
@@ -12511,7 +12532,7 @@ var require_loslib = __commonJS({
     var push_pad_2 = function(b, n, pad) {
       if (n < 10)
         luaL_addchar(b, pad);
-      luaL_addstring(b, to_luastring(String(n)));
+      luaL_addstring(b, to_luastring2(String(n)));
     };
     var strftime = function(L, b, s, date) {
       let i = 0;
@@ -12623,13 +12644,13 @@ var require_loslib = __commonJS({
               break;
             // '1970'
             case 89:
-              luaL_addstring(b, to_luastring(String(date.getFullYear())));
+              luaL_addstring(b, to_luastring2(String(date.getFullYear())));
               break;
             // 'GMT'
             case 90: {
               let tzString = date.toString().match(/\(([\w\s]+)\)/);
               if (tzString)
-                luaL_addstring(b, to_luastring(tzString[1]));
+                luaL_addstring(b, to_luastring2(tzString[1]));
               break;
             }
             // 'Thu'
@@ -12679,7 +12700,7 @@ var require_loslib = __commonJS({
                   /* 0 */
                 );
               }
-              luaL_addstring(b, to_luastring(String(yday)));
+              luaL_addstring(b, to_luastring2(String(yday)));
               break;
             }
             // ' 0'
@@ -12723,7 +12744,7 @@ var require_loslib = __commonJS({
               break;
             // '0'
             case 115:
-              luaL_addstring(b, to_luastring(String(Math.floor(date / 1e3))));
+              luaL_addstring(b, to_luastring2(String(Math.floor(date / 1e3))));
               break;
             // '\t'
             case 116:
@@ -12732,12 +12753,12 @@ var require_loslib = __commonJS({
             // '4'
             case 117: {
               let day = date.getDay();
-              luaL_addstring(b, to_luastring(String(day === 0 ? 7 : day)));
+              luaL_addstring(b, to_luastring2(String(day === 0 ? 7 : day)));
               break;
             }
             // '4'
             case 119:
-              luaL_addstring(b, to_luastring(String(date.getDay())));
+              luaL_addstring(b, to_luastring2(String(date.getDay())));
               break;
             // '12/31/69'
             case 120:
@@ -12802,7 +12823,7 @@ var require_loslib = __commonJS({
       luaL_argerror(
         L,
         1,
-        lua_pushfstring(L, to_luastring("invalid conversion specifier '%%%s'"), conv)
+        lua_pushfstring(L, to_luastring2("invalid conversion specifier '%%%s'"), conv)
       );
     };
     var os_date = function(L) {
@@ -12857,9 +12878,9 @@ var require_loslib = __commonJS({
       lua_pushnumber(L, t1 - t2);
       return 1;
     };
-    var catnames = ["all", "collate", "ctype", "monetary", "numeric", "time"].map((lc) => to_luastring(lc));
-    var C = to_luastring("C");
-    var POSIX = to_luastring("POSIX");
+    var catnames = ["all", "collate", "ctype", "monetary", "numeric", "time"].map((lc) => to_luastring2(lc));
+    var C = to_luastring2("C");
+    var POSIX = to_luastring2("POSIX");
     var os_setlocale = function(L) {
       const l = luaL_optstring(L, 1, null);
       luaL_checkoption(L, 2, "all", catnames);
@@ -12939,8 +12960,8 @@ var require_loslib = __commonJS({
       syslib.tmpname = function(L) {
         let name = lua_tmpname();
         if (!name)
-          return luaL_error(L, to_luastring("unable to generate a unique filename"));
-        lua_pushstring(L, to_luastring(name));
+          return luaL_error(L, to_luastring2("unable to generate a unique filename"));
+        lua_pushstring(L, to_luastring2(name));
         return 1;
       };
       syslib.execute = function(L) {
@@ -13002,7 +13023,7 @@ var require_lutf8lib = __commonJS({
     } = require_lauxlib();
     var {
       luastring_of,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_fengaricore();
     var MAXUNICODE = 1114111;
     var iscont = function(p) {
@@ -13060,7 +13081,7 @@ var require_lutf8lib = __commonJS({
       lua_pushinteger(L, n);
       return 1;
     };
-    var p_U = to_luastring("%U");
+    var p_U = to_luastring2("%U");
     var pushutfchar = function(L, arg) {
       let code = luaL_checkinteger(L, arg);
       luaL_argcheck(L, 0 <= code && code <= MAXUNICODE, arg, "value out of range");
@@ -13152,7 +13173,7 @@ var require_lutf8lib = __commonJS({
       else {
         let dec = utf8_decode(s, n);
         if (dec === null || iscont(s[dec.pos]))
-          return luaL_error(L, to_luastring("invalid UTF-8 code"));
+          return luaL_error(L, to_luastring2("invalid UTF-8 code"));
         lua_pushinteger(L, n + 1);
         lua_pushinteger(L, dec.code);
         return 2;
@@ -13173,13 +13194,13 @@ var require_lutf8lib = __commonJS({
       "offset": byteoffset
     };
     var UTF8PATT = luastring_of(91, 0, 45, 127, 194, 45, 244, 93, 91, 128, 45, 191, 93, 42);
-    var luaopen_utf8 = function(L) {
+    var luaopen_utf82 = function(L) {
       luaL_newlib(L, funcs);
       lua_pushstring(L, UTF8PATT);
-      lua_setfield(L, -2, to_luastring("charpattern", true));
+      lua_setfield(L, -2, to_luastring2("charpattern", true));
       return 1;
     };
-    module.exports.luaopen_utf8 = luaopen_utf8;
+    module.exports.luaopen_utf8 = luaopen_utf82;
   }
 });
 
@@ -13263,11 +13284,11 @@ var require_ldblib = __commonJS({
     var lualib = require_lualib();
     var {
       luastring_indexOf,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_fengaricore();
     var checkstack = function(L, L1, n) {
       if (L !== L1 && !lua_checkstack(L1, n))
-        luaL_error(L, to_luastring("stack overflow", true));
+        luaL_error(L, to_luastring2("stack overflow", true));
     };
     var db_getregistry = function(L) {
       lua_pushvalue(L, LUA_REGISTRYINDEX);
@@ -13341,7 +13362,7 @@ var require_ldblib = __commonJS({
       let options = luaL_optstring(L, arg + 2, "flnStu");
       checkstack(L, L1, 3);
       if (lua_isfunction(L, arg + 1)) {
-        options = lua_pushfstring(L, to_luastring(">%s"), options);
+        options = lua_pushfstring(L, to_luastring2(">%s"), options);
         lua_pushvalue(L, arg + 1);
         lua_xmove(L, L1, 1);
       } else {
@@ -13358,53 +13379,53 @@ var require_ldblib = __commonJS({
         83
         /* 'S'.charCodeAt(0) */
       ) > -1) {
-        settabss(L, to_luastring("source", true), ar.source);
-        settabss(L, to_luastring("short_src", true), ar.short_src);
-        settabsi(L, to_luastring("linedefined", true), ar.linedefined);
-        settabsi(L, to_luastring("lastlinedefined", true), ar.lastlinedefined);
-        settabss(L, to_luastring("what", true), ar.what);
+        settabss(L, to_luastring2("source", true), ar.source);
+        settabss(L, to_luastring2("short_src", true), ar.short_src);
+        settabsi(L, to_luastring2("linedefined", true), ar.linedefined);
+        settabsi(L, to_luastring2("lastlinedefined", true), ar.lastlinedefined);
+        settabss(L, to_luastring2("what", true), ar.what);
       }
       if (luastring_indexOf(
         options,
         108
         /* 'l'.charCodeAt(0) */
       ) > -1)
-        settabsi(L, to_luastring("currentline", true), ar.currentline);
+        settabsi(L, to_luastring2("currentline", true), ar.currentline);
       if (luastring_indexOf(
         options,
         117
         /* 'u'.charCodeAt(0) */
       ) > -1) {
-        settabsi(L, to_luastring("nups", true), ar.nups);
-        settabsi(L, to_luastring("nparams", true), ar.nparams);
-        settabsb(L, to_luastring("isvararg", true), ar.isvararg);
+        settabsi(L, to_luastring2("nups", true), ar.nups);
+        settabsi(L, to_luastring2("nparams", true), ar.nparams);
+        settabsb(L, to_luastring2("isvararg", true), ar.isvararg);
       }
       if (luastring_indexOf(
         options,
         110
         /* 'n'.charCodeAt(0) */
       ) > -1) {
-        settabss(L, to_luastring("name", true), ar.name);
-        settabss(L, to_luastring("namewhat", true), ar.namewhat);
+        settabss(L, to_luastring2("name", true), ar.name);
+        settabss(L, to_luastring2("namewhat", true), ar.namewhat);
       }
       if (luastring_indexOf(
         options,
         116
         /* 't'.charCodeAt(0) */
       ) > -1)
-        settabsb(L, to_luastring("istailcall", true), ar.istailcall);
+        settabsb(L, to_luastring2("istailcall", true), ar.istailcall);
       if (luastring_indexOf(
         options,
         76
         /* 'L'.charCodeAt(0) */
       ) > -1)
-        treatstackoption(L, L1, to_luastring("activelines", true));
+        treatstackoption(L, L1, to_luastring2("activelines", true));
       if (luastring_indexOf(
         options,
         102
         /* 'f'.charCodeAt(0) */
       ) > -1)
-        treatstackoption(L, L1, to_luastring("func", true));
+        treatstackoption(L, L1, to_luastring2("func", true));
       return 1;
     };
     var db_getlocal = function(L) {
@@ -13488,8 +13509,8 @@ var require_ldblib = __commonJS({
       lua_upvaluejoin(L, 1, n1, 3, n2);
       return 0;
     };
-    var HOOKKEY = to_luastring("__hooks__", true);
-    var hooknames = ["call", "return", "line", "count", "tail call"].map((e) => to_luastring(e));
+    var HOOKKEY = to_luastring2("__hooks__", true);
+    var hooknames = ["call", "return", "line", "count", "tail call"].map((e) => to_luastring2(e));
     var hookf = function(L, ar) {
       lua_rawgetp(L, LUA_REGISTRYINDEX, HOOKKEY);
       let hooktable = lua_touserdata(L, -1);
@@ -13500,7 +13521,7 @@ var require_ldblib = __commonJS({
         if (ar.currentline >= 0)
           lua_pushinteger(L, ar.currentline);
         else lua_pushnil(L);
-        lualib.lua_assert(lua_getinfo(L, to_luastring("lS"), ar));
+        lualib.lua_assert(lua_getinfo(L, to_luastring2("lS"), ar));
         lua_call(L, 2, 0);
       }
     };
@@ -13634,8 +13655,8 @@ var require_ldblib = __commonJS({
             return 0;
           if (input.length === 0)
             continue;
-          let buffer = to_luastring(input);
-          if (luaL_loadbuffer(L, buffer, buffer.length, to_luastring("=(debug command)", true)) || lua_pcall(L, 0, 0, 0)) {
+          let buffer = to_luastring2(input);
+          if (luaL_loadbuffer(L, buffer, buffer.length, to_luastring2("=(debug command)", true)) || lua_pcall(L, 0, 0, 0)) {
             lua_writestringerror(lua_tojsstring(L, -1), "\n");
           }
           lua_settop(L, 0);
@@ -13654,28 +13675,28 @@ var require_ldblib = __commonJS({
 var require_fengari = __commonJS({
   "node_modules/fengari/src/fengari.js"(exports, module) {
     "use strict";
-    var core = require_fengaricore();
-    module.exports.FENGARI_AUTHORS = core.FENGARI_AUTHORS;
-    module.exports.FENGARI_COPYRIGHT = core.FENGARI_COPYRIGHT;
-    module.exports.FENGARI_RELEASE = core.FENGARI_RELEASE;
-    module.exports.FENGARI_VERSION = core.FENGARI_VERSION;
-    module.exports.FENGARI_VERSION_MAJOR = core.FENGARI_VERSION_MAJOR;
-    module.exports.FENGARI_VERSION_MINOR = core.FENGARI_VERSION_MINOR;
-    module.exports.FENGARI_VERSION_NUM = core.FENGARI_VERSION_NUM;
-    module.exports.FENGARI_VERSION_RELEASE = core.FENGARI_VERSION_RELEASE;
-    module.exports.luastring_eq = core.luastring_eq;
-    module.exports.luastring_indexOf = core.luastring_indexOf;
-    module.exports.luastring_of = core.luastring_of;
-    module.exports.to_jsstring = core.to_jsstring;
-    module.exports.to_luastring = core.to_luastring;
-    module.exports.to_uristring = core.to_uristring;
+    var core2 = require_fengaricore();
+    module.exports.FENGARI_AUTHORS = core2.FENGARI_AUTHORS;
+    module.exports.FENGARI_COPYRIGHT = core2.FENGARI_COPYRIGHT;
+    module.exports.FENGARI_RELEASE = core2.FENGARI_RELEASE;
+    module.exports.FENGARI_VERSION = core2.FENGARI_VERSION;
+    module.exports.FENGARI_VERSION_MAJOR = core2.FENGARI_VERSION_MAJOR;
+    module.exports.FENGARI_VERSION_MINOR = core2.FENGARI_VERSION_MINOR;
+    module.exports.FENGARI_VERSION_NUM = core2.FENGARI_VERSION_NUM;
+    module.exports.FENGARI_VERSION_RELEASE = core2.FENGARI_VERSION_RELEASE;
+    module.exports.luastring_eq = core2.luastring_eq;
+    module.exports.luastring_indexOf = core2.luastring_indexOf;
+    module.exports.luastring_of = core2.luastring_of;
+    module.exports.to_jsstring = core2.to_jsstring;
+    module.exports.to_luastring = core2.to_luastring;
+    module.exports.to_uristring = core2.to_uristring;
     var luaconf = require_luaconf();
-    var lua = require_lua();
-    var lauxlib = require_lauxlib();
+    var lua2 = require_lua();
+    var lauxlib2 = require_lauxlib();
     var lualib = require_lualib();
     module.exports.luaconf = luaconf;
-    module.exports.lua = lua;
-    module.exports.lauxlib = lauxlib;
+    module.exports.lua = lua2;
+    module.exports.lauxlib = lauxlib2;
     module.exports.lualib = lualib;
   }
 });
@@ -13751,7 +13772,7 @@ var require_loadlib = __commonJS({
     var {
       luastring_indexOf,
       to_jsstring,
-      to_luastring,
+      to_luastring: to_luastring2,
       to_uristring
     } = require_fengaricore();
     var fengari = require_fengari();
@@ -13766,16 +13787,16 @@ var require_loadlib = __commonJS({
         return (0, eval)("this");
       }
     })();
-    var JSLIBS = to_luastring("__JSLIBS__");
+    var JSLIBS = to_luastring2("__JSLIBS__");
     var LUA_PATH_VAR = "LUA_PATH";
     var LUA_JSPATH_VAR = "LUA_JSPATH";
     var LUA_IGMARK = "-";
     var LUA_CSUBSEP = LUA_DIRSEP;
     var LUA_LSUBSEP = LUA_DIRSEP;
-    var LUA_POF = to_luastring("luaopen_");
-    var LUA_OFSEP = to_luastring("_");
+    var LUA_POF = to_luastring2("luaopen_");
+    var LUA_OFSEP = to_luastring2("_");
     var LIB_FAIL = "open";
-    var AUXMARK = to_luastring("");
+    var AUXMARK = to_luastring2("");
     var lsys_load;
     if (true) {
       lsys_load = function(L, path, seeglb) {
@@ -13784,7 +13805,7 @@ var require_loadlib = __commonJS({
         xhr.open("GET", path, false);
         xhr.send();
         if (xhr.status < 200 || xhr.status >= 300) {
-          lua_pushstring(L, to_luastring(`${xhr.status}: ${xhr.statusText}`));
+          lua_pushstring(L, to_luastring2(`${xhr.status}: ${xhr.statusText}`));
           return null;
         }
         let code = xhr.response;
@@ -13794,7 +13815,7 @@ var require_loadlib = __commonJS({
         try {
           func = Function("fengari", code);
         } catch (e) {
-          lua_pushstring(L, to_luastring(`${e.name}: ${e.message}`));
+          lua_pushstring(L, to_luastring2(`${e.name}: ${e.message}`));
           return null;
         }
         let res = func(fengari);
@@ -13803,7 +13824,7 @@ var require_loadlib = __commonJS({
         } else if (res === void 0) {
           return global_env;
         } else {
-          lua_pushstring(L, to_luastring(`library returned unexpected type (${typeof res})`));
+          lua_pushstring(L, to_luastring2(`library returned unexpected type (${typeof res})`));
           return null;
         }
       };
@@ -13815,7 +13836,7 @@ var require_loadlib = __commonJS({
         try {
           return __require(path);
         } catch (e) {
-          lua_pushstring(L, to_luastring(e.message));
+          lua_pushstring(L, to_luastring2(e.message));
           return null;
         }
       };
@@ -13825,12 +13846,12 @@ var require_loadlib = __commonJS({
       if (f && typeof f === "function")
         return f;
       else {
-        lua_pushfstring(L, to_luastring("undefined symbol: %s"), sym);
+        lua_pushfstring(L, to_luastring2("undefined symbol: %s"), sym);
         return null;
       }
     };
     var noenv = function(L) {
-      lua_getfield(L, LUA_REGISTRYINDEX, to_luastring("LUA_NOENV"));
+      lua_getfield(L, LUA_REGISTRYINDEX, to_luastring2("LUA_NOENV"));
       let b = lua_toboolean(L, -1);
       lua_pop(L, 1);
       return b;
@@ -13898,7 +13919,7 @@ var require_loadlib = __commonJS({
     })();
     var setpath = function(L, fieldname, envname, dft) {
       let nver = `${envname}${lualib.LUA_VERSUFFIX}`;
-      lua_pushstring(L, to_luastring(nver));
+      lua_pushstring(L, to_luastring2(nver));
       let path = env[nver];
       if (path === void 0)
         path = env[envname];
@@ -13907,9 +13928,9 @@ var require_loadlib = __commonJS({
       else {
         path = luaL_gsub(
           L,
-          to_luastring(path),
-          to_luastring(LUA_PATH_SEP + LUA_PATH_SEP, true),
-          to_luastring(LUA_PATH_SEP + to_jsstring(AUXMARK) + LUA_PATH_SEP, true)
+          to_luastring2(path),
+          to_luastring2(LUA_PATH_SEP + LUA_PATH_SEP, true),
+          to_luastring2(LUA_PATH_SEP + to_jsstring(AUXMARK) + LUA_PATH_SEP, true)
         );
         luaL_gsub(L, path, AUXMARK, dft);
         lua_remove(L, -2);
@@ -13946,11 +13967,11 @@ var require_loadlib = __commonJS({
       if (sep[0] !== 0)
         name = luaL_gsub(L, name, sep, dirsep);
       while ((path = pushnexttemplate(L, path)) !== null) {
-        let filename = luaL_gsub(L, lua_tostring(L, -1), to_luastring(LUA_PATH_MARK, true), name);
+        let filename = luaL_gsub(L, lua_tostring(L, -1), to_luastring2(LUA_PATH_MARK, true), name);
         lua_remove(L, -2);
         if (readable(filename))
           return filename;
-        lua_pushfstring(L, to_luastring("\n	no file '%s'"), filename);
+        lua_pushfstring(L, to_luastring2("\n	no file '%s'"), filename);
         lua_remove(L, -2);
         luaL_addvalue(msg);
       }
@@ -13976,8 +13997,8 @@ var require_loadlib = __commonJS({
       lua_getfield(L, lua_upvalueindex(1), pname);
       let path = lua_tostring(L, -1);
       if (path === null)
-        luaL_error(L, to_luastring("'package.%s' must be a string"), pname);
-      return searchpath(L, name, path, to_luastring("."), dirsep);
+        luaL_error(L, to_luastring2("'package.%s' must be a string"), pname);
+      return searchpath(L, name, path, to_luastring2("."), dirsep);
     };
     var checkload = function(L, stat, filename) {
       if (stat) {
@@ -13986,7 +14007,7 @@ var require_loadlib = __commonJS({
       } else
         return luaL_error(
           L,
-          to_luastring("error loading module '%s' from file '%s':\n	%s"),
+          to_luastring2("error loading module '%s' from file '%s':\n	%s"),
           lua_tostring(L, 1),
           filename,
           lua_tostring(L, -1)
@@ -13994,27 +14015,27 @@ var require_loadlib = __commonJS({
     };
     var searcher_Lua = function(L) {
       let name = luaL_checkstring(L, 1);
-      let filename = findfile(L, name, to_luastring("path", true), to_luastring(LUA_LSUBSEP, true));
+      let filename = findfile(L, name, to_luastring2("path", true), to_luastring2(LUA_LSUBSEP, true));
       if (filename === null) return 1;
       return checkload(L, luaL_loadfile(L, filename) === LUA_OK, filename);
     };
     var loadfunc = function(L, filename, modname) {
       let openfunc;
-      modname = luaL_gsub(L, modname, to_luastring("."), LUA_OFSEP);
+      modname = luaL_gsub(L, modname, to_luastring2("."), LUA_OFSEP);
       let mark = luastring_indexOf(modname, LUA_IGMARK.charCodeAt(0));
       if (mark >= 0) {
         openfunc = lua_pushlstring(L, modname, mark);
-        openfunc = lua_pushfstring(L, to_luastring("%s%s"), LUA_POF, openfunc);
+        openfunc = lua_pushfstring(L, to_luastring2("%s%s"), LUA_POF, openfunc);
         let stat = lookforfunc(L, filename, openfunc);
         if (stat !== ERRFUNC) return stat;
         modname = mark + 1;
       }
-      openfunc = lua_pushfstring(L, to_luastring("%s%s"), LUA_POF, modname);
+      openfunc = lua_pushfstring(L, to_luastring2("%s%s"), LUA_POF, modname);
       return lookforfunc(L, filename, openfunc);
     };
     var searcher_C = function(L) {
       let name = luaL_checkstring(L, 1);
-      let filename = findfile(L, name, to_luastring("jspath", true), to_luastring(LUA_CSUBSEP, true));
+      let filename = findfile(L, name, to_luastring2("jspath", true), to_luastring2(LUA_CSUBSEP, true));
       if (filename === null) return 1;
       return checkload(L, loadfunc(L, filename, name) === 0, filename);
     };
@@ -14024,13 +14045,13 @@ var require_loadlib = __commonJS({
       let stat;
       if (p < 0) return 0;
       lua_pushlstring(L, name, p);
-      let filename = findfile(L, lua_tostring(L, -1), to_luastring("jspath", true), to_luastring(LUA_CSUBSEP, true));
+      let filename = findfile(L, lua_tostring(L, -1), to_luastring2("jspath", true), to_luastring2(LUA_CSUBSEP, true));
       if (filename === null) return 1;
       if ((stat = loadfunc(L, filename, name)) !== 0) {
         if (stat != ERRFUNC)
           return checkload(L, 0, filename);
         else {
-          lua_pushfstring(L, to_luastring("\n	no module '%s' in file '%s'"), name, filename);
+          lua_pushfstring(L, to_luastring2("\n	no module '%s' in file '%s'"), name, filename);
           return 1;
         }
       }
@@ -14041,14 +14062,14 @@ var require_loadlib = __commonJS({
       let name = luaL_checkstring(L, 1);
       lua_getfield(L, LUA_REGISTRYINDEX, LUA_PRELOAD_TABLE);
       if (lua_getfield(L, -1, name) === LUA_TNIL)
-        lua_pushfstring(L, to_luastring("\n	no field package.preload['%s']"), name);
+        lua_pushfstring(L, to_luastring2("\n	no field package.preload['%s']"), name);
       return 1;
     };
     var findloader = function(L, name, ctx, k) {
       let msg = new luaL_Buffer();
       luaL_buffinit(L, msg);
-      if (lua_getfield(L, lua_upvalueindex(1), to_luastring("searchers", true)) !== LUA_TTABLE)
-        luaL_error(L, to_luastring("'package.searchers' must be a table"));
+      if (lua_getfield(L, lua_upvalueindex(1), to_luastring2("searchers", true)) !== LUA_TTABLE)
+        luaL_error(L, to_luastring2("'package.searchers' must be a table"));
       let ctx2 = { name, i: 1, msg, ctx, k };
       return findloader_cont(L, LUA_OK, ctx2);
     };
@@ -14058,7 +14079,7 @@ var require_loadlib = __commonJS({
           if (lua_rawgeti(L, 3, ctx.i) === LUA_TNIL) {
             lua_pop(L, 1);
             luaL_pushresult(ctx.msg);
-            luaL_error(L, to_luastring("module '%s' not found:%s"), ctx.name, lua_tostring(L, -1));
+            luaL_error(L, to_luastring2("module '%s' not found:%s"), ctx.name, lua_tostring(L, -1));
           }
           lua_pushstring(L, ctx.name);
           lua_callk(L, 1, 2, ctx, findloader_cont);
@@ -14119,7 +14140,7 @@ var require_loadlib = __commonJS({
         lua_pushcclosure(L, searchers[i], 1);
         lua_rawseti(L, -2, i + 1);
       }
-      lua_setfield(L, -2, to_luastring("searchers", true));
+      lua_setfield(L, -2, to_luastring2("searchers", true));
     };
     var createjslibstable = function(L) {
       lua_newtable(L);
@@ -14131,14 +14152,14 @@ var require_loadlib = __commonJS({
       createjslibstable(L);
       luaL_newlib(L, pk_funcs);
       createsearcherstable(L);
-      setpath(L, to_luastring("path", true), LUA_PATH_VAR, LUA_PATH_DEFAULT);
-      setpath(L, to_luastring("jspath", true), LUA_JSPATH_VAR, LUA_JSPATH_DEFAULT);
+      setpath(L, to_luastring2("path", true), LUA_PATH_VAR, LUA_PATH_DEFAULT);
+      setpath(L, to_luastring2("jspath", true), LUA_JSPATH_VAR, LUA_JSPATH_DEFAULT);
       lua_pushliteral(L, LUA_DIRSEP + "\n" + LUA_PATH_SEP + "\n" + LUA_PATH_MARK + "\n" + LUA_EXEC_DIR + "\n" + LUA_IGMARK + "\n");
-      lua_setfield(L, -2, to_luastring("config", true));
+      lua_setfield(L, -2, to_luastring2("config", true));
       luaL_getsubtable(L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
-      lua_setfield(L, -2, to_luastring("loaded", true));
+      lua_setfield(L, -2, to_luastring2("loaded", true));
       luaL_getsubtable(L, LUA_REGISTRYINDEX, LUA_PRELOAD_TABLE);
-      lua_setfield(L, -2, to_luastring("preload", true));
+      lua_setfield(L, -2, to_luastring2("preload", true));
       lua_pushglobaltable(L);
       lua_pushvalue(L, -2);
       luaL_setfuncs(L, ll_funcs, 1);
@@ -14169,26 +14190,26 @@ var require_fengarilib = __commonJS({
       FENGARI_VERSION_MINOR,
       FENGARI_VERSION_NUM,
       FENGARI_VERSION_RELEASE,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_fengaricore();
     var luaopen_fengari = function(L) {
       luaL_newlib(L, {});
       lua_pushliteral(L, FENGARI_AUTHORS);
-      lua_setfield(L, -2, to_luastring("AUTHORS"));
+      lua_setfield(L, -2, to_luastring2("AUTHORS"));
       lua_pushliteral(L, FENGARI_COPYRIGHT);
-      lua_setfield(L, -2, to_luastring("COPYRIGHT"));
+      lua_setfield(L, -2, to_luastring2("COPYRIGHT"));
       lua_pushliteral(L, FENGARI_RELEASE);
-      lua_setfield(L, -2, to_luastring("RELEASE"));
+      lua_setfield(L, -2, to_luastring2("RELEASE"));
       lua_pushliteral(L, FENGARI_VERSION);
-      lua_setfield(L, -2, to_luastring("VERSION"));
+      lua_setfield(L, -2, to_luastring2("VERSION"));
       lua_pushliteral(L, FENGARI_VERSION_MAJOR);
-      lua_setfield(L, -2, to_luastring("VERSION_MAJOR"));
+      lua_setfield(L, -2, to_luastring2("VERSION_MAJOR"));
       lua_pushliteral(L, FENGARI_VERSION_MINOR);
-      lua_setfield(L, -2, to_luastring("VERSION_MINOR"));
+      lua_setfield(L, -2, to_luastring2("VERSION_MINOR"));
       lua_pushinteger(L, FENGARI_VERSION_NUM);
-      lua_setfield(L, -2, to_luastring("VERSION_NUM"));
+      lua_setfield(L, -2, to_luastring2("VERSION_NUM"));
       lua_pushliteral(L, FENGARI_VERSION_RELEASE);
-      lua_setfield(L, -2, to_luastring("VERSION_RELEASE"));
+      lua_setfield(L, -2, to_luastring2("VERSION_RELEASE"));
       return 1;
     };
     module.exports.luaopen_fengari = luaopen_fengari;
@@ -14201,32 +14222,32 @@ var require_linit = __commonJS({
     "use strict";
     var { lua_pop } = require_lua();
     var { luaL_requiref } = require_lauxlib();
-    var { to_luastring } = require_fengaricore();
+    var { to_luastring: to_luastring2 } = require_fengaricore();
     var loadedlibs = {};
     var luaL_openlibs = function(L) {
       for (let lib in loadedlibs) {
-        luaL_requiref(L, to_luastring(lib), loadedlibs[lib], 1);
+        luaL_requiref(L, to_luastring2(lib), loadedlibs[lib], 1);
         lua_pop(L, 1);
       }
     };
     module.exports.luaL_openlibs = luaL_openlibs;
     var lualib = require_lualib();
-    var { luaopen_base } = require_lbaselib();
-    var { luaopen_coroutine } = require_lcorolib();
+    var { luaopen_base: luaopen_base2 } = require_lbaselib();
+    var { luaopen_coroutine: luaopen_coroutine2 } = require_lcorolib();
     var { luaopen_debug } = require_ldblib();
-    var { luaopen_math } = require_lmathlib();
+    var { luaopen_math: luaopen_math2 } = require_lmathlib();
     var { luaopen_package } = require_loadlib();
     var { luaopen_os } = require_loslib();
-    var { luaopen_string } = require_lstrlib();
-    var { luaopen_table } = require_ltablib();
-    var { luaopen_utf8 } = require_lutf8lib();
-    loadedlibs["_G"] = luaopen_base, loadedlibs[lualib.LUA_LOADLIBNAME] = luaopen_package;
-    loadedlibs[lualib.LUA_COLIBNAME] = luaopen_coroutine;
-    loadedlibs[lualib.LUA_TABLIBNAME] = luaopen_table;
+    var { luaopen_string: luaopen_string2 } = require_lstrlib();
+    var { luaopen_table: luaopen_table2 } = require_ltablib();
+    var { luaopen_utf8: luaopen_utf82 } = require_lutf8lib();
+    loadedlibs["_G"] = luaopen_base2, loadedlibs[lualib.LUA_LOADLIBNAME] = luaopen_package;
+    loadedlibs[lualib.LUA_COLIBNAME] = luaopen_coroutine2;
+    loadedlibs[lualib.LUA_TABLIBNAME] = luaopen_table2;
     loadedlibs[lualib.LUA_OSLIBNAME] = luaopen_os;
-    loadedlibs[lualib.LUA_STRLIBNAME] = luaopen_string;
-    loadedlibs[lualib.LUA_MATHLIBNAME] = luaopen_math;
-    loadedlibs[lualib.LUA_UTF8LIBNAME] = luaopen_utf8;
+    loadedlibs[lualib.LUA_STRLIBNAME] = luaopen_string2;
+    loadedlibs[lualib.LUA_MATHLIBNAME] = luaopen_math2;
+    loadedlibs[lualib.LUA_UTF8LIBNAME] = luaopen_utf82;
     loadedlibs[lualib.LUA_DBLIBNAME] = luaopen_debug;
     if (false)
       loadedlibs[lualib.LUA_IOLIBNAME] = null.luaopen_io;
@@ -14368,7 +14389,7 @@ var require_lstrlib = __commonJS({
       luastring_eq,
       luastring_indexOf,
       to_jsstring,
-      to_luastring
+      to_luastring: to_luastring2
     } = require_fengaricore();
     var sL_ESC = "%";
     var L_ESC = sL_ESC.charCodeAt(0);
@@ -14422,7 +14443,7 @@ var require_lstrlib = __commonJS({
       lua_settop(L, 1);
       luaL_buffinit(L, b);
       if (lua_dump(L, writer, b, strip) !== 0)
-        return luaL_error(L, to_luastring("unable to dump given function"));
+        return luaL_error(L, to_luastring2("unable to dump given function"));
       luaL_pushresult(b);
       return 1;
     };
@@ -14430,16 +14451,16 @@ var require_lstrlib = __commonJS({
     var L_NBFD = 1;
     var num2straux = function(x) {
       if (Object.is(x, Infinity))
-        return to_luastring("inf");
+        return to_luastring2("inf");
       else if (Object.is(x, -Infinity))
-        return to_luastring("-inf");
+        return to_luastring2("-inf");
       else if (Number.isNaN(x))
-        return to_luastring("nan");
+        return to_luastring2("nan");
       else if (x === 0) {
         let zero = sprintf(LUA_NUMBER_FMT + "x0p+0", x);
         if (Object.is(x, -0))
           zero = "-" + zero;
-        return to_luastring(zero);
+        return to_luastring2(zero);
       } else {
         let buff = "";
         let fe = frexp(x);
@@ -14453,7 +14474,7 @@ var require_lstrlib = __commonJS({
         buff += (m * (1 << L_NBFD)).toString(16);
         e -= L_NBFD;
         buff += sprintf("p%+d", e);
-        return to_luastring(buff);
+        return to_luastring2(buff);
       }
     };
     var lua_number2strx = function(L, fmt, x) {
@@ -14465,10 +14486,10 @@ var require_lstrlib = __commonJS({
             buff[i] = c & 223;
         }
       } else if (fmt[SIZELENMOD] !== 97)
-        luaL_error(L, to_luastring("modifiers for format '%%a'/'%%A' not implemented"));
+        luaL_error(L, to_luastring2("modifiers for format '%%a'/'%%A' not implemented"));
       return buff;
     };
-    var FLAGS = to_luastring("-+ #0");
+    var FLAGS = to_luastring2("-+ #0");
     var isalpha = (e) => 97 <= e && e <= 122 || 65 <= e && e <= 90;
     var isdigit = (e) => 48 <= e && e <= 57;
     var iscntrl = (e) => 0 <= e && e <= 31 || e === 127;
@@ -14498,7 +14519,7 @@ var require_lstrlib = __commonJS({
           let buff = "" + s[i];
           if (isdigit(s[i + 1]))
             buff = ("000" + buff).slice(-3);
-          luaL_addstring(b, to_luastring("\\" + buff));
+          luaL_addstring(b, to_luastring2("\\" + buff));
         } else
           luaL_addchar(b, s[i]);
         i++;
@@ -14531,12 +14552,12 @@ var require_lstrlib = __commonJS({
           let buff;
           if (!lua_isinteger(L, arg)) {
             let n = lua_tonumber(L, arg);
-            buff = lua_number2strx(L, to_luastring(`%${LUA_INTEGER_FRMLEN}a`), n);
+            buff = lua_number2strx(L, to_luastring2(`%${LUA_INTEGER_FRMLEN}a`), n);
             checkdp(buff);
           } else {
             let n = lua_tointeger(L, arg);
             let format = n === LUA_MININTEGER ? "0x%" + LUA_INTEGER_FRMLEN + "x" : LUA_INTEGER_FMT;
-            buff = to_luastring(sprintf(format, n));
+            buff = to_luastring2(sprintf(format, n));
           }
           luaL_addstring(b, buff);
           break;
@@ -14548,7 +14569,7 @@ var require_lstrlib = __commonJS({
           break;
         }
         default: {
-          luaL_argerror(L, arg, to_luastring("value has no literal form"));
+          luaL_argerror(L, arg, to_luastring2("value has no literal form"));
         }
       }
     };
@@ -14556,7 +14577,7 @@ var require_lstrlib = __commonJS({
       let p = i;
       while (strfrmt[p] !== 0 && luastring_indexOf(FLAGS, strfrmt[p]) >= 0) p++;
       if (p - i >= FLAGS.length)
-        luaL_error(L, to_luastring("invalid format (repeated flags)"));
+        luaL_error(L, to_luastring2("invalid format (repeated flags)"));
       if (isdigit(strfrmt[p])) p++;
       if (isdigit(strfrmt[p])) p++;
       if (strfrmt[p] === 46) {
@@ -14565,7 +14586,7 @@ var require_lstrlib = __commonJS({
         if (isdigit(strfrmt[p])) p++;
       }
       if (isdigit(strfrmt[p]))
-        luaL_error(L, to_luastring("invalid format (width or precision too long)"));
+        luaL_error(L, to_luastring2("invalid format (width or precision too long)"));
       form[0] = 37;
       for (let j = 0; j < p - i + 1; j++)
         form[j + 1] = strfrmt[i + j];
@@ -14594,7 +14615,7 @@ var require_lstrlib = __commonJS({
         } else {
           let form = [];
           if (++arg > top)
-            luaL_argerror(L, arg, to_luastring("no value"));
+            luaL_argerror(L, arg, to_luastring2("no value"));
           i = scanformat(L, strfrmt, i, form);
           switch (String.fromCharCode(strfrmt[i++])) {
             case "c": {
@@ -14608,13 +14629,13 @@ var require_lstrlib = __commonJS({
             case "x":
             case "X": {
               let n = luaL_checkinteger(L, arg);
-              addlenmod(form, to_luastring(LUA_INTEGER_FRMLEN, true));
-              luaL_addstring(b, to_luastring(sprintf(String.fromCharCode(...form), n)));
+              addlenmod(form, to_luastring2(LUA_INTEGER_FRMLEN, true));
+              luaL_addstring(b, to_luastring2(sprintf(String.fromCharCode(...form), n)));
               break;
             }
             case "a":
             case "A": {
-              addlenmod(form, to_luastring(LUA_INTEGER_FRMLEN, true));
+              addlenmod(form, to_luastring2(LUA_INTEGER_FRMLEN, true));
               luaL_addstring(b, lua_number2strx(L, form, luaL_checknumber(L, arg)));
               break;
             }
@@ -14624,8 +14645,8 @@ var require_lstrlib = __commonJS({
             case "g":
             case "G": {
               let n = luaL_checknumber(L, arg);
-              addlenmod(form, to_luastring(LUA_INTEGER_FRMLEN, true));
-              luaL_addstring(b, to_luastring(sprintf(String.fromCharCode(...form), n)));
+              addlenmod(form, to_luastring2(LUA_INTEGER_FRMLEN, true));
+              luaL_addstring(b, to_luastring2(sprintf(String.fromCharCode(...form), n)));
               break;
             }
             case "q": {
@@ -14645,14 +14666,14 @@ var require_lstrlib = __commonJS({
                 ) < 0 && s.length >= 100) {
                   luaL_addvalue(b);
                 } else {
-                  luaL_addstring(b, to_luastring(sprintf(String.fromCharCode(...form), to_jsstring(s))));
+                  luaL_addstring(b, to_luastring2(sprintf(String.fromCharCode(...form), to_jsstring(s))));
                   lua_pop(L, 1);
                 }
               }
               break;
             }
             default: {
-              return luaL_error(L, to_luastring("invalid option '%%%c' to 'format'"), strfrmt[i - 1]);
+              return luaL_error(L, to_luastring2("invalid option '%%%c' to 'format'"), strfrmt[i - 1]);
             }
           }
         }
@@ -14697,7 +14718,7 @@ var require_lstrlib = __commonJS({
     var getnumlimit = function(h, fmt, df) {
       let sz = getnum(fmt, df);
       if (sz > MAXINTSIZE || sz <= 0)
-        luaL_error(h.L, to_luastring("integral size (%d) out of limits [1,%d]"), sz, MAXINTSIZE);
+        luaL_error(h.L, to_luastring2("integral size (%d) out of limits [1,%d]"), sz, MAXINTSIZE);
       return sz;
     };
     var getoption = function(h, fmt) {
@@ -14779,7 +14800,7 @@ var require_lstrlib = __commonJS({
         case 99: {
           r.size = getnum(fmt, -1);
           if (r.size === -1)
-            luaL_error(h.L, to_luastring("missing size for format option 'c'"));
+            luaL_error(h.L, to_luastring2("missing size for format option 'c'"));
           r.opt = Kchar;
           return r;
         }
@@ -14808,7 +14829,7 @@ var require_lstrlib = __commonJS({
           h.maxalign = getnumlimit(h, fmt, MAXALIGN);
           break;
         default:
-          luaL_error(h.L, to_luastring("invalid format option '%c'"), r.opt);
+          luaL_error(h.L, to_luastring2("invalid format option '%c'"), r.opt);
       }
       r.opt = Knop;
       return r;
@@ -14825,13 +14846,13 @@ var require_lstrlib = __commonJS({
       let align = r.size;
       if (r.opt === Kpaddalign) {
         if (fmt.off >= fmt.s.length || fmt.s[fmt.off] === 0)
-          luaL_argerror(h.L, 1, to_luastring("invalid next option for option 'X'"));
+          luaL_argerror(h.L, 1, to_luastring2("invalid next option for option 'X'"));
         else {
           let o = getoption(h, fmt);
           align = o.size;
           o = o.opt;
           if (o === Kchar || align === 0)
-            luaL_argerror(h.L, 1, to_luastring("invalid next option for option 'X'"));
+            luaL_argerror(h.L, 1, to_luastring2("invalid next option for option 'X'"));
         }
       }
       if (align <= 1 || r.opt === Kchar)
@@ -14840,7 +14861,7 @@ var require_lstrlib = __commonJS({
         if (align > h.maxalign)
           align = h.maxalign;
         if ((align & align - 1) !== 0)
-          luaL_argerror(h.L, 1, to_luastring("format asks for alignment not power of 2"));
+          luaL_argerror(h.L, 1, to_luastring2("format asks for alignment not power of 2"));
         r.ntoalign = align - (totalsize & align - 1) & align - 1;
       }
       return r;
@@ -14992,7 +15013,7 @@ var require_lstrlib = __commonJS({
       let lsep = sep.length;
       if (n <= 0) lua_pushliteral(L, "");
       else if (l + lsep < l || l + lsep > MAXSIZE / n)
-        return luaL_error(L, to_luastring("resulting string too large"));
+        return luaL_error(L, to_luastring2("resulting string too large"));
       else {
         let totallen = n * l + (n - 1) * lsep;
         let b = new luaL_Buffer();
@@ -15072,7 +15093,7 @@ var require_lstrlib = __commonJS({
         let mask = !issigned || res >= 0 ? 0 : MC;
         for (let i = limit; i < size; i++) {
           if (str[islittle ? i : size - 1 - i] !== mask)
-            luaL_error(L, to_luastring("%d-byte integer does not fit into Lua Integer"), size);
+            luaL_error(L, to_luastring2("%d-byte integer does not fit into Lua Integer"), size);
         }
       }
       return res;
@@ -15105,7 +15126,7 @@ var require_lstrlib = __commonJS({
           /*ntoalign + size > ~pos ||*/
           pos + ntoalign + size > ld
         )
-          luaL_argerror(L, 2, to_luastring("data string too short"));
+          luaL_argerror(L, 2, to_luastring2("data string too short"));
         pos += ntoalign;
         luaL_checkstack(L, 2, "too many results");
         n++;
@@ -15153,7 +15174,7 @@ var require_lstrlib = __commonJS({
     var CAP_UNFINISHED = -1;
     var CAP_POSITION = -2;
     var MAXCCALLS = 200;
-    var SPECIALS = to_luastring("^$*+?.([%-");
+    var SPECIALS = to_luastring2("^$*+?.([%-");
     var MatchState = class {
       constructor(L) {
         this.src = null;
@@ -15170,27 +15191,27 @@ var require_lstrlib = __commonJS({
     var check_capture = function(ms, l) {
       l = l - 49;
       if (l < 0 || l >= ms.level || ms.capture[l].len === CAP_UNFINISHED)
-        return luaL_error(ms.L, to_luastring("invalid capture index %%%d"), l + 1);
+        return luaL_error(ms.L, to_luastring2("invalid capture index %%%d"), l + 1);
       return l;
     };
     var capture_to_close = function(ms) {
       let level = ms.level;
       for (level--; level >= 0; level--)
         if (ms.capture[level].len === CAP_UNFINISHED) return level;
-      return luaL_error(ms.L, to_luastring("invalid pattern capture"));
+      return luaL_error(ms.L, to_luastring2("invalid pattern capture"));
     };
     var classend = function(ms, p) {
       switch (ms.p[p++]) {
         case L_ESC: {
           if (p === ms.p_end)
-            luaL_error(ms.L, to_luastring("malformed pattern (ends with '%%')"));
+            luaL_error(ms.L, to_luastring2("malformed pattern (ends with '%%')"));
           return p + 1;
         }
         case 91: {
           if (ms.p[p] === 94) p++;
           do {
             if (p === ms.p_end)
-              luaL_error(ms.L, to_luastring("malformed pattern (missing ']')"));
+              luaL_error(ms.L, to_luastring2("malformed pattern (missing ']')"));
             if (ms.p[p++] === L_ESC && p < ms.p_end)
               p++;
           } while (ms.p[p] !== 93);
@@ -15292,7 +15313,7 @@ var require_lstrlib = __commonJS({
     };
     var matchbalance = function(ms, s, p) {
       if (p >= ms.p_end - 1)
-        luaL_error(ms.L, to_luastring("malformed pattern (missing arguments to '%%b'"));
+        luaL_error(ms.L, to_luastring2("malformed pattern (missing arguments to '%%b'"));
       if (ms.src[s] !== ms.p[p])
         return null;
       else {
@@ -15330,7 +15351,7 @@ var require_lstrlib = __commonJS({
     };
     var start_capture = function(ms, s, p, what) {
       let level = ms.level;
-      if (level >= LUA_MAXCAPTURES) luaL_error(ms.L, to_luastring("too many captures"));
+      if (level >= LUA_MAXCAPTURES) luaL_error(ms.L, to_luastring2("too many captures"));
       ms.capture[level] = ms.capture[level] ? ms.capture[level] : {};
       ms.capture[level].init = s;
       ms.capture[level].len = what;
@@ -15362,7 +15383,7 @@ var require_lstrlib = __commonJS({
       let gotodefault = false;
       let gotoinit = true;
       if (ms.matchdepth-- === 0)
-        luaL_error(ms.L, to_luastring("pattern too complex"));
+        luaL_error(ms.L, to_luastring2("pattern too complex"));
       while (gotoinit || gotodefault) {
         gotoinit = false;
         if (p !== ms.p_end) {
@@ -15399,7 +15420,7 @@ var require_lstrlib = __commonJS({
                 case 102: {
                   p += 2;
                   if (ms.p[p] !== 91)
-                    luaL_error(ms.L, to_luastring("missing '[' after '%%f' in pattern"));
+                    luaL_error(ms.L, to_luastring2("missing '[' after '%%f' in pattern"));
                   let ep = classend(ms, p);
                   let previous = s === ms.src_init ? 0 : ms.src[s - 1];
                   if (!matchbracketclass(ms, previous, p, ep - 1) && matchbracketclass(ms, s === ms.src_end ? 0 : ms.src[s], p, ep - 1)) {
@@ -15484,10 +15505,10 @@ var require_lstrlib = __commonJS({
         if (i === 0)
           lua_pushlstring(ms.L, ms.src.subarray(s, e), e - s);
         else
-          luaL_error(ms.L, to_luastring("invalid capture index %%%d"), i + 1);
+          luaL_error(ms.L, to_luastring2("invalid capture index %%%d"), i + 1);
       } else {
         let l = ms.capture[i].len;
-        if (l === CAP_UNFINISHED) luaL_error(ms.L, to_luastring("unfinished capture"));
+        if (l === CAP_UNFINISHED) luaL_error(ms.L, to_luastring2("unfinished capture"));
         if (l === CAP_POSITION)
           lua_pushinteger(ms.L, ms.capture[i].init - ms.src_init + 1);
         else
@@ -15627,7 +15648,7 @@ var require_lstrlib = __commonJS({
           i++;
           if (!isdigit(news[i])) {
             if (news[i] !== L_ESC)
-              luaL_error(L, to_luastring("invalid use of '%c' in replacement string"), L_ESC);
+              luaL_error(L, to_luastring2("invalid use of '%c' in replacement string"), L_ESC);
             luaL_addchar(b, news[i]);
           } else if (news[i] === 48)
             luaL_addlstring(b, ms.src.subarray(s, e), e - s);
@@ -15663,7 +15684,7 @@ var require_lstrlib = __commonJS({
         lua_pop(L, 1);
         lua_pushlstring(L, ms.src.subarray(s, e), e - s);
       } else if (!lua_isstring(L, -1))
-        luaL_error(L, to_luastring("invalid replacement value (a %s)"), luaL_typename(L, -1));
+        luaL_error(L, to_luastring2("invalid replacement value (a %s)"), luaL_typename(L, -1));
       luaL_addvalue(b);
     };
     var str_gsub = function(L) {
@@ -15735,42 +15756,48 @@ var require_lstrlib = __commonJS({
       lua_setmetatable(L, -2);
       lua_pop(L, 1);
       lua_pushvalue(L, -2);
-      lua_setfield(L, -2, to_luastring("__index", true));
+      lua_setfield(L, -2, to_luastring2("__index", true));
       lua_pop(L, 1);
     };
-    var luaopen_string = function(L) {
+    var luaopen_string2 = function(L) {
       luaL_newlib(L, strlib);
       createmetatable(L);
       return 1;
     };
-    module.exports.luaopen_string = luaopen_string;
+    module.exports.luaopen_string = luaopen_string2;
   }
 });
 
-// scripts/fengari-entry.cjs
-var require_fengari_entry = __commonJS({
-  "scripts/fengari-entry.cjs"(exports) {
-    var core = require_fengaricore();
-    var lua = require_lua();
-    var lauxlib = require_lauxlib();
-    var lbaselib = require_lbaselib();
-    var lmathlib = require_lmathlib();
-    var lstrlib = require_lstrlib();
-    var ltablib = require_ltablib();
-    var lcorolib = require_lcorolib();
-    var lutf8lib = require_lutf8lib();
-    exports.to_luastring = core.to_luastring;
-    exports.lua = lua;
-    exports.lauxlib = lauxlib;
-    exports.luaopen_base = lbaselib.luaopen_base;
-    exports.luaopen_math = lmathlib.luaopen_math;
-    exports.luaopen_string = lstrlib.luaopen_string;
-    exports.luaopen_table = ltablib.luaopen_table;
-    exports.luaopen_coroutine = lcorolib.luaopen_coroutine;
-    exports.luaopen_utf8 = lutf8lib.luaopen_utf8;
-  }
-});
-export default require_fengari_entry();
+// scripts/fengari-entry.mjs
+var import_fengaricore = __toESM(require_fengaricore(), 1);
+var import_lua = __toESM(require_lua(), 1);
+var import_lauxlib = __toESM(require_lauxlib(), 1);
+var import_lbaselib = __toESM(require_lbaselib(), 1);
+var import_lmathlib = __toESM(require_lmathlib(), 1);
+var import_lstrlib = __toESM(require_lstrlib(), 1);
+var import_ltablib = __toESM(require_ltablib(), 1);
+var import_lcorolib = __toESM(require_lcorolib(), 1);
+var import_lutf8lib = __toESM(require_lutf8lib(), 1);
+var to_luastring = import_fengaricore.default.to_luastring;
+var luaopen_base = import_lbaselib.default.luaopen_base;
+var luaopen_math = import_lmathlib.default.luaopen_math;
+var luaopen_string = import_lstrlib.default.luaopen_string;
+var luaopen_table = import_ltablib.default.luaopen_table;
+var luaopen_coroutine = import_lcorolib.default.luaopen_coroutine;
+var luaopen_utf8 = import_lutf8lib.default.luaopen_utf8;
+var export_lauxlib = import_lauxlib.default;
+var export_lua = import_lua.default;
+export {
+  export_lauxlib as lauxlib,
+  export_lua as lua,
+  luaopen_base,
+  luaopen_coroutine,
+  luaopen_math,
+  luaopen_string,
+  luaopen_table,
+  luaopen_utf8,
+  to_luastring
+};
 /*! Bundled license information:
 
 fengari/src/fengari.js:

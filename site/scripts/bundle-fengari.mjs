@@ -63,7 +63,7 @@ const forceBrowserPlugin = {
 };
 
 await build({
-  entryPoints: [path.resolve(__dirname, "fengari-entry.cjs")],
+  entryPoints: [path.resolve(__dirname, "fengari-entry.mjs")],
   bundle: true,
   format: "esm",
   outfile,

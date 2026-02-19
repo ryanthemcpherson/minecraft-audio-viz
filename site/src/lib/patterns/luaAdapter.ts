@@ -10,20 +10,12 @@
 
 import type { EntityData, AudioState, PatternConfig } from "./base";
 import { DEFAULT_CONFIG } from "./base";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — esbuild CJS-to-ESM wraps exports as default
-import fengari from "./fengari-browser.js";
+import {
+  lua, lauxlib, to_luastring,
+  luaopen_base, luaopen_math, luaopen_string,
+  luaopen_table, luaopen_coroutine, luaopen_utf8,
+} from "./fengari-browser.js";
 
-// Static import — fengari-browser.js is pre-bundled with all Node.js deps stubbed
-const lua: any = fengari.lua;
-const lauxlib: any = fengari.lauxlib;
-const to_luastring = fengari.to_luastring;
-const luaopen_base: any = fengari.luaopen_base;
-const luaopen_math: any = fengari.luaopen_math;
-const luaopen_string: any = fengari.luaopen_string;
-const luaopen_table: any = fengari.luaopen_table;
-const luaopen_coroutine: any = fengari.luaopen_coroutine;
-const luaopen_utf8: any = fengari.luaopen_utf8;
 const luaL_requiref: any = lauxlib.luaL_requiref;
 
 const fengariReady = true;
