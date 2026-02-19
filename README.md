@@ -351,7 +351,6 @@ minecraft-audio-viz/
 ├── site/                  # Landing page (Next.js 15, mcav.live)
 ├── coordinator/           # DJ coordinator API (FastAPI, PostgreSQL)
 ├── worker/                # Tenant router (Cloudflare Workers)
-├── python_client/         # VizClient WebSocket library
 ├── protocol/              # Shared protocol schemas
 ├── patterns/              # Lua visualization patterns
 ├── configs/               # Configuration files
@@ -377,7 +376,7 @@ minecraft-audio-viz/
 ```bash
 pip install -e ".[dev]"
 pytest
-ruff check audio_processor/ python_client/
+ruff check vj_server/
 
 cd minecraft_plugin && mvn package
 ```

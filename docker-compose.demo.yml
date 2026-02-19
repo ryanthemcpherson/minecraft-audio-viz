@@ -47,25 +47,6 @@ services:
       - mcav
     restart: unless-stopped
 
-  # Audio Simulator - Sends simulated DJ audio frames
-  audio_simulator:
-    build:
-      context: .
-      dockerfile: Dockerfile.simulator
-    container_name: mcav-audio-simulator
-    depends_on:
-      vj_server:
-        condition: service_healthy
-    environment:
-      - VJ_HOST=vj_server
-      - VJ_PORT=9000
-      - BPM=128
-      - INTENSITY=0.7
-      - FPS=21.5
-    networks:
-      - mcav
-    restart: unless-stopped
-
   # Preview Web Server - Serves 3D preview tool
   preview:
     image: nginx:alpine

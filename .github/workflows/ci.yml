@@ -30,10 +30,10 @@ jobs:
         run: pip install "ruff>=0.1.0,<1"
 
       - name: Ruff check
-        run: ruff check vj_server/ python_client/
+        run: ruff check vj_server/
 
       - name: Ruff format check
-        run: ruff format --check vj_server/ python_client/
+        run: ruff format --check vj_server/
 
   # ---------------------------------------------------------------------------
   # Python: security static analysis (Bandit)
@@ -54,11 +54,11 @@ jobs:
 
       - name: Run Bandit
         # Bandit exits non-zero when findings exist; report is still written
-        run: bandit -r vj_server/ python_client/ -c pyproject.toml -f json -o bandit-report.json || true
+        run: bandit -r vj_server/ -c pyproject.toml -f json -o bandit-report.json || true
 
       - name: Bandit (console output)
         continue-on-error: true
-        run: bandit -r vj_server/ python_client/ -c pyproject.toml
+        run: bandit -r vj_server/ -c pyproject.toml
 
       - name: Upload Bandit report
         if: always()

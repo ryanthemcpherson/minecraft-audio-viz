@@ -19,7 +19,6 @@ RUN pip install --no-cache-dir ./vj_server[full]
 
 # Copy application code
 COPY vj_server/ ./vj_server/
-COPY python_client/ ./python_client/
 COPY admin_panel/ ./admin_panel/
 COPY preview_tool/ ./preview_tool/
 COPY configs/ ./configs/

@@ -46,12 +46,11 @@ The following components are in scope:
 
 | Component | In Scope |
 |-----------|----------|
-| `audio_processor/` (Python) | Yes - WebSocket server, audio processing |
+| `vj_server/` (Python) | Yes - WebSocket server, audio processing |
 | `minecraft_plugin/` (Java) | Yes - Plugin running on game servers |
 | `dj_client/` (Rust/Tauri) | Yes - Desktop application |
 | `admin_panel/` (JS) | Yes - Web control interface |
 | `preview_tool/` (JS) | Yes - Web preview interface |
-| `python_client/` (Python) | Yes - Client library |
 
 ### Security Measures in CI
 
