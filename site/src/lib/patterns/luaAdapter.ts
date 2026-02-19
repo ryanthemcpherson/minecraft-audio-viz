@@ -10,43 +10,26 @@
 
 import type { EntityData, AudioState, PatternConfig } from "./base";
 import { DEFAULT_CONFIG } from "./base";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — esbuild CJS-to-ESM wraps exports as default
+import fengari from "./fengari-browser.js";
 
-// Lazy-loaded fengari modules
-let fengariReady = false;
-let lua: any;
-let lauxlib: any;
-let to_luastring: (s: string) => Uint8Array;
+// Static import — fengari-browser.js is pre-bundled with all Node.js deps stubbed
+const lua: any = fengari.lua;
+const lauxlib: any = fengari.lauxlib;
+const to_luastring = fengari.to_luastring;
+const luaopen_base: any = fengari.luaopen_base;
+const luaopen_math: any = fengari.luaopen_math;
+const luaopen_string: any = fengari.luaopen_string;
+const luaopen_table: any = fengari.luaopen_table;
+const luaopen_coroutine: any = fengari.luaopen_coroutine;
+const luaopen_utf8: any = fengari.luaopen_utf8;
+const luaL_requiref: any = lauxlib.luaL_requiref;
 
-// Individual library openers (safe, no Node.js deps)
-let luaopen_base: any;
-let luaopen_math: any;
-let luaopen_string: any;
-let luaopen_table: any;
-let luaopen_coroutine: any;
-let luaopen_utf8: any;
-let luaL_requiref: any;
-
-let loadPromise: Promise<void> | null = null;
+const fengariReady = true;
 
 export function ensureFengari(): Promise<void> {
-  if (fengariReady) return Promise.resolve();
-  if (loadPromise) return loadPromise;
-
-  loadPromise = import("./fengari-browser").then((mod) => {
-    to_luastring = mod.to_luastring;
-    lua = mod.lua;
-    lauxlib = mod.lauxlib;
-    luaL_requiref = mod.lauxlib.luaL_requiref;
-    luaopen_base = mod.luaopen_base;
-    luaopen_math = mod.luaopen_math;
-    luaopen_string = mod.luaopen_string;
-    luaopen_table = mod.luaopen_table;
-    luaopen_coroutine = mod.luaopen_coroutine;
-    luaopen_utf8 = mod.luaopen_utf8;
-    fengariReady = true;
-  });
-
-  return loadPromise;
+  return Promise.resolve();
 }
 
 export function isFengariReady(): boolean {
