@@ -103,6 +103,7 @@ function calculate(audio, config, dt)
                     all_dead = false
                     spark.x = spark.x + spark.dx * dt
                     spark.y = spark.y + spark.dy * dt
+                    spark.z = spark.z + spark.dz * dt
                     spark.dy = spark.dy - gravity * dt
                     -- Velocity drag
                     spark.dx = spark.dx * (1.0 - 1.5 * dt)
