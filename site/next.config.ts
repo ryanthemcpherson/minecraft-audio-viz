@@ -1,6 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Fengari (Lua-in-JS) uses require('os') and require('fs') at module
+  // evaluation time when it detects `process` (injected by Turbopack).
+  // These shims let the module evaluate without throwing in the browser.
+  turbopack: {
+    resolveAlias: {
+      os: "./shims/os.js",
+      fs: "./shims/fs.js",
+    },
+  },
   async rewrites() {
     const coordinatorUrl =
       process.env.COORDINATOR_API_URL || "https://api.mcav.live";

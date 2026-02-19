@@ -2,10 +2,8 @@
  * Lua Pattern Adapter
  * Executes Lua pattern scripts in the browser via fengari.
  *
- * We import from fengari's individual source files to avoid pulling in
- * loslib.js / ldblib.js which depend on Node.js modules (child_process, fs).
- * Only safe standard libraries (base, math, string, table, coroutine, utf8)
- * are opened.
+ * Uses a pre-bundled fengari-browser.js (built by scripts/bundle-fengari.mjs)
+ * that stubs all Node.js dependencies, making it safe for Turbopack/browser.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,27 +32,17 @@ export function ensureFengari(): Promise<void> {
   if (fengariReady) return Promise.resolve();
   if (loadPromise) return loadPromise;
 
-  loadPromise = Promise.all([
-    import(/* webpackIgnore: true */ "fengari/src/fengaricore.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lua.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lauxlib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lbaselib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lmathlib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lstrlib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/ltablib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lcorolib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lutf8lib.js"),
-  ]).then(([core, luaMod, lauxMod, baseMod, mathMod, strMod, tabMod, coroMod, utf8Mod]) => {
-    to_luastring = core.to_luastring;
-    lua = luaMod;
-    lauxlib = lauxMod;
-    luaL_requiref = lauxMod.luaL_requiref;
-    luaopen_base = baseMod.luaopen_base;
-    luaopen_math = mathMod.luaopen_math;
-    luaopen_string = strMod.luaopen_string;
-    luaopen_table = tabMod.luaopen_table;
-    luaopen_coroutine = coroMod.luaopen_coroutine;
-    luaopen_utf8 = utf8Mod.luaopen_utf8;
+  loadPromise = import("./fengari-browser").then((mod) => {
+    to_luastring = mod.to_luastring;
+    lua = mod.lua;
+    lauxlib = mod.lauxlib;
+    luaL_requiref = mod.lauxlib.luaL_requiref;
+    luaopen_base = mod.luaopen_base;
+    luaopen_math = mod.luaopen_math;
+    luaopen_string = mod.luaopen_string;
+    luaopen_table = mod.luaopen_table;
+    luaopen_coroutine = mod.luaopen_coroutine;
+    luaopen_utf8 = mod.luaopen_utf8;
     fengariReady = true;
   });
 
