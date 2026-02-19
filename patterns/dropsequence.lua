@@ -38,10 +38,10 @@ function calculate(audio, config, dt)
 
     -- Target build beats based on BPM
     local target_beats = 16
-    if audio.bpm > 140 then
-        target_beats = 12
-    elseif audio.bpm > 170 then
+    if audio.bpm > 170 then
         target_beats = 8
+    elseif audio.bpm > 140 then
+        target_beats = 12
     end
 
     -- Beat handling
