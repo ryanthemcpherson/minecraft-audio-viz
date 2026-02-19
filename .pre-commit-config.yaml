@@ -9,6 +9,7 @@ repos:
       - id: check-json
       - id: check-added-large-files
         args: ['--maxkb=700']
+        exclude: '\.mp4$'
       - id: check-merge-conflict
       - id: detect-private-key
 

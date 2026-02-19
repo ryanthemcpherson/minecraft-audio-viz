@@ -56,6 +56,8 @@ export function generateAudioState(
     amplitude,
     isBeat,
     beatIntensity,
+    beatPhase,
+    bpm: BPM,
     frame,
   };
 }

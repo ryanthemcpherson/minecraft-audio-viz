@@ -45,6 +45,13 @@ interface VoiceStatus {
   connected_players: number;
 }
 
+interface CaptureMode {
+  mode: 'pending' | 'system_loopback' | 'process_loopback' | 'input_device';
+  fallback_reason?: string;
+  pid?: number;
+  name?: string;
+}
+
 const MCAV_LOGO_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAKCAYAAABrGwT5AAAA3ElEQVR4AWyRvQ3CMBCFLx4jBQ0FyhppaNiAggFgAApKCgaAASjYgIYma0QUNBQZA3PfiTOOlUgv9+79OJYSZOJpmiaWmIhJKufhtm2lRO77QVbGyMOYqjGECXJf94gZIBgs73CyMPzx3MhldZTdfC193yPZDiFf13W0LyNQnH32FoSjbe8HRiqxc6CJ+kplil6Cqye+U9Ib2iFwPGBlv5aXCC4XV2E/v27k7EZe9HxQUnVdZ6by0aSF5hMOyA/DUNmX1bQDEAGBEugO8or/f9alcngon+79pg6RLwAAAP//ucby7wAAAAZJREFUAwBHiZkQ43EK0gAAAABJRU5ErkJggg==';
 
@@ -58,6 +65,9 @@ function App() {
   const [djName, setDjName] = useState('');
   const [connectCode, setConnectCode] = useState(['', '', '', '', '', '', '', '']);
   const [showName, setShowName] = useState<string | null>(null);
+  const [directConnect, setDirectConnect] = useState(() => localStorage.getItem('mcav.directConnect') === 'true');
+  const [serverHost, setServerHost] = useState(() => localStorage.getItem('mcav.serverHost') || '192.168.1.204');
+  const [serverPort, setServerPort] = useState(() => parseInt(localStorage.getItem('mcav.serverPort') || '9000', 10));
 
   // Audio state
   const [audioSources, setAudioSources] = useState<AudioSource[]>([]);
@@ -101,6 +111,9 @@ function App() {
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
+
+  // Capture mode state
+  const [captureMode, setCaptureMode] = useState<CaptureMode | null>(null);
 
   // Test audio state
   const [isTestingAudio, setIsTestingAudio] = useState(false);
@@ -217,6 +230,17 @@ function App() {
     }
   }, [selectedSource]);
 
+  // Persist direct connect settings
+  useEffect(() => {
+    localStorage.setItem('mcav.directConnect', String(directConnect));
+  }, [directConnect]);
+  useEffect(() => {
+    localStorage.setItem('mcav.serverHost', serverHost);
+  }, [serverHost]);
+  useEffect(() => {
+    localStorage.setItem('mcav.serverPort', String(serverPort));
+  }, [serverPort]);
+
   // Persist preset selection
   useEffect(() => {
     localStorage.setItem('mcav.preset', activePreset);
@@ -262,6 +286,12 @@ function App() {
     unlisteners.push(
       listen<string>('preset-changed', (event) => {
         setActivePreset(event.payload);
+      })
+    );
+
+    unlisteners.push(
+      listen<CaptureMode>('capture-mode', (event) => {
+        setCaptureMode(event.payload);
       })
     );
 
@@ -394,21 +424,27 @@ function App() {
       // Format code as XXXX-XXXX
       const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
 
-      // Resolve connect code through the coordinator
-      const resolved = await api.resolveConnectCode(formattedCode);
+      let connHost: string;
+      let connPort: number;
 
-      // Parse host and port from the websocket URL
-      const wsUrl = new URL(resolved.websocket_url);
-      const serverHost = wsUrl.hostname;
-      const serverPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
-
-      setShowName(resolved.show_name);
+      if (directConnect) {
+        // Direct connection — use user-provided server host/port
+        connHost = serverHost;
+        connPort = serverPort;
+      } else {
+        // Resolve connect code through the coordinator API
+        const resolved = await api.resolveConnectCode(formattedCode);
+        const wsUrl = new URL(resolved.websocket_url);
+        connHost = wsUrl.hostname;
+        connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
+        setShowName(resolved.show_name);
+      }
 
       await invoke('connect_with_code', {
         code: formattedCode,
         djName: djName.trim(),
-        serverHost,
-        serverPort,
+        serverHost: connHost,
+        serverPort: connPort,
       });
 
       // Start audio capture
@@ -465,6 +501,7 @@ function App() {
       setShowName(null);
       setBands([0, 0, 0, 0, 0]);
       setIsBeat(false);
+      setCaptureMode(null);
       setVoiceEnabled(false);
       setVoiceStatus({ available: false, streaming: false, channel_type: 'static', connected_players: 0 });
     } catch (e) {
@@ -550,6 +587,17 @@ function App() {
       setTestBands([0, 0, 0, 0, 0]);
     } catch (err) {
       console.error('Failed to stop test audio:', err);
+    }
+  };
+
+  const handleSourceChange = async (sourceId: string | null) => {
+    setSelectedSource(sourceId);
+    if (sourceId && status.connected) {
+      try {
+        await invoke('change_audio_source', { sourceId });
+      } catch (e) {
+        console.error('Failed to change audio source:', e);
+      }
     }
   };
 
@@ -777,6 +825,32 @@ function App() {
               <div className="code-display">
                 {formatCode(connectCode) || 'XXXX-XXXX'}
               </div>
+              <label className="direct-connect-toggle">
+                <input
+                  type="checkbox"
+                  checked={directConnect}
+                  onChange={e => setDirectConnect(e.target.checked)}
+                />
+                <span>Direct connect (self-hosted server)</span>
+              </label>
+              {directConnect && (
+                <div className="direct-connect-fields">
+                  <input
+                    type="text"
+                    value={serverHost}
+                    onChange={e => setServerHost(e.target.value)}
+                    placeholder="Server host"
+                    className="input input-sm"
+                  />
+                  <input
+                    type="number"
+                    value={serverPort}
+                    onChange={e => setServerPort(parseInt(e.target.value, 10) || 9000)}
+                    placeholder="Port"
+                    className="input input-sm input-port"
+                  />
+                </div>
+              )}
             </section>
 
             <section className="section">
@@ -849,6 +923,25 @@ function App() {
                 <span className="input-label" style={{ margin: 0 }}>{showName}</span>
               </section>
             )}
+
+            <section className="section audio-source-connected">
+              <AudioSourceSelect
+                sources={audioSources}
+                value={selectedSource}
+                onChange={handleSourceChange}
+                onRefresh={loadAudioSources}
+              />
+              {captureMode && captureMode.mode === 'system_loopback' && captureMode.fallback_reason && (
+                <div className="capture-mode-warning">
+                  Per-app capture failed: {captureMode.fallback_reason}
+                </div>
+              )}
+              {captureMode && captureMode.mode === 'process_loopback' && (
+                <div className="capture-mode-info">
+                  Capturing: {captureMode.name} (PID {captureMode.pid})
+                </div>
+              )}
+            </section>
 
             <section className="section">
               <FrequencyMeter bands={bands} />

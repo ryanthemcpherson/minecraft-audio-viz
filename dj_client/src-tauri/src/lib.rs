@@ -10,7 +10,7 @@ pub mod protocol;
 pub mod state;
 pub mod voice;
 
-use audio::{AudioCaptureHandle, AudioPreset, AudioSource};
+use audio::{AudioCaptureHandle, AudioPreset, AudioSource, CaptureMode};
 use protocol::{AudioFrameMessage, DjClient, DjClientConfig};
 use state::AppState;
 use voice::{VoiceStatus, VoiceStreamer};
@@ -599,6 +599,7 @@ async fn run_bridge(
 /// Start audio capture from selected source
 #[tauri::command]
 async fn start_capture(
+    app_handle: AppHandle,
     state: State<'_, AppStateWrapper>,
     source_id: Option<String>,
 ) -> Result<(), String> {
@@ -624,6 +625,20 @@ async fn start_capture(
     app_state.audio_source_id = source_id;
     app_state.audio_capture = Some(capture);
     app_state.voice_streamer = Some(voice_streamer);
+    drop(app_state);
+
+    // Emit capture mode after a brief delay for the audio thread to initialize
+    let state_for_mode = state.0.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mode = {
+            let app_state = state_for_mode.lock();
+            app_state.audio_capture.as_ref().map(|c| c.get_capture_mode())
+        };
+        if let Some(mode) = mode {
+            let _ = app_handle.emit("capture-mode", &mode);
+        }
+    });
 
     Ok(())
 }
@@ -632,7 +647,7 @@ async fn start_capture(
 #[tauri::command]
 async fn stop_capture(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     let mut app_state = state.0.lock();
-    if let Some(mut capture) = app_state.audio_capture.take() {
+    if let Some(capture) = app_state.audio_capture.take() {
         capture.stop();
     }
     Ok(())
@@ -641,13 +656,14 @@ async fn stop_capture(state: State<'_, AppStateWrapper>) -> Result<(), String> {
 /// Change audio source while connected (hot-swap capture)
 #[tauri::command]
 async fn change_audio_source(
+    app_handle: AppHandle,
     state: State<'_, AppStateWrapper>,
     source_id: Option<String>,
 ) -> Result<(), String> {
     // Stop existing capture
     {
         let mut app_state = state.0.lock();
-        if let Some(mut capture) = app_state.audio_capture.take() {
+        if let Some(capture) = app_state.audio_capture.take() {
             capture.stop();
         }
     }
@@ -675,6 +691,20 @@ async fn change_audio_source(
     app_state.audio_source_id = source_id;
     app_state.audio_capture = Some(capture);
     app_state.voice_streamer = Some(voice_streamer);
+    drop(app_state);
+
+    // Emit capture mode after a brief delay for the audio thread to initialize
+    let state_for_mode = state.0.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mode = {
+            let app_state = state_for_mode.lock();
+            app_state.audio_capture.as_ref().map(|c| c.get_capture_mode())
+        };
+        if let Some(mode) = mode {
+            let _ = app_handle.emit("capture-mode", &mode);
+        }
+    });
 
     Ok(())
 }
@@ -684,15 +714,18 @@ async fn change_audio_source(
 pub struct CaptureStatus {
     pub active: bool,
     pub source_id: Option<String>,
+    pub capture_mode: Option<CaptureMode>,
 }
 
 /// Get current capture status
 #[tauri::command]
 fn get_capture_status(state: State<'_, AppStateWrapper>) -> CaptureStatus {
     let app_state = state.0.lock();
+    let capture_mode = app_state.audio_capture.as_ref().map(|c| c.get_capture_mode());
     CaptureStatus {
         active: app_state.audio_capture.is_some(),
         source_id: app_state.audio_source_id.clone(),
+        capture_mode,
     }
 }
 
@@ -730,7 +763,7 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     }
 
     // Stop audio capture
-    if let Some(mut capture) = capture {
+    if let Some(capture) = capture {
         capture.stop();
     }
 
@@ -1038,7 +1071,7 @@ pub fn run() {
                         if let tauri::WindowEvent::CloseRequested { .. } = event {
                             let state = app_handle.state::<AppStateWrapper>();
                             let mut app_state = state.0.lock();
-                            if let Some(mut capture) = app_state.audio_capture.take() {
+                            if let Some(capture) = app_state.audio_capture.take() {
                                 capture.stop();
                             }
                             app_state.voice_streamer = None;

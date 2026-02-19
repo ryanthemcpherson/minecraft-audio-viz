@@ -247,6 +247,27 @@ export async function refreshTokens(): Promise<AuthResponse> {
   return auth;
 }
 
+// ---------------------------------------------------------------------------
+// Connect code API
+// ---------------------------------------------------------------------------
+
+export interface ResolvedConnectCode {
+  websocket_url: string;
+  show_name: string;
+}
+
+export async function resolveConnectCode(
+  code: string,
+): Promise<ResolvedConnectCode> {
+  return apiFetch<ResolvedConnectCode>(
+    `/connect/${encodeURIComponent(code)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Profile API
+// ---------------------------------------------------------------------------
+
 export async function getProfile(): Promise<UserProfileResponse> {
   return authedFetch<UserProfileResponse>('/auth/me');
 }

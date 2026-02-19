@@ -82,7 +82,7 @@ async def _handle_health(writer: asyncio.StreamWriter, server: "VJServer") -> No
         "connected_djs": len(server._djs),
         "connected_browsers": len(server._broadcast_clients),
         "active_pattern": server._pattern_name,
-        "active_dj": active_dj.name if active_dj else None,
+        "active_dj": active_dj.dj_name if active_dj else None,
         "minecraft_connected": (server.viz_client is not None and server.viz_client.connected),
     }
 

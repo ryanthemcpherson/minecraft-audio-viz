@@ -1,5 +1,5 @@
 export default function DemoVideo() {
-  const demoVideoUrl = "/animals.mp4";
+  const demoVideoUrl = "/demo.mp4";
 
   return (
     <section id="demo" className="relative px-6 py-32">

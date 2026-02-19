@@ -280,20 +280,62 @@ class LuaPattern(VisualizationPattern):
                             "scale": scale,
                             "rotation": rotation,
                         }
-                        entities.append(
-                            {
-                                "id": entity_id,
-                                "x": x,
-                                "y": y,
-                                "z": z,
-                                "scale": scale,
-                                "rotation": rotation,
-                                "band": int(entry["band"] or 0),
-                                "visible": bool(entry["visible"])
-                                if entry["visible"] is not None
-                                else True,
-                            }
-                        )
+                        entity = {
+                            "id": entity_id,
+                            "x": x,
+                            "y": y,
+                            "z": z,
+                            "scale": scale,
+                            "rotation": rotation,
+                            "band": int(entry["band"] or 0),
+                            "visible": bool(entry["visible"])
+                            if entry["visible"] is not None
+                            else True,
+                        }
+                        # Forward optional rendering fields when set by pattern
+                        if entry["glow"] is not None:
+                            entity["glow"] = bool(entry["glow"])
+                        if entry["brightness"] is not None:
+                            entity["brightness"] = int(entry["brightness"])
+                        if entry["material"] is not None:
+                            entity["material"] = str(entry["material"])
+                        if entry["interpolation"] is not None:
+                            entity["interpolation"] = int(entry["interpolation"])
+                        entities.append(entity)
+            # Enforce a strict entity budget for all patterns.
+            target_count = max(0, int(self.config.entity_count))
+            if len(entities) > target_count:
+                entities = entities[:target_count]
+            elif len(entities) < target_count:
+                pad_index = len(entities)
+                while len(entities) < target_count:
+                    pad_id = f"block_{pad_index}"
+                    if pad_id in seen_ids:
+                        pad_id = f"__pad_{pad_index}"
+                    pad_index += 1
+                    seen_ids.add(pad_id)
+                    self._entity_state[pad_id] = {
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5,
+                        "scale": 0.0,
+                        "rotation": 0.0,
+                    }
+                    entities.append(
+                        {
+                            "id": pad_id,
+                            "x": 0.5,
+                            "y": 0.5,
+                            "z": 0.5,
+                            "scale": 0.0,
+                            "rotation": 0.0,
+                            "band": 0,
+                            "visible": False,
+                        }
+                    )
+
+            seen_ids = {entity["id"] for entity in entities}
+
             # Cleanup stale cached entities.
             if self._entity_state:
                 stale = [eid for eid in self._entity_state.keys() if eid not in seen_ids]

@@ -8,7 +8,7 @@ const communityLinks = [
       </svg>
     ),
     buttonText: "Join Discord",
-    href: "https://discord.gg/mcav",
+    href: "https://discord.gg/my2k8P2Mru",
     accent: "text-disc-blue",
     borderHover: "hover:border-disc-blue/30",
     glowClass: "hover:glow-purple",
@@ -38,7 +38,7 @@ const communityLinks = [
       </svg>
     ),
     buttonText: "Pattern Gallery",
-    href: "/patterns",
+    href: "/#patterns",
     accent: "text-noteblock-amber",
     borderHover: "hover:border-noteblock-amber/30",
     glowClass: "hover:glow-pink",

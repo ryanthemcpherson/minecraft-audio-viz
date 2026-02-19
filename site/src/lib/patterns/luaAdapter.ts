@@ -2,10 +2,9 @@
  * Lua Pattern Adapter
  * Executes Lua pattern scripts in the browser via fengari.
  *
- * We import from fengari's individual source files to avoid pulling in
- * loslib.js / ldblib.js which depend on Node.js modules (child_process, fs).
- * Only safe standard libraries (base, math, string, table, coroutine, utf8)
- * are opened.
+ * Fengari is loaded as an IIFE from public/fengari-browser.js (built by
+ * scripts/bundle-fengari.mjs). This bypasses Turbopack's module transformation
+ * which mangles fengari's internal Lua compiler state.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -13,49 +12,63 @@
 import type { EntityData, AudioState, PatternConfig } from "./base";
 import { DEFAULT_CONFIG } from "./base";
 
-// Lazy-loaded fengari modules
-let fengariReady = false;
-let lua: any;
-let lauxlib: any;
+// --- Fengari globals (populated by script load) ---
+let lua: any = null;
+let lauxlib: any = null;
 let to_luastring: (s: string) => Uint8Array;
+let luaopen_base: any = null;
+let luaopen_math: any = null;
+let luaopen_string: any = null;
+let luaopen_table: any = null;
+let luaopen_coroutine: any = null;
+let luaopen_utf8: any = null;
+let luaL_requiref: any = null;
 
-// Individual library openers (safe, no Node.js deps)
-let luaopen_base: any;
-let luaopen_math: any;
-let luaopen_string: any;
-let luaopen_table: any;
-let luaopen_coroutine: any;
-let luaopen_utf8: any;
-let luaL_requiref: any;
-
+let fengariReady = false;
 let loadPromise: Promise<void> | null = null;
+
+function bindGlobals(): void {
+  const f = (window as any).__fengari;
+  if (!f) throw new Error("__fengari global not found after script load");
+  lua = f.lua;
+  lauxlib = f.lauxlib;
+  to_luastring = f.to_luastring;
+  luaopen_base = f.luaopen_base;
+  luaopen_math = f.luaopen_math;
+  luaopen_string = f.luaopen_string;
+  luaopen_table = f.luaopen_table;
+  luaopen_coroutine = f.luaopen_coroutine;
+  luaopen_utf8 = f.luaopen_utf8;
+  luaL_requiref = lauxlib.luaL_requiref;
+  // Patch LUA_REGISTRYINDEX onto lauxlib so both old and new code works
+  // (fengari's lauxlib doesn't export it; only lua does)
+  lauxlib.LUA_REGISTRYINDEX = lua.LUA_REGISTRYINDEX;
+  fengariReady = true;
+}
 
 export function ensureFengari(): Promise<void> {
   if (fengariReady) return Promise.resolve();
   if (loadPromise) return loadPromise;
 
-  loadPromise = Promise.all([
-    import(/* webpackIgnore: true */ "fengari/src/fengaricore.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lua.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lauxlib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lbaselib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lmathlib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lstrlib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/ltablib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lcorolib.js"),
-    import(/* webpackIgnore: true */ "fengari/src/lutf8lib.js"),
-  ]).then(([core, luaMod, lauxMod, baseMod, mathMod, strMod, tabMod, coroMod, utf8Mod]) => {
-    to_luastring = core.to_luastring;
-    lua = luaMod;
-    lauxlib = lauxMod;
-    luaL_requiref = lauxMod.luaL_requiref;
-    luaopen_base = baseMod.luaopen_base;
-    luaopen_math = mathMod.luaopen_math;
-    luaopen_string = strMod.luaopen_string;
-    luaopen_table = tabMod.luaopen_table;
-    luaopen_coroutine = coroMod.luaopen_coroutine;
-    luaopen_utf8 = utf8Mod.luaopen_utf8;
-    fengariReady = true;
+  // Already loaded by another script tag (e.g. test harness)
+  if (typeof window !== "undefined" && (window as any).__fengari) {
+    bindGlobals();
+    return Promise.resolve();
+  }
+
+  loadPromise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/fengari-browser.js";
+    script.onload = () => {
+      try {
+        bindGlobals();
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    };
+    script.onerror = () => reject(new Error("Failed to load fengari-browser.js"));
+    document.head.appendChild(script);
   });
 
   return loadPromise;
@@ -96,6 +109,8 @@ function getFieldNames(): Record<string, Uint8Array> {
     is_beat: to_luastring("is_beat"),
     beat: to_luastring("beat"),
     beat_intensity: to_luastring("beat_intensity"),
+    beat_phase: to_luastring("beat_phase"),
+    bpm: to_luastring("bpm"),
     frame: to_luastring("frame"),
     entity_count: to_luastring("entity_count"),
     zone_size: to_luastring("zone_size"),
@@ -161,7 +176,7 @@ export class LuaPatternInstance {
         lua.lua_pop(L, 1);
         return;
       }
-      this._calculateRef = lauxlib.luaL_ref(L, lauxlib.LUA_REGISTRYINDEX);
+      this._calculateRef = lauxlib.luaL_ref(L, lua.LUA_REGISTRYINDEX);
       this._ready = true;
     } catch (e) {
       console.error("LuaPattern init error:", e);
@@ -201,10 +216,10 @@ export class LuaPatternInstance {
 
     try {
       // Push calculate function from registry
-      lua.lua_rawgeti(L, lauxlib.LUA_REGISTRYINDEX, this._calculateRef);
+      lua.lua_rawgeti(L, lua.LUA_REGISTRYINDEX, this._calculateRef);
 
       // Push audio table
-      lua.lua_createtable(L, 0, 7);
+      lua.lua_createtable(L, 0, 9);
 
       // audio.bands (1-indexed Lua table)
       lua.lua_pushstring(L, f.bands);
@@ -238,6 +253,16 @@ export class LuaPatternInstance {
       // audio.beat_intensity
       lua.lua_pushstring(L, f.beat_intensity);
       lua.lua_pushnumber(L, audio.beatIntensity);
+      lua.lua_settable(L, -3);
+
+      // audio.beat_phase
+      lua.lua_pushstring(L, f.beat_phase);
+      lua.lua_pushnumber(L, audio.beatPhase);
+      lua.lua_settable(L, -3);
+
+      // audio.bpm
+      lua.lua_pushstring(L, f.bpm);
+      lua.lua_pushnumber(L, audio.bpm);
       lua.lua_settable(L, -3);
 
       // audio.frame
@@ -349,7 +374,7 @@ export class LuaPatternInstance {
   dispose(): void {
     if (this.L) {
       if (this._calculateRef >= 0) {
-        lauxlib.luaL_unref(this.L, lauxlib.LUA_REGISTRYINDEX, this._calculateRef);
+        lauxlib.luaL_unref(this.L, lua.LUA_REGISTRYINDEX, this._calculateRef);
       }
       lua.lua_close(this.L);
       this.L = null;

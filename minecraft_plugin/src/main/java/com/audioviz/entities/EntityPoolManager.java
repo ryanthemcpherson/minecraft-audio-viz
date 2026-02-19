@@ -86,12 +86,25 @@ public class EntityPoolManager {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Location spawnLoc = zone.getOrigin().clone();
 
-            // Update material on all existing entities
+            // Reset all existing entities to clean state for the new pattern.
+            // This clears per-entity material, glow, and brightness overrides
+            // that the previous pattern may have applied.
             for (Entity entity : pool.values()) {
-                if (entity instanceof BlockDisplay display && entity.isValid()) {
-                    display.setBlock(finalMaterial.createBlockData());
+                if (entity.isValid()) {
+                    if (entity instanceof BlockDisplay display) {
+                        display.setBlock(finalMaterial.createBlockData());
+                    }
+                    if (entity instanceof Display display) {
+                        display.setBrightness(BRIGHTNESS_CACHE[15]);
+                    }
+                    entity.setGlowing(false);
                 }
             }
+
+            // Invalidate material cache — init_pool reset all entities to the
+            // pool material, so cached per-entity overrides are now stale.
+            String cachePrefix = zoneName.toLowerCase() + ":";
+            entityMaterialCache.keySet().removeIf(key -> key.startsWith(cachePrefix));
 
             if (finalCount > currentCount) {
                 // Add more entities — spawn at sibling positions so they
@@ -251,10 +264,11 @@ public class EntityPoolManager {
                     String lastMaterial = entityMaterialCache.get(cacheKey);
                     if (!update.material().equals(lastMaterial)) {
                         Material mat = Material.matchMaterial(update.material());
-                        if (mat != null) {
+                        if (mat != null && mat.isBlock()) {
                             blockDisplay.setBlock(mat.createBlockData());
-                            entityMaterialCache.put(cacheKey, update.material());
                         }
+                        // Cache even invalid names to avoid repeated lookups
+                        entityMaterialCache.put(cacheKey, update.material());
                     }
                 }
             }

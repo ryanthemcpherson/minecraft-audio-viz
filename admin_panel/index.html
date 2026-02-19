@@ -169,21 +169,14 @@
                         <button id="btn-generate-code" class="btn btn-primary btn-full">
                             Generate Connect Code
                         </button>
-                        <div id="active-codes" class="active-codes"></div>
-                    </div>
-                </div>
-
-                <!-- Connect Code Modal -->
-                <div id="code-modal" class="modal hidden">
-                    <div class="modal-backdrop"></div>
-                    <div class="modal-content">
-                        <h3>Connect Code Generated</h3>
-                        <div class="code-display-large" id="modal-code">BEAT-7K3M</div>
-                        <p class="code-instructions">Share this code with a DJ. It expires in <span id="modal-ttl">30</span> minutes.</p>
-                        <div class="modal-actions">
-                            <button id="btn-copy-code" class="btn btn-primary">Copy Code</button>
-                            <button id="btn-close-modal" class="btn btn-secondary">Close</button>
+                        <div id="generated-code-display" class="generated-code-display hidden">
+                            <div class="generated-code-row">
+                                <span class="generated-code-text" id="generated-code-text"></span>
+                                <button id="btn-copy-code" class="btn btn-copy-inline" title="Copy code">Copy</button>
+                            </div>
+                            <span class="generated-code-ttl">Expires in <span id="generated-code-ttl">30</span>m</span>
                         </div>
+                        <div id="active-codes" class="active-codes"></div>
                     </div>
                 </div>
             </aside>

@@ -79,5 +79,5 @@ function calculate(audio, config, dt)
         end
     end
 
-    return entities
+    return normalize_entities(entities, n)
 end

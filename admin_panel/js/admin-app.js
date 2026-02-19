@@ -272,11 +272,10 @@ class AdminApp {
         // Connect Code elements
         this.elements.btnGenerateCode = document.getElementById('btn-generate-code');
         this.elements.activeCodes = document.getElementById('active-codes');
-        this.elements.codeModal = document.getElementById('code-modal');
-        this.elements.modalCode = document.getElementById('modal-code');
-        this.elements.modalTtl = document.getElementById('modal-ttl');
+        this.elements.generatedCodeDisplay = document.getElementById('generated-code-display');
+        this.elements.generatedCodeText = document.getElementById('generated-code-text');
+        this.elements.generatedCodeTtl = document.getElementById('generated-code-ttl');
         this.elements.btnCopyCode = document.getElementById('btn-copy-code');
-        this.elements.btnCloseModal = document.getElementById('btn-close-modal');
 
         // Reconnect button
         this.elements.btnReconnect = document.getElementById('btn-reconnect');
@@ -557,39 +556,28 @@ class AdminApp {
         // Generate code button
         if (this.elements.btnGenerateCode) {
             this.elements.btnGenerateCode.addEventListener('click', () => {
+                // Show loading state
+                this.elements.btnGenerateCode.disabled = true;
+                this.elements.btnGenerateCode.classList.add('btn-loading');
+                this.elements.btnGenerateCode.textContent = 'Generating...';
                 this.ws.send({ type: 'generate_connect_code', ttl_minutes: 30 });
             });
         }
 
-        // Copy code button
+        // Copy code button (inline)
         if (this.elements.btnCopyCode) {
             this.elements.btnCopyCode.addEventListener('click', () => {
-                const code = this.elements.modalCode?.textContent || '';
+                const code = this.elements.generatedCodeText?.textContent || '';
                 this._copyToClipboard(code).then((ok) => {
                     if (ok) {
                         this.elements.btnCopyCode.textContent = 'Copied!';
                         this.elements.btnCopyCode.classList.add('btn-copy-success');
                         setTimeout(() => {
-                            this.elements.btnCopyCode.textContent = 'Copy Code';
+                            this.elements.btnCopyCode.textContent = 'Copy';
                             this.elements.btnCopyCode.classList.remove('btn-copy-success');
                         }, 2000);
                     }
                 });
-            });
-        }
-
-        // Close modal button
-        if (this.elements.btnCloseModal) {
-            this.elements.btnCloseModal.addEventListener('click', () => {
-                this._hideCodeModal();
-            });
-        }
-
-        // Click backdrop to close
-        const backdrop = this.elements.codeModal?.querySelector('.modal-backdrop');
-        if (backdrop) {
-            backdrop.addEventListener('click', () => {
-                this._hideCodeModal();
             });
         }
 
@@ -604,21 +592,30 @@ class AdminApp {
         }
     }
 
-    _showCodeModal(code, ttlMinutes = 30) {
-        if (this.elements.modalCode) {
-            this.elements.modalCode.textContent = code;
-        }
-        if (this.elements.modalTtl) {
-            this.elements.modalTtl.textContent = ttlMinutes;
-        }
-        if (this.elements.codeModal) {
-            this.elements.codeModal.classList.remove('hidden');
+    _resetGenerateButton() {
+        if (this.elements.btnGenerateCode) {
+            this.elements.btnGenerateCode.disabled = false;
+            this.elements.btnGenerateCode.classList.remove('btn-loading');
+            this.elements.btnGenerateCode.textContent = 'Generate Connect Code';
         }
     }
 
-    _hideCodeModal() {
-        if (this.elements.codeModal) {
-            this.elements.codeModal.classList.add('hidden');
+    _showGeneratedCode(code, ttlMinutes = 30) {
+        // Reset generate button
+        if (this.elements.btnGenerateCode) {
+            this.elements.btnGenerateCode.disabled = false;
+            this.elements.btnGenerateCode.classList.remove('btn-loading');
+            this.elements.btnGenerateCode.textContent = 'Generate Connect Code';
+        }
+        // Show inline code display
+        if (this.elements.generatedCodeText) {
+            this.elements.generatedCodeText.textContent = code;
+        }
+        if (this.elements.generatedCodeTtl) {
+            this.elements.generatedCodeTtl.textContent = ttlMinutes;
+        }
+        if (this.elements.generatedCodeDisplay) {
+            this.elements.generatedCodeDisplay.classList.remove('hidden');
         }
     }
 
@@ -978,6 +975,7 @@ class AdminApp {
             this.state.minecraftConnected = false;
             this._setConnectionStatus('disconnected');
             this._updateServiceIndicators();
+            this._resetGenerateButton();
         });
 
         this.ws.addEventListener('error', () => {
@@ -1160,8 +1158,8 @@ class AdminApp {
                 break;
 
             case 'connect_code_generated':
-                // Show the newly generated code in modal
-                this._showCodeModal(data.code, data.ttl_minutes || 30);
+                // Show the newly generated code inline
+                this._showGeneratedCode(data.code, data.ttl_minutes || 30);
                 break;
 
             case 'connect_codes':
@@ -1470,14 +1468,14 @@ class AdminApp {
             this._showToast('No stage selected', 'warning');
             return;
         }
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        if (!this.ws || !this.ws.isConnected) {
             this._showToast('Not connected', 'error');
             return;
         }
-        this.ws.send(JSON.stringify({
+        this.ws.send({
             type: 'scan_stage_blocks',
             stage: this.state.selectedStage
-        }));
+        });
         this._showToast('Scanning stage blocks...', 'info');
     }
 
@@ -2577,23 +2575,43 @@ class AdminApp {
 
         const builtInScenes = ['Chill Lounge', 'EDM Stage', 'Rock Arena', 'Ambient'];
 
-        this.elements.scenesGrid.innerHTML = this.state.scenes.map(scene => {
+        this.elements.scenesGrid.replaceChildren();
+        this.state.scenes.forEach(scene => {
             const isBuiltIn = builtInScenes.includes(scene.name);
             const isActive = this.state.currentScene === scene.name;
-            const activeClass = isActive ? 'active' : '';
-            const builtInClass = isBuiltIn ? 'built-in' : '';
 
-            return `
-                <div class="scene-card ${activeClass} ${builtInClass}" data-scene="${scene.name}">
-                    ${!isBuiltIn ? `<button class="scene-card-delete" data-scene="${scene.name}">×</button>` : ''}
-                    <div class="scene-card-name">${scene.name}</div>
-                    <div class="scene-card-details">
-                        <div class="scene-card-pattern">${scene.pattern}</div>
-                        <div>${scene.preset} · ${scene.entity_count} blocks</div>
-                    </div>
-                </div>
-            `;
-        }).join('');
+            const card = document.createElement('div');
+            card.className = `scene-card${isActive ? ' active' : ''}${isBuiltIn ? ' built-in' : ''}`;
+            card.dataset.scene = scene.name;
+
+            if (!isBuiltIn) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'scene-card-delete';
+                deleteBtn.dataset.scene = scene.name;
+                deleteBtn.textContent = '\u00d7';
+                card.appendChild(deleteBtn);
+            }
+
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'scene-card-name';
+            nameDiv.textContent = scene.name;
+            card.appendChild(nameDiv);
+
+            const detailsDiv = document.createElement('div');
+            detailsDiv.className = 'scene-card-details';
+
+            const patternDiv = document.createElement('div');
+            patternDiv.className = 'scene-card-pattern';
+            patternDiv.textContent = scene.pattern;
+            detailsDiv.appendChild(patternDiv);
+
+            const infoDiv = document.createElement('div');
+            infoDiv.textContent = `${scene.preset} \u00b7 ${scene.entity_count} blocks`;
+            detailsDiv.appendChild(infoDiv);
+
+            card.appendChild(detailsDiv);
+            this.elements.scenesGrid.appendChild(card);
+        });
 
         // Add click handlers for scene cards
         this.elements.scenesGrid.querySelectorAll('.scene-card').forEach(card => {
@@ -3710,10 +3728,10 @@ class AdminApp {
                 this._previewScene.add(ground);
             }
 
-            // Grid helper
-            const gridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-            gridHelper.position.y = 0.02;
-            this._previewScene.add(gridHelper);
+            // Grid helper (only for single-zone fallback, hidden in stage mode)
+            this._previewGridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
+            this._previewGridHelper.position.y = 0.02;
+            this._previewScene.add(this._previewGridHelper);
 
             // Pre-create static band-color materials for reuse
             this._bandColorMaterials = this._previewConfig.colors.map(color =>
@@ -3882,16 +3900,19 @@ class AdminApp {
         const sy = zone.size?.y || 10;
         const sz = zone.size?.z || 10;
 
-        // Group origin = zone origin offset, with size/2 shift so wireframe is centered
-        group.position.set(ox + sx / 2, oy + sy / 2, oz + sz / 2);
+        // Group origin = zone origin (rotation pivot point)
+        // Minecraft rotates around the origin corner, not the center
+        group.position.set(ox, oy, oz);
         group.rotation.y = -(zone.rotation || 0) * (Math.PI / 180);
 
-        // Wireframe box showing zone boundaries
+        // Wireframe box showing zone boundaries, offset to (size/2) in local space
+        // so it covers (0,0,0) to (sx,sy,sz) before rotation
         const boxGeo = new THREE.BoxGeometry(sx, sy, sz);
         const edgesGeo = new THREE.EdgesGeometry(boxGeo);
         const wireColor = this._getZoneWireframeColor(zone);
         const lineMat = new THREE.LineBasicMaterial({ color: wireColor, opacity: 0.35, transparent: true });
         const wireframe = new THREE.LineSegments(edgesGeo, lineMat);
+        wireframe.position.set(sx / 2, sy / 2, sz / 2);
         group.add(wireframe);
         boxGeo.dispose();
 
@@ -3935,12 +3956,16 @@ class AdminApp {
         if (this._textureManager && entityMaterial && entityMaterial !== block.userData.currentMaterial) {
             const texMat = this._textureManager.getMaterial(entityMaterial);
             if (texMat) {
-                block.material = texMat;
+                // Clone so emissiveIntensity mutations are per-block
+                block.material.dispose();
+                block.material = texMat.clone();
                 block.userData.currentMaterial = entityMaterial;
             }
         } else if (!entityMaterial && block.userData.currentMaterial) {
+            // Material removed — dispose cloned material and create fresh band-colored one
+            block.material.dispose();
             if (this._bandColorMaterials) {
-                block.material = this._bandColorMaterials[bandIndex];
+                block.material = this._bandColorMaterials[bandIndex].clone();
             }
             block.userData.currentMaterial = '';
         } else if (!entityMaterial && !block.userData.currentMaterial) {
@@ -3986,12 +4011,12 @@ class AdminApp {
             this._previewStageMode = true;
             // Pre-create zone groups
             zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
-            // Switch environment to stage mode
+            // Switch environment to stage mode — hide procedural env, grid, and ground
             if (this._mcEnvironment) {
                 this._mcEnvironment.setVisible(false);
-                if (typeof MinecraftEnvironment !== 'undefined') {
-                    this._buildStageEnvironment();
-                }
+            }
+            if (this._previewGridHelper) {
+                this._previewGridHelper.visible = false;
             }
             // Frame camera to stage
             this._frameStage();
@@ -4001,8 +4026,8 @@ class AdminApp {
 
             // Auto-scan stage blocks on first multi-zone preview
             if (!this._stageBlocksScanned && this.state.selectedStage
-                && this.ws && this.ws.readyState === WebSocket.OPEN
-                && this.state.mcStatus === 'connected') {
+                && this.ws && this.ws.isConnected
+                && this.state.minecraftConnected) {
                 this._stageBlocksScanned = true;
                 this._scanStageBlocks();
             }
@@ -4010,9 +4035,12 @@ class AdminApp {
             this._previewStageMode = false;
             // Hide scan button in single-zone mode
             if (scanBtn) scanBtn.style.display = 'none';
-            // Restore single-zone environment
+            // Restore single-zone environment and grid
             if (this._mcEnvironment) {
                 this._mcEnvironment.setVisible(true);
+            }
+            if (this._previewGridHelper) {
+                this._previewGridHelper.visible = true;
             }
             if (this._stageGround) {
                 this._previewScene.remove(this._stageGround);
@@ -4283,7 +4311,7 @@ class AdminApp {
             if (this._previewAutoRotate && this._previewCamera) {
                 const spherical = new THREE.Spherical();
                 spherical.setFromVector3(this._previewCamera.position);
-                spherical.theta += 0.002;
+                spherical.theta += 0.0005;
                 this._previewCamera.position.setFromSpherical(spherical);
                 const lookY = this._previewStageMode ? 0 : 3;
                 this._previewCamera.lookAt(0, lookY, 0);
@@ -4385,10 +4413,10 @@ class AdminApp {
                 const z = Number.isFinite(entity.z) ? entity.z : 0.5;
                 const scale = Number.isFinite(entity.scale) ? entity.scale : 0.5;
 
-                // Position in zone-local space (centered: -size/2 to +size/2)
-                block.userData.targetX = (x - 0.5) * sx;
-                block.userData.targetY = (y - 0.5) * sy;
-                block.userData.targetZ = (z - 0.5) * sz;
+                // Position in zone-local space (0 to size, matching Minecraft's localToWorld)
+                block.userData.targetX = x * sx;
+                block.userData.targetY = y * sy;
+                block.userData.targetZ = z * sz;
                 block.userData.targetScale = scale * 1.5;
 
                 this._updateBlockMaterial(block, entity, bands, config);

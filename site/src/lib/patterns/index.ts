@@ -76,7 +76,9 @@ export function listPatterns(): PatternMeta[] {
     category: def.category,
     staticCamera: def.staticCamera,
     startBlocks: def.startBlocks,
-    createPattern: () => new PendingPattern(LIB_LUA, def.source),
+    createPattern: () => new PendingPattern(LIB_LUA, def.source, {
+      entityCount: def.startBlocks ?? DEFAULT_CONFIG.entityCount,
+    }),
   }));
 }
 

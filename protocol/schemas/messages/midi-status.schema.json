@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midi-status.schema.json",
+  "title": "MidiStatusMessage",
+  "description": "MIDI controller connection status and current parameter values.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "midi_status"
+    },
+    "v": {
+      "type": "string"
+    },
+    "connected": {
+      "type": "boolean"
+    },
+    "port": {
+      "type": ["string", "null"]
+    },
+    "clock_bpm": {
+      "type": "number"
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "ports": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["type", "connected"]
+}

@@ -132,9 +132,9 @@ function BlockRing({
       <meshStandardMaterial
         toneMapped={false}
         transparent
-        opacity={0.85}
-        roughness={0.3}
-        metalness={0.3}
+        opacity={0.9}
+        roughness={0.15}
+        metalness={0.4}
       />
     </instancedMesh>
   );
@@ -225,8 +225,8 @@ function EqualizerGrid() {
         toneMapped={false}
         transparent
         opacity={0.7}
-        roughness={0.4}
-        metalness={0.3}
+        roughness={0.15}
+        metalness={0.4}
       />
     </instancedMesh>
   );

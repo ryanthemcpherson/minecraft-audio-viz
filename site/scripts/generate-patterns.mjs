@@ -27,7 +27,12 @@ function extractMeta(source, filename) {
   const staticCameraMatch = source.match(/^static_camera\s*=\s*(true|false)/m);
   const staticCamera = staticCameraMatch?.[1] === "true";
   const startBlocksMatch = source.match(/^start_blocks\s*=\s*(\d+)/m);
-  const startBlocks = startBlocksMatch ? parseInt(startBlocksMatch[1], 10) : null;
+  const recommendedMatch = source.match(/^recommended_entities\s*=\s*(\d+)/m);
+  const startBlocks = startBlocksMatch
+    ? parseInt(startBlocksMatch[1], 10)
+    : recommendedMatch
+      ? parseInt(recommendedMatch[1], 10)
+      : null;
 
   if (!name || !description) {
     console.warn(`  WARN: ${filename} missing name or description, skipping`);

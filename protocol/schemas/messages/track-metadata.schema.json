@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "track-metadata.schema.json",
+  "title": "TrackMetadataMessage",
+  "description": "Track metadata from DJ software (title, artist, BPM, etc.).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "track_metadata"
+    },
+    "v": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "artist": {
+      "type": "string"
+    },
+    "album": {
+      "type": "string"
+    },
+    "bpm": {
+      "type": "number"
+    },
+    "key": {
+      "type": "string"
+    },
+    "deck_id": {
+      "type": "string"
+    },
+    "software_name": {
+      "type": "string"
+    },
+    "elapsed_ms": {
+      "type": "integer"
+    },
+    "duration_ms": {
+      "type": "integer"
+    }
+  },
+  "required": ["type"]
+}

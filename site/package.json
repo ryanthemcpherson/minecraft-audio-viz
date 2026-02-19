@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "generate-patterns": "node scripts/generate-patterns.mjs",
-    "prebuild": "node scripts/generate-patterns.mjs",
-    "dev": "node scripts/generate-patterns.mjs && next dev",
+    "bundle-fengari": "node scripts/bundle-fengari.mjs",
+    "prebuild": "node scripts/bundle-fengari.mjs && node scripts/generate-patterns.mjs",
+    "dev": "node scripts/bundle-fengari.mjs && node scripts/generate-patterns.mjs && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint ."
@@ -26,6 +27,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.182.0",
+    "esbuild": "^0.27.3",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
     "tailwindcss": "^4",

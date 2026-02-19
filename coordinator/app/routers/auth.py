@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_session
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_admin
 from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
@@ -43,6 +43,18 @@ _EXCHANGE_CODE_TTL = 60  # seconds
 
 # In-memory store for desktop OAuth exchange codes: code -> (AuthResponse dict, created_at)
 _desktop_exchange_codes: dict[str, tuple[dict[str, Any], float]] = {}
+
+
+def _cleanup_expired_exchange_codes() -> None:
+    """Remove expired desktop OAuth exchange codes to prevent memory leaks."""
+    now = time.time()
+    expired = [
+        code
+        for code, (_, created_at) in _desktop_exchange_codes.items()
+        if now - created_at > _EXCHANGE_CODE_TTL
+    ]
+    for code in expired:
+        del _desktop_exchange_codes[code]
 
 
 def _create_oauth_state(jwt_secret: str, *, desktop: bool = False) -> str:
@@ -254,6 +266,7 @@ async def discord_callback(
     # Desktop deep-link flow: store auth response behind a one-time exchange code
     # and redirect to the desktop app via custom URL scheme.
     if state_payload.get("desktop"):
+        _cleanup_expired_exchange_codes()
         exchange_code = secrets.token_urlsafe(32)
         _desktop_exchange_codes[exchange_code] = (
             auth_resp.model_dump(mode="json"),
@@ -286,6 +299,7 @@ async def exchange_desktop_code(
     body: ExchangeCodeRequest,
 ) -> AuthResponse:
     """Exchange a one-time code (from the desktop deep-link callback) for auth tokens."""
+    _cleanup_expired_exchange_codes()
     entry = _desktop_exchange_codes.pop(body.exchange_code, None)
     if entry is None:
         raise HTTPException(status_code=400, detail="Invalid or already used exchange code")
@@ -493,7 +507,7 @@ async def logout(
     summary="Delete expired and revoked refresh tokens",
 )
 async def cleanup_tokens(
-    user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     deleted = await auth_service.cleanup_expired_tokens(session)

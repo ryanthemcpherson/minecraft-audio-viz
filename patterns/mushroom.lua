@@ -52,7 +52,7 @@ function calculate(audio, config, dt)
     end
 
     -- Wobble on beat
-    if audio.is_beat then
+    if audio.beat then
         state.pulse = 1.0
         state.glow = 1.0
         state.wobble = 0.15 * audio.amplitude
@@ -133,6 +133,10 @@ function calculate(audio, config, dt)
             scale = math.min(config.max_scale, scale),
             band = band_idx,
             visible = true,
+            glow = false,
+            brightness = math.min(15, 6 + math.floor(state.pulse * 6)),
+            material = "MUSHROOM_STEM",
+            interpolation = 8,
         }
         entity_idx = entity_idx + 1
     end
@@ -180,6 +184,10 @@ function calculate(audio, config, dt)
                 scale = math.min(config.max_scale, scale),
                 band = band_idx,
                 visible = true,
+                glow = state.pulse > 0.7,
+                brightness = math.min(15, 8 + math.floor(audio.bands[1] * 5)),
+                material = "RED_MUSHROOM_BLOCK",
+                interpolation = 6,
             }
             entity_idx = entity_idx + 1
             points_placed = points_placed + 1
@@ -207,6 +215,10 @@ function calculate(audio, config, dt)
             scale = math.min(config.max_scale, scale),
             band = band_idx,
             visible = true,
+            glow = false,
+            brightness = math.min(15, 7 + math.floor(audio.bands[3] * 5)),
+            material = "RED_MUSHROOM_BLOCK",
+            interpolation = 5,
         }
         entity_idx = entity_idx + 1
     end
@@ -243,6 +255,10 @@ function calculate(audio, config, dt)
                 scale = math.min(config.max_scale, scale),
                 band = band_idx,
                 visible = true,
+                glow = false,
+                brightness = math.min(15, 5 + math.floor(audio.bands[4] * 5)),
+                material = "MUSHROOM_STEM",
+                interpolation = 5,
             }
             entity_idx = entity_idx + 1
         end
@@ -270,6 +286,10 @@ function calculate(audio, config, dt)
             scale = math.min(config.max_scale, scale),
             band = band_idx,
             visible = true,
+            glow = state.glow > 0.3,
+            brightness = math.min(15, math.floor(10 + state.glow * 5)),
+            material = state.glow > 0.5 and "GLOWSTONE" or "WHITE_CONCRETE",
+            interpolation = 5,
         }
         entity_idx = entity_idx + 1
     end
@@ -301,10 +321,40 @@ function calculate(audio, config, dt)
             z = clamp(z, 0, 1),
             scale = math.min(config.max_scale, math.max(0.01, scale)),
             band = band_idx,
-            visible = fade > 0.1,
+            visible = true,
+            glow = fade > 0.5 and state.glow > 0.2,
+            brightness = math.min(15, math.floor(fade * 8 + state.glow * 7)),
+            material = state.glow > 0.4 and "GLOWSTONE" or "YELLOW_CONCRETE",
+            interpolation = 3,
         }
         entity_idx = entity_idx + 1
     end
 
-    return entities
+    -- Fill any remainder with additional floating spores so high counts stay visually dense.
+    while entity_idx < n do
+        local sp = entity_idx
+        local phase = sp * 1.618 + state.spore_time
+        local spore_life = (phase % 3.0) / 3.0
+        local spore_angle = phase * 2.0 + sp
+        local spore_r = 0.05 + spore_life * 0.16 + math.sin(phase * 3.2) * 0.03
+        local spore_y = cap_base_y + 0.08 + spore_life * 0.42 + audio.bands[5] * 0.06
+        local x = center + math.cos(spore_angle) * spore_r + wobble_x * 0.5 + cap_offset_x * 0.6
+        local z = center + math.sin(spore_angle) * spore_r + wobble_z * 0.5 + cap_offset_z * 0.6
+        local fade = math.max(0.15, math.sin(spore_life * math.pi))
+        local scale = config.base_scale * 0.28 * fade + audio.bands[5] * 0.14 * fade
+
+        entities[#entities + 1] = {
+            id = string.format("block_%d", entity_idx),
+            x = clamp(x, 0, 1),
+            y = clamp(spore_y, 0, 1),
+            z = clamp(z, 0, 1),
+            scale = math.min(config.max_scale, math.max(0.01, scale)),
+            band = 4,
+            visible = true,
+            glow = fade > 0.55 and state.glow > 0.2,
+        }
+        entity_idx = entity_idx + 1
+    end
+
+    return normalize_entities(entities, n)
 end

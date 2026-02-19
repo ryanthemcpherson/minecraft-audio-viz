@@ -18,6 +18,8 @@ export interface AudioState {
   amplitude: number; // Overall amplitude 0-1
   isBeat: boolean; // Beat detected this frame
   beatIntensity: number; // Beat strength 0-1
+  beatPhase: number; // Beat phase 0-1 (position within current beat)
+  bpm: number; // Beats per minute
   frame: number; // Frame counter
 }
 

@@ -1,13 +1,17 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { EntityData } from "@/lib/patterns/base";
 import type { PatternInstance } from "@/lib/patterns";
 import { generateAudioState } from "@/lib/audioSim";
+import MinecraftStage from "./MinecraftStage";
 
 const BLOCK_SIZE = 0.22;
+const STAGE_Y = -1.8;
+const STAGE_BLOCK = 0.38;
+const FLOOR_Y = STAGE_Y + STAGE_BLOCK / 2; // top surface of grass
 const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
 
@@ -56,7 +60,8 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
 
     // Map entities to 3D positions — 0-1 range to world space
     const scale3d = 6;
-    const prev = prevPositions.current!;
+    const prev = prevPositions.current;
+    if (!prev) return;
 
     const sc = smoothCenter.current;
 
@@ -118,15 +123,19 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
         prev[pi + 1] = y;
         prev[pi + 2] = z;
 
-        TEMP_OBJECT.position.set(x, y, z);
+        // Clamp so blocks don't clip through the grass floor
         const s = Math.max(0.05, e.scale * 2.5);
+        const halfBlock = BLOCK_SIZE * s * 0.5;
+        const clampedY = Math.max(y, FLOOR_Y + halfBlock);
+
+        TEMP_OBJECT.position.set(x, clampedY, z);
         TEMP_OBJECT.scale.set(s, s, s);
         TEMP_OBJECT.updateMatrix();
         mesh.setMatrixAt(i, TEMP_OBJECT.matrix);
 
-        // Color by band
+        // Color by band — moderate brightness so directional light shading shows
         const bandColor = BAND_COLORS[Math.min(e.band, 4)];
-        const brightness = 0.6 + e.scale * 2.5;
+        const brightness = 0.7 + e.scale * 1.8;
         TEMP_COLOR.copy(bandColor).multiplyScalar(brightness);
         mesh.setColorAt(i, TEMP_COLOR);
       } else {
@@ -152,23 +161,23 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
 
   return (
     <>
-      <ambientLight intensity={0.15} />
-      <pointLight position={[3, 4, 3]} intensity={1.2} distance={12} color="#00CCFF" />
-      <pointLight position={[-3, 3, -2]} intensity={0.8} distance={12} color="#5B6AFF" />
-      <pointLight position={[0, -2, 3]} intensity={0.5} distance={10} color="#FFAA00" />
-      <fog attach="fog" args={["#050505", 6, 20]} />
+      <ambientLight intensity={0.3} />
+      <directionalLight position={[4, 6, 3]} intensity={1.5} color="#ffffff" />
+      <pointLight position={[3, 4, 3]} intensity={0.8} distance={14} color="#00CCFF" />
+      <pointLight position={[-3, 3, -2]} intensity={0.6} distance={14} color="#5B6AFF" />
+      <pointLight position={[0, -2, 3]} intensity={0.4} distance={12} color="#FFAA00" />
+      <fog attach="fog" args={["#050505", 8, 25]} />
 
       <group ref={groupRef}>
         <instancedMesh ref={meshRef} args={[undefined, undefined, maxCount]}>
           <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
           <meshStandardMaterial
             toneMapped={false}
-            transparent
-            opacity={0.9}
-            roughness={0.15}
-            metalness={0.4}
+            roughness={0.6}
+            metalness={0.05}
           />
         </instancedMesh>
+        <MinecraftStage size={7} layers={3} yOffset={-1.8} />
       </group>
     </>
   );

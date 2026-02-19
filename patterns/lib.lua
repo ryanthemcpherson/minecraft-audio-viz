@@ -100,3 +100,26 @@ function simple_noise(x, y, z, seed)
     local m = ((n * 15731 + 789221) % 2147483647 * n + 1376312589) % 2147483647
     return 1.0 - m / 1073741824.0
 end
+
+-- Normalize pattern output to exactly n entities.
+-- Truncates overflow and pads with invisible placeholders when underfilled.
+function normalize_entities(entities, n)
+    n = math.max(0, math.floor(n or 0))
+    while #entities > n do
+        entities[#entities] = nil
+    end
+    while #entities < n do
+        local idx = #entities
+        entities[#entities + 1] = {
+            id = string.format("__pad_%d", idx),
+            x = 0.5,
+            y = 0.5,
+            z = 0.5,
+            scale = 0.0,
+            rotation = 0.0,
+            band = 0,
+            visible = false,
+        }
+    end
+    return entities
+end
