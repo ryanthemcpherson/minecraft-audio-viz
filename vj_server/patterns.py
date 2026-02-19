@@ -280,20 +280,28 @@ class LuaPattern(VisualizationPattern):
                             "scale": scale,
                             "rotation": rotation,
                         }
-                        entities.append(
-                            {
-                                "id": entity_id,
-                                "x": x,
-                                "y": y,
-                                "z": z,
-                                "scale": scale,
-                                "rotation": rotation,
-                                "band": int(entry["band"] or 0),
-                                "visible": bool(entry["visible"])
-                                if entry["visible"] is not None
-                                else True,
-                            }
-                        )
+                        entity = {
+                            "id": entity_id,
+                            "x": x,
+                            "y": y,
+                            "z": z,
+                            "scale": scale,
+                            "rotation": rotation,
+                            "band": int(entry["band"] or 0),
+                            "visible": bool(entry["visible"])
+                            if entry["visible"] is not None
+                            else True,
+                        }
+                        # Forward optional rendering fields when set by pattern
+                        if entry["glow"] is not None:
+                            entity["glow"] = bool(entry["glow"])
+                        if entry["brightness"] is not None:
+                            entity["brightness"] = int(entry["brightness"])
+                        if entry["material"] is not None:
+                            entity["material"] = str(entry["material"])
+                        if entry["interpolation"] is not None:
+                            entity["interpolation"] = int(entry["interpolation"])
+                        entities.append(entity)
             # Cleanup stale cached entities.
             if self._entity_state:
                 stale = [eid for eid in self._entity_state.keys() if eid not in seen_ids]
