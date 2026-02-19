@@ -1,33 +1,7 @@
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
-var __commonJS = (cb, mod) => function __require2() {
+var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
-
-// node-stub:os
-var require_os = __commonJS({
-  "node-stub:os"(exports, module) {
-    module.exports = {
-      platform: function() {
-        return "linux";
-      },
-      arch: function() {
-        return "x64";
-      },
-      endianness: function() {
-        return "LE";
-      },
-      tmpdir: function() {
-        return "/tmp";
-      }
-    };
-  }
-});
 
 // node_modules/fengari/src/luaconf.js
 var require_luaconf = __commonJS({
@@ -47,7 +21,7 @@ var require_luaconf = __commonJS({
     module.exports.LUA_EXEC_DIR = LUA_EXEC_DIR;
     var LUA_VDIR = LUA_VERSION_MAJOR + "." + LUA_VERSION_MINOR;
     module.exports.LUA_VDIR = LUA_VDIR;
-    if (typeof process === "undefined") {
+    if (true) {
       const LUA_DIRSEP = "/";
       module.exports.LUA_DIRSEP = LUA_DIRSEP;
       const LUA_LDIR = "./lua/" + LUA_VDIR + "/";
@@ -62,7 +36,7 @@ var require_luaconf = __commonJS({
         LUA_JSDIR + "?.js;" + LUA_JSDIR + "loadall.js;./?.js"
       );
       module.exports.LUA_JSPATH_DEFAULT = LUA_JSPATH_DEFAULT;
-    } else if (require_os().platform() === "win32") {
+    } else if (null.platform() === "win32") {
       const LUA_DIRSEP = "\\";
       module.exports.LUA_DIRSEP = LUA_DIRSEP;
       const LUA_LDIR = "!\\lua\\";
@@ -10087,13 +10061,6 @@ var require_lua = __commonJS({
   }
 });
 
-// node-stub:fs
-var require_fs = __commonJS({
-  "node-stub:fs"(exports, module) {
-    module.exports = {};
-  }
-});
-
 // node_modules/fengari/src/lauxlib.js
 var require_lauxlib = __commonJS({
   "node_modules/fengari/src/lauxlib.js"(exports, module) {
@@ -10771,7 +10738,7 @@ var require_lauxlib = __commonJS({
       }
     };
     var luaL_loadfilex;
-    if (typeof process === "undefined") {
+    if (true) {
       class LoadF {
         constructor() {
           this.n = NaN;
@@ -10838,7 +10805,7 @@ var require_lauxlib = __commonJS({
         return status;
       };
     } else {
-      const fs = require_fs();
+      const fs = null;
       class LoadF {
         constructor() {
           this.n = NaN;
@@ -10923,7 +10890,7 @@ var require_lauxlib = __commonJS({
     var lua_writestringerror = function() {
       for (let i = 0; i < arguments.length; i++) {
         let a = arguments[i];
-        if (typeof process === "undefined") {
+        if (true) {
           do {
             let r = /([^\n]*)\n?([\d\D]*)/.exec(a);
             console.error(r[1]);
@@ -11097,7 +11064,7 @@ var require_lbaselib = __commonJS({
     } = require_fengaricore();
     var lua_writestring;
     var lua_writeline;
-    if (typeof process === "undefined") {
+    if (true) {
       if (typeof TextDecoder === "function") {
         let buff = "";
         let decoder = new TextDecoder("utf-8");
@@ -12422,224 +12389,6 @@ var require_ltablib = __commonJS({
   }
 });
 
-// node_modules/fengari/src/liolib.js
-var require_liolib = __commonJS({
-  "node_modules/fengari/src/liolib.js"(exports, module) {
-    "use strict";
-    var fs = require_fs();
-    var {
-      LUA_REGISTRYINDEX,
-      lua_getfield,
-      lua_gettop,
-      lua_isnone,
-      lua_isnoneornil,
-      lua_newuserdata,
-      lua_pop,
-      lua_pushliteral,
-      lua_pushnil,
-      lua_pushstring,
-      lua_pushvalue,
-      lua_setfield,
-      lua_tostring,
-      lua_touserdata
-    } = require_lua();
-    var {
-      LUA_FILEHANDLE,
-      luaL_checkany,
-      luaL_checklstring,
-      luaL_checkudata,
-      luaL_error,
-      luaL_fileresult,
-      luaL_newlib,
-      luaL_newmetatable,
-      luaL_setfuncs,
-      luaL_setmetatable,
-      luaL_testudata
-    } = require_lauxlib();
-    var lualib = require_lualib();
-    var { to_luastring } = require_fengaricore();
-    var IO_PREFIX = "_IO_";
-    var IOPREF_LEN = IO_PREFIX.length;
-    var IO_INPUT = to_luastring(IO_PREFIX + "input");
-    var IO_OUTPUT = to_luastring(IO_PREFIX + "output");
-    var tolstream = function(L) {
-      return luaL_checkudata(L, 1, LUA_FILEHANDLE);
-    };
-    var isclosed = function(p) {
-      return p.closef === null;
-    };
-    var io_type = function(L) {
-      luaL_checkany(L, 1);
-      let p = luaL_testudata(L, 1, LUA_FILEHANDLE);
-      if (p === null)
-        lua_pushnil(L);
-      else if (isclosed(p))
-        lua_pushliteral(L, "closed file");
-      else
-        lua_pushliteral(L, "file");
-      return 1;
-    };
-    var f_tostring = function(L) {
-      let p = tolstream(L);
-      if (isclosed(p))
-        lua_pushliteral(L, "file (closed)");
-      else
-        lua_pushstring(L, to_luastring(`file (${p.f.toString()})`));
-      return 1;
-    };
-    var tofile = function(L) {
-      let p = tolstream(L);
-      if (isclosed(p))
-        luaL_error(L, to_luastring("attempt to use a closed file"));
-      lualib.lua_assert(p.f);
-      return p.f;
-    };
-    var newprefile = function(L) {
-      let p = lua_newuserdata(L);
-      p.f = null;
-      p.closef = null;
-      luaL_setmetatable(L, LUA_FILEHANDLE);
-      return p;
-    };
-    var aux_close = function(L) {
-      let p = tolstream(L);
-      let cf = p.closef;
-      p.closef = null;
-      return cf(L);
-    };
-    var io_close = function(L) {
-      if (lua_isnone(L, 1))
-        lua_getfield(L, LUA_REGISTRYINDEX, IO_OUTPUT);
-      tofile(L);
-      return aux_close(L);
-    };
-    var getiofile = function(L, findex) {
-      lua_getfield(L, LUA_REGISTRYINDEX, findex);
-      let p = lua_touserdata(L, -1);
-      if (isclosed(p))
-        luaL_error(L, to_luastring("standard %s file is closed"), findex.subarray(IOPREF_LEN));
-      return p.f;
-    };
-    var g_iofile = function(L, f, mode) {
-      if (!lua_isnoneornil(L, 1)) {
-        let filename = lua_tostring(L, 1);
-        if (filename)
-          luaL_error(L, to_luastring("opening files not yet implemented"));
-        else {
-          tofile(L);
-          lua_pushvalue(L, 1);
-        }
-        lua_setfield(L, LUA_REGISTRYINDEX, f);
-      }
-      lua_getfield(L, LUA_REGISTRYINDEX, f);
-      return 1;
-    };
-    var io_input = function(L) {
-      return g_iofile(L, IO_INPUT, "r");
-    };
-    var io_output = function(L) {
-      return g_iofile(L, IO_OUTPUT, "w");
-    };
-    var prepare_string_for_write = process.versions.node > 6 ? (s) => s : (
-      // identity function
-      (s) => Buffer.from(s.buffer, s.byteOffset, s.byteLength)
-    );
-    var g_write = function(L, f, arg) {
-      let nargs = lua_gettop(L) - arg;
-      let status = true;
-      let err;
-      for (; nargs--; arg++) {
-        let s = luaL_checklstring(L, arg);
-        try {
-          status = status && fs.writeSync(f.fd, prepare_string_for_write(s), 0, s.length) === s.length;
-        } catch (e) {
-          status = false;
-          err = e;
-        }
-      }
-      if (status) return 1;
-      else return luaL_fileresult(L, status, null, err);
-    };
-    var io_write = function(L) {
-      return g_write(L, getiofile(L, IO_OUTPUT), 1);
-    };
-    var f_write = function(L) {
-      let f = tofile(L);
-      lua_pushvalue(L, 1);
-      return g_write(L, f, 2);
-    };
-    var io_flush = function(L) {
-      getiofile(L, IO_OUTPUT);
-      return luaL_fileresult(L, true, null, null);
-    };
-    var f_flush = function(L) {
-      tofile(L);
-      return luaL_fileresult(L, true, null, null);
-    };
-    var iolib = {
-      "close": io_close,
-      "flush": io_flush,
-      "input": io_input,
-      "output": io_output,
-      "type": io_type,
-      "write": io_write
-    };
-    var flib = {
-      "close": io_close,
-      "flush": f_flush,
-      "write": f_write,
-      "__tostring": f_tostring
-    };
-    var createmeta = function(L) {
-      luaL_newmetatable(L, LUA_FILEHANDLE);
-      lua_pushvalue(L, -1);
-      lua_setfield(L, -2, to_luastring("__index", true));
-      luaL_setfuncs(L, flib, 0);
-      lua_pop(L, 1);
-    };
-    var io_noclose = function(L) {
-      let p = tolstream(L);
-      p.closef = io_noclose;
-      lua_pushnil(L);
-      lua_pushliteral(L, "cannot close standard file");
-      return 2;
-    };
-    var createstdfile = function(L, f, k, fname) {
-      let p = newprefile(L);
-      p.f = f;
-      p.closef = io_noclose;
-      if (k !== null) {
-        lua_pushvalue(L, -1);
-        lua_setfield(L, LUA_REGISTRYINDEX, k);
-      }
-      lua_setfield(L, -2, fname);
-    };
-    var luaopen_io = function(L) {
-      luaL_newlib(L, iolib);
-      createmeta(L);
-      createstdfile(L, process.stdin, IO_INPUT, to_luastring("stdin"));
-      createstdfile(L, process.stdout, IO_OUTPUT, to_luastring("stdout"));
-      createstdfile(L, process.stderr, null, to_luastring("stderr"));
-      return 1;
-    };
-    module.exports.luaopen_io = luaopen_io;
-  }
-});
-
-// node-stub:tmp
-var require_tmp = __commonJS({
-  "node-stub:tmp"(exports, module) {
-    module.exports = {};
-  }
-});
-
-// node-stub:child_process
-var require_child_process = __commonJS({
-  "node-stub:child_process"(exports, module) {
-    module.exports = {};
-  }
-});
-
 // node_modules/fengari/src/loslib.js
 var require_loslib = __commonJS({
   "node_modules/fengari/src/loslib.js"(exports, module) {
@@ -13123,15 +12872,15 @@ var require_loslib = __commonJS({
       "setlocale": os_setlocale,
       "time": os_time
     };
-    if (typeof process === "undefined") {
+    if (true) {
       syslib.clock = function(L) {
         lua_pushnumber(L, performance.now() / 1e3);
         return 1;
       };
     } else {
-      const fs = require_fs();
-      const tmp = require_tmp();
-      const child_process = require_child_process();
+      const fs = null;
+      const tmp = null;
+      const child_process = null;
       syslib.exit = function(L) {
         let status;
         if (lua_isboolean(L, 1))
@@ -13431,13 +13180,6 @@ var require_lutf8lib = __commonJS({
       return 1;
     };
     module.exports.luaopen_utf8 = luaopen_utf8;
-  }
-});
-
-// node-stub:readline-sync
-var require_readline_sync = __commonJS({
-  "node-stub:readline-sync"(exports, module) {
-    module.exports = {};
   }
 });
 
@@ -13870,8 +13612,8 @@ var require_ldblib = __commonJS({
       "upvaluejoin": db_upvaluejoin
     };
     var getinput;
-    if (typeof process !== "undefined") {
-      const readlineSync = require_readline_sync();
+    if (false) {
+      const readlineSync = null;
       readlineSync.setDefaultOptions({
         prompt: "lua_debug> "
       });
@@ -13935,13 +13677,6 @@ var require_fengari = __commonJS({
     module.exports.lua = lua;
     module.exports.lauxlib = lauxlib;
     module.exports.lualib = lualib;
-  }
-});
-
-// node-stub:path
-var require_path = __commonJS({
-  "node-stub:path"(exports, module) {
-    module.exports = {};
   }
 });
 
@@ -14021,7 +13756,7 @@ var require_loadlib = __commonJS({
     } = require_fengaricore();
     var fengari = require_fengari();
     var global_env = (function() {
-      if (typeof process !== "undefined") {
+      if (false) {
         return global;
       } else if (typeof window !== "undefined") {
         return window;
@@ -14042,7 +13777,7 @@ var require_loadlib = __commonJS({
     var LIB_FAIL = "open";
     var AUXMARK = to_luastring("");
     var lsys_load;
-    if (typeof process === "undefined") {
+    if (true) {
       lsys_load = function(L, path, seeglb) {
         path = to_uristring(path);
         let xhr = new XMLHttpRequest();
@@ -14073,7 +13808,7 @@ var require_loadlib = __commonJS({
         }
       };
     } else {
-      const pathlib = require_path();
+      const pathlib = null;
       lsys_load = function(L, path, seeglb) {
         path = to_jsstring(path);
         path = pathlib.resolve(process.cwd(), path);
@@ -14101,8 +13836,8 @@ var require_loadlib = __commonJS({
       return b;
     };
     var readable;
-    if (typeof process !== "undefined") {
-      const fs = require_fs();
+    if (false) {
+      const fs = null;
       readable = function(filename) {
         try {
           let fd = fs.openSync(filename, "r");
@@ -14155,7 +13890,7 @@ var require_loadlib = __commonJS({
       }
     };
     var env = (function() {
-      if (typeof process !== "undefined") {
+      if (false) {
         return process.env;
       } else {
         return global_env;
@@ -14493,8 +14228,8 @@ var require_linit = __commonJS({
     loadedlibs[lualib.LUA_MATHLIBNAME] = luaopen_math;
     loadedlibs[lualib.LUA_UTF8LIBNAME] = luaopen_utf8;
     loadedlibs[lualib.LUA_DBLIBNAME] = luaopen_debug;
-    if (typeof process !== "undefined")
-      loadedlibs[lualib.LUA_IOLIBNAME] = require_liolib().luaopen_io;
+    if (false)
+      loadedlibs[lualib.LUA_IOLIBNAME] = null.luaopen_io;
     var { luaopen_fengari } = require_fengarilib();
     loadedlibs[lualib.LUA_FENGARILIBNAME] = luaopen_fengari;
   }
@@ -14519,10 +14254,10 @@ var require_lualib = __commonJS({
     var LUA_TABLIBNAME = "table";
     module.exports.LUA_TABLIBNAME = LUA_TABLIBNAME;
     module.exports.luaopen_table = require_ltablib().luaopen_table;
-    if (typeof process !== "undefined") {
+    if (false) {
       const LUA_IOLIBNAME = "io";
       module.exports.LUA_IOLIBNAME = LUA_IOLIBNAME;
-      module.exports.luaopen_io = require_liolib().luaopen_io;
+      module.exports.luaopen_io = null.luaopen_io;
     }
     var LUA_OSLIBNAME = "os";
     module.exports.LUA_OSLIBNAME = LUA_OSLIBNAME;

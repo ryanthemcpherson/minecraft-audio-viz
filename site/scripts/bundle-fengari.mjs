@@ -1,12 +1,13 @@
 /**
  * Pre-bundle fengari for browser use via esbuild.
  *
- * Stubs all Node.js built-ins (os, fs, path, child_process, readline-sync)
- * so the bundle can run in the browser without Turbopack trying to resolve them.
+ * Stubs all Node.js built-ins and forces browser code paths by replacing
+ * `typeof process` checks. This makes the bundle safe for Turbopack/browser.
  */
 import { build } from "esbuild";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outfile = path.resolve(__dirname, "../src/lib/patterns/fengari-browser.js");
@@ -14,18 +15,18 @@ const outfile = path.resolve(__dirname, "../src/lib/patterns/fengari-browser.js"
 /** Plugin that stubs Node.js modules fengari tries to require */
 const nodeStubPlugin = {
   name: "node-stub",
-  setup(build) {
+  setup(b) {
     const stubs = [
       "os", "fs", "path", "child_process", "readline-sync",
       "crypto", "buffer", "stream", "util", "net", "tty",
       "tmp", "process",
     ];
     const filter = new RegExp(`^(${stubs.join("|")})$`);
-    build.onResolve({ filter }, (args) => ({
+    b.onResolve({ filter }, (args) => ({
       path: args.path,
       namespace: "node-stub",
     }));
-    build.onLoad({ filter: /.*/, namespace: "node-stub" }, (args) => {
+    b.onLoad({ filter: /.*/, namespace: "node-stub" }, (args) => {
       // os needs platform() for fengari's luaconf.js
       if (args.path === "os") {
         return {
@@ -44,6 +45,23 @@ const nodeStubPlugin = {
   },
 };
 
+/**
+ * Plugin that forces browser code paths in fengari sources.
+ * Replaces `typeof process` with `"undefined"` so all Node.js
+ * detection checks resolve to the browser branch.
+ */
+const forceBrowserPlugin = {
+  name: "force-browser",
+  setup(b) {
+    b.onLoad({ filter: /node_modules[\\/]fengari[\\/]/ }, async (args) => {
+      let contents = await fs.promises.readFile(args.path, "utf8");
+      // Replace typeof process checks to force browser paths
+      contents = contents.replace(/typeof\s+process/g, '"undefined"');
+      return { contents, loader: "js" };
+    });
+  },
+};
+
 await build({
   entryPoints: [path.resolve(__dirname, "fengari-entry.cjs")],
   bundle: true,
@@ -51,7 +69,7 @@ await build({
   outfile,
   platform: "browser",
   target: "es2020",
-  plugins: [nodeStubPlugin],
+  plugins: [forceBrowserPlugin, nodeStubPlugin],
   // Don't minify — easier to debug; size is small anyway
   minify: false,
   logLevel: "info",
