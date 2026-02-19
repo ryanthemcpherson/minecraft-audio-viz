@@ -312,7 +312,23 @@ function calculate(audio, config, dt)
 
         -- Global beat pulse
         if audio.beat then
-            base_scale = base_scale * 1.1
+            base_scale = base_scale * 1.15
+        end
+
+        -- Per-part rendering fields
+        local ent_glow = false
+        local ent_brightness = 8 + math.floor(audio.amplitude * 4)
+        local ent_material = "BONE_BLOCK"
+
+        if part_type == "eye" or part_type == "eye_inner" then
+            ent_glow = state.eye_glow > 0.3
+            ent_brightness = math.floor(state.eye_glow * 15)
+            ent_material = state.eye_glow > 0.5 and "GLOWSTONE" or "BONE_BLOCK"
+        elseif part_type == "teeth_upper" or part_type == "teeth_lower" then
+            ent_brightness = 10 + math.floor(state.beat_intensity * 5)
+            ent_material = state.beat_intensity > 0.6 and "QUARTZ_BLOCK" or "BONE_BLOCK"
+        elseif part_type == "jaw" then
+            ent_brightness = 7 + math.floor(audio.bands[1] * 5)
         end
 
         entities[#entities + 1] = {
@@ -321,8 +337,13 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, base_scale),
+            rotation = (yaw * 180 / math.pi) % 360,
             band = band_idx,
             visible = true,
+            glow = ent_glow,
+            brightness = math.min(15, ent_brightness),
+            material = ent_material,
+            interpolation = 5,
         }
     end
 
