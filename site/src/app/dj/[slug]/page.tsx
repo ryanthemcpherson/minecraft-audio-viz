@@ -6,6 +6,8 @@ import Image from "next/image";
 import { getDJProfileBySlug } from "@/lib/auth";
 import type { DJProfile } from "@/lib/auth";
 
+const BAND_LABELS = ["Bass", "Low-mid", "Mid", "High-mid", "High"];
+
 export default function PublicDJProfilePage() {
   const params = useParams();
   const slug = params.slug as string;
@@ -147,6 +149,22 @@ export default function PublicDJProfilePage() {
             )}
           </div>
         )}
+
+        {/* Block palette */}
+              {profile.block_palette && profile.block_palette.some((b: string | null) => b !== null) && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-white/60 mb-2">Block Palette</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {BAND_LABELS.map((label, i) => (
+                      profile.block_palette![i] && (
+                        <span key={label} className="px-2 py-1 bg-white/10 rounded text-sm">
+                          {label}: {profile.block_palette![i]!.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                        </span>
+                      )
+                    ))}
+                  </div>
+                </div>
+              )}
 
         {/* Color palette swatches */}
         {profile.color_palette && profile.color_palette.length > 0 && (

@@ -45,6 +45,7 @@ export interface DJProfileResponse {
   soundcloud_url: string | null;
   spotify_url: string | null;
   website_url: string | null;
+  block_palette: (string | null)[] | null;
   is_public: boolean;
   created_at: string;
 }

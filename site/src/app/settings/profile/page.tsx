@@ -15,6 +15,64 @@ import type { DJProfile } from "@/lib/auth";
 
 const DEFAULT_COLORS = ["#6366f1", "#8b5cf6", "#ec4899"];
 
+const BLOCK_TYPE_OPTIONS = [
+  "DIAMOND_BLOCK",
+  "GOLD_BLOCK",
+  "IRON_BLOCK",
+  "EMERALD_BLOCK",
+  "LAPIS_BLOCK",
+  "REDSTONE_BLOCK",
+  "NETHERITE_BLOCK",
+  "COPPER_BLOCK",
+  "AMETHYST_BLOCK",
+  "QUARTZ_BLOCK",
+  "OBSIDIAN",
+  "CRYING_OBSIDIAN",
+  "GLOWSTONE",
+  "SEA_LANTERN",
+  "SHROOMLIGHT",
+  "PRISMARINE",
+  "PURPUR_BLOCK",
+  "END_STONE",
+  "BONE_BLOCK",
+  "PACKED_ICE",
+  "BLUE_ICE",
+  "MAGMA_BLOCK",
+  "HONEYCOMB_BLOCK",
+  "SCULK",
+  "HAY_BLOCK",
+  "MOSS_BLOCK",
+  "MUD_BRICKS",
+  "TUFF",
+  "DEEPSLATE",
+  "COAL_BLOCK",
+  "SNOW_BLOCK",
+  "SANDSTONE",
+  "RED_SANDSTONE",
+  "NETHER_BRICKS",
+  "RED_NETHER_BRICKS",
+  "BLACKSTONE",
+  "BASALT",
+  "TERRACOTTA",
+  "WHITE_CONCRETE",
+  "BLACK_CONCRETE",
+  "RED_CONCRETE",
+  "BLUE_CONCRETE",
+  "GREEN_CONCRETE",
+  "YELLOW_CONCRETE",
+  "PURPLE_CONCRETE",
+  "ORANGE_CONCRETE",
+  "PINK_CONCRETE",
+  "CYAN_CONCRETE",
+  "LIME_CONCRETE",
+  "WHITE_WOOL",
+  "BLACK_WOOL",
+  "RED_WOOL",
+  "BLUE_WOOL",
+];
+
+const BAND_LABELS = ["Bass", "Low-mid", "Mid", "High-mid", "High"];
+
 export default function ProfileEditPage() {
   const router = useRouter();
   const { user, accessToken, loading: authLoading } = useAuth();
@@ -35,6 +93,7 @@ export default function ProfileEditPage() {
   const [isPublic, setIsPublic] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [blockPalette, setBlockPalette] = useState<(string | null)[]>([null, null, null, null, null]);
 
   // Slug availability
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
@@ -75,6 +134,7 @@ export default function ProfileEditPage() {
           setSoundcloudUrl(p.soundcloud_url || "");
           setSpotifyUrl(p.spotify_url || "");
           setWebsiteUrl(p.website_url || "");
+          setBlockPalette(p.block_palette || [null, null, null, null, null]);
         }
       })
       .catch(() => {})
@@ -185,6 +245,7 @@ export default function ProfileEditPage() {
         slug: slug || undefined,
         color_palette: colors,
         is_public: isPublic,
+        block_palette: blockPalette,
         soundcloud_url: soundcloudUrl,
         spotify_url: spotifyUrl,
         website_url: websiteUrl,
@@ -481,6 +542,39 @@ export default function ProfileEditPage() {
               ))}
             </div>
           </div>
+
+          {/* Block Palette */}
+            <div>
+              <label className="block text-sm font-medium text-white/80 mb-2">
+                Block Palette
+              </label>
+              <p className="text-xs text-white/40 mb-3">
+                Set preferred block types per frequency band. Auto-applies when you become the active DJ.
+              </p>
+              <div className="grid grid-cols-1 gap-2">
+                {BAND_LABELS.map((label, i) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <span className="text-sm text-white/60 w-20">{label}</span>
+                    <select
+                      value={blockPalette[i] || ""}
+                      onChange={(e) => {
+                        const updated = [...blockPalette];
+                        updated[i] = e.target.value || null;
+                        setBlockPalette(updated);
+                      }}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                    >
+                      <option value="">Default</option>
+                      {BLOCK_TYPE_OPTIONS.map((block) => (
+                        <option key={block} value={block}>
+                          {block.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
 
           {/* Public toggle */}
           <div className="flex items-center justify-between">

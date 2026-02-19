@@ -449,6 +449,7 @@ function App() {
         djName: djName.trim(),
         serverHost: connHost,
         serverPort: connPort,
+        blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
       });
 
       // Start audio capture

@@ -434,6 +434,7 @@ async def register_org_server(
 @router.delete(
     "/{org_id}/servers/{server_id}",
     status_code=204,
+    response_model=None,
     summary="Remove a server from this organization",
 )
 async def remove_org_server(
@@ -560,6 +561,7 @@ async def list_invites(
 @router.delete(
     "/{org_id}/invites/{invite_id}",
     status_code=204,
+    response_model=None,
     summary="Deactivate an invite code",
 )
 async def delete_invite(

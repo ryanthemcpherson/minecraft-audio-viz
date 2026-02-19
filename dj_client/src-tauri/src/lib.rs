@@ -60,6 +60,7 @@ async fn connect_with_code(
     dj_name: String,
     server_host: String,
     server_port: u16,
+    block_palette: Option<Vec<Option<String>>>,
 ) -> Result<(), String> {
     content_filter::validate_no_slurs(&dj_name, "DJ name")?;
 
@@ -98,6 +99,15 @@ async fn connect_with_code(
     // Create and connect client (async, no mutex held)
     let mut client = DjClient::new(config);
     client.connect().await.map_err(|e| e.to_string())?;
+
+    // Send block palette if provided
+    if let Some(palette) = block_palette {
+        if palette.iter().any(|m| m.is_some()) {
+            if let Err(e) = client.send_palette(palette).await {
+                log::warn!("Failed to send block palette: {}", e);
+            }
+        }
+    }
 
     // Create shutdown channel for bridge task
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
