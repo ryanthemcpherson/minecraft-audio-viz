@@ -706,6 +706,19 @@ function App() {
         </div>
       </header>
 
+      {auth.isSignedIn && auth.user && !auth.user.email_verified && (
+        <div className="email-verify-banner">
+          <span>Please verify your email. Check your inbox for a verification link.</span>
+          {auth.verificationMessage ? (
+            <span className="success-message">{auth.verificationMessage}</span>
+          ) : (
+            <button className="btn-link-inline" onClick={auth.resendVerification} type="button">
+              Resend
+            </button>
+          )}
+        </div>
+      )}
+
       {showShortcutsHelp && (
         <div className="shortcuts-help">
           <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '14px' }}>Keyboard Shortcuts</h3>
@@ -786,17 +799,17 @@ function App() {
             </section>
 
             <section className="section">
-              {auth.isSignedIn && auth.user?.dj_profile && (
+              {auth.isSignedIn && auth.user && (
                 <div className="profile-card">
-                  {auth.user.avatar_url ? (
-                    <img className="profile-card-avatar" src={auth.user.avatar_url} alt="" />
+                  {(auth.user.dj_profile?.avatar_url ?? auth.user.avatar_url) ? (
+                    <img className="profile-card-avatar" src={(auth.user.dj_profile?.avatar_url ?? auth.user.avatar_url)!} alt="" />
                   ) : (
                     <span className="profile-card-avatar-initials">
-                      {auth.user.display_name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
+                      {(auth.user.dj_profile?.dj_name ?? auth.user.display_name).split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
                     </span>
                   )}
                   <div className="profile-card-inner">
-                    <span className="profile-card-name">{auth.user.dj_profile.dj_name}</span>
+                    <span className="profile-card-name">{auth.user.dj_profile?.dj_name ?? auth.user.display_name}</span>
                     <span className="profile-card-sub">Signed in as {auth.user.display_name}</span>
                   </div>
                 </div>

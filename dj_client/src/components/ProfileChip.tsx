@@ -31,8 +31,9 @@ export default function ProfileChip({ user, onSignOut }: ProfileChipProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const avatarUrl = user.avatar_url;
-  const displayName = user.display_name;
+  const djProfile = user.dj_profile;
+  const avatarUrl = djProfile?.avatar_url ?? user.avatar_url;
+  const displayName = djProfile?.dj_name ?? user.display_name;
 
   return (
     <div className="profile-chip-wrapper" ref={ref}>

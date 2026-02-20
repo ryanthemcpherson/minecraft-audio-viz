@@ -1317,6 +1317,119 @@ kbd {
   justify-content: center;
 }
 
+.btn-google {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: #3c4043;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 8px;
+}
+
+.btn-google:hover:not(:disabled) {
+  background: #f1f3f4;
+}
+
+.btn-google:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-link-inline {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0;
+  font-weight: 500;
+  transition: opacity 0.15s ease;
+}
+
+.btn-link-inline:hover {
+  opacity: 0.8;
+}
+
+.auth-heading {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+
+.auth-subtext {
+  margin: 0 0 18px;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.auth-back {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s ease;
+}
+
+.auth-back:hover {
+  color: var(--accent);
+}
+
+.success-message {
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(47, 224, 152, 0.6);
+  background: rgba(47, 224, 152, 0.16);
+  color: #8bffc8;
+  padding: 11px 12px;
+  font-size: 0.84rem;
+}
+
+.email-verify-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(145deg, rgba(255, 209, 102, 0.12), rgba(255, 159, 67, 0.08));
+  border: 1px solid rgba(255, 209, 102, 0.4);
+  font-size: 0.86rem;
+  color: var(--warning);
+}
+
+.email-verify-banner span {
+  flex: 1;
+}
+
+.email-verify-banner .btn-link-inline {
+  color: var(--warning);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.email-verify-banner .success-message {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.82rem;
+  color: #8bffc8;
+}
+
 /* Profile Chip (header) */
 .profile-chip-wrapper {
   position: relative;

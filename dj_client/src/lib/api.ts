@@ -30,6 +30,7 @@ export interface UserResponse {
   discord_username: string | null;
   avatar_url: string | null;
   onboarding_completed: boolean;
+  email_verified: boolean;
 }
 
 export interface DJProfileResponse {
@@ -64,6 +65,7 @@ export interface UserProfileResponse {
   discord_username: string | null;
   avatar_url: string | null;
   onboarding_completed: boolean;
+  email_verified: boolean;
   user_type: string | null;
   dj_profile: DJProfileResponse | null;
   organizations: OrgSummary[];
@@ -286,4 +288,27 @@ export async function logout(): Promise<void> {
     }
   }
   await clearTokens();
+}
+
+export async function getGoogleAuthorizeUrl(
+  desktop = true,
+): Promise<DiscordAuthorizeResponse> {
+  return apiFetch<DiscordAuthorizeResponse>(
+    `/auth/google?desktop=${desktop}`,
+  );
+}
+
+export async function forgotPassword(
+  email: string,
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resendVerification(): Promise<{ message: string }> {
+  return authedFetch<{ message: string }>('/auth/resend-verification', {
+    method: 'POST',
+  });
 }
