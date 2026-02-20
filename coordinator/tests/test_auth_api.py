@@ -15,7 +15,7 @@ from httpx import AsyncClient
 async def _register(client: AsyncClient, **overrides: str) -> dict:
     defaults = {
         "email": "test@example.com",
-        "password": "testpass123",
+        "password": "Testpass123",
         "display_name": "Test User",
     }
     defaults.update(overrides)
@@ -72,7 +72,7 @@ class TestLogin:
         await _register(client)
         resp = await client.post(
             "/api/v1/auth/login",
-            json={"email": "test@example.com", "password": "testpass123"},
+            json={"email": "test@example.com", "password": "Testpass123"},
         )
         assert resp.status_code == 200
         data = resp.json()
