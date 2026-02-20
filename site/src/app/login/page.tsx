@@ -182,29 +182,31 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* Discord */}
-        <button
-          onClick={handleDiscord}
-          className="mb-6 flex w-full items-center justify-center gap-2.5 rounded-full bg-[#5865F2] px-4 py-3 text-base font-medium text-white transition-colors hover:bg-[#4752C4]"
-        >
-          <svg width="24" height="24" viewBox="0 -28.5 256 256" fill="currentColor">
-            <path d="M216.856 16.597A208.502 208.502 0 00164.042 0c-2.275 4.113-4.933 9.645-6.766 14.046-19.692-2.961-39.203-2.961-58.533 0-1.832-4.4-4.55-9.933-6.846-14.046a207.809 207.809 0 00-52.855 16.638C5.618 67.147-3.443 116.4 1.087 164.956c22.169 16.555 43.653 26.612 64.775 33.193a161.094 161.094 0 0013.89-22.985 136.664 136.664 0 01-21.846-10.632 108.636 108.636 0 005.356-4.237c42.122 19.702 87.89 19.702 129.51 0a131.66 131.66 0 005.355 4.237 136.07 136.07 0 01-21.886 10.653c4.006 8.02 8.638 15.67 13.89 22.985 21.142-6.58 42.646-16.637 64.815-33.213 5.316-56.288-9.08-105.09-38.056-148.36zM85.474 135.095c-12.645 0-23.015-11.805-23.015-26.18s10.149-26.2 23.015-26.2c12.867 0 23.236 11.804 23.015 26.2.02 14.375-10.148 26.18-23.015 26.18zm85.051 0c-12.645 0-23.014-11.805-23.014-26.18s10.148-26.2 23.014-26.2c12.867 0 23.236 11.804 23.015 26.2 0 14.375-10.148 26.18-23.015 26.18z" />
-          </svg>
-          Continue with Discord
-        </button>
+        {/* OAuth buttons */}
+        <div className="mb-6 flex flex-col gap-3">
+          <button
+            onClick={handleDiscord}
+            className="flex w-full items-center justify-center gap-2.5 rounded-full bg-[#5865F2] px-4 py-3 text-base font-medium text-white transition-colors hover:bg-[#4752C4]"
+          >
+            <svg width="24" height="24" viewBox="0 -28.5 256 256" fill="currentColor">
+              <path d="M216.856 16.597A208.502 208.502 0 00164.042 0c-2.275 4.113-4.933 9.645-6.766 14.046-19.692-2.961-39.203-2.961-58.533 0-1.832-4.4-4.55-9.933-6.846-14.046a207.809 207.809 0 00-52.855 16.638C5.618 67.147-3.443 116.4 1.087 164.956c22.169 16.555 43.653 26.612 64.775 33.193a161.094 161.094 0 0013.89-22.985 136.664 136.664 0 01-21.846-10.632 108.636 108.636 0 005.356-4.237c42.122 19.702 87.89 19.702 129.51 0a131.66 131.66 0 005.355 4.237 136.07 136.07 0 01-21.886 10.653c4.006 8.02 8.638 15.67 13.89 22.985 21.142-6.58 42.646-16.637 64.815-33.213 5.316-56.288-9.08-105.09-38.056-148.36zM85.474 135.095c-12.645 0-23.015-11.805-23.015-26.18s10.149-26.2 23.015-26.2c12.867 0 23.236 11.804 23.015 26.2.02 14.375-10.148 26.18-23.015 26.18zm85.051 0c-12.645 0-23.014-11.805-23.014-26.18s10.148-26.2 23.014-26.2c12.867 0 23.236 11.804 23.015 26.2 0 14.375-10.148 26.18-23.015 26.18z" />
+            </svg>
+            Continue with Discord
+          </button>
 
-        <button
-          onClick={handleGoogle}
-          className="mb-6 flex w-full items-center justify-center gap-2.5 rounded-full bg-white px-4 py-3 text-base font-medium text-gray-700 transition-colors hover:bg-gray-100"
-        >
-          <svg width="20" height="20" viewBox="0 0 48 48">
-            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-            <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 010-9.18l-7.98-6.19a24.0 24.0 0 000 21.56l7.98-6.19z" />
-            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-          </svg>
-          Continue with Google
-        </button>
+          <button
+            onClick={handleGoogle}
+            className="flex w-full items-center justify-center gap-2.5 rounded-full border border-white/10 bg-white/[0.03] px-4 py-3 text-base font-medium text-white transition-colors hover:bg-white/[0.08]"
+          >
+            <svg width="20" height="20" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+              <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 010-9.18l-7.98-6.19a24.0 24.0 0 000 21.56l7.98-6.19z" />
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+            </svg>
+            Continue with Google
+          </button>
+        </div>
 
         <div className="mb-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-white/10" />
@@ -332,6 +334,13 @@ export default function LoginPage() {
             {loading ? "..." : "Create account"}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-xs text-text-secondary/60">
+          By signing in, you agree to our{" "}
+          <a href="/terms" className="text-text-secondary hover:text-white transition-colors underline">Terms of Service</a>
+          {" "}and{" "}
+          <a href="/privacy" className="text-text-secondary hover:text-white transition-colors underline">Privacy Policy</a>.
+        </p>
       </div>
     </div>
   );
