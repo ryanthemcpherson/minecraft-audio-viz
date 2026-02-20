@@ -12,6 +12,9 @@ export interface UseAuthReturn {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName: string) => Promise<void>;
   signInWithDiscord: () => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  resendVerification: () => Promise<void>;
+  verificationMessage: string | null;
   signOut: () => Promise<void>;
   clearError: () => void;
 }
@@ -20,6 +23,7 @@ export function useAuth(): UseAuthReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<UserProfileResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
 
   const isSignedIn = user !== null;
 
@@ -114,6 +118,26 @@ export function useAuth(): UseAuthReturn {
     }
   }, []);
 
+  const signInWithGoogle = useCallback(async () => {
+    setError(null);
+    try {
+      const { authorize_url } = await api.getGoogleAuthorizeUrl(true);
+      await open(authorize_url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const resendVerification = useCallback(async () => {
+    setVerificationMessage(null);
+    try {
+      const { message } = await api.resendVerification();
+      setVerificationMessage(message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
     await api.logout();
     setUser(null);
@@ -130,6 +154,9 @@ export function useAuth(): UseAuthReturn {
     login,
     register,
     signInWithDiscord,
+    signInWithGoogle,
+    resendVerification,
+    verificationMessage,
     signOut,
     clearError,
   };
