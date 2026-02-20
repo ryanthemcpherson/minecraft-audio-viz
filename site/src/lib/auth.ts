@@ -19,6 +19,7 @@ export interface User {
   discord_username: string | null;
   avatar_url: string | null;
   onboarding_completed: boolean;
+  email_verified: boolean;
   is_admin?: boolean;
 }
 
@@ -392,6 +393,70 @@ export async function changePassword(
       current_password: currentPassword,
       new_password: newPassword,
     }),
+  });
+}
+
+export async function requestPasswordReset(email: string): Promise<{ message: string }> {
+  return api<{ message: string }>("/api/v1/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(
+  token: string,
+  newPassword: string
+): Promise<{ message: string }> {
+  return api<{ message: string }>("/api/v1/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
+export async function deleteAccount(
+  accessToken: string,
+  password: string
+): Promise<void> {
+  return api<void>("/api/v1/auth/account", {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ password }),
+  });
+}
+
+export async function verifyEmail(token: string): Promise<{ message: string }> {
+  return api<{ message: string }>("/api/v1/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function resendVerification(accessToken: string): Promise<{ message: string }> {
+  return api<{ message: string }>("/api/v1/auth/resend-verification", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export interface SessionInfo {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  is_current: boolean;
+}
+
+export async function fetchSessions(accessToken: string): Promise<SessionInfo[]> {
+  return api<SessionInfo[]>("/api/v1/auth/sessions", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function revokeSession(accessToken: string, sessionId: string): Promise<void> {
+  return api<void>(`/api/v1/auth/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
 }
 

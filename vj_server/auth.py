@@ -95,14 +95,12 @@ def verify_password(password: str, hash_str: str) -> bool:
             computed = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
             return secrets.compare_digest(computed, stored_hash)
         elif len(parts) == 2:
-            # Legacy format: sha256:hash (no salt)
-            logging.warning(
-                "Legacy unsalted SHA256 hash detected. "
+            # Legacy unsalted format is no longer accepted
+            logging.error(
+                "Rejected login with legacy unsalted SHA256 hash. "
                 "Rehash with: python -m vj_server.auth hash <password>"
             )
-            stored_hash = parts[1]
-            computed = hashlib.sha256(password.encode("utf-8")).hexdigest()
-            return secrets.compare_digest(computed, stored_hash)
+            return False
         return False
 
     else:

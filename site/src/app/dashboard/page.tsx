@@ -18,6 +18,7 @@ import {
   joinOrg,
   fetchUnifiedDashboard,
   resetAccountFull,
+  resendVerification,
 } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
@@ -378,6 +379,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [resettingFull, setResettingFull] = useState(false);
   const [confirmFullReset, setConfirmFullReset] = useState(false);
+  const [verificationDismissed, setVerificationDismissed] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) return;
@@ -458,6 +460,37 @@ export default function DashboardPage() {
       </div>
 
       <div className="relative z-10">
+        {/* Email verification banner */}
+        {user && !user.email_verified && !verificationDismissed && (
+          <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-3">
+            <p className="text-sm text-amber-400">
+              Please verify your email. Check your inbox or{" "}
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!accessToken) return;
+                  try {
+                    await resendVerification(accessToken);
+                  } catch {}
+                }}
+                className="underline hover:text-amber-300"
+              >
+                resend verification
+              </button>
+              .
+            </p>
+            <button
+              type="button"
+              onClick={() => setVerificationDismissed(true)}
+              className="ml-4 text-amber-400/60 hover:text-amber-400"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Profile header with capability badges */}
         <div className="mb-10 flex items-center gap-4">
           {profile.avatar_url ? (

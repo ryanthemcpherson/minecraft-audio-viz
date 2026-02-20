@@ -397,7 +397,7 @@ class DJAuthConfig:
         return config
 
     def _warn_plaintext_passwords(self) -> list:
-        """Check for plaintext passwords and log warnings. Returns list of offending IDs."""
+        """Check for plaintext passwords and reject them. Returns list of offending IDs."""
         plaintext_ids = []
         for section_name, section in [
             ("djs", self.djs),
@@ -407,10 +407,11 @@ class DJAuthConfig:
                 key_hash = entry.get("key_hash", "")
                 if key_hash and not key_hash.startswith(("bcrypt:", "sha256:")):
                     plaintext_ids.append(f"{section_name}/{entry_id}")
-                    logger.critical(
-                        f"SECURITY WARNING: {section_name}/{entry_id} has a plaintext password! "
-                        f"Hash it with: python -m vj_server.auth hash <password>"
-                    )
+        if plaintext_ids:
+            raise ValueError(
+                f"Plaintext passwords detected in auth config for: {', '.join(plaintext_ids)}. "
+                f"Hash them with: python -m vj_server.auth hash <password>"
+            )
         return plaintext_ids
 
     def has_plaintext_passwords(self) -> bool:
@@ -599,6 +600,11 @@ class VJServer:
         self._connect_codes: Dict[str, ConnectCode] = {}  # code -> ConnectCode
         self._code_cleanup_task: Optional[asyncio.Task] = None
         self._code_show_ids: Dict[str, str] = {}  # code -> coordinator show_id
+
+        # Auth rate limiting: per-IP sliding window
+        self._auth_attempts: dict[str, list[float]] = {}  # IP -> list of attempt timestamps
+        self._auth_rate_limit_max: int = 5  # max attempts per window
+        self._auth_rate_limit_window: float = 60.0  # seconds
 
         # Coordinator integration (for centralized connect codes)
         self._coordinator: Optional["CoordinatorClient"] = None
@@ -991,6 +997,36 @@ class VJServer:
             )
             self._last_profile_log = now
 
+    def _check_auth_rate_limit(self, ip: str) -> bool:
+        """Check if an IP has exceeded the auth rate limit. Returns True if rate limited."""
+        now = time.time()
+        window = self._auth_rate_limit_window
+
+        # Periodic cleanup: every 100th call, prune stale entries
+        if len(self._auth_attempts) > 50:
+            stale_ips = [
+                addr
+                for addr, timestamps in self._auth_attempts.items()
+                if not timestamps or timestamps[-1] < now - window
+            ]
+            for addr in stale_ips:
+                del self._auth_attempts[addr]
+
+        if ip not in self._auth_attempts:
+            self._auth_attempts[ip] = []
+
+        # Remove timestamps outside the window
+        attempts = self._auth_attempts[ip]
+        self._auth_attempts[ip] = [t for t in attempts if t > now - window]
+        attempts = self._auth_attempts[ip]
+
+        if len(attempts) >= self._auth_rate_limit_max:
+            return True  # rate limited
+
+        # Record this attempt
+        attempts.append(now)
+        return False
+
     async def _handle_dj_connection(self, websocket):
         """Handle an incoming DJ connection."""
         dj_id = None
@@ -1009,6 +1045,13 @@ class VJServer:
                 data = json.loads(message)
             except json.JSONDecodeError:
                 await websocket.close(4002, "Invalid JSON")
+                return
+
+            # Rate limit auth attempts per IP
+            client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
+            if self._check_auth_rate_limit(client_ip):
+                logger.warning("Auth rate limited for IP %s", client_ip)
+                await websocket.close(4029, "Too many auth attempts, try again later")
                 return
 
             msg_type = data.get("type")

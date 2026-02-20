@@ -13,12 +13,12 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "lupa>=1.14",
     "better-profanity>=0.7.0",
+    "bcrypt>=4.0.0",
 ]
 
 [project.optional-dependencies]
-auth = ["bcrypt>=4.0.0"]
 link = ["aalink>=0.1"]
-full = ["bcrypt>=4.0.0", "aalink>=0.1"]
+full = ["aalink>=0.1"]
 
 [project.scripts]
 audioviz-vj = "vj_server.cli:vj_server"

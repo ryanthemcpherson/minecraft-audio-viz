@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import {
   register,
@@ -258,6 +259,12 @@ export default function LoginPage() {
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               placeholder="Your password"
             />
+          </div>
+
+          <div className="text-right">
+            <Link href="/forgot-password" className="text-xs text-text-secondary hover:text-disc-cyan transition-colors">
+              Forgot password?
+            </Link>
           </div>
 
           <button

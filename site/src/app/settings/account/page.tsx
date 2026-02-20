@@ -7,10 +7,26 @@ import {
   fetchMe,
   updateAccount,
   changePassword,
+  deleteAccount,
   getDiscordAuthUrl,
   getStoredRefreshToken,
+  clearStoredRefreshToken,
+  fetchSessions,
+  revokeSession,
 } from "@/lib/auth";
-import type { UserProfile } from "@/lib/auth";
+import type { UserProfile, User, SessionInfo } from "@/lib/auth";
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function AccountSettingsPage() {
   const router = useRouter();
@@ -36,6 +52,17 @@ export default function AccountSettingsPage() {
   // Discord connect
   const [discordRedirecting, setDiscordRedirecting] = useState(false);
 
+  // Active sessions
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState("");
+
+  // Account deletion
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
   useEffect(() => {
     if (authLoading) return;
     if (!user || !accessToken) {
@@ -50,6 +77,11 @@ export default function AccountSettingsPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    fetchSessions(accessToken)
+      .then((s) => setSessions(s))
+      .catch((err) => setSessionsError(err instanceof Error ? err.message : "Failed to load sessions"))
+      .finally(() => setSessionsLoading(false));
   }, [user, accessToken, authLoading, router]);
 
   // -- Display name handlers --
@@ -142,6 +174,36 @@ export default function AccountSettingsPage() {
       window.location.href = url;
     } catch {
       setDiscordRedirecting(false);
+    }
+  }
+
+  async function handleDeleteAccount(e: React.FormEvent) {
+    e.preventDefault();
+    if (!accessToken || deleteConfirm !== "DELETE") return;
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      await deleteAccount(accessToken, deletePassword);
+      // Clear auth and redirect to home
+      setAuth(null as unknown as string, null as unknown as string, null as unknown as User);
+      clearStoredRefreshToken();
+      router.push("/");
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete account");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // -- Session management --
+
+  async function handleRevokeSession(sessionId: string) {
+    if (!accessToken) return;
+    try {
+      await revokeSession(accessToken, sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : "Failed to revoke session");
     }
   }
 
@@ -392,6 +454,112 @@ export default function AccountSettingsPage() {
             account.
           </p>
         )}
+      </div>
+
+      {/* Active Sessions */}
+      <div className="glass-card rounded-xl p-5">
+        <h3 className="mb-3 text-sm font-semibold">Active Sessions</h3>
+        {sessionsLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
+          </div>
+        ) : sessionsError ? (
+          <p className="text-sm text-red-400">{sessionsError}</p>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-text-secondary">No active sessions found.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {sessions.map((session) => (
+              <div
+                key={session.id}
+                className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-white" title={session.user_agent ?? undefined}>
+                    {session.user_agent
+                      ? session.user_agent.length > 60
+                        ? session.user_agent.slice(0, 60) + "..."
+                        : session.user_agent
+                      : "Unknown device"}
+                  </p>
+                  <div className="mt-0.5 flex items-center gap-3 text-xs text-text-secondary">
+                    <span>{session.ip_address ?? "Unknown IP"}</span>
+                    <span>Last used: {timeAgo(session.last_used_at)}</span>
+                    {session.is_current && (
+                      <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-green-400">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {!session.is_current && (
+                  <button
+                    type="button"
+                    onClick={() => handleRevokeSession(session.id)}
+                    className="ml-4 shrink-0 rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/10"
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Danger Zone */}
+      <div className="glass-card rounded-xl border border-red-500/20 p-5">
+        <h3 className="mb-1 text-sm font-semibold text-red-400">Danger Zone</h3>
+        <p className="mb-4 text-sm text-text-secondary">
+          Permanently delete your account. This action cannot be undone.
+        </p>
+
+        <form onSubmit={handleDeleteAccount} className="flex flex-col gap-3">
+          {hasEmail && (
+            <div>
+              <label htmlFor="delete-password" className="mb-1 block text-sm text-text-secondary">
+                Confirm your password
+              </label>
+              <input
+                id="delete-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50"
+              />
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="delete-confirm" className="mb-1 block text-sm text-text-secondary">
+              Type <span className="font-mono text-red-400">DELETE</span> to confirm
+            </label>
+            <input
+              id="delete-confirm"
+              type="text"
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50"
+              placeholder="DELETE"
+            />
+          </div>
+
+          {deleteError && (
+            <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              {deleteError}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={deleting || deleteConfirm !== "DELETE" || (hasEmail && !deletePassword)}
+            className="w-fit rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+          >
+            {deleting ? "Deleting..." : "Delete Account"}
+          </button>
+        </form>
       </div>
     </div>
   );

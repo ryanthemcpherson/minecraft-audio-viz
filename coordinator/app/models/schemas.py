@@ -17,6 +17,17 @@ from app.services.content_filter import validate_no_slurs
 CODE_PATTERN = re.compile(r"^[A-Z]{4}-[A-Z2-9]{4}$")
 
 
+def _validate_password_strength(v: str) -> str:
+    """Enforce password policy: 8+ chars, at least one uppercase letter, at least one digit."""
+    if len(v) < 8:
+        raise ValueError("Password must be at least 8 characters")
+    if not any(c.isupper() for c in v):
+        raise ValueError("Password must contain at least one uppercase letter")
+    if not any(c.isdigit() for c in v):
+        raise ValueError("Password must contain at least one digit")
+    return v
+
+
 # ---------------------------------------------------------------------------
 # Server schemas
 # ---------------------------------------------------------------------------
@@ -132,6 +143,11 @@ class RegisterRequest(BaseModel):
             raise ValueError("Invalid email format")
         return v.lower().strip()
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
     @field_validator("display_name")
     @classmethod
     def validate_display_name_slurs(cls, v: str) -> str:
@@ -151,6 +167,7 @@ class UserResponse(BaseModel):
     avatar_url: str | None
     onboarding_completed: bool
     is_admin: bool = False
+    email_verified: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -176,6 +193,11 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=200)
     new_password: str = Field(..., min_length=8, max_length=200)
 
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
 
 class RefreshRequest(BaseModel):
     refresh_token: str
@@ -183,6 +205,44 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        if "@" not in v or "." not in v.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return v.lower().strip()
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=256)
+
+
+class SessionInfo(BaseModel):
+    id: uuid.UUID
+    user_agent: str | None
+    ip_address: str | None
+    created_at: datetime
+    last_used_at: datetime | None
+    is_current: bool
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(..., min_length=1, max_length=200)
 
 
 class OAuthAuthorizeResponse(BaseModel):
@@ -231,6 +291,7 @@ class UserProfileResponse(BaseModel):
     avatar_url: str | None
     onboarding_completed: bool
     is_admin: bool = False
+    email_verified: bool = False
     user_type: str | None
     dj_profile: DJProfileResponse | None
     organizations: list[OrgSummary]
