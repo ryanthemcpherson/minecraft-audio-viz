@@ -66,12 +66,9 @@ class Settings(BaseSettings):
     max_failed_login_attempts: int = 5
     lockout_duration_minutes: int = 15
 
-    # SMTP (password reset emails)
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from_email: str = "noreply@mcav.live"
+    # Email (Resend)
+    resend_api_key: str = ""
+    email_from: str = "MCAV <noreply@mcav.live>"
     password_reset_expiry_minutes: int = 30
 
     # URLs
