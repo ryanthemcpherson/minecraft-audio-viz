@@ -17,7 +17,7 @@ export default function PrivacyPage() {
             Privacy <span className="text-gradient">Policy</span>
           </h1>
           <p className="mt-4 text-lg text-text-secondary sm:text-xl">
-            Last updated: February 14, 2026
+            Last updated: February 19, 2026
           </p>
         </div>
       </section>
@@ -44,8 +44,9 @@ export default function PrivacyPage() {
                 When you create an account on mcav.live, we collect:
               </p>
               <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-6">
-                <li>Discord user ID, username, and avatar (if you sign in with Discord OAuth)</li>
-                <li>Email address (if provided by Discord)</li>
+                <li>Discord user ID, username, and avatar (if you sign in with Discord)</li>
+                <li>Google account ID, email, name, and profile picture (if you sign in with Google)</li>
+                <li>Email address (provided by your sign-in method or entered during registration)</li>
                 <li>DJ name and server configuration preferences</li>
               </ul>
 
@@ -75,7 +76,7 @@ export default function PrivacyPage() {
               </p>
               <ul className="list-disc pl-6 space-y-2 text-text-secondary">
                 <li>Provide and maintain the MCAV service</li>
-                <li>Authenticate users via Discord OAuth</li>
+                <li>Authenticate users via Discord and Google OAuth</li>
                 <li>Enable DJ-to-server connections using connect codes</li>
                 <li>Improve and optimize the website and services</li>
                 <li>Communicate important updates or security notifications</li>
@@ -105,7 +106,8 @@ export default function PrivacyPage() {
                 MCAV integrates with the following third-party services:
               </p>
               <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
-                <li><strong>Discord</strong> - For OAuth authentication</li>
+                <li><strong>Discord</strong> - For OAuth authentication and profile data</li>
+                <li><strong>Google</strong> - For OAuth authentication and profile data</li>
                 <li><strong>Cloudflare</strong> - For CDN and DDoS protection</li>
                 <li><strong>Railway</strong> - For hosting the coordinator API</li>
               </ul>
@@ -164,7 +166,7 @@ export default function PrivacyPage() {
               <ul className="list-disc pl-6 space-y-2 text-text-secondary mt-4 mb-4">
                 <li>Encrypted WebSocket connections (WSS) for DJ-to-server communication</li>
                 <li>JWT-based authentication with short-lived tokens</li>
-                <li>Bcrypt password hashing for VJ operator credentials</li>
+                <li>Bcrypt password hashing for password-based accounts</li>
                 <li>HTTPS for all web traffic</li>
               </ul>
               <p className="text-text-secondary leading-relaxed">

@@ -17,7 +17,7 @@ export default function TermsPage() {
             Terms of <span className="text-gradient">Service</span>
           </h1>
           <p className="mt-4 text-lg text-text-secondary sm:text-xl">
-            Last updated: February 14, 2026
+            Last updated: February 19, 2026
           </p>
         </div>
       </section>
@@ -82,6 +82,7 @@ export default function TermsPage() {
               </p>
               <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
                 <li>You must provide accurate and complete information when creating an account</li>
+                <li>You may sign in using third-party providers (Discord, Google). When you do so, you authorize us to access the profile information described in our Privacy Policy</li>
                 <li>You are responsible for maintaining the security of your account credentials</li>
                 <li>You must not share your account with others or use another person&apos;s account</li>
                 <li>You are responsible for all activity that occurs under your account</li>
@@ -208,10 +209,23 @@ export default function TermsPage() {
             <section>
               <h2 className="text-2xl font-bold mb-4">Third-Party Services</h2>
               <p className="text-text-secondary leading-relaxed">
-                MCAV integrates with third-party services including Discord, Cloudflare, and Railway.
+                MCAV integrates with third-party services including Discord, Google, Cloudflare, and Railway.
                 Your use of these services is subject to their respective terms of service and privacy policies.
                 We are not responsible for the availability, content, or practices of third-party services.
               </p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold mb-4">OAuth and Third-Party Authentication</h2>
+              <p className="text-text-secondary leading-relaxed mb-4">
+                MCAV allows you to sign in using third-party identity providers including Discord and Google. When you authenticate through these providers:
+              </p>
+              <ul className="list-disc pl-6 space-y-2 text-text-secondary">
+                <li>We receive limited profile information (user ID, email, display name, avatar) as authorized by the provider</li>
+                <li>We do not receive or store your password for any third-party provider</li>
+                <li>You can revoke MCAV&apos;s access at any time through the respective provider&apos;s settings (Discord: User Settings &gt; Authorized Apps; Google: myaccount.google.com/permissions)</li>
+                <li>Linking multiple providers to one MCAV account is supported — accounts are matched by email address</li>
+              </ul>
             </section>
 
             <section>
