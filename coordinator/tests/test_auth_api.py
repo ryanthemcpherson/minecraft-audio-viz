@@ -44,7 +44,7 @@ class TestRegister:
             "/api/v1/auth/register",
             json={
                 "email": "test@example.com",
-                "password": "anotherpass",
+                "password": "Anotherpass1",
                 "display_name": "Another",
             },
         )
