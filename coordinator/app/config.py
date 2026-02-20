@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # User-session JWT (global secret)
     user_jwt_secret: str = _INSECURE_DEFAULT_SECRET
     user_jwt_expiry_minutes: int = 60
-    refresh_token_expiry_days: int = 30
+    refresh_token_expiry_days: int = 7
 
     # Discord OAuth
     discord_client_id: str = ""
@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "https://mcav.live/auth/callback"
+
+    # Account lockout
+    max_failed_login_attempts: int = 5
+    lockout_duration_minutes: int = 15
+
+    # SMTP (password reset emails)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@mcav.live"
+    password_reset_expiry_minutes: int = 30
 
     # URLs
     base_url: str = "https://mcav.live"

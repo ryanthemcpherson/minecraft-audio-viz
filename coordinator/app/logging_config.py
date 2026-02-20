@@ -25,8 +25,19 @@ class JSONFormatter(logging.Formatter):
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
 
-        # Add extra fields if present (e.g., request_id, path, method)
-        for key in ("request_id", "path", "method", "status_code", "duration_ms"):
+        # Add extra fields if present (e.g., request_id, path, method, audit)
+        for key in (
+            "request_id",
+            "path",
+            "method",
+            "status_code",
+            "duration_ms",
+            "event",
+            "user_id",
+            "email",
+            "ip_address",
+            "detail",
+        ):
             if hasattr(record, key):
                 log_data[key] = getattr(record, key)
 

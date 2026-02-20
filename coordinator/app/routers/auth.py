@@ -5,33 +5,42 @@ from __future__ import annotations
 import logging
 import secrets
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_session
 from app.dependencies.auth import get_current_user, require_admin
+from app.models.db import RefreshToken as RefreshTokenModel
 from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
     ChangePasswordRequest,
+    DeleteAccountRequest,
     DJProfileResponse,
     ExchangeCodeRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LogoutRequest,
     OAuthAuthorizeResponse,
     OrgSummary,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
+    SessionInfo,
     UpdateAccountRequest,
     UserProfileResponse,
     UserResponse,
+    VerifyEmailRequest,
 )
 from app.services import auth_service, discord_oauth, google_oauth
+from app.services.audit import log_auth_event
+from app.services.email import send_password_reset_email, send_verification_email
 from app.services.password import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
@@ -95,8 +104,14 @@ def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
             avatar_url=user.avatar_url,
             onboarding_completed=user.onboarding_completed_at is not None,
             is_admin=user.is_admin,
+            email_verified=user.email_verified,
         ),
     )
+
+
+def _client_ip(request: Request) -> str | None:
+    """Extract client IP from a FastAPI request."""
+    return request.client.host if request.client else None
 
 
 # ---------------------------------------------------------------------------
@@ -112,11 +127,15 @@ def _auth_response(result: auth_service.AuthResult, user: User) -> AuthResponse:
 )
 async def register(
     body: RegisterRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent")
+
     try:
-        result = await auth_service.register_email(
+        reg_result = await auth_service.register_email(
             email=body.email,
             password=body.password,
             display_name=body.display_name,
@@ -124,11 +143,28 @@ async def register(
             jwt_secret=settings.user_jwt_secret,
             expiry_minutes=settings.user_jwt_expiry_minutes,
             refresh_expiry_days=settings.refresh_token_expiry_days,
+            user_agent=ua,
+            ip_address=ip,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
     await session.commit()
+
+    result = reg_result.auth
+
+    log_auth_event("register", user_id=str(result.user_id), email=body.email, ip_address=ip)
+
+    # Send verification email (best-effort — don't block registration)
+    if reg_result.verification_token:
+        try:
+            await send_verification_email(
+                to_email=body.email,
+                token=reg_result.verification_token,
+                settings=settings,
+            )
+        except Exception:
+            logger.warning("Failed to send verification email to %s", body.email, exc_info=True)
 
     # Re-fetch user for response
     from sqlalchemy import select
@@ -154,9 +190,13 @@ async def register(
 )
 async def login(
     body: LoginRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent")
+
     try:
         result = await auth_service.login_email(
             email=body.email,
@@ -165,11 +205,23 @@ async def login(
             jwt_secret=settings.user_jwt_secret,
             expiry_minutes=settings.user_jwt_expiry_minutes,
             refresh_expiry_days=settings.refresh_token_expiry_days,
+            max_failed_attempts=settings.max_failed_login_attempts,
+            lockout_duration_minutes=settings.lockout_duration_minutes,
+            user_agent=ua,
+            ip_address=ip,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+        detail = str(exc)
+        if "locked" in detail.lower():
+            log_auth_event("login_locked", email=body.email, ip_address=ip)
+        else:
+            log_auth_event("login_failed", email=body.email, ip_address=ip)
+        await session.commit()  # persist failed_login_attempts increment
+        raise HTTPException(status_code=401, detail=detail)
 
     await session.commit()
+
+    log_auth_event("login", user_id=str(result.user_id), email=body.email, ip_address=ip)
 
     from sqlalchemy import select
 
@@ -219,6 +271,7 @@ async def discord_authorize(
     summary="Discord OAuth callback",
 )
 async def discord_callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(""),
     session: AsyncSession = Depends(get_session),
@@ -243,6 +296,9 @@ async def discord_callback(
         logger.exception("Discord OAuth exchange failed")
         raise HTTPException(status_code=400, detail="Discord OAuth exchange failed")
 
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent")
+
     result = await auth_service.login_discord(
         discord_id=discord_user.id,
         discord_username=discord_user.username,
@@ -252,9 +308,13 @@ async def discord_callback(
         jwt_secret=settings.user_jwt_secret,
         expiry_minutes=settings.user_jwt_expiry_minutes,
         refresh_expiry_days=settings.refresh_token_expiry_days,
+        user_agent=ua,
+        ip_address=ip,
     )
 
     await session.commit()
+
+    log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="discord")
 
     from sqlalchemy import select
 
@@ -325,6 +385,7 @@ async def google_authorize(
     summary="Google OAuth callback",
 )
 async def google_callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(""),
     session: AsyncSession = Depends(get_session),
@@ -349,6 +410,9 @@ async def google_callback(
         logger.exception("Google OAuth exchange failed")
         raise HTTPException(status_code=400, detail="Google OAuth exchange failed")
 
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent")
+
     result = await auth_service.login_google(
         google_id=google_user.id,
         google_email=google_user.email,
@@ -358,9 +422,13 @@ async def google_callback(
         jwt_secret=settings.user_jwt_secret,
         expiry_minutes=settings.user_jwt_expiry_minutes,
         refresh_expiry_days=settings.refresh_token_expiry_days,
+        user_agent=ua,
+        ip_address=ip,
     )
 
     await session.commit()
+
+    log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="google")
 
     from sqlalchemy import select
 
@@ -420,6 +488,81 @@ async def exchange_desktop_code(
 
 
 # ---------------------------------------------------------------------------
+# POST /auth/forgot-password
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/forgot-password",
+    summary="Request a password reset email",
+)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    ip = _client_ip(request)
+
+    token = await auth_service.request_password_reset(
+        email=body.email,
+        session=session,
+        expiry_minutes=settings.password_reset_expiry_minutes,
+    )
+
+    log_auth_event("password_reset_request", email=body.email, ip_address=ip)
+
+    if token:
+        try:
+            await send_password_reset_email(
+                to_email=body.email,
+                reset_token=token,
+                settings=settings,
+            )
+        except RuntimeError:
+            await session.rollback()
+            raise HTTPException(status_code=503, detail="Email service not configured")
+        except Exception:
+            logger.exception("Failed to send password reset email")
+            await session.rollback()
+            raise HTTPException(status_code=503, detail="Failed to send email")
+
+    await session.commit()
+    # Always return success to prevent email enumeration
+    return {"message": "If an account with that email exists, a reset link has been sent."}
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/reset-password
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/reset-password",
+    summary="Reset password with token",
+)
+async def reset_password_endpoint(
+    body: ResetPasswordRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    ip = _client_ip(request)
+
+    try:
+        await auth_service.reset_password(
+            token_value=body.token,
+            new_password=body.new_password,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await session.commit()
+    log_auth_event("password_reset_complete", ip_address=ip)
+    return {"message": "Password has been reset. You can now log in with your new password."}
+
+
+# ---------------------------------------------------------------------------
 # POST /auth/refresh
 # ---------------------------------------------------------------------------
 
@@ -431,9 +574,13 @@ async def exchange_desktop_code(
 )
 async def refresh(
     body: RefreshRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent")
+
     try:
         result = await auth_service.refresh_access_token(
             refresh_token_value=body.refresh_token,
@@ -441,11 +588,15 @@ async def refresh(
             jwt_secret=settings.user_jwt_secret,
             expiry_minutes=settings.user_jwt_expiry_minutes,
             refresh_expiry_days=settings.refresh_token_expiry_days,
+            user_agent=ua,
+            ip_address=ip,
         )
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 
     await session.commit()
+
+    log_auth_event("token_refreshed", user_id=str(result.user_id), ip_address=ip)
 
     from sqlalchemy import select
 
@@ -514,6 +665,7 @@ def _build_user_profile_response(user: User) -> UserProfileResponse:
         avatar_url=user.avatar_url,
         onboarding_completed=user.onboarding_completed_at is not None,
         is_admin=user.is_admin,
+        email_verified=user.email_verified,
         user_type=user.user_type,
         dj_profile=dj_profile,
         organizations=orgs,
@@ -565,6 +717,7 @@ async def update_me(
 )
 async def change_password(
     body: ChangePasswordRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserProfileResponse:
@@ -579,7 +732,58 @@ async def change_password(
 
     user.password_hash = hash_password(body.new_password)
     await session.commit()
+
+    log_auth_event("password_change", user_id=str(user.id), ip_address=_client_ip(request))
+
     return _build_user_profile_response(user)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /auth/account
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/account",
+    status_code=204,
+    response_class=Response,
+    summary="Delete (deactivate) current user account",
+)
+async def delete_account(
+    body: DeleteAccountRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    # Email-auth users must confirm with their password
+    if user.password_hash is not None:
+        if not verify_password(body.password, user.password_hash):
+            raise HTTPException(status_code=400, detail="Incorrect password")
+    else:
+        # OAuth-only users: password field is ignored but required by schema
+        pass
+
+    # Soft-delete: deactivate user
+    user.is_active = False
+
+    # Revoke all refresh tokens
+    from sqlalchemy import select as sa_select
+
+    from app.models.db import RefreshToken as RT
+
+    active_tokens = (
+        (await session.execute(sa_select(RT).where(RT.user_id == user.id, RT.revoked.is_(False))))
+        .scalars()
+        .all()
+    )
+    for t in active_tokens:
+        t.revoked = True
+
+    await session.commit()
+
+    log_auth_event("account_deleted", user_id=str(user.id), ip_address=_client_ip(request))
+
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +799,7 @@ async def change_password(
 )
 async def logout(
     body: LogoutRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     await auth_service.revoke_refresh_token(
@@ -602,6 +807,175 @@ async def logout(
         session=session,
     )
     await session.commit()
+
+    log_auth_event("logout", ip_address=_client_ip(request))
+
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/verify-email
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/verify-email",
+    summary="Verify email with token",
+)
+async def verify_email_endpoint(
+    body: VerifyEmailRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    try:
+        await auth_service.verify_email(
+            token_value=body.token,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await session.commit()
+
+    log_auth_event("email_verified", ip_address=_client_ip(request))
+
+    return {"message": "Email verified successfully."}
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/resend-verification
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/resend-verification",
+    summary="Resend email verification link",
+)
+async def resend_verification(
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    if user.email_verified:
+        return {"message": "Email is already verified."}
+
+    if not user.email:
+        raise HTTPException(status_code=400, detail="No email address on this account")
+
+    token = await auth_service.create_email_verification(
+        user_id=user.id,
+        session=session,
+    )
+
+    try:
+        await send_verification_email(
+            to_email=user.email,
+            token=token,
+            settings=settings,
+        )
+    except RuntimeError:
+        await session.rollback()
+        raise HTTPException(status_code=503, detail="Email service not configured")
+    except Exception:
+        logger.exception("Failed to send verification email")
+        await session.rollback()
+        raise HTTPException(status_code=503, detail="Failed to send email")
+
+    await session.commit()
+    return {"message": "Verification email sent."}
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/sessions
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/sessions",
+    response_model=list[SessionInfo],
+    summary="List active sessions for the current user",
+)
+async def list_sessions(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[SessionInfo]:
+    from sqlalchemy import select as sa_select
+
+    stmt = sa_select(RefreshTokenModel).where(
+        RefreshTokenModel.user_id == user.id,
+        RefreshTokenModel.revoked.is_(False),
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    result = []
+    for row in rows:
+        expires = (
+            row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+        )
+        if expires < now:
+            continue  # skip expired
+
+        result.append(
+            SessionInfo(
+                id=row.id,
+                user_agent=row.user_agent,
+                ip_address=row.ip_address,
+                created_at=row.created_at,
+                last_used_at=row.last_used_at,
+                is_current=False,  # Can't determine from access token alone
+            )
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# DELETE /auth/sessions/{session_id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Revoke a specific session",
+)
+async def revoke_session(
+    session_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    import uuid as _uuid
+
+    from sqlalchemy import select as sa_select
+
+    try:
+        sid = _uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+
+    stmt = sa_select(RefreshTokenModel).where(
+        RefreshTokenModel.id == sid,
+        RefreshTokenModel.user_id == user.id,
+        RefreshTokenModel.revoked.is_(False),
+    )
+    token_row = (await session.execute(stmt)).scalar_one_or_none()
+    if token_row is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    token_row.revoked = True
+    await session.commit()
+
+    log_auth_event(
+        "session_revoked",
+        user_id=str(user.id),
+        ip_address=_client_ip(request),
+        detail=str(sid),
+    )
+
     return Response(status_code=204)
 
 
