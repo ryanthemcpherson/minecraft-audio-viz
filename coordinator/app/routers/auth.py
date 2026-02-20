@@ -640,6 +640,15 @@ def _build_user_profile_response(user: User) -> UserProfileResponse:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        block_palette = None
+        if user.dj_profile.block_palette:
+            try:
+                parsed = json.loads(user.dj_profile.block_palette)
+                if isinstance(parsed, list):
+                    block_palette = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         dj_profile = DJProfileResponse(
             id=user.dj_profile.id,
             user_id=user.dj_profile.user_id,
@@ -649,6 +658,7 @@ def _build_user_profile_response(user: User) -> UserProfileResponse:
             avatar_url=user.dj_profile.avatar_url,
             banner_url=user.dj_profile.banner_url,
             color_palette=color_palette,
+            block_palette=block_palette,
             slug=user.dj_profile.slug,
             soundcloud_url=user.dj_profile.soundcloud_url,
             spotify_url=user.dj_profile.spotify_url,
