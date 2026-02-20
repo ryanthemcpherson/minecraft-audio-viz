@@ -13,7 +13,7 @@ async def _register_and_auth(client: AsyncClient, email: str = "orgtest@example.
     """Register a user and return the full auth response."""
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123", "display_name": "Org Tester"},
+        json={"email": email, "password": "Testpass123", "display_name": "Org Tester"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()

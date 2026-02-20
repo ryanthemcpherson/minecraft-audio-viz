@@ -18,7 +18,7 @@ async def _get_user_token(client: AsyncClient, email: str = "test@example.com") 
     """Register a user and return the access token for authenticated requests."""
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123", "display_name": "Test User"},
+        json={"email": email, "password": "Testpass123", "display_name": "Test User"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["access_token"]

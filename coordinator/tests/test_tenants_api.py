@@ -18,7 +18,7 @@ async def _setup_tenant(client: AsyncClient) -> dict:
         "/api/v1/auth/register",
         json={
             "email": "tenant@example.com",
-            "password": "testpass123",
+            "password": "Testpass123",
             "display_name": "Tenant Owner",
         },
     )
