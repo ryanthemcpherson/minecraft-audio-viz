@@ -92,6 +92,7 @@ async def dashboard_summary(
     session: AsyncSession = Depends(get_session),
 ) -> ServerOwnerDashboard | TeamMemberDashboard | DJDashboardData | GenericDashboard:
     # Re-fetch user with deep relationship loading to avoid sync lazy-load errors.
+    # populate_existing=True ensures cached identity-map data is refreshed.
     stmt = (
         select(User)
         .where(User.id == user.id)
@@ -105,6 +106,7 @@ async def dashboard_summary(
             .selectinload(Organization.members),
             selectinload(User.dj_profile),
         )
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     user = result.scalar_one()
@@ -210,6 +212,7 @@ async def unified_dashboard(
             .selectinload(Organization.members),
             selectinload(User.dj_profile),
         )
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     user = result.scalar_one()
