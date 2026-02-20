@@ -91,11 +91,14 @@ async def dashboard_summary(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ServerOwnerDashboard | TeamMemberDashboard | DJDashboardData | GenericDashboard:
-    # Re-fetch user with deep relationship loading to avoid sync lazy-load errors.
-    # populate_existing=True ensures cached identity-map data is refreshed.
+    # Clear identity map so the re-fetch below loads all objects and
+    # relationships fresh from the DB (avoids stale cached state).
+    user_id = user.id
+    session.expunge_all()
+
     stmt = (
         select(User)
-        .where(User.id == user.id)
+        .where(User.id == user_id)
         .options(
             selectinload(User.org_memberships)
             .selectinload(OrgMember.organization)
@@ -106,7 +109,6 @@ async def dashboard_summary(
             .selectinload(Organization.members),
             selectinload(User.dj_profile),
         )
-        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     user = result.scalar_one()
@@ -198,10 +200,14 @@ async def unified_dashboard(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UnifiedDashboard:
-    # Eager-load relationships (same as dashboard_summary)
+    # Clear identity map so the re-fetch below loads all objects and
+    # relationships fresh from the DB (avoids stale cached state).
+    user_id = user.id
+    session.expunge_all()
+
     stmt = (
         select(User)
-        .where(User.id == user.id)
+        .where(User.id == user_id)
         .options(
             selectinload(User.org_memberships)
             .selectinload(OrgMember.organization)
@@ -212,7 +218,6 @@ async def unified_dashboard(
             .selectinload(Organization.members),
             selectinload(User.dj_profile),
         )
-        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     user = result.scalar_one()
