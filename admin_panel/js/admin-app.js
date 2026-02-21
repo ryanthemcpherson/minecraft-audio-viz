@@ -96,6 +96,22 @@ class AdminApp {
                 distance: 100,
                 connectedPlayers: 0
             },
+            // Bitmap LED Wall state
+            bitmap: {
+                initialized: false,
+                zone: 'main',
+                width: 16,
+                height: 12,
+                patterns: [],
+                transitions: [],
+                palettes: [],
+                activePattern: null,
+                activePalette: null,
+                brightness: 100,
+                strobe: false,
+                frozen: false,
+                dataFetched: false,
+            },
             // 3D Preview state
             entities: [],
             zoneEntities: {},               // zone_name → entity[] from server
@@ -167,6 +183,7 @@ class AdminApp {
         this._setupWebSocket();
         this._setupDJQueueDelegation();
         this._setupDJPendingDelegation();
+        this._initBitmapControls();
         this._updateTabIndicator();
         window.addEventListener('resize', () => this._updateTabIndicator());
 
@@ -347,6 +364,26 @@ class AdminApp {
         this.elements.voiceChannelType = document.getElementById('voice-channel-type');
         this.elements.voiceDistance = document.getElementById('voice-distance');
         this.elements.voiceDistanceRow = document.getElementById('voice-distance-row');
+
+        // Bitmap LED Wall elements
+        this.elements.bitmapZone = document.getElementById('bitmap-zone');
+        this.elements.bitmapWidth = document.getElementById('bitmap-width');
+        this.elements.bitmapHeight = document.getElementById('bitmap-height');
+        this.elements.btnBitmapInit = document.getElementById('btn-bitmap-init');
+        this.elements.bitmapStatus = document.getElementById('bitmap-status');
+        this.elements.bitmapPatternGrid = document.getElementById('bitmap-pattern-grid');
+        this.elements.bitmapPaletteGrid = document.getElementById('bitmap-palette-grid');
+        this.elements.bitmapTransition = document.getElementById('bitmap-transition');
+        this.elements.bitmapTransitionDuration = document.getElementById('bitmap-transition-duration');
+        this.elements.bitmapBrightness = document.getElementById('bitmap-brightness');
+        this.elements.bitmapStrobe = document.getElementById('bitmap-strobe');
+        this.elements.bitmapBeatFlash = document.getElementById('bitmap-beat-flash');
+        this.elements.bitmapWashColor = document.getElementById('bitmap-wash-color');
+        this.elements.bitmapWashOpacity = document.getElementById('bitmap-wash-opacity');
+        this.elements.bitmapLayerPattern = document.getElementById('bitmap-layer-pattern');
+        this.elements.bitmapLayerBlend = document.getElementById('bitmap-layer-blend');
+        this.elements.bitmapLayerOpacity = document.getElementById('bitmap-layer-opacity');
+        this.elements.bitmapSharedPalette = document.getElementById('bitmap-shared-palette');
 
         // Pattern transition elements
         this.elements.transitionDurationSlider = document.getElementById('transition-duration-slider');
@@ -976,6 +1013,7 @@ class AdminApp {
         this.ws.addEventListener('disconnected', () => {
             this.state.connected = false;
             this.state.minecraftConnected = false;
+            this.state.bitmap.dataFetched = false;
             this._setConnectionStatus('disconnected');
             this._updateServiceIndicators();
             this._resetGenerateButton();
@@ -1224,6 +1262,42 @@ class AdminApp {
                 this._handleVoiceStatus(data);
                 break;
 
+            // Bitmap LED Wall messages
+            case 'bitmap_patterns':
+                this.state.bitmap.patterns = data.patterns || [];
+                this._renderBitmapPatterns();
+                break;
+
+            case 'bitmap_transitions':
+                this.state.bitmap.transitions = data.transitions || [];
+                this._renderBitmapTransitions();
+                break;
+
+            case 'bitmap_palettes':
+                this.state.bitmap.palettes = data.palettes || [];
+                this._renderBitmapPalettes();
+                break;
+
+            case 'bitmap_initialized':
+                this.state.bitmap.initialized = true;
+                this._updateBitmapStatus(data);
+                this._showToast(`Bitmap initialized: ${data.width || '?'}x${data.height || '?'}`, 'success');
+                break;
+
+            case 'bitmap_pattern_set':
+                this.state.bitmap.activePattern = data.pattern;
+                this._highlightBitmapPattern(data.pattern);
+                break;
+
+            case 'bitmap_palette_set':
+                this.state.bitmap.activePalette = data.palette;
+                this._highlightBitmapPalette(data.palette);
+                break;
+
+            case 'bitmap_status':
+                this._updateBitmapStatus(data);
+                break;
+
             case 'error':
                 this._showToast(data.message || 'An error occurred', 'error');
                 break;
@@ -1343,6 +1417,9 @@ class AdminApp {
 
         // Render zone chips
         this._renderZoneChips();
+
+        // Update bitmap zone selector
+        this._updateBitmapZoneSelector();
 
         // Rebuild 3D preview zone layout when zones change
         if (this._previewInitialized) {
@@ -2390,6 +2467,11 @@ class AdminApp {
         // Initialize 3D preview on first switch to preview tab
         if (tabName === 'preview' && !this._previewInitialized) {
             this._initPreview();
+        }
+
+        // Fetch bitmap data on first switch to bitmap tab
+        if (tabName === 'bitmap' && !this.state.bitmap.dataFetched && this.state.connected) {
+            this._fetchBitmapData();
         }
 
         // Handle preview animation based on tab visibility
@@ -4837,6 +4919,467 @@ class AdminApp {
         }
 
         // Restore selection
+        if (currentVal) select.value = currentVal;
+    }
+
+    // ========== Bitmap LED Wall ==========
+
+    _initBitmapControls() {
+        const el = this.elements;
+
+        // Init button
+        if (el.btnBitmapInit) {
+            el.btnBitmapInit.addEventListener('click', () => {
+                const zone = el.bitmapZone?.value || 'main';
+                const width = parseInt(el.bitmapWidth?.value) || 16;
+                const height = parseInt(el.bitmapHeight?.value) || 12;
+                this.ws.send({
+                    type: 'init_bitmap',
+                    zone,
+                    width,
+                    height,
+                    pattern: this.state.bitmap.activePattern || 'rainbow_wave'
+                });
+            });
+        }
+
+        // Transition duration slider
+        if (el.bitmapTransitionDuration) {
+            el.bitmapTransitionDuration.addEventListener('input', () => {
+                const val = parseInt(el.bitmapTransitionDuration.value);
+                const display = document.getElementById('val-bitmap-transition-duration');
+                if (display) display.textContent = `${val} ticks`;
+            });
+        }
+
+        // Brightness slider (debounced)
+        if (el.bitmapBrightness) {
+            const sendBrightness = debounce((val) => {
+                this.ws.send({
+                    type: 'bitmap_effects',
+                    action: 'brightness',
+                    level: val / 100
+                });
+            }, 50);
+
+            el.bitmapBrightness.addEventListener('input', () => {
+                const val = parseInt(el.bitmapBrightness.value);
+                const display = document.getElementById('val-bitmap-brightness');
+                if (display) display.textContent = `${val}%`;
+                this.state.bitmap.brightness = val;
+                sendBrightness(val);
+            });
+        }
+
+        // Strobe toggle
+        if (el.bitmapStrobe) {
+            el.bitmapStrobe.addEventListener('change', () => {
+                this.ws.send({
+                    type: 'bitmap_effects',
+                    action: 'strobe',
+                    enabled: el.bitmapStrobe.checked
+                });
+            });
+        }
+
+        // Beat Flash toggle
+        if (el.bitmapBeatFlash) {
+            el.bitmapBeatFlash.addEventListener('change', () => {
+                this.ws.send({
+                    type: 'bitmap_effects',
+                    action: 'beat_flash',
+                    enabled: el.bitmapBeatFlash.checked
+                });
+            });
+        }
+
+        // Wash color + opacity (debounced)
+        const sendWash = debounce(() => {
+            if (!el.bitmapWashColor || !el.bitmapWashOpacity) return;
+            const color = el.bitmapWashColor.value;
+            const opacity = parseInt(el.bitmapWashOpacity.value) / 100;
+            this.ws.send({
+                type: 'bitmap_effects',
+                action: 'wash',
+                color,
+                opacity
+            });
+        }, 50);
+
+        if (el.bitmapWashColor) el.bitmapWashColor.addEventListener('input', sendWash);
+        if (el.bitmapWashOpacity) {
+            el.bitmapWashOpacity.addEventListener('input', () => {
+                const val = parseInt(el.bitmapWashOpacity.value);
+                const display = document.getElementById('val-bitmap-wash-opacity');
+                if (display) display.textContent = `${val}%`;
+                sendWash();
+            });
+        }
+
+        // Effect buttons
+        const effectBtns = {
+            'btn-bitmap-blackout': () => {
+                const zone = el.bitmapZone?.value || 'main';
+                this.ws.send({ type: 'bitmap_effects', action: 'blackout', zone });
+            },
+            'btn-bitmap-freeze': () => {
+                this.state.bitmap.frozen = !this.state.bitmap.frozen;
+                this.ws.send({
+                    type: 'bitmap_effects',
+                    action: 'freeze',
+                    enabled: this.state.bitmap.frozen
+                });
+                const btn = document.getElementById('btn-bitmap-freeze');
+                if (btn) btn.classList.toggle('firing', this.state.bitmap.frozen);
+            },
+            'btn-bitmap-reset': () => {
+                this.ws.send({ type: 'bitmap_effects', action: 'reset' });
+                // Reset local UI state
+                if (el.bitmapBrightness) el.bitmapBrightness.value = 100;
+                const brightDisplay = document.getElementById('val-bitmap-brightness');
+                if (brightDisplay) brightDisplay.textContent = '100%';
+                if (el.bitmapStrobe) el.bitmapStrobe.checked = false;
+                if (el.bitmapBeatFlash) el.bitmapBeatFlash.checked = false;
+                if (el.bitmapWashOpacity) el.bitmapWashOpacity.value = 0;
+                const washDisplay = document.getElementById('val-bitmap-wash-opacity');
+                if (washDisplay) washDisplay.textContent = '0%';
+                this.state.bitmap.frozen = false;
+                const freezeBtn = document.getElementById('btn-bitmap-freeze');
+                if (freezeBtn) freezeBtn.classList.remove('firing');
+            },
+            'btn-bitmap-firework': () => {
+                this.ws.send({ type: 'bitmap_firework' });
+            },
+            'btn-bitmap-flash-all': () => {
+                this.ws.send({ type: 'bitmap_composition', action: 'flash_all' });
+            }
+        };
+
+        Object.entries(effectBtns).forEach(([id, handler]) => {
+            const btn = document.getElementById(id);
+            if (btn) btn.addEventListener('click', handler);
+        });
+
+        // Text & Overlays
+        const btnMarquee = document.getElementById('btn-bitmap-marquee');
+        if (btnMarquee) {
+            btnMarquee.addEventListener('click', () => {
+                const text = document.getElementById('bitmap-marquee-text')?.value;
+                const color = document.getElementById('bitmap-marquee-color')?.value;
+                if (!text) return;
+                this.ws.send({
+                    type: 'bitmap_marquee',
+                    zone: el.bitmapZone?.value || 'main',
+                    text,
+                    color
+                });
+            });
+        }
+
+        const btnTrack = document.getElementById('btn-bitmap-track');
+        if (btnTrack) {
+            btnTrack.addEventListener('click', () => {
+                const artist = document.getElementById('bitmap-track-artist')?.value || '';
+                const title = document.getElementById('bitmap-track-title')?.value || '';
+                this.ws.send({
+                    type: 'bitmap_track_display',
+                    zone: el.bitmapZone?.value || 'main',
+                    artist,
+                    title
+                });
+            });
+        }
+
+        const btnCountdownStart = document.getElementById('btn-bitmap-countdown-start');
+        if (btnCountdownStart) {
+            btnCountdownStart.addEventListener('click', () => {
+                const seconds = parseInt(document.getElementById('bitmap-countdown-seconds')?.value) || 10;
+                this.ws.send({
+                    type: 'bitmap_countdown',
+                    zone: el.bitmapZone?.value || 'main',
+                    action: 'start',
+                    seconds
+                });
+            });
+        }
+
+        const btnCountdownStop = document.getElementById('btn-bitmap-countdown-stop');
+        if (btnCountdownStop) {
+            btnCountdownStop.addEventListener('click', () => {
+                this.ws.send({
+                    type: 'bitmap_countdown',
+                    zone: el.bitmapZone?.value || 'main',
+                    action: 'stop'
+                });
+            });
+        }
+
+        const btnChat = document.getElementById('btn-bitmap-chat');
+        if (btnChat) {
+            btnChat.addEventListener('click', () => {
+                const message = document.getElementById('bitmap-chat-message')?.value;
+                if (!message) return;
+                this.ws.send({
+                    type: 'bitmap_chat',
+                    zone: el.bitmapZone?.value || 'main',
+                    player: 'VJ',
+                    message
+                });
+                // Clear input after send
+                const input = document.getElementById('bitmap-chat-message');
+                if (input) input.value = '';
+            });
+        }
+
+        // Layers
+        const btnLayerSet = document.getElementById('btn-bitmap-layer-set');
+        if (btnLayerSet) {
+            btnLayerSet.addEventListener('click', () => {
+                const pattern = el.bitmapLayerPattern?.value;
+                if (!pattern) return;
+                this.ws.send({
+                    type: 'bitmap_layer',
+                    zone: el.bitmapZone?.value || 'main',
+                    action: 'set',
+                    pattern,
+                    blend_mode: el.bitmapLayerBlend?.value || 'ADDITIVE',
+                    opacity: (parseInt(el.bitmapLayerOpacity?.value) || 50) / 100
+                });
+            });
+        }
+
+        // Layer opacity display
+        if (el.bitmapLayerOpacity) {
+            el.bitmapLayerOpacity.addEventListener('input', () => {
+                const val = parseInt(el.bitmapLayerOpacity.value);
+                const display = document.getElementById('val-bitmap-layer-opacity');
+                if (display) display.textContent = `${val}%`;
+            });
+        }
+
+        const btnLayerClear = document.getElementById('btn-bitmap-layer-clear');
+        if (btnLayerClear) {
+            btnLayerClear.addEventListener('click', () => {
+                this.ws.send({
+                    type: 'bitmap_layer',
+                    zone: el.bitmapZone?.value || 'main',
+                    action: 'clear'
+                });
+            });
+        }
+
+        // Update bitmap zone selector when zones change
+        if (el.bitmapZone) {
+            el.bitmapZone.addEventListener('change', () => {
+                this.state.bitmap.zone = el.bitmapZone.value;
+            });
+        }
+    }
+
+    _fetchBitmapData() {
+        this.ws.send({ type: 'get_bitmap_patterns' });
+        this.ws.send({ type: 'get_bitmap_transitions' });
+        this.ws.send({ type: 'get_bitmap_palettes' });
+        this.state.bitmap.dataFetched = true;
+    }
+
+    _renderBitmapPatterns() {
+        const grid = this.elements.bitmapPatternGrid;
+        if (!grid) return;
+
+        while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+        this.state.bitmap.patterns.forEach(pattern => {
+            const btn = document.createElement('button');
+            btn.className = 'pattern-btn';
+            btn.dataset.pattern = pattern.id || pattern;
+            btn.textContent = pattern.name || pattern;
+            btn.title = pattern.description || '';
+
+            if ((pattern.id || pattern) === this.state.bitmap.activePattern) {
+                btn.classList.add('active');
+            }
+
+            btn.addEventListener('click', () => this._setBitmapPattern(pattern.id || pattern));
+            grid.appendChild(btn);
+        });
+
+        // Also populate layer pattern dropdown
+        this._populateSelectFromList(this.elements.bitmapLayerPattern, this.state.bitmap.patterns, '-- None --');
+    }
+
+    _renderBitmapTransitions() {
+        const select = this.elements.bitmapTransition;
+        if (!select) return;
+
+        const currentVal = select.value;
+        while (select.firstChild) select.removeChild(select.firstChild);
+
+        this.state.bitmap.transitions.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id || t;
+            opt.textContent = t.name || t;
+            select.appendChild(opt);
+        });
+
+        if (currentVal) select.value = currentVal;
+    }
+
+    _renderBitmapPalettes() {
+        const grid = this.elements.bitmapPaletteGrid;
+        if (!grid) return;
+
+        while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+        // "None" button to clear palette
+        const noneBtn = document.createElement('button');
+        noneBtn.className = 'pattern-btn';
+        noneBtn.dataset.palette = '';
+        noneBtn.dataset.type = 'palette';
+        noneBtn.textContent = 'None';
+        if (!this.state.bitmap.activePalette) noneBtn.classList.add('active');
+        noneBtn.addEventListener('click', () => this._setBitmapPalette(''));
+        grid.appendChild(noneBtn);
+
+        this.state.bitmap.palettes.forEach(palette => {
+            const btn = document.createElement('button');
+            btn.className = 'pattern-btn';
+            btn.dataset.palette = palette.id || palette;
+            btn.dataset.type = 'palette';
+            btn.textContent = palette.name || palette;
+
+            if ((palette.id || palette) === this.state.bitmap.activePalette) {
+                btn.classList.add('active');
+            }
+
+            btn.addEventListener('click', () => this._setBitmapPalette(palette.id || palette));
+            grid.appendChild(btn);
+        });
+
+        // Also populate shared palette dropdown
+        this._populateSelectFromList(this.elements.bitmapSharedPalette, this.state.bitmap.palettes, '-- None --');
+    }
+
+    /** Helper: populate a <select> from a list of {id, name} items, preserving current value */
+    _populateSelectFromList(select, items, placeholder) {
+        if (!select) return;
+        const currentVal = select.value;
+        while (select.firstChild) select.removeChild(select.firstChild);
+
+        if (placeholder) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = placeholder;
+            select.appendChild(opt);
+        }
+
+        items.forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.id || item;
+            opt.textContent = item.name || item;
+            select.appendChild(opt);
+        });
+
+        if (currentVal) select.value = currentVal;
+    }
+
+    _setBitmapPattern(patternId) {
+        const zone = this.elements.bitmapZone?.value || 'main';
+        const transition = this.elements.bitmapTransition?.value;
+        const duration = parseInt(this.elements.bitmapTransitionDuration?.value) || 20;
+
+        if (transition && transition !== 'INSTANT') {
+            this.ws.send({
+                type: 'bitmap_transition',
+                zone,
+                pattern: patternId,
+                transition,
+                duration_ticks: duration
+            });
+        } else {
+            this.ws.send({
+                type: 'set_bitmap_pattern',
+                zone,
+                pattern: patternId
+            });
+        }
+
+        this.state.bitmap.activePattern = patternId;
+        this._highlightBitmapPattern(patternId);
+    }
+
+    _setBitmapPalette(paletteId) {
+        this.ws.send({
+            type: 'bitmap_palette',
+            palette: paletteId || null
+        });
+        this.state.bitmap.activePalette = paletteId || null;
+        this._highlightBitmapPalette(paletteId);
+    }
+
+    _highlightBitmapPattern(patternId) {
+        if (!this.elements.bitmapPatternGrid) return;
+        this.elements.bitmapPatternGrid.querySelectorAll('.pattern-btn').forEach(btn => {
+            const isActive = btn.dataset.pattern === patternId;
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                btn.classList.remove('just-selected');
+                void btn.offsetWidth;
+                btn.classList.add('just-selected');
+                setTimeout(() => btn.classList.remove('just-selected'), 400);
+            }
+        });
+    }
+
+    _highlightBitmapPalette(paletteId) {
+        if (!this.elements.bitmapPaletteGrid) return;
+        this.elements.bitmapPaletteGrid.querySelectorAll('.pattern-btn').forEach(btn => {
+            const isActive = (btn.dataset.palette || '') === (paletteId || '');
+            btn.classList.toggle('active', isActive);
+        });
+    }
+
+    _updateBitmapStatus(data) {
+        const statusEl = this.elements.bitmapStatus;
+        if (!statusEl) return;
+
+        if (data.active || data.initialized) {
+            this.state.bitmap.initialized = true;
+            const w = data.width || this.state.bitmap.width;
+            const h = data.height || this.state.bitmap.height;
+            const pattern = data.pattern || this.state.bitmap.activePattern || '?';
+            statusEl.textContent = `Active: ${w}x${h} — ${pattern}`;
+            statusEl.classList.add('active');
+        } else {
+            statusEl.textContent = 'Not initialized';
+            statusEl.classList.remove('active');
+        }
+
+        if (data.pattern) {
+            this.state.bitmap.activePattern = data.pattern;
+            this._highlightBitmapPattern(data.pattern);
+        }
+        if (data.palette) {
+            this.state.bitmap.activePalette = data.palette;
+            this._highlightBitmapPalette(data.palette);
+        }
+    }
+
+    _updateBitmapZoneSelector() {
+        const select = this.elements.bitmapZone;
+        if (!select) return;
+
+        const currentVal = select.value;
+        while (select.firstChild) select.removeChild(select.firstChild);
+
+        const zones = this.state.allZones || [{ name: 'main' }];
+        zones.forEach(z => {
+            const opt = document.createElement('option');
+            opt.value = z.name;
+            opt.textContent = z.name;
+            select.appendChild(opt);
+        });
+
         if (currentVal) select.value = currentVal;
     }
 }

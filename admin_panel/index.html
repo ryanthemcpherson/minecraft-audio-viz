@@ -188,6 +188,7 @@
                     <button id="tab-mixer" class="tab active" data-tab="mixer" role="tab" aria-selected="true" aria-controls="mixer-panel">Live Mixer</button>
                     <button id="tab-zone" class="tab" data-tab="zone" role="tab" aria-selected="false" aria-controls="zone-panel">Zone Settings</button>
                     <button id="tab-preview" class="tab" data-tab="preview" role="tab" aria-selected="false" aria-controls="preview-panel">3D Preview</button>
+                    <button id="tab-bitmap" class="tab" data-tab="bitmap" role="tab" aria-selected="false" aria-controls="bitmap-panel">LED Wall</button>
                     <button id="tab-banner" class="tab" data-tab="banner" role="tab" aria-selected="false" aria-controls="banner-panel">DJ Banner</button>
                 </nav>
 
@@ -893,6 +894,198 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- LED Wall (Bitmap) Panel -->
+                    <div id="bitmap-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-bitmap">
+                        <!-- Zone & Init -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Zone & Init</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label for="bitmap-zone">Zone</label>
+                                    <select id="bitmap-zone" class="control-select">
+                                        <option value="main">main</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-width">Width</label>
+                                    <input type="number" id="bitmap-width" class="control-input" value="16" min="4" max="64">
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-height">Height</label>
+                                    <input type="number" id="bitmap-height" class="control-input" value="12" min="4" max="64">
+                                </div>
+                            </div>
+                            <div class="bitmap-init-row">
+                                <button id="btn-bitmap-init" class="btn btn-primary">Init Bitmap</button>
+                                <span id="bitmap-status" class="bitmap-status-text">Not initialized</span>
+                            </div>
+                        </section>
+
+                        <!-- Patterns -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Patterns</h3>
+                            <div id="bitmap-pattern-grid" class="bitmap-grid">
+                                <!-- Populated by JS -->
+                            </div>
+                            <div class="controls-grid" style="margin-top: var(--spacing-sm);">
+                                <div class="control-row">
+                                    <label for="bitmap-transition">Transition</label>
+                                    <select id="bitmap-transition" class="control-select">
+                                        <option value="INSTANT">Instant</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-transition-duration">Duration</label>
+                                    <input type="range" id="bitmap-transition-duration" class="slider" min="0" max="100" value="20">
+                                    <span class="control-value" id="val-bitmap-transition-duration">20 ticks</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Palettes -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Palettes</h3>
+                            <div id="bitmap-palette-grid" class="bitmap-grid">
+                                <!-- Populated by JS -->
+                            </div>
+                        </section>
+
+                        <!-- Effects -->
+                        <section class="mixer-section">
+                            <h3 class="section-title">Effects</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label for="bitmap-brightness">Brightness</label>
+                                    <input type="range" id="bitmap-brightness" class="slider" min="0" max="100" value="100">
+                                    <span class="control-value" id="val-bitmap-brightness">100%</span>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Strobe</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="bitmap-strobe" aria-label="Strobe">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Beat Flash</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="bitmap-beat-flash" aria-label="Beat Flash">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-wash-color">Wash Color</label>
+                                    <input type="color" id="bitmap-wash-color" value="#ff0000">
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-wash-opacity">Wash Opacity</label>
+                                    <input type="range" id="bitmap-wash-opacity" class="slider" min="0" max="100" value="0">
+                                    <span class="control-value" id="val-bitmap-wash-opacity">0%</span>
+                                </div>
+                            </div>
+                            <div class="effect-grid" style="margin-top: var(--spacing-sm);">
+                                <button class="effect-btn" id="btn-bitmap-blackout">Blackout</button>
+                                <button class="effect-btn" id="btn-bitmap-freeze">Freeze</button>
+                                <button class="effect-btn" id="btn-bitmap-reset">Reset</button>
+                                <button class="effect-btn" id="btn-bitmap-firework">Firework</button>
+                            </div>
+                        </section>
+
+                        <!-- Text & Overlays -->
+                        <section class="mixer-section collapsible collapsed">
+                            <h3 class="section-title">Text & Overlays</h3>
+                            <!-- Marquee -->
+                            <div class="bitmap-overlay-group">
+                                <span class="bitmap-overlay-label">Marquee</span>
+                                <div class="bitmap-inline-form">
+                                    <input type="text" id="bitmap-marquee-text" class="control-input" placeholder="Marquee text...">
+                                    <input type="color" id="bitmap-marquee-color" value="#ffffff">
+                                    <button id="btn-bitmap-marquee" class="btn btn-secondary btn-sm">Send</button>
+                                </div>
+                            </div>
+                            <!-- Track Display -->
+                            <div class="bitmap-overlay-group">
+                                <span class="bitmap-overlay-label">Track Display</span>
+                                <div class="bitmap-inline-form">
+                                    <input type="text" id="bitmap-track-artist" class="control-input" placeholder="Artist">
+                                    <input type="text" id="bitmap-track-title" class="control-input" placeholder="Title">
+                                    <button id="btn-bitmap-track" class="btn btn-secondary btn-sm">Send</button>
+                                </div>
+                            </div>
+                            <!-- Countdown -->
+                            <div class="bitmap-overlay-group">
+                                <span class="bitmap-overlay-label">Countdown</span>
+                                <div class="bitmap-inline-form">
+                                    <input type="number" id="bitmap-countdown-seconds" class="control-input" value="10" min="1" max="999" style="width:70px;">
+                                    <button id="btn-bitmap-countdown-start" class="btn btn-secondary btn-sm">Start</button>
+                                    <button id="btn-bitmap-countdown-stop" class="btn btn-secondary btn-sm">Stop</button>
+                                </div>
+                            </div>
+                            <!-- Chat -->
+                            <div class="bitmap-overlay-group">
+                                <span class="bitmap-overlay-label">Chat</span>
+                                <div class="bitmap-inline-form">
+                                    <input type="text" id="bitmap-chat-message" class="control-input" placeholder="Chat message...">
+                                    <button id="btn-bitmap-chat" class="btn btn-secondary btn-sm">Send</button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Layers -->
+                        <section class="mixer-section collapsible collapsed">
+                            <h3 class="section-title">Layers</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label for="bitmap-layer-pattern">Pattern</label>
+                                    <select id="bitmap-layer-pattern" class="control-select">
+                                        <option value="">-- None --</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-layer-blend">Blend Mode</label>
+                                    <select id="bitmap-layer-blend" class="control-select">
+                                        <option value="ADDITIVE">Additive</option>
+                                        <option value="MULTIPLY">Multiply</option>
+                                        <option value="SCREEN">Screen</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-layer-opacity">Opacity</label>
+                                    <input type="range" id="bitmap-layer-opacity" class="slider" min="0" max="100" value="50">
+                                    <span class="control-value" id="val-bitmap-layer-opacity">50%</span>
+                                </div>
+                            </div>
+                            <div class="zone-actions" style="margin-top: var(--spacing-sm);">
+                                <button id="btn-bitmap-layer-set" class="btn btn-primary">Set Layer</button>
+                                <button id="btn-bitmap-layer-clear" class="btn btn-secondary">Clear Layer</button>
+                            </div>
+                        </section>
+
+                        <!-- Composition -->
+                        <section class="mixer-section collapsible collapsed">
+                            <h3 class="section-title">Composition</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label for="bitmap-sync-mode">Sync Mode</label>
+                                    <select id="bitmap-sync-mode" class="control-select">
+                                        <option value="independent">Independent</option>
+                                        <option value="synced">Synced</option>
+                                        <option value="mirror">Mirror</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-shared-palette">Shared Palette</label>
+                                    <select id="bitmap-shared-palette" class="control-select">
+                                        <option value="">-- None --</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="effect-grid" style="margin-top: var(--spacing-sm);">
+                                <button class="effect-btn" id="btn-bitmap-flash-all">Flash All</button>
+                            </div>
+                        </section>
                     </div>
 
                     <!-- DJ Banner Panel -->

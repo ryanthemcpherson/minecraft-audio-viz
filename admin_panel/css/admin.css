@@ -4465,3 +4465,105 @@ input:disabled + .toggle-slider {
 .dj-sync-badge.stale {
     color: #ff5252;
 }
+
+/* ============================================
+   LED Wall (Bitmap) Panel
+   ============================================ */
+
+.bitmap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: var(--spacing-sm);
+}
+
+.bitmap-grid .pattern-btn {
+    font-size: var(--font-size-sm);
+    padding: 10px 8px;
+}
+
+.bitmap-grid .pattern-btn.active {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(0, 212, 255, 0.08));
+    color: var(--accent-primary);
+    border-color: rgba(0, 212, 255, 0.5);
+    font-weight: 600;
+    box-shadow:
+        0 0 15px rgba(0, 212, 255, 0.25),
+        0 0 30px rgba(0, 212, 255, 0.1),
+        inset 0 0 15px rgba(0, 212, 255, 0.05);
+}
+
+.bitmap-grid .pattern-btn[data-type="palette"].active {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(139, 92, 246, 0.08));
+    color: var(--accent-purple);
+    border-color: rgba(139, 92, 246, 0.5);
+    box-shadow:
+        0 0 15px rgba(139, 92, 246, 0.25),
+        0 0 30px rgba(139, 92, 246, 0.1),
+        inset 0 0 15px rgba(139, 92, 246, 0.05);
+}
+
+.bitmap-init-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-md);
+}
+
+.bitmap-status-text {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+.bitmap-status-text.active {
+    color: var(--accent-secondary);
+}
+
+.bitmap-overlay-group {
+    margin-bottom: var(--spacing-md);
+}
+
+.bitmap-overlay-group:last-child {
+    margin-bottom: 0;
+}
+
+.bitmap-overlay-label {
+    display: block;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--spacing-xs);
+}
+
+.bitmap-inline-form {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.bitmap-inline-form .control-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.bitmap-inline-form input[type="color"] {
+    width: 32px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-tertiary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+    .bitmap-grid {
+        grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    }
+    .bitmap-inline-form {
+        flex-wrap: wrap;
+    }
+}
