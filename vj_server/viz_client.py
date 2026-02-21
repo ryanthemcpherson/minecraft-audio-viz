@@ -207,6 +207,8 @@ class VizClient:
                         "bitmap_layer_cleared",
                         "bitmap_firework_launched",
                         "bitmap_composition_updated",
+                        "bitmap_transition_started",
+                        "bitmap_composition_zones",
                         "ok",
                         "error",
                         "connected",
