@@ -1058,6 +1058,7 @@ class AdminApp {
                     this.state.zonePatterns = data.zone_patterns;
                     this._renderZoneChips();
                     this._updatePatternHighlightForZones();
+                    this._updateBitmapZoneSelector();
                 }
                 // Handle stage data from vj_state
                 if (data.stages) {
@@ -5372,11 +5373,20 @@ class AdminApp {
         const currentVal = select.value;
         while (select.firstChild) select.removeChild(select.firstChild);
 
-        const zones = this.state.allZones || [{ name: 'main' }];
-        zones.forEach(z => {
+        // Build zone list from allZones or fall back to zonePatterns keys
+        let zoneNames = [];
+        if (this.state.allZones && this.state.allZones.length > 0) {
+            zoneNames = this.state.allZones.map(z => z.name);
+        } else if (this.state.zonePatterns && Object.keys(this.state.zonePatterns).length > 0) {
+            zoneNames = Object.keys(this.state.zonePatterns);
+        } else {
+            zoneNames = ['main'];
+        }
+
+        zoneNames.forEach(name => {
             const opt = document.createElement('option');
-            opt.value = z.name;
-            opt.textContent = z.name;
+            opt.value = name;
+            opt.textContent = name;
             select.appendChild(opt);
         });
 
