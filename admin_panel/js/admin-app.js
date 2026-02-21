@@ -131,8 +131,9 @@ class AdminApp {
         // DOM elements cache
         this.elements = {};
 
-        // 3D Preview components (lazy-loaded)
+        // 3D Preview components (eagerly init on connect, lives in preview strip)
         this._previewInitialized = false;
+        this._previewStripCollapsed = localStorage.getItem('mcav-preview-collapsed') === 'true';
         this._previewScene = null;
         this._previewCamera = null;
         this._previewRenderer = null;
@@ -140,8 +141,8 @@ class AdminApp {
         this._previewParticleSystem = null;
         this._previewBlockIndicators = null;
         this._previewFailed = false;
-        this._previewAutoRotate = true;
-        this._previewShowGrid = true;
+        this._previewAutoRotate = false;
+        this._previewShowGrid = false;
         this._previewAnimationId = null;
         this._previewLastFrameTime = 0;
         this._previewFps = 60;
@@ -185,6 +186,7 @@ class AdminApp {
         this._setupDJQueueDelegation();
         this._setupDJPendingDelegation();
         this._initBitmapControls();
+        this._initPreviewStrip();
         this._updateTabIndicator();
         window.addEventListener('resize', () => this._updateTabIndicator());
 
@@ -847,7 +849,7 @@ class AdminApp {
         // Stage selector
         if (this.elements.stageSelect) {
             this.elements.stageSelect.addEventListener('change', () => {
-                this.state.selectedStage = this.elements.stageSelect.value || null;
+                this.state.selectedStage = this.elements.stageSelect.value || this.state.selectedStage;
                 // Auto-select all zones of the new stage
                 this.state.selectedZones.clear();
                 const zones = this.state.allZones || [];
@@ -1013,10 +1015,16 @@ class AdminApp {
             this.ws.send({ type: 'get_voice_status' });
             this.ws.send({ type: 'list_scenes' });
 
-            // Fetch bitmap data if bitmap tab is already active
-            const activeTab = document.querySelector('.tab.active');
-            if (activeTab && activeTab.dataset.tab === 'bitmap') {
-                this._fetchBitmapData();
+            // Fetch bitmap data on connect (LED Wall is now inline in Mixer)
+            this._fetchBitmapData();
+
+            // Eagerly init 3D preview (lives in always-visible strip now)
+            if (!this._previewInitialized && !this._previewFailed) {
+                this._initPreview().then(() => {
+                    if (this._previewInitialized && !this._previewStripCollapsed) {
+                        this._startPreviewAnimation();
+                    }
+                });
             }
         });
 
@@ -1074,10 +1082,10 @@ class AdminApp {
                 if (data.stages) {
                     this._handleStagesList({ stages: data.stages });
                 }
-                if (data.stage !== undefined) {
-                    this.state.selectedStage = data.stage || null;
+                if (data.stage !== undefined && data.stage) {
+                    this.state.selectedStage = data.stage;
                     if (this.elements.stageSelect) {
-                        this.elements.stageSelect.value = data.stage || '';
+                        this.elements.stageSelect.value = data.stage;
                     }
                 }
                 // Handle initial MC status from vj_state
@@ -1473,9 +1481,10 @@ class AdminApp {
                 this.elements.stageSelect.appendChild(option);
             });
 
-            // Auto-select first stage if none selected
-            if (!this.state.selectedStage && this.state.stages.length > 0) {
-                this.state.selectedStage = this.state.stages[0].name;
+            // Always ensure a stage is selected
+            const stageNames = this.state.stages.map(s => s.name);
+            if (!this.state.selectedStage || !stageNames.includes(this.state.selectedStage)) {
+                this.state.selectedStage = stageNames.length > 0 ? stageNames[0] : null;
             }
 
             if (this.state.selectedStage) {
@@ -2494,32 +2503,7 @@ class AdminApp {
             panel.classList.toggle('active', panel.id === `${tabName}-panel`);
         });
 
-        // Initialize 3D preview on first switch to preview tab
-        if (tabName === 'preview' && !this._previewInitialized) {
-            this._initPreview();
-        }
-
-        // Fetch bitmap data on first switch to bitmap tab
-        if (tabName === 'bitmap' && !this.state.bitmap.dataFetched && this.state.connected) {
-            this._fetchBitmapData();
-        }
-
-        // Handle preview animation based on tab visibility
-        if (tabName === 'preview') {
-            if (!this._previewFailed) {
-                this._startPreviewAnimation();
-            } else {
-                this._showToast('3D Preview unavailable on this browser/GPU', 'warning');
-            }
-            // Show preview stats in header
-            const statsEl = document.getElementById('preview-stats');
-            if (statsEl) statsEl.classList.remove('hidden');
-        } else {
-            this._stopPreviewAnimation();
-            // Hide preview stats in header
-            const statsEl = document.getElementById('preview-stats');
-            if (statsEl) statsEl.classList.add('hidden');
-        }
+        // Preview animation is handled by the strip, not by tab switching
     }
 
     _updateTabIndicator() {
@@ -3793,6 +3777,48 @@ class AdminApp {
         }
     }
 
+    _initPreviewStrip() {
+        const strip = document.getElementById('preview-strip');
+        const collapseBtn = document.getElementById('preview-strip-collapse');
+        if (!strip) return;
+
+        // Apply saved collapsed state
+        if (this._previewStripCollapsed) {
+            strip.classList.add('collapsed');
+            if (collapseBtn) {
+                collapseBtn.querySelector('.collapse-arrow').textContent = '\u25B2'; // ▲
+            }
+        }
+
+        // Collapse toggle
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', () => {
+                this._previewStripCollapsed = !this._previewStripCollapsed;
+                strip.classList.toggle('collapsed', this._previewStripCollapsed);
+                collapseBtn.querySelector('.collapse-arrow').textContent =
+                    this._previewStripCollapsed ? '\u25B2' : '\u25BC';
+                localStorage.setItem('mcav-preview-collapsed', String(this._previewStripCollapsed));
+
+                if (this._previewStripCollapsed) {
+                    this._stopPreviewAnimation();
+                } else {
+                    this._onPreviewResize();
+                    this._startPreviewAnimation();
+                }
+            });
+        }
+
+        // Listen for strip body transition end to resize canvas
+        const body = strip.querySelector('.preview-strip-body');
+        if (body) {
+            body.addEventListener('transitionend', () => {
+                if (!this._previewStripCollapsed) {
+                    this._onPreviewResize();
+                }
+            });
+        }
+    }
+
     async _initPreview() {
         if (this._previewInitialized || this._previewFailed) return;
 
@@ -4626,29 +4652,17 @@ class AdminApp {
 
     _updatePreviewMeters() {
         for (let i = 0; i < 5; i++) {
-            const meterBar = document.getElementById(`preview-band-${i}`);
-            if (meterBar) {
-                const height = Math.round(this.state.bands[i] * 100);
-                meterBar.style.height = height + '%';
+            // Strip meters (horizontal, use width)
+            const stripBar = document.getElementById(`strip-band-${i}`);
+            if (stripBar) {
+                const pct = Math.round(this.state.bands[i] * 100);
+                stripBar.style.width = pct + '%';
             }
         }
     }
 
     _updatePreviewStats() {
-        // Block stats
-        const blockStatsEl = document.getElementById('preview-stat-blocks');
-        if (blockStatsEl && this._previewBlockIndicators) {
-            const stats = this._previewBlockIndicators.getStats();
-            blockStatsEl.textContent = `${stats.active}/${stats.total}`;
-        }
-
-        // Particle stats
-        const particleStatsEl = document.getElementById('preview-stat-particles');
-        if (particleStatsEl && this._previewParticleSystem) {
-            particleStatsEl.textContent = this._previewParticleSystem.getActiveCount();
-        }
-
-        // Header stats (when preview tab is active)
+        // Strip header stats
         const headerBlockCount = document.getElementById('preview-block-count');
         const headerParticleCount = document.getElementById('preview-particle-count');
         if (headerBlockCount && this._previewBlockIndicators) {
