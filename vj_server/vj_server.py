@@ -205,6 +205,7 @@ FORWARD_TO_MINECRAFT = {
     "bitmap_layer",
     "bitmap_firework",
     "bitmap_composition",
+    "bitmap_image",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
