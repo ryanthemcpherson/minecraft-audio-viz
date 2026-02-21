@@ -1274,11 +1274,7 @@ body {
     flex-direction: column;
 }
 
-/* When preview panel is active, remove padding and allow full height */
-#tab-content:has(#preview-panel.active) {
-    padding: 0;
-    overflow: hidden;
-}
+/* (Preview panel removed — now rendered in always-visible strip) */
 
 .tab-panel {
     display: none;
@@ -2518,28 +2514,121 @@ input:disabled + .toggle-slider {
 }
 
 /* ============================================
-   3D Preview Panel
+   Live Preview Strip (always-visible, collapsible)
    ============================================ */
-#preview-panel {
-    padding: 0;
-    height: 100%;
-    overflow: hidden;
-}
-
-#preview-panel.active {
+.preview-strip {
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
 }
 
-.preview-container {
+.preview-strip-header {
     display: flex;
-    flex: 1;
-    height: 100%;
-    background: var(--bg-primary);
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-xs) var(--spacing-md);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    min-height: 32px;
+    cursor: default;
 }
 
-.preview-canvas-wrapper {
-    flex: 1;
+.preview-strip-title {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.preview-strip-stats {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-2xs);
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.preview-strip-stats .stat-sep {
+    color: var(--border-color);
+}
+
+.preview-strip-stats #preview-block-count,
+.preview-strip-stats #preview-particle-count {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.preview-strip-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.preview-strip-toggle {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 14px;
+    transition: color var(--transition-fast);
+}
+
+.preview-strip-toggle:hover {
+    color: var(--accent-primary);
+}
+
+.preview-strip-toggle input {
+    display: none;
+}
+
+.preview-strip-toggle input:checked + .toggle-icon {
+    color: var(--accent-primary);
+}
+
+.btn-icon {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    font-size: 12px;
+    border-radius: var(--border-radius-sm);
+    transition: color var(--transition-fast), background var(--transition-fast);
+    line-height: 1;
+}
+
+.btn-icon:hover {
+    color: var(--accent-primary);
+    background: var(--bg-hover);
+}
+
+.collapse-arrow {
+    display: inline-block;
+    transition: transform 0.2s ease;
+}
+
+.preview-strip.collapsed .collapse-arrow {
+    transform: rotate(-90deg);
+}
+
+.preview-strip-body {
+    height: 200px;
+    overflow: hidden;
+    transition: height 0.2s var(--ease-out-quart);
+}
+
+.preview-strip.collapsed .preview-strip-body {
+    height: 0;
+}
+
+.preview-strip-canvas-wrap {
+    width: 100%;
+    height: 100%;
     position: relative;
     overflow: hidden;
 }
@@ -2553,57 +2642,6 @@ input:disabled + .toggle-slider {
 
 #preview-canvas:active {
     cursor: grabbing;
-}
-
-/* Preview Audio Meters Overlay */
-.preview-meters {
-    position: absolute;
-    left: var(--spacing-md);
-    bottom: var(--spacing-md);
-    display: flex;
-    gap: 6px;
-    pointer-events: none;
-}
-
-.preview-meter {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-}
-
-.preview-meter-fill {
-    width: 22px;
-    height: 90px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: var(--border-radius-sm);
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-}
-
-.preview-meter-fill .preview-meter-bar {
-    width: 100%;
-    height: 0%;
-    transition: height 0.05s ease-out;
-    border-radius: var(--border-radius-xs);
-}
-
-/* Band-specific meter colors */
-.preview-meter[data-band="0"] .preview-meter-bar { background: linear-gradient(to top, rgba(255, 107, 53, 0.5), var(--band-bass)); }
-.preview-meter[data-band="1"] .preview-meter-bar { background: linear-gradient(to top, rgba(255, 211, 42, 0.5), var(--band-low)); }
-.preview-meter[data-band="2"] .preview-meter-bar { background: linear-gradient(to top, rgba(11, 232, 129, 0.5), var(--band-mid)); }
-.preview-meter[data-band="3"] .preview-meter-bar { background: linear-gradient(to top, rgba(24, 220, 255, 0.5), var(--band-high)); }
-.preview-meter[data-band="4"] .preview-meter-bar { background: linear-gradient(to top, rgba(197, 108, 240, 0.5), var(--band-air)); }
-
-.preview-meter-label {
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    text-transform: uppercase;
-    font-weight: 600;
-    letter-spacing: 0.5px;
 }
 
 /* Beat Flash Overlay */
@@ -2626,106 +2664,66 @@ input:disabled + .toggle-slider {
     100% { opacity: 0; }
 }
 
-/* Preview Sidebar */
-.preview-sidebar {
-    width: 200px;
-    background: var(--bg-secondary);
-    border-left: 1px solid var(--border-color);
-    padding: var(--spacing-md);
-    overflow-y: auto;
-    flex-shrink: 0;
-}
-
-.preview-control-group {
-    margin-bottom: var(--spacing-lg);
-}
-
-.preview-control-group h4 {
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    color: var(--accent-primary);
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-bottom: var(--spacing-sm);
-    padding-bottom: var(--spacing-xs);
-    border-bottom: 1px solid var(--border-color);
-}
-
-.preview-checkbox {
+/* Strip Audio Meters (horizontal bars along bottom of canvas) */
+.preview-strip-meters {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
-    padding: 3px 0;
-    cursor: pointer;
-    font-size: var(--font-size-sm);
-    color: var(--text-primary);
-    transition: color var(--transition-normal);
+    height: 4px;
+    pointer-events: none;
+    gap: 1px;
 }
 
-.preview-checkbox:hover {
-    color: var(--accent-primary);
-}
-
-.preview-checkbox input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--accent-primary);
-    cursor: pointer;
-}
-
-.preview-checkbox span {
+.strip-meter {
     flex: 1;
+    background: rgba(255, 255, 255, 0.03);
+    overflow: hidden;
 }
 
-.preview-effect-list {
-    margin-left: var(--spacing-md);
-    margin-top: var(--spacing-xs);
+.strip-meter-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.05s ease-out;
 }
 
-.preview-effect-list .effect-item {
-    color: var(--text-secondary);
-    font-size: var(--font-size-xs);
-}
+.strip-meter[data-band="0"] .strip-meter-fill { background: var(--band-bass); }
+.strip-meter[data-band="1"] .strip-meter-fill { background: var(--band-low); }
+.strip-meter[data-band="2"] .strip-meter-fill { background: var(--band-mid); }
+.strip-meter[data-band="3"] .strip-meter-fill { background: var(--band-high); }
+.strip-meter[data-band="4"] .strip-meter-fill { background: var(--band-air); }
 
-.preview-stat-row {
+/* ============================================
+   LED Wall Inline (inside Mixer tab)
+   ============================================ */
+.ledwall-status-bar {
     display: flex;
-    justify-content: space-between;
-    padding: 3px 0;
-    font-size: var(--font-size-sm);
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
 }
 
-.preview-stat-row span:first-child {
-    color: var(--text-secondary);
-}
-
-.preview-stat-row span:last-child {
-    color: var(--accent-primary);
-    font-family: var(--font-mono);
-    font-weight: 600;
-}
-
-/* Header Preview Stats */
-.preview-stats {
+.ledwall-init-row {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
-    font-family: var(--font-mono);
-    font-size: var(--font-size-xs);
+    margin-bottom: var(--spacing-md);
+}
+
+.ledwall-zone-select {
+    flex: 1;
+    min-width: 80px;
+}
+
+.ledwall-dim {
+    width: 60px !important;
+    text-align: center;
+}
+
+.ledwall-dim-sep {
     color: var(--text-muted);
-}
-
-.preview-stats.hidden {
-    display: none;
-}
-
-.preview-stats .stat-sep {
-    color: var(--border-color);
-}
-
-#preview-block-count,
-#preview-particle-count {
-    color: var(--accent-primary);
-    font-weight: 600;
+    font-size: var(--font-size-sm);
 }
 
 /* ============================================
@@ -3469,9 +3467,6 @@ input:disabled + .toggle-slider {
         grid-template-columns: 1fr;
     }
 
-    .preview-sidebar {
-        width: 180px;
-    }
 }
 
 /* ============================================
@@ -3494,21 +3489,9 @@ input:disabled + .toggle-slider {
         height: 120px;
     }
 
-    .preview-container {
-        flex-direction: column;
-    }
-
-    .preview-sidebar {
-        width: 100%;
-        height: auto;
-        max-height: 200px;
-        border-left: none;
-        border-top: 1px solid var(--border-color);
-    }
-
-    .preview-canvas-wrapper {
-        flex: 1;
-        min-height: 300px;
+    /* Preview strip: shorter on tablet */
+    .preview-strip-body {
+        height: 160px;
     }
 }
 
@@ -3738,14 +3721,13 @@ input:disabled + .toggle-slider {
         font-size: 20px;
     }
 
-    /* Preview full width on mobile */
-    .preview-container {
-        flex-direction: column;
-        min-height: 400px;
+    /* Preview strip: compact on mobile */
+    .preview-strip-body {
+        height: 120px;
     }
 
-    .preview-sidebar {
-        max-height: 150px;
+    .preview-strip-stats {
+        display: none;
     }
 
     /* Toast: bottom-up for thumb reachability */
