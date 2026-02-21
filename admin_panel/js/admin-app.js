@@ -1008,6 +1008,12 @@ class AdminApp {
             this.ws.send({ type: 'get_pending_djs' });
             this.ws.send({ type: 'get_voice_status' });
             this.ws.send({ type: 'list_scenes' });
+
+            // Fetch bitmap data if bitmap tab is already active
+            const activeTab = document.querySelector('.tab.active');
+            if (activeTab && activeTab.dataset.tab === 'bitmap') {
+                this._fetchBitmapData();
+            }
         });
 
         this.ws.addEventListener('disconnected', () => {
@@ -4939,7 +4945,7 @@ class AdminApp {
                     zone,
                     width,
                     height,
-                    pattern: this.state.bitmap.activePattern || 'rainbow_wave'
+                    pattern: this.state.bitmap.activePattern || 'bmp_spectrum'
                 });
             });
         }
@@ -4997,7 +5003,7 @@ class AdminApp {
         // Wash color + opacity (debounced)
         const sendWash = debounce(() => {
             if (!el.bitmapWashColor || !el.bitmapWashOpacity) return;
-            const color = el.bitmapWashColor.value;
+            const color = this._hexToArgbInt(el.bitmapWashColor.value);
             const opacity = parseInt(el.bitmapWashOpacity.value) / 100;
             this.ws.send({
                 type: 'bitmap_effects',
@@ -5020,8 +5026,7 @@ class AdminApp {
         // Effect buttons
         const effectBtns = {
             'btn-bitmap-blackout': () => {
-                const zone = el.bitmapZone?.value || 'main';
-                this.ws.send({ type: 'bitmap_effects', action: 'blackout', zone });
+                this.ws.send({ type: 'bitmap_effects', action: 'blackout', enabled: true });
             },
             'btn-bitmap-freeze': () => {
                 this.state.bitmap.frozen = !this.state.bitmap.frozen;
@@ -5066,13 +5071,13 @@ class AdminApp {
         if (btnMarquee) {
             btnMarquee.addEventListener('click', () => {
                 const text = document.getElementById('bitmap-marquee-text')?.value;
-                const color = document.getElementById('bitmap-marquee-color')?.value;
+                const colorHex = document.getElementById('bitmap-marquee-color')?.value;
                 if (!text) return;
                 this.ws.send({
                     type: 'bitmap_marquee',
                     zone: el.bitmapZone?.value || 'main',
                     text,
-                    color
+                    color: this._hexToArgbInt(colorHex)
                 });
             });
         }
@@ -5175,6 +5180,16 @@ class AdminApp {
                 this.state.bitmap.zone = el.bitmapZone.value;
             });
         }
+    }
+
+    /** Convert "#RRGGBB" hex color to ARGB integer (full alpha) for Minecraft plugin */
+    _hexToArgbInt(hex) {
+        if (!hex) return 0xFFFFFFFF;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        // ARGB: 0xFF (full alpha) + RGB — use signed 32-bit via bitwise OR
+        return ((0xFF << 24) | (r << 16) | (g << 8) | b) | 0;
     }
 
     _fetchBitmapData() {
@@ -5312,7 +5327,7 @@ class AdminApp {
     _setBitmapPalette(paletteId) {
         this.ws.send({
             type: 'bitmap_palette',
-            palette: paletteId || null
+            palette: paletteId || 'none'
         });
         this.state.bitmap.activePalette = paletteId || null;
         this._highlightBitmapPalette(paletteId);
