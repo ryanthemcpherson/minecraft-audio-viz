@@ -84,6 +84,11 @@ class BitmapPreview {
         }
     }
 
+    setZoneVisible(zoneName, visible) {
+        const s = this.zones[zoneName];
+        if (s) s.mesh.visible = visible;
+    }
+
     /** Called every animation frame. */
     update(dt, audioState) {
         if (this.effects.frozen) return;

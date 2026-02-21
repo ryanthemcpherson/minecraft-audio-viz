@@ -45,6 +45,7 @@ let particleEntityRenderer = null;
 let blockIndicators = null;
 let bitmapPreview = null;
 let showBlockGrid = true;
+let selectedBitmapZone = '__all__'; // '__all__' or a specific zone name
 
 // View mode: 'blocks', 'particles', 'hybrid'
 let viewMode = 'blocks';
@@ -365,15 +366,27 @@ function setupControls() {
         });
     }
 
-    // Bitmap pattern selector (LED Wall mode)
+    // Bitmap pattern selector (LED Wall mode) — applies to selected zone or all
     const bitmapPatternSelect = document.getElementById('bitmap-pattern-select');
     if (bitmapPatternSelect) {
         bitmapPatternSelect.addEventListener('change', (e) => {
-            if (bitmapPreview) {
+            if (!bitmapPreview) return;
+            if (selectedBitmapZone === '__all__') {
                 for (const zoneName of Object.keys(bitmapPreview.zones)) {
                     bitmapPreview.setPattern(zoneName, e.target.value);
                 }
+            } else {
+                bitmapPreview.setPattern(selectedBitmapZone, e.target.value);
             }
+        });
+    }
+
+    // Bitmap zone selector
+    const bitmapZoneSelect = document.getElementById('bitmap-zone-select');
+    if (bitmapZoneSelect) {
+        bitmapZoneSelect.addEventListener('change', (e) => {
+            selectedBitmapZone = e.target.value;
+            applyBitmapZoneVisibility();
         });
     }
 
@@ -573,16 +586,16 @@ function applyViewMode() {
         block.visible = showBlocks;
     });
 
-    // Bitmap LED wall visibility
-    if (bitmapPreview) {
-        bitmapPreview.setVisible(isBitmap);
-    }
+    // Bitmap LED wall visibility (respects zone selection)
+    applyBitmapZoneVisibility();
 
     // Toggle pattern selectors based on mode
     const luaSelect = document.getElementById('pattern-select');
     const bmpSelect = document.getElementById('bitmap-pattern-select');
+    const bmpZoneSelect = document.getElementById('bitmap-zone-select');
     if (luaSelect) luaSelect.style.display = isBitmap ? 'none' : '';
     if (bmpSelect) bmpSelect.style.display = isBitmap ? '' : 'none';
+    if (bmpZoneSelect) bmpZoneSelect.style.display = isBitmap ? '' : 'none';
 
     // Hide block count slider in bitmap mode
     const blockCountRow = document.getElementById('block-count');
@@ -1351,7 +1364,50 @@ function handleZonesResponse(zones) {
                 bitmapPreview.activate(zone.name, 16, 12, 'bmp_plasma', zoneGroups[zone.name]);
             }
         });
-        bitmapPreview.setVisible(viewMode === 'bitmap');
+        applyBitmapZoneVisibility();
+    }
+
+    // Populate bitmap zone selector
+    populateBitmapZoneSelector(zones);
+}
+
+function populateBitmapZoneSelector(zones) {
+    const select = document.getElementById('bitmap-zone-select');
+    if (!select) return;
+
+    const currentVal = select.value;
+    while (select.children.length > 1) select.removeChild(select.lastChild);
+
+    zones.forEach(zone => {
+        if (!zone.name) return;
+        const opt = document.createElement('option');
+        opt.value = zone.name;
+        opt.textContent = zone.name;
+        select.appendChild(opt);
+    });
+
+    // Restore previous selection if still valid
+    if (currentVal && [...select.options].some(o => o.value === currentVal)) {
+        select.value = currentVal;
+    } else {
+        select.value = '__all__';
+        selectedBitmapZone = '__all__';
+    }
+}
+
+function applyBitmapZoneVisibility() {
+    if (!bitmapPreview) return;
+    const isBitmap = (viewMode === 'bitmap');
+    if (!isBitmap) {
+        bitmapPreview.setVisible(false);
+        return;
+    }
+    if (selectedBitmapZone === '__all__') {
+        bitmapPreview.setVisible(true);
+    } else {
+        for (const zoneName of Object.keys(bitmapPreview.zones)) {
+            bitmapPreview.setZoneVisible(zoneName, zoneName === selectedBitmapZone);
+        }
     }
 }
 
@@ -1367,7 +1423,7 @@ function handleBitmapInitialized(data) {
         data.pattern || 'bmp_plasma',
         zg
     );
-    bitmapPreview.setVisible(viewMode === 'bitmap');
+    applyBitmapZoneVisibility();
     console.log(`[Bitmap] Initialized ${data.width}x${data.height} for zone '${data.zone}'`);
 }
 

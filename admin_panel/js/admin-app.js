@@ -99,6 +99,7 @@ class AdminApp {
             // Bitmap LED Wall state
             bitmap: {
                 initialized: false,
+                initializedZones: new Set(),
                 zone: 'main',
                 width: 16,
                 height: 12,
@@ -1292,15 +1293,17 @@ class AdminApp {
                 this.state.bitmap.height = data.height || 12;
                 this._updateBitmapStatus(data);
                 this._showToast(`Bitmap initialized: ${data.width || '?'}x${data.height || '?'}`, 'success');
-                // Show bitmap in 3D preview
+                // Track this zone as initialized and show its bitmap in 3D preview
                 if (this._bitmapPreview) {
                     const zone = data.zone || this.state.bitmap.zone;
+                    this.state.bitmap.initializedZones.add(zone);
                     const zg = this._previewZoneGroups[zone];
                     if (zg) {
                         this._bitmapPreview.activate(zone, data.width || 16, data.height || 12,
                             data.pattern || this.state.bitmap.activePattern || 'bmp_plasma', zg);
                     }
-                    this._bitmapPreview.setVisible(true);
+                    // Only show the initialized zone's bitmap plane
+                    this._bitmapPreview.setZoneVisible(zone, true);
                 }
                 break;
 
@@ -4153,18 +4156,19 @@ class AdminApp {
             // Pre-create zone groups
             zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
 
-            // Activate bitmap preview for each zone (hidden until bitmap is initialized)
+            // Activate bitmap preview for initialized zones only
             if (this._bitmapPreview) {
+                const initZones = this.state.bitmap.initializedZones;
                 zones.forEach(z => {
                     const zg = this._previewZoneGroups[z.name];
-                    if (zg) {
+                    if (zg && initZones.has(z.name)) {
                         const bw = this.state.bitmap.width || 16;
                         const bh = this.state.bitmap.height || 12;
                         const bp = this.state.bitmap.activePattern || 'bmp_plasma';
                         this._bitmapPreview.activate(z.name, bw, bh, bp, zg);
+                        this._bitmapPreview.setZoneVisible(z.name, true);
                     }
                 });
-                this._bitmapPreview.setVisible(this.state.bitmap.initialized);
             }
 
             // Switch environment to stage mode — hide procedural env, grid, and ground
@@ -5248,6 +5252,13 @@ class AdminApp {
         if (el.bitmapZone) {
             el.bitmapZone.addEventListener('change', () => {
                 this.state.bitmap.zone = el.bitmapZone.value;
+                // Update 3D preview — show only the selected zone's bitmap plane
+                if (this._bitmapPreview) {
+                    const selected = el.bitmapZone.value;
+                    for (const zoneName of Object.keys(this._bitmapPreview.zones)) {
+                        this._bitmapPreview.setZoneVisible(zoneName, zoneName === selected);
+                    }
+                }
             });
         }
 
