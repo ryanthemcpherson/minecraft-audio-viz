@@ -1292,6 +1292,7 @@ class AdminApp {
                 break;
 
             case 'bitmap_pattern_set':
+            case 'bitmap_transition_started':
                 this.state.bitmap.activePattern = data.pattern;
                 this._highlightBitmapPattern(data.pattern);
                 break;
