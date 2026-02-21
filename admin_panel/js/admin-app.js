@@ -368,6 +368,8 @@ class AdminApp {
 
         // Bitmap LED Wall elements
         this.elements.bitmapZone = document.getElementById('bitmap-zone');
+        this.elements.bitmapAutoSize = document.getElementById('bitmap-auto-size');
+        this.elements.bitmapManualDims = document.getElementById('bitmap-manual-dims');
         this.elements.bitmapWidth = document.getElementById('bitmap-width');
         this.elements.bitmapHeight = document.getElementById('bitmap-height');
         this.elements.btnBitmapInit = document.getElementById('btn-bitmap-init');
@@ -4987,19 +4989,30 @@ class AdminApp {
     _initBitmapControls() {
         const el = this.elements;
 
+        // Auto-size checkbox toggles manual dimension inputs
+        if (el.bitmapAutoSize) {
+            el.bitmapAutoSize.addEventListener('change', () => {
+                if (el.bitmapManualDims) {
+                    el.bitmapManualDims.style.display = el.bitmapAutoSize.checked ? 'none' : '';
+                }
+            });
+        }
+
         // Init button
         if (el.btnBitmapInit) {
             el.btnBitmapInit.addEventListener('click', () => {
                 const zone = el.bitmapZone?.value || 'main';
-                const width = parseInt(el.bitmapWidth?.value) || 16;
-                const height = parseInt(el.bitmapHeight?.value) || 12;
-                this.ws.send({
+                const autoSize = el.bitmapAutoSize?.checked ?? true;
+                const msg = {
                     type: 'init_bitmap',
                     zone,
-                    width,
-                    height,
                     pattern: this.state.bitmap.activePattern || 'bmp_spectrum'
-                });
+                };
+                if (!autoSize) {
+                    msg.width = parseInt(el.bitmapWidth?.value) || 16;
+                    msg.height = parseInt(el.bitmapHeight?.value) || 12;
+                }
+                this.ws.send(msg);
             });
         }
 

@@ -9,8 +9,8 @@ websocket:
 
 # Default visualization settings
 defaults:
-  # Default entity count when initializing pools
-  entity_count: 16
+  # Default entity count when initializing pools (covers all pattern recommendations)
+  entity_count: 160
 
   # Default block material for block displays
   material: GLOWSTONE
@@ -18,10 +18,19 @@ defaults:
   # Entity interpolation duration (ticks)
   interpolation_duration: 1
 
+# Bitmap LED wall settings
+bitmap:
+  # Maximum total pixels (TextDisplay entities) per bitmap zone
+  max_pixels_per_zone: 2000
+
+  # Pixels per world block — controls auto-sizing resolution
+  # Higher = more pixels, better fidelity, more entities
+  pixels_per_block: 5
+
 # Performance settings
 performance:
-  # Maximum entities per zone
-  max_entities_per_zone: 100
+  # Maximum entities per zone (block displays for Lua patterns)
+  max_entities_per_zone: 256
 
   # Batch update interval (ticks) - entities will be updated at most this often
   min_update_interval: 1
