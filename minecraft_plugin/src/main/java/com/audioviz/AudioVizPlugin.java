@@ -91,6 +91,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Initialize bitmap rendering subsystem
         this.bitmapRenderer = new BitmapRendererBackend(this, entityPoolManager);
         this.bitmapPatternManager = new BitmapPatternManager(this, bitmapRenderer);
+        this.bitmapPatternManager.start();
         this.compositionManager = new CompositionManager();
 
         // Register event listeners

@@ -353,6 +353,28 @@ public class MessageHandler {
             }
         }
 
+        // Forward audio data to bitmap pattern manager (if present in the batch_update).
+        // The VJ server embeds bands/amplitude/beat in batch_update messages.
+        // The bitmap pattern manager self-ticks at 20 TPS; we just update its audio state.
+        if (message.has("bands") && plugin.getBitmapPatternManager() != null) {
+            JsonArray bandsJson = message.getAsJsonArray("bands");
+            int bandCount = Math.min(bandsJson.size(), 10);
+            double[] bands = new double[bandCount];
+            for (int i = 0; i < bands.length; i++) {
+                bands[i] = InputSanitizer.sanitizeBandValue(bandsJson.get(i).getAsDouble());
+            }
+            double amplitude = InputSanitizer.sanitizeAmplitude(
+                message.has("amplitude") ? message.get("amplitude").getAsDouble() : 0.0);
+            boolean isBeat = message.has("is_beat") && message.get("is_beat").getAsBoolean();
+            double beatIntensity = InputSanitizer.sanitizeDouble(
+                message.has("beat_intensity") ? message.get("beat_intensity").getAsDouble() : 0.0,
+                0.0, 1.0, 0.0);
+            long frame = message.has("frame") ? message.get("frame").getAsLong() : 0;
+
+            AudioState audioState = new AudioState(bands, amplitude, isBeat, beatIntensity, 0.0, 0.0, frame);
+            plugin.getBitmapPatternManager().updateAudioState(audioState);
+        }
+
         JsonObject response = new JsonObject();
         response.addProperty("type", "batch_updated");
         response.addProperty("zone", zoneName);
@@ -1086,9 +1108,9 @@ public class MessageHandler {
                 plugin.getDecoratorManager().updateAudioState(audioState);
             }
 
-            // Tick bitmap pattern manager (renders patterns into frame buffers)
+            // Update bitmap audio state (pattern manager self-ticks at 20 TPS)
             if (plugin.getBitmapPatternManager() != null) {
-                plugin.getBitmapPatternManager().tick(audioState);
+                plugin.getBitmapPatternManager().updateAudioState(audioState);
             }
         }
 
@@ -1636,6 +1658,12 @@ public class MessageHandler {
 
         // Activate the pattern manager with the ACTUAL scaled dimensions
         patternMgr.activateZone(zoneName, patternId, actualWidth, actualHeight);
+
+        // Register zone with composition manager for layers/transitions/sync
+        CompositionManager comp = plugin.getCompositionManager();
+        if (comp != null) {
+            comp.registerZone(zoneName.toLowerCase(), actualWidth, actualHeight);
+        }
 
         // Set zone backend to BITMAP in registry
         plugin.getRendererRegistry().setZoneBackends(zoneName,

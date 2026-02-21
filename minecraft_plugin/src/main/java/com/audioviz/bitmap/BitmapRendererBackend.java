@@ -154,7 +154,8 @@ public class BitmapRendererBackend implements RendererBackend {
                     double localZ = 0.5; // Center on the Z face of the zone
 
                     Location pixelLoc = zone.localToWorld(localX, localY, localZ);
-                    pixelLoc.setYaw(zone.getRotation());
+                    // Face TOWARD the audience (180° from zone's rotation direction)
+                    pixelLoc.setYaw(zone.getRotation() + 180);
                     pixelLoc.setPitch(0);
 
                     final float scale = pixelScale;
@@ -171,11 +172,17 @@ public class BitmapRendererBackend implements RendererBackend {
                         entity.setLineWidth(200); // Wide enough that space doesn't wrap
                         entity.setPersistent(false);
 
-                        // Scale to pixel size using transformation
+                        // Scale to pixel size using TheCymaera's non-uniform scaling.
+                        // A space character's background is ~1/8 block wide and ~1/4 block tall,
+                        // so we multiply by 8x and 4x respectively to fill the pixel area.
                         entity.setTransformation(new Transformation(
-                            new Vector3f(-scale / 2f, -scale / 2f, 0),
+                            new Vector3f(
+                                (-0.1f + 0.5f) * scale,   // X recenter: 0.4 * scale
+                                (-0.5f + 0.5f) * scale,   // Y recenter: 0
+                                0f
+                            ),
                             new AxisAngle4f(0, 0, 0, 1),
-                            new Vector3f(scale, scale, scale),
+                            new Vector3f(scale * 8.0f, scale * 4.0f, 1f),
                             new AxisAngle4f(0, 0, 0, 1)
                         ));
                     });
@@ -229,13 +236,16 @@ public class BitmapRendererBackend implements RendererBackend {
         }
 
         if (!colorUpdates.isEmpty()) {
-            poolManager.batchUpdateTextBackgrounds(zoneName, colorUpdates);
+            boolean applied = poolManager.batchUpdateTextBackgrounds(zoneName, colorUpdates);
+            // Only snapshot if the pool existed and updates were applied.
+            // If pool isn't registered yet (async spawn in progress), skip the snapshot
+            // so the next frame treats all pixels as dirty and retries the full update.
+            if (applied) {
+                int[] snapshot = new int[currentPixels.length];
+                System.arraycopy(currentPixels, 0, snapshot, 0, currentPixels.length);
+                lastFramePixels.put(zoneKey, snapshot);
+            }
         }
-
-        // Snapshot for next frame's dirty check
-        int[] snapshot = new int[currentPixels.length];
-        System.arraycopy(currentPixels, 0, snapshot, 0, currentPixels.length);
-        lastFramePixels.put(zoneKey, snapshot);
     }
 
     /**

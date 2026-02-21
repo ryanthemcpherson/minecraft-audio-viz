@@ -8,6 +8,8 @@ import com.audioviz.bitmap.patterns.*;
 import com.audioviz.bitmap.text.*;
 import com.audioviz.bitmap.transitions.TransitionManager;
 import com.audioviz.patterns.AudioState;
+import org.bukkit.Bukkit;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -52,11 +54,39 @@ public class BitmapPatternManager {
     /** Game state modulator (Bukkit-dependent). */
     private final GameStateModulator gameStateModulator;
 
+    /** Latest audio state from VJ server (updated by message handlers). */
+    private volatile AudioState latestAudioState = AudioState.silent();
+
+    /** Self-tick scheduler task. */
+    private BukkitTask tickTask;
+
     public BitmapPatternManager(AudioVizPlugin plugin, BitmapRendererBackend renderer) {
         this.plugin = plugin;
         this.renderer = renderer;
         this.gameStateModulator = new GameStateModulator(plugin);
         registerBuiltInPatterns();
+    }
+
+    /**
+     * Start the self-tick scheduler. Runs at 20 TPS on the main thread,
+     * independent of VJ server messages, so bitmap patterns animate
+     * even without an active DJ or Lua pattern zones.
+     */
+    public void start() {
+        if (tickTask != null) return;
+        tickTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            if (!zoneStates.isEmpty()) {
+                tick(latestAudioState);
+            }
+        }, 1L, 1L); // Every tick (50ms = 20 TPS)
+    }
+
+    /**
+     * Update the audio state used by the self-tick loop.
+     * Called from message handlers when audio data arrives.
+     */
+    public void updateAudioState(AudioState audio) {
+        this.latestAudioState = audio;
     }
 
     // ========== Pattern Registry ==========
@@ -279,6 +309,10 @@ public class BitmapPatternManager {
      * Clean up all zones and subsystems.
      */
     public void shutdown() {
+        if (tickTask != null) {
+            tickTask.cancel();
+            tickTask = null;
+        }
         transitionManager.cancelAll();
         effectsProcessor.reset();
         for (ZoneState state : zoneStates.values()) {
