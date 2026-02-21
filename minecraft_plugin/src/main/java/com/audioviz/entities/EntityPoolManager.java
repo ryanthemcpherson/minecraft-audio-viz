@@ -440,6 +440,9 @@ public class EntityPoolManager {
     /**
      * Batch update TextDisplay background colors for pixel-art banner rendering.
      * Sets background color, text content, and billboard mode in a single scheduler task.
+     *
+     * <p>Optimized for the bitmap render hot path: runs directly when already on the
+     * main thread (avoids scheduler overhead at 20 TPS).
      */
     public void batchUpdateTextBackgrounds(String zoneName, Map<String, Color> colorMap) {
         if (colorMap == null || colorMap.isEmpty()) return;
@@ -447,15 +450,54 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
         if (pool == null) return;
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Runnable apply = () -> {
             for (Map.Entry<String, Color> entry : colorMap.entrySet()) {
                 Entity entity = pool.get(entry.getKey());
                 if (entity instanceof TextDisplay display) {
                     display.setBackgroundColor(entry.getValue());
-                    display.setText(" "); // Single space creates a colored rectangle
+                    // Only set text if not already a space (avoid redundant packet)
+                    if (!" ".equals(display.getText())) {
+                        display.setText(" ");
+                    }
                 }
             }
-        });
+        };
+
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
+    }
+
+    /**
+     * Register an externally-spawned entity pool with the pool manager.
+     * Used by {@link com.audioviz.bitmap.BitmapRendererBackend} which spawns its own
+     * TextDisplay grid but needs lifecycle tracking (cleanup, entity count queries).
+     *
+     * @param zoneName the zone name to associate with
+     * @param pool     map of entityId → Entity, already spawned in-world
+     */
+    public void registerExternalPool(String zoneName, Map<String, Entity> pool) {
+        if (pool == null || pool.isEmpty()) return;
+
+        Map<String, Entity> existingPool = entityPools.computeIfAbsent(
+            zoneName.toLowerCase(), k -> new ConcurrentHashMap<>());
+        existingPool.putAll(pool);
+
+        // Track entity types
+        for (Entity entity : pool.values()) {
+            if (entity instanceof TextDisplay) {
+                entityTypes.put(entity.getUniqueId(), EntityType.TEXT_DISPLAY);
+            } else if (entity instanceof BlockDisplay) {
+                entityTypes.put(entity.getUniqueId(), EntityType.BLOCK_DISPLAY);
+            } else if (entity instanceof ItemDisplay) {
+                entityTypes.put(entity.getUniqueId(), EntityType.ITEM_DISPLAY);
+            }
+        }
+
+        plugin.getLogger().info("Registered external pool for zone '" + zoneName +
+            "' (" + pool.size() + " entities)");
     }
 
     /**

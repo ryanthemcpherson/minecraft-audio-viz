@@ -2,6 +2,21 @@ package com.audioviz.protocol;
 
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.bedrock.BedrockSupport;
+import com.audioviz.bitmap.BitmapFrameBuffer;
+import com.audioviz.bitmap.BitmapPattern;
+import com.audioviz.bitmap.BitmapPatternManager;
+import com.audioviz.bitmap.BitmapRendererBackend;
+import com.audioviz.bitmap.composition.CompositionManager;
+import com.audioviz.bitmap.effects.ColorPalette;
+import com.audioviz.bitmap.effects.EffectsProcessor;
+import com.audioviz.bitmap.effects.LayerCompositor;
+import com.audioviz.bitmap.gamestate.FireworkPattern;
+import com.audioviz.bitmap.media.ImagePattern;
+import com.audioviz.bitmap.text.ChatWallPattern;
+import com.audioviz.bitmap.text.CountdownPattern;
+import com.audioviz.bitmap.text.MarqueePattern;
+import com.audioviz.bitmap.text.TrackDisplayPattern;
+import com.audioviz.bitmap.transitions.TransitionManager;
 import com.audioviz.decorators.BannerConfig;
 import com.audioviz.decorators.DJInfo;
 import com.audioviz.effects.BeatEffectConfig;
@@ -105,6 +120,32 @@ public class MessageHandler {
             case "dj_info" -> handleDjInfo(message);
             // Banner config
             case "banner_config" -> handleBannerConfig(message);
+            // Bitmap rendering
+            case "init_bitmap" -> handleInitBitmap(message);
+            case "bitmap_frame" -> handleBitmapFrame(message);
+            case "set_bitmap_pattern" -> handleSetBitmapPattern(message);
+            case "get_bitmap_patterns" -> handleGetBitmapPatterns();
+            case "get_bitmap_status" -> handleGetBitmapStatus(message);
+            // Bitmap transitions
+            case "bitmap_transition" -> handleBitmapTransition(message);
+            case "get_bitmap_transitions" -> handleGetBitmapTransitions();
+            // Bitmap text/marquee
+            case "bitmap_marquee" -> handleBitmapMarquee(message);
+            case "bitmap_track_display" -> handleBitmapTrackDisplay(message);
+            case "bitmap_countdown" -> handleBitmapCountdown(message);
+            case "bitmap_chat" -> handleBitmapChat(message);
+            // Bitmap effects
+            case "bitmap_effects" -> handleBitmapEffects(message);
+            case "bitmap_palette" -> handleBitmapPalette(message);
+            case "get_bitmap_palettes" -> handleGetBitmapPalettes();
+            // Bitmap layers
+            case "bitmap_layer" -> handleBitmapLayer(message);
+            // Bitmap game integration
+            case "bitmap_firework" -> handleBitmapFirework(message);
+            // Bitmap image/media
+            case "bitmap_image" -> handleBitmapImage(message);
+            // Bitmap composition
+            case "bitmap_composition" -> handleBitmapComposition(message);
             // Voice chat
             case "voice_audio" -> handleVoiceAudio(message);
             case "voice_config" -> handleVoiceConfig(message);
@@ -780,6 +821,20 @@ public class MessageHandler {
         providers.add("hologram", hologramProvider);
         response.add("providers", providers);
 
+        // Bitmap backend info
+        JsonObject bitmap = new JsonObject();
+        bitmap.addProperty("implemented", true);
+        bitmap.addProperty("active_zones", plugin.getBitmapRenderer() != null ?
+            (plugin.getBitmapRenderer().isBitmapZone(zoneName)) : false);
+        JsonArray bitmapPatterns = new JsonArray();
+        if (plugin.getBitmapPatternManager() != null) {
+            for (String id : plugin.getBitmapPatternManager().getPatternIds()) {
+                bitmapPatterns.add(id);
+            }
+        }
+        bitmap.add("patterns", bitmapPatterns);
+        providers.add("bitmap", bitmap);
+
         // Bedrock support status
         BedrockSupport bedrockSupport = plugin.getBedrockSupport();
         JsonObject bedrock = new JsonObject();
@@ -1029,6 +1084,11 @@ public class MessageHandler {
             // Forward audio state to decorator manager
             if (plugin.getDecoratorManager() != null) {
                 plugin.getDecoratorManager().updateAudioState(audioState);
+            }
+
+            // Tick bitmap pattern manager (renders patterns into frame buffers)
+            if (plugin.getBitmapPatternManager() != null) {
+                plugin.getBitmapPatternManager().tick(audioState);
             }
         }
 
@@ -1532,6 +1592,226 @@ public class MessageHandler {
         return response;
     }
 
+    // ========== Bitmap Rendering Handlers ==========
+
+    /**
+     * Initialize a bitmap grid for a zone.
+     * Expected format:
+     * {
+     *   "type": "init_bitmap",
+     *   "zone": "zone_name",
+     *   "width": 32,
+     *   "height": 16,
+     *   "pattern": "bmp_spectrum"  // optional, default "bmp_spectrum"
+     * }
+     */
+    private JsonObject handleInitBitmap(JsonObject message) {
+        if (!message.has("zone")) {
+            return createError("Missing required field: zone");
+        }
+        String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
+        if (!plugin.getZoneManager().zoneExists(zoneName)) {
+            return createError("Zone not found: " + zoneName);
+        }
+
+        int width = message.has("width") ? message.get("width").getAsInt() : 32;
+        int height = message.has("height") ? message.get("height").getAsInt() : 16;
+        String patternId = message.has("pattern") ? message.get("pattern").getAsString() : "bmp_spectrum";
+
+        // Clamp dimensions
+        width = Math.max(2, Math.min(128, width));
+        height = Math.max(2, Math.min(64, height));
+
+        BitmapRendererBackend renderer = plugin.getBitmapRenderer();
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+
+        // Initialize the grid of TextDisplay entities
+        var zone = plugin.getZoneManager().getZone(zoneName);
+        renderer.initializeBitmapGrid(zone, width, height);
+
+        // Activate the pattern manager for this zone
+        patternMgr.activateZone(zoneName, patternId, width, height);
+
+        // Set zone backend to BITMAP in registry
+        plugin.getRendererRegistry().setZoneBackends(zoneName,
+            com.audioviz.render.RendererBackendType.BITMAP,
+            com.audioviz.render.RendererBackendType.DISPLAY_ENTITIES);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_initialized");
+        response.addProperty("zone", zoneName);
+        response.addProperty("width", width);
+        response.addProperty("height", height);
+        response.addProperty("pattern", patternId);
+        response.addProperty("pixel_count", width * height);
+        return response;
+    }
+
+    /**
+     * Push a raw frame buffer to a bitmap zone.
+     * Expected format:
+     * {
+     *   "type": "bitmap_frame",
+     *   "zone": "zone_name",
+     *   "pixels": "base64-encoded ARGB int array (little-endian)"
+     * }
+     *
+     * Alternative format with JSON array (slower but easier to debug):
+     * {
+     *   "type": "bitmap_frame",
+     *   "zone": "zone_name",
+     *   "pixel_array": [0xFF0000FF, 0xFF00FF00, ...]
+     * }
+     */
+    private JsonObject handleBitmapFrame(JsonObject message) {
+        if (!message.has("zone")) {
+            return createError("Missing required field: zone");
+        }
+        String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
+
+        BitmapRendererBackend renderer = plugin.getBitmapRenderer();
+        if (!renderer.isBitmapZone(zoneName)) {
+            return createError("Zone '" + zoneName + "' is not in bitmap mode. Call init_bitmap first.");
+        }
+
+        var config = renderer.getGridConfig(zoneName);
+        int pixelCount = config.pixelCount();
+
+        int[] pixels;
+
+        if (message.has("pixels")) {
+            // Base64-encoded binary format (fast path)
+            try {
+                String base64 = message.get("pixels").getAsString();
+                byte[] bytes = Base64.getDecoder().decode(base64);
+
+                if (bytes.length != pixelCount * 4) {
+                    return createError("Pixel data size mismatch: expected " + (pixelCount * 4) +
+                        " bytes, got " + bytes.length);
+                }
+
+                pixels = new int[pixelCount];
+                ByteBuffer buf = ByteBuffer.wrap(bytes)
+                    .order(ByteOrder.LITTLE_ENDIAN);
+                for (int i = 0; i < pixelCount; i++) {
+                    pixels[i] = buf.getInt();
+                }
+            } catch (IllegalArgumentException e) {
+                return createError("Invalid base64 pixel data: " + e.getMessage());
+            }
+        } else if (message.has("pixel_array")) {
+            // JSON array format (debug-friendly)
+            JsonArray arr = message.getAsJsonArray("pixel_array");
+            pixels = new int[Math.min(arr.size(), pixelCount)];
+            for (int i = 0; i < pixels.length; i++) {
+                pixels[i] = arr.get(i).getAsInt();
+            }
+        } else {
+            return createError("Missing pixel data: provide 'pixels' (base64) or 'pixel_array' (JSON)");
+        }
+
+        renderer.applyRawFrame(zoneName, pixels);
+
+        // Silent OK for high-frequency message
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    /**
+     * Switch the active bitmap pattern for a zone.
+     * Expected format:
+     * {
+     *   "type": "set_bitmap_pattern",
+     *   "zone": "zone_name",
+     *   "pattern": "bmp_spectrogram"
+     * }
+     */
+    private JsonObject handleSetBitmapPattern(JsonObject message) {
+        if (!message.has("zone") || !message.has("pattern")) {
+            return createError("Missing required fields: zone, pattern");
+        }
+        String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
+        String patternId = message.get("pattern").getAsString();
+
+        BitmapPatternManager mgr = plugin.getBitmapPatternManager();
+        if (!mgr.isActive(zoneName)) {
+            return createError("Zone '" + zoneName + "' has no active bitmap. Call init_bitmap first.");
+        }
+        if (mgr.getPattern(patternId) == null) {
+            return createError("Unknown bitmap pattern: " + patternId +
+                ". Available: " + String.join(", ", mgr.getPatternIds()));
+        }
+
+        mgr.setPattern(zoneName, patternId);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_pattern_set");
+        response.addProperty("zone", zoneName);
+        response.addProperty("pattern", patternId);
+        return response;
+    }
+
+    /**
+     * List all available bitmap patterns.
+     */
+    private JsonObject handleGetBitmapPatterns() {
+        BitmapPatternManager mgr = plugin.getBitmapPatternManager();
+
+        JsonArray patterns = new JsonArray();
+        for (String id : mgr.getPatternIds()) {
+            var pattern = mgr.getPattern(id);
+            JsonObject p = new JsonObject();
+            p.addProperty("id", pattern.getId());
+            p.addProperty("name", pattern.getName());
+            p.addProperty("description", pattern.getDescription());
+            patterns.add(p);
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_patterns");
+        response.add("patterns", patterns);
+        return response;
+    }
+
+    /**
+     * Get bitmap status for a zone.
+     */
+    private JsonObject handleGetBitmapStatus(JsonObject message) {
+        if (!message.has("zone")) {
+            return createError("Missing required field: zone");
+        }
+        String zoneName = message.get("zone").getAsString();
+
+        BitmapRendererBackend renderer = plugin.getBitmapRenderer();
+        BitmapPatternManager mgr = plugin.getBitmapPatternManager();
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_status");
+        response.addProperty("zone", zoneName);
+        response.addProperty("active", renderer.isBitmapZone(zoneName));
+
+        if (renderer.isBitmapZone(zoneName)) {
+            var config = renderer.getGridConfig(zoneName);
+            response.addProperty("width", config.width());
+            response.addProperty("height", config.height());
+            response.addProperty("pixel_count", config.pixelCount());
+            response.addProperty("interpolation_ticks", config.interpolationTicks());
+            response.addProperty("pattern", mgr.getActivePatternId(zoneName));
+        }
+
+        return response;
+    }
+
     // ========== Stage JSON Helpers ==========
 
     private JsonObject stageToJson(Stage stage) {
@@ -1709,6 +1989,393 @@ public class MessageHandler {
             return status;
         }
         return voiceChat.getStatus();
+    }
+
+    // ========== Bitmap Transition Handlers ==========
+
+    private JsonObject handleBitmapTransition(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String patternId = message.get("pattern").getAsString();
+        String transitionId = message.has("transition") ? message.get("transition").getAsString() : "crossfade";
+        int durationTicks = message.has("duration_ticks") ? message.get("duration_ticks").getAsInt() : 20;
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null || !patternMgr.isActive(zone)) {
+            return createError("Bitmap zone not active: " + zone);
+        }
+
+        BitmapPattern newPattern = patternMgr.getPattern(patternId);
+        if (newPattern == null) {
+            return createError("Unknown pattern: " + patternId);
+        }
+
+        // Use composition manager if available, otherwise direct switch
+        CompositionManager comp = plugin.getCompositionManager();
+        if (comp != null && comp.getZone(zone) != null) {
+            comp.switchPattern(zone, newPattern, transitionId, durationTicks);
+        } else {
+            patternMgr.setPattern(zone, patternId);
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_transition_started");
+        response.addProperty("zone", zone);
+        response.addProperty("pattern", patternId);
+        response.addProperty("transition", transitionId);
+        response.addProperty("duration_ticks", durationTicks);
+        return response;
+    }
+
+    private JsonObject handleGetBitmapTransitions() {
+        TransitionManager tm = plugin.getBitmapPatternManager().getTransitionManager();
+        JsonArray transitions = new JsonArray();
+        for (String id : tm.getTransitionIds()) {
+            JsonObject t = new JsonObject();
+            t.addProperty("id", id);
+            t.addProperty("name", tm.getTransition(id).getName());
+            transitions.add(t);
+        }
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_transitions");
+        response.add("transitions", transitions);
+        return response;
+    }
+
+    // ========== Bitmap Text Handlers ==========
+
+    private JsonObject handleBitmapMarquee(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String text = message.get("text").getAsString();
+        int color = message.has("color") ? message.get("color").getAsInt() : 0xFFFFFFFF;
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        // Find or activate marquee pattern
+        BitmapPattern pattern = patternMgr.getPattern("bmp_marquee");
+        if (pattern instanceof MarqueePattern marquee) {
+            marquee.queueMessage(text, color);
+
+            // If zone is not running marquee, switch to it
+            if (patternMgr.isActive(zone) && !"bmp_marquee".equals(patternMgr.getActivePatternId(zone))) {
+                patternMgr.setPattern(zone, "bmp_marquee");
+            }
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    private JsonObject handleBitmapTrackDisplay(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String artist = message.has("artist") ? message.get("artist").getAsString() : "";
+        String title = message.has("title") ? message.get("title").getAsString() : "";
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        BitmapPattern pattern = patternMgr.getPattern("bmp_track_display");
+        if (pattern instanceof TrackDisplayPattern trackDisplay) {
+            if (message.has("artist_color")) trackDisplay.setArtistColor(message.get("artist_color").getAsInt());
+            if (message.has("title_color")) trackDisplay.setTitleColor(message.get("title_color").getAsInt());
+            trackDisplay.setTrack(artist, title);
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    private JsonObject handleBitmapCountdown(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String action = message.has("action") ? message.get("action").getAsString() : "start";
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        BitmapPattern pattern = patternMgr.getPattern("bmp_countdown");
+        if (pattern instanceof CountdownPattern countdown) {
+            switch (action) {
+                case "start" -> {
+                    int seconds = message.has("seconds") ? message.get("seconds").getAsInt() : 10;
+                    countdown.start(seconds);
+                    if (patternMgr.isActive(zone)) {
+                        patternMgr.setPattern(zone, "bmp_countdown");
+                    }
+                }
+                case "stop" -> countdown.stop();
+            }
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    private JsonObject handleBitmapChat(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String playerName = message.has("player") ? message.get("player").getAsString() : "VJ";
+        // Accept both "text" and "message" field names for flexibility
+        String text = message.has("message") ? message.get("message").getAsString()
+                    : message.has("text") ? message.get("text").getAsString() : "";
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        BitmapPattern pattern = patternMgr.getPattern("bmp_chat_wall");
+        if (pattern instanceof ChatWallPattern chatWall) {
+            chatWall.addMessage(playerName, text);
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    // ========== Bitmap Effects Handlers ==========
+
+    private JsonObject handleBitmapEffects(JsonObject message) {
+        String action = message.get("action").getAsString();
+
+        EffectsProcessor effects = plugin.getGlobalBitmapEffects();
+        if (effects == null) return createError("Bitmap effects not initialized");
+
+        switch (action) {
+            case "strobe" -> {
+                effects.setStrobeEnabled(message.has("enabled") ? message.get("enabled").getAsBoolean() : true);
+                if (message.has("divisor")) effects.setStrobeDivisor(message.get("divisor").getAsInt());
+                if (message.has("color")) effects.setStrobeColor(message.get("color").getAsInt());
+            }
+            case "freeze" -> {
+                boolean freeze = message.has("enabled") ? message.get("enabled").getAsBoolean() : true;
+                if (freeze) {
+                    // Freeze current frame of specified zone
+                    String zone = message.has("zone") ? message.get("zone").getAsString().toLowerCase() : "";
+                    BitmapFrameBuffer buf = plugin.getBitmapPatternManager().getFrameBuffer(zone);
+                    if (buf != null) effects.freeze(buf);
+                } else {
+                    effects.unfreeze();
+                }
+            }
+            case "brightness" -> effects.setBrightness(message.get("level").getAsDouble());
+            case "blackout" -> effects.blackout(message.has("enabled") ? message.get("enabled").getAsBoolean() : true);
+            case "wash" -> {
+                int color = message.get("color").getAsInt();
+                double opacity = message.has("opacity") ? message.get("opacity").getAsDouble() : 0.3;
+                effects.setWash(color, opacity);
+            }
+            case "clear_wash" -> effects.clearWash();
+            case "beat_flash" -> effects.setBeatFlashEnabled(
+                message.has("enabled") ? message.get("enabled").getAsBoolean() : true);
+            case "reset" -> effects.reset();
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    private JsonObject handleBitmapPalette(JsonObject message) {
+        String paletteId = message.get("palette").getAsString();
+
+        EffectsProcessor effects = plugin.getGlobalBitmapEffects();
+        if (effects == null) return createError("Bitmap effects not initialized");
+
+        if ("none".equals(paletteId) || "clear".equals(paletteId)) {
+            effects.clearPalette();
+        } else {
+            ColorPalette palette = null;
+            for (ColorPalette p : ColorPalette.BUILT_IN) {
+                if (p.getId().equals(paletteId)) {
+                    palette = p;
+                    break;
+                }
+            }
+            if (palette == null) return createError("Unknown palette: " + paletteId);
+            effects.setPalette(palette);
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_palette_set");
+        response.addProperty("palette", paletteId);
+        return response;
+    }
+
+    private JsonObject handleGetBitmapPalettes() {
+        JsonArray palettes = new JsonArray();
+        for (ColorPalette p : ColorPalette.BUILT_IN) {
+            JsonObject obj = new JsonObject();
+            obj.addProperty("id", p.getId());
+            obj.addProperty("name", p.getName());
+            palettes.add(obj);
+        }
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_palettes");
+        response.add("palettes", palettes);
+        return response;
+    }
+
+    // ========== Bitmap Layer Handler ==========
+
+    private JsonObject handleBitmapLayer(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String action = message.get("action").getAsString();
+
+        CompositionManager comp = plugin.getCompositionManager();
+        if (comp == null) return createError("Composition manager not initialized");
+
+        CompositionManager.ZoneState zoneState = comp.getZone(zone);
+        if (zoneState == null) return createError("Zone not registered with composition manager: " + zone);
+
+        switch (action) {
+            case "set" -> {
+                String patternId = message.get("pattern").getAsString();
+                String blendMode = message.has("blend_mode") ? message.get("blend_mode").getAsString() : "ADDITIVE";
+                double opacity = message.has("opacity") ? message.get("opacity").getAsDouble() : 0.5;
+
+                BitmapPattern pattern = plugin.getBitmapPatternManager().getPattern(patternId);
+                if (pattern == null) return createError("Unknown pattern: " + patternId);
+
+                LayerCompositor.BlendMode mode;
+                try {
+                    mode = LayerCompositor.BlendMode.valueOf(blendMode.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    mode = LayerCompositor.BlendMode.ADDITIVE;
+                }
+
+                zoneState.setSecondaryLayer(pattern, mode, opacity);
+            }
+            case "clear" -> zoneState.clearSecondaryLayer();
+            case "opacity" -> zoneState.secondaryOpacity = message.get("opacity").getAsDouble();
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    // ========== Bitmap Game Integration Handlers ==========
+
+    private JsonObject handleBitmapFirework(JsonObject message) {
+        float x = message.has("x") ? message.get("x").getAsFloat() : 0.5f;
+        float y = message.has("y") ? message.get("y").getAsFloat() : 0.3f;
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        BitmapPattern pattern = patternMgr.getPattern("bmp_fireworks");
+        if (pattern instanceof FireworkPattern fireworks) {
+            fireworks.spawn(x, y);
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    // ========== Bitmap Image Handler ==========
+
+    private JsonObject handleBitmapImage(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String action = message.has("action") ? message.get("action").getAsString() : "load";
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        BitmapPattern pattern = patternMgr.getPattern("bmp_image");
+        if (!(pattern instanceof ImagePattern imagePattern)) {
+            return createError("Image pattern not registered");
+        }
+
+        switch (action) {
+            case "load_pixels" -> {
+                // Load from base64-encoded ARGB pixel array
+                if (message.has("pixels")) {
+                    String b64 = message.get("pixels").getAsString();
+                    byte[] bytes = java.util.Base64.getDecoder().decode(b64);
+                    java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                    int[] pixels = new int[bytes.length / 4];
+                    bb.asIntBuffer().get(pixels);
+
+                    int w = message.get("width").getAsInt();
+                    int h = message.get("height").getAsInt();
+                    imagePattern.loadFromPixels(pixels, w, h);
+
+                    if (patternMgr.isActive(zone)) {
+                        patternMgr.setPattern(zone, "bmp_image");
+                    }
+                }
+            }
+            case "load_file" -> {
+                String path = message.get("path").getAsString();
+                BitmapFrameBuffer buf = patternMgr.getFrameBuffer(zone);
+                if (buf != null) {
+                    imagePattern.loadFromFile(new java.io.File(path), buf.getWidth(), buf.getHeight());
+                    if (patternMgr.isActive(zone)) {
+                        patternMgr.setPattern(zone, "bmp_image");
+                    }
+                }
+            }
+            case "set_mode" -> {
+                String modeName = message.get("mode").getAsString().toUpperCase();
+                try {
+                    imagePattern.setMode(ImagePattern.ModulationMode.valueOf(modeName));
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    // ========== Bitmap Composition Handler ==========
+
+    private JsonObject handleBitmapComposition(JsonObject message) {
+        String action = message.get("action").getAsString();
+
+        CompositionManager comp = plugin.getCompositionManager();
+        if (comp == null) return createError("Composition manager not initialized");
+
+        switch (action) {
+            case "set_sync_mode" -> {
+                String mode = message.get("mode").getAsString().toUpperCase();
+                try {
+                    comp.setSyncMode(CompositionManager.SyncMode.valueOf(mode));
+                } catch (IllegalArgumentException ignored) {}
+                if (message.has("mirror_source")) {
+                    comp.setMirrorSource(message.get("mirror_source").getAsString().toLowerCase());
+                }
+            }
+            case "set_shared_palette" -> {
+                String paletteId = message.get("palette").getAsString();
+                ColorPalette palette = null;
+                for (ColorPalette p : ColorPalette.BUILT_IN) {
+                    if (p.getId().equals(paletteId)) { palette = p; break; }
+                }
+                if (palette != null) comp.setSharedPalette(palette);
+                else comp.clearSharedPalette();
+            }
+            case "flash_all" -> {
+                int color = message.has("color") ? message.get("color").getAsInt() : 0xFFFFFFFF;
+                double intensity = message.has("intensity") ? message.get("intensity").getAsDouble() : 0.5;
+                comp.flashAll(color, intensity);
+            }
+            case "get_zones" -> {
+                JsonArray zones = new JsonArray();
+                for (String z : comp.getZoneNames()) zones.add(z);
+                JsonObject response = new JsonObject();
+                response.addProperty("type", "bitmap_composition_zones");
+                response.add("zones", zones);
+                response.addProperty("sync_mode", comp.getSyncMode().name());
+                return response;
+            }
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
     }
 
     private JsonObject createError(String message) {

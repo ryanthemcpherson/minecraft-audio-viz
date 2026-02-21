@@ -523,6 +523,377 @@ class VizClient:
             return response
         return None
 
+    # ========== Bitmap Rendering Methods ==========
+
+    async def init_bitmap(
+        self, zone_name: str, width: int = 32, height: int = 16, pattern: str = "bmp_spectrum"
+    ) -> Optional[dict]:
+        """Initialize a bitmap (LED wall) display in a zone.
+
+        Spawns a grid of TextDisplay entities that act as pixels.
+        Each pixel's background color is updated to create 2D visuals.
+
+        Args:
+            zone_name: Zone to initialize bitmap in.
+            width: Grid width in pixels (2-128).
+            height: Grid height in pixels (2-64).
+            pattern: Initial pattern ID (e.g. 'bmp_spectrum', 'bmp_plasma').
+
+        Returns:
+            Response dict with grid info, or None on failure.
+        """
+        response = await self.send(
+            {
+                "type": "init_bitmap",
+                "zone": zone_name,
+                "width": width,
+                "height": height,
+                "pattern": pattern,
+            }
+        )
+        if response and response.get("type") == "bitmap_initialized":
+            logger.info(f"Bitmap initialized: {zone_name} ({width}x{height}, pattern={pattern})")
+            return response
+        return None
+
+    async def send_bitmap_frame(self, zone_name: str, pixels: list[int]) -> bool:
+        """Push a raw ARGB pixel array to a bitmap zone.
+
+        This is the low-level frame push for custom VJ server rendering.
+        Each pixel is a 32-bit ARGB integer (e.g. 0xFFFF0000 = opaque red).
+
+        For high-frequency updates, consider using send_bitmap_frame_fast()
+        which uses base64 encoding for smaller payloads.
+
+        Args:
+            zone_name: Target bitmap zone.
+            pixels: List of ARGB integers, length must match width*height.
+
+        Returns:
+            True if accepted by the plugin.
+        """
+        response = await self.send(
+            {
+                "type": "bitmap_frame",
+                "zone": zone_name,
+                "pixel_array": pixels,
+            }
+        )
+        return response is not None and response.get("type") == "ok"
+
+    async def send_bitmap_frame_fast(self, zone_name: str, pixels: list[int]) -> None:
+        """Push a bitmap frame using base64 encoding (fire-and-forget, lower latency).
+
+        Encodes the pixel array as little-endian base64 for compact transport.
+        Does not wait for a response — designed for 20 TPS frame streaming.
+
+        Args:
+            zone_name: Target bitmap zone.
+            pixels: List of ARGB integers.
+        """
+        if not self.ws or not self._connected:
+            return
+        import base64
+        import struct
+
+        raw = struct.pack(f"<{len(pixels)}I", *pixels)
+        b64 = base64.b64encode(raw).decode("ascii")
+        try:
+            await self.ws.send(
+                json.dumps(
+                    {
+                        "type": "bitmap_frame",
+                        "zone": zone_name,
+                        "pixels": b64,
+                    }
+                )
+            )
+        except Exception:
+            pass  # Fire and forget
+
+    async def set_bitmap_pattern(self, zone_name: str, pattern_id: str) -> Optional[dict]:
+        """Switch the active bitmap pattern for a zone.
+
+        Args:
+            zone_name: Target bitmap zone.
+            pattern_id: Pattern to activate (e.g. 'bmp_plasma', 'bmp_waveform').
+
+        Returns:
+            Response dict, or None on failure.
+        """
+        response = await self.send(
+            {
+                "type": "set_bitmap_pattern",
+                "zone": zone_name,
+                "pattern": pattern_id,
+            }
+        )
+        if response and response.get("type") == "bitmap_pattern_set":
+            logger.info(f"Bitmap pattern set: {zone_name} -> {pattern_id}")
+            return response
+        return None
+
+    async def get_bitmap_patterns(self) -> list[dict]:
+        """Get all available bitmap pattern IDs and descriptions.
+
+        Returns:
+            List of pattern dicts with 'id', 'name', 'description'.
+        """
+        response = await self.send({"type": "get_bitmap_patterns"})
+        if response and response.get("type") == "bitmap_patterns":
+            return response.get("patterns", [])
+        return []
+
+    async def get_bitmap_status(self, zone_name: str) -> Optional[dict]:
+        """Get bitmap rendering status for a zone.
+
+        Returns:
+            Status dict with active, width, height, pattern info. None on failure.
+        """
+        return await self.send(
+            {
+                "type": "get_bitmap_status",
+                "zone": zone_name,
+            }
+        )
+
+    # ========== Bitmap Transitions ==========
+
+    async def bitmap_transition(
+        self,
+        zone_name: str,
+        pattern_id: str,
+        transition: str = "crossfade",
+        duration_ticks: int = 20,
+    ) -> Optional[dict]:
+        """Switch pattern with a smooth transition.
+
+        Args:
+            zone_name: Target zone.
+            pattern_id: New pattern to transition to.
+            transition: Transition type (crossfade, dissolve, wipe_left, wipe_right,
+                        wipe_up, wipe_down, iris_open, iris_close).
+            duration_ticks: Transition duration in server ticks (20 = 1 second).
+        """
+        return await self.send(
+            {
+                "type": "bitmap_transition",
+                "zone": zone_name,
+                "pattern": pattern_id,
+                "transition": transition,
+                "duration_ticks": duration_ticks,
+            }
+        )
+
+    async def get_bitmap_transitions(self) -> list[str]:
+        """Get list of available transition IDs."""
+        resp = await self.send({"type": "get_bitmap_transitions"})
+        return resp.get("transitions", []) if resp else []
+
+    # ========== Text / Marquee ==========
+
+    async def bitmap_marquee(
+        self, zone_name: str, text: str, color: int = 0xFFFFFFFF, speed: float = 1.5
+    ) -> Optional[dict]:
+        """Queue a scrolling marquee message on the LED wall.
+
+        Args:
+            zone_name: Target zone (must have bmp_marquee pattern active).
+            text: Message to scroll.
+            color: ARGB text color.
+            speed: Scroll speed in pixels per tick (0.5-5.0).
+        """
+        return await self.send(
+            {
+                "type": "bitmap_marquee",
+                "zone": zone_name,
+                "text": text,
+                "color": color,
+                "speed": speed,
+            }
+        )
+
+    async def bitmap_track_display(self, zone_name: str, artist: str, title: str) -> Optional[dict]:
+        """Show "Now Playing" artist/title overlay with fade animation.
+
+        Args:
+            zone_name: Target zone (must have bmp_track_display active or
+                       will be composited as overlay).
+            artist: Artist name.
+            title: Track title.
+        """
+        return await self.send(
+            {
+                "type": "bitmap_track_display",
+                "zone": zone_name,
+                "artist": artist,
+                "title": title,
+            }
+        )
+
+    async def bitmap_countdown(
+        self, zone_name: str, seconds: int = 10, action: str = "start"
+    ) -> Optional[dict]:
+        """Start/stop a countdown timer on the LED wall.
+
+        Args:
+            zone_name: Target zone.
+            seconds: Countdown duration (for action="start").
+            action: "start" or "stop".
+        """
+        return await self.send(
+            {
+                "type": "bitmap_countdown",
+                "zone": zone_name,
+                "seconds": seconds,
+                "action": action,
+            }
+        )
+
+    async def bitmap_chat(self, zone_name: str, player_name: str, message: str) -> Optional[dict]:
+        """Push a chat message to the LED wall (usually called from server-side events).
+
+        Args:
+            zone_name: Target zone with bmp_chat_wall pattern.
+            player_name: Sender's name.
+            message: Chat message text.
+        """
+        return await self.send(
+            {
+                "type": "bitmap_chat",
+                "zone": zone_name,
+                "player": player_name,
+                "message": message,
+            }
+        )
+
+    # ========== VJ Effects ==========
+
+    async def bitmap_effects(self, action: str, **kwargs) -> Optional[dict]:
+        """Control VJ performance effects.
+
+        Args:
+            action: Effect command. One of:
+                "strobe"     - kwargs: enabled=bool, divisor=int, color=int
+                "freeze"     - kwargs: enabled=bool, zone=str
+                "brightness" - kwargs: level=float (0.0-1.0)
+                "blackout"   - kwargs: enabled=bool
+                "wash"       - kwargs: color=int, opacity=float
+                "clear_wash" - no kwargs
+                "beat_flash" - kwargs: enabled=bool
+                "reset"      - no kwargs
+        """
+        msg = {"type": "bitmap_effects", "action": action}
+        msg.update(kwargs)
+        return await self.send(msg)
+
+    async def bitmap_strobe(
+        self, enabled: bool = True, divisor: int = 1, color: int = 0xFFFFFFFF
+    ) -> Optional[dict]:
+        """Enable/disable beat-synced strobe flash."""
+        return await self.bitmap_effects("strobe", enabled=enabled, divisor=divisor, color=color)
+
+    async def bitmap_freeze(self, zone_name: str, enabled: bool = True) -> Optional[dict]:
+        """Freeze/unfreeze the current frame."""
+        return await self.bitmap_effects("freeze", zone=zone_name, enabled=enabled)
+
+    async def bitmap_brightness(self, level: float) -> Optional[dict]:
+        """Set global brightness (0.0 = blackout, 1.0 = full)."""
+        return await self.bitmap_effects("brightness", level=level)
+
+    async def bitmap_blackout(self, enabled: bool = True) -> Optional[dict]:
+        """Instant blackout toggle."""
+        return await self.bitmap_effects("blackout", enabled=enabled)
+
+    async def bitmap_wash(self, color: int, opacity: float = 0.3) -> Optional[dict]:
+        """Apply a color wash overlay."""
+        return await self.bitmap_effects("wash", color=color, opacity=opacity)
+
+    # ========== Palettes ==========
+
+    async def bitmap_palette(self, palette_id: str) -> Optional[dict]:
+        """Set the active color palette for bitmap rendering.
+
+        Args:
+            palette_id: One of: spectrum, warm, cool, neon, mono, lava,
+                        ocean, sunset, forest, cyberpunk, or "none" to disable.
+        """
+        return await self.send(
+            {
+                "type": "bitmap_palette",
+                "palette": palette_id,
+            }
+        )
+
+    async def get_bitmap_palettes(self) -> list[dict]:
+        """Get list of available palettes."""
+        resp = await self.send({"type": "get_bitmap_palettes"})
+        return resp.get("palettes", []) if resp else []
+
+    # ========== Layer Compositing ==========
+
+    async def bitmap_layer(self, zone_name: str, action: str, **kwargs) -> Optional[dict]:
+        """Control layer compositing for a zone.
+
+        Args:
+            zone_name: Target zone.
+            action: "set_blend" (mode=str, opacity=float),
+                    "set_overlay_pattern" (pattern=str),
+                    "clear_overlay".
+        """
+        msg = {"type": "bitmap_layer", "zone": zone_name, "action": action}
+        msg.update(kwargs)
+        return await self.send(msg)
+
+    # ========== Fireworks ==========
+
+    async def bitmap_firework(
+        self, zone_name: str, x: float = 0.5, y: float = 0.3
+    ) -> Optional[dict]:
+        """Spawn a firework burst at normalized coordinates.
+
+        Args:
+            zone_name: Target zone with bmp_fireworks pattern.
+            x: Horizontal position (0.0-1.0, left-right).
+            y: Vertical position (0.0-1.0, top-bottom).
+        """
+        return await self.send(
+            {
+                "type": "bitmap_firework",
+                "zone": zone_name,
+                "x": x,
+                "y": y,
+            }
+        )
+
+    # ========== Image Display ==========
+
+    async def bitmap_image(self, zone_name: str, action: str, **kwargs) -> Optional[dict]:
+        """Control image display pattern.
+
+        Args:
+            zone_name: Target zone with bmp_image pattern.
+            action: "load" (path=str), "set_mode" (mode=str),
+                    "clear".
+        """
+        msg = {"type": "bitmap_image", "zone": zone_name, "action": action}
+        msg.update(kwargs)
+        return await self.send(msg)
+
+    # ========== Composition ==========
+
+    async def bitmap_composition(self, action: str, **kwargs) -> Optional[dict]:
+        """Control multi-zone composition.
+
+        Args:
+            action: "set_sync_mode" (mode=str: INDEPENDENT/PALETTE_SYNC/BEAT_SYNC/MIRROR),
+                    "set_shared_palette" (palette=str),
+                    "flash_all" (color=int).
+        """
+        msg = {"type": "bitmap_composition", "action": action}
+        msg.update(kwargs)
+        return await self.send(msg)
+
     @property
     def connected(self) -> bool:
         return self._connected

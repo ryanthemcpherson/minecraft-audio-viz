@@ -6,7 +6,8 @@ package com.audioviz.render;
 public enum RendererBackendType {
     DISPLAY_ENTITIES("display_entities"),
     PARTICLES("particles"),
-    HOLOGRAM("hologram");
+    HOLOGRAM("hologram"),
+    BITMAP("bitmap");
 
     private final String key;
 
