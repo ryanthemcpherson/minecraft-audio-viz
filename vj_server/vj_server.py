@@ -188,6 +188,23 @@ FORWARD_TO_MINECRAFT = {
     "set_entity_glow",
     "set_entity_brightness",
     "banner_config",
+    # Bitmap LED wall messages
+    "init_bitmap",
+    "get_bitmap_status",
+    "set_bitmap_pattern",
+    "get_bitmap_patterns",
+    "bitmap_transition",
+    "get_bitmap_transitions",
+    "bitmap_palette",
+    "get_bitmap_palettes",
+    "bitmap_effects",
+    "bitmap_marquee",
+    "bitmap_track_display",
+    "bitmap_countdown",
+    "bitmap_chat",
+    "bitmap_layer",
+    "bitmap_firework",
+    "bitmap_composition",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
