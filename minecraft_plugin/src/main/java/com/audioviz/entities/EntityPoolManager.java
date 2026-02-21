@@ -444,11 +444,11 @@ public class EntityPoolManager {
      * <p>Optimized for the bitmap render hot path: runs directly when already on the
      * main thread (avoids scheduler overhead at 20 TPS).
      */
-    public void batchUpdateTextBackgrounds(String zoneName, Map<String, Color> colorMap) {
-        if (colorMap == null || colorMap.isEmpty()) return;
+    public boolean batchUpdateTextBackgrounds(String zoneName, Map<String, Color> colorMap) {
+        if (colorMap == null || colorMap.isEmpty()) return false;
 
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
-        if (pool == null) return;
+        if (pool == null) return false;
 
         Runnable apply = () -> {
             for (Map.Entry<String, Color> entry : colorMap.entrySet()) {
@@ -468,6 +468,7 @@ public class EntityPoolManager {
         } else {
             Bukkit.getScheduler().runTask(plugin, apply);
         }
+        return true;
     }
 
     /**

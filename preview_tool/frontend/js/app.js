@@ -43,6 +43,7 @@ let zoneEntitiesData = null; // Per-zone entities from state broadcasts
 let particleSystem = null;
 let particleEntityRenderer = null;
 let blockIndicators = null;
+let bitmapPreview = null;
 let showBlockGrid = true;
 
 // View mode: 'blocks', 'particles', 'hybrid'
@@ -208,6 +209,11 @@ function init() {
         blockIndicators = new BlockIndicatorSystem(scene, 8);
     }
 
+    // Initialize bitmap LED wall preview
+    if (typeof BitmapPreview !== 'undefined') {
+        bitmapPreview = new BitmapPreview();
+    }
+
     // Event listeners
     window.addEventListener('resize', onResize);
 
@@ -356,6 +362,18 @@ function setupControls() {
     if (patternSelect) {
         patternSelect.addEventListener('change', (e) => {
             setPattern(e.target.value);
+        });
+    }
+
+    // Bitmap pattern selector (LED Wall mode)
+    const bitmapPatternSelect = document.getElementById('bitmap-pattern-select');
+    if (bitmapPatternSelect) {
+        bitmapPatternSelect.addEventListener('change', (e) => {
+            if (bitmapPreview) {
+                for (const zoneName of Object.keys(bitmapPreview.zones)) {
+                    bitmapPreview.setPattern(zoneName, e.target.value);
+                }
+            }
         });
     }
 
@@ -547,11 +565,30 @@ function setupViewModeControls() {
 }
 
 function applyViewMode() {
-    // Block visibility
+    const isBitmap = (viewMode === 'bitmap');
+
+    // Block visibility (hidden in bitmap mode)
     const showBlocks = (viewMode === 'blocks' || viewMode === 'hybrid');
     blocks.forEach(block => {
         block.visible = showBlocks;
     });
+
+    // Bitmap LED wall visibility
+    if (bitmapPreview) {
+        bitmapPreview.setVisible(isBitmap);
+    }
+
+    // Toggle pattern selectors based on mode
+    const luaSelect = document.getElementById('pattern-select');
+    const bmpSelect = document.getElementById('bitmap-pattern-select');
+    if (luaSelect) luaSelect.style.display = isBitmap ? 'none' : '';
+    if (bmpSelect) bmpSelect.style.display = isBitmap ? '' : 'none';
+
+    // Hide block count slider in bitmap mode
+    const blockCountRow = document.getElementById('block-count');
+    if (blockCountRow && blockCountRow.parentElement) {
+        blockCountRow.parentElement.style.display = isBitmap ? 'none' : '';
+    }
 
     // Particle entity renderer visibility
     if (particleEntityRenderer) {
@@ -622,6 +659,12 @@ function connectWebSocket() {
                     handleStagesResponse(data.stages || []);
                 } else if (data.type === 'stage_blocks') {
                     handleStageBlocksResponse(data);
+                } else if (data.type === 'bitmap_initialized') {
+                    handleBitmapInitialized(data);
+                } else if (data.type === 'bitmap_pattern_changed') {
+                    if (bitmapPreview && data.zone) {
+                        bitmapPreview.setPattern(data.zone, data.pattern);
+                    }
                 } else if (data.type === 'vj_state') {
                     // Initial state broadcast — extract zone info if present
                     if (data.zones && !zoneData) {
@@ -894,7 +937,7 @@ function spawnAmbientParticles() {
 }
 
 function updateBlockTargets() {
-    const showBlocks = (viewMode === 'blocks' || viewMode === 'hybrid');
+    const showBlocks = (viewMode === 'blocks' || viewMode === 'hybrid') && viewMode !== 'bitmap';
     const hasZoneEntities = zoneEntitiesData && zoneData && Object.keys(zoneEntitiesData).length > 0;
 
     if (hasZoneEntities) {
@@ -1061,6 +1104,9 @@ function updateMultiZoneEntities(zoneEntities, bands, showBlocks) {
 
 function disposeZoneGroups() {
     for (const [name, zg] of Object.entries(zoneGroups)) {
+        // Deactivate bitmap for this zone
+        if (bitmapPreview) bitmapPreview.deactivate(name);
+
         zg.blocks.forEach(block => {
             block.geometry.dispose();
             block.material.dispose();
@@ -1127,6 +1173,11 @@ function animate() {
     // Update particle entity renderer (particle/hybrid view mode)
     if (particleEntityRenderer && (viewMode === 'particles' || viewMode === 'hybrid')) {
         particleEntityRenderer.update(dt);
+    }
+
+    // Update bitmap LED wall preview
+    if (bitmapPreview && viewMode === 'bitmap') {
+        bitmapPreview.update(dt, audioState);
     }
 
     // Auto rotate camera
@@ -1292,6 +1343,32 @@ function handleZonesResponse(zones) {
     zones.forEach(zone => {
         if (zone.name) ensureZoneGroup(zone.name);
     });
+
+    // Activate bitmap preview for all zones (visible only in LED Wall mode)
+    if (bitmapPreview) {
+        zones.forEach(zone => {
+            if (zone.name && zoneGroups[zone.name]) {
+                bitmapPreview.activate(zone.name, 16, 12, 'bmp_plasma', zoneGroups[zone.name]);
+            }
+        });
+        bitmapPreview.setVisible(viewMode === 'bitmap');
+    }
+}
+
+function handleBitmapInitialized(data) {
+    if (!bitmapPreview || !data.zone) return;
+    const zg = zoneGroups[data.zone];
+    if (!zg) return;
+
+    bitmapPreview.activate(
+        data.zone,
+        data.width || 16,
+        data.height || 12,
+        data.pattern || 'bmp_plasma',
+        zg
+    );
+    bitmapPreview.setVisible(viewMode === 'bitmap');
+    console.log(`[Bitmap] Initialized ${data.width}x${data.height} for zone '${data.zone}'`);
 }
 
 function handleStagesResponse(stages) {

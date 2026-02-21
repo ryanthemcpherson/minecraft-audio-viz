@@ -384,6 +384,7 @@ class AdminApp {
         this.elements.bitmapLayerBlend = document.getElementById('bitmap-layer-blend');
         this.elements.bitmapLayerOpacity = document.getElementById('bitmap-layer-opacity');
         this.elements.bitmapSharedPalette = document.getElementById('bitmap-shared-palette');
+        this.elements.bitmapSyncMode = document.getElementById('bitmap-sync-mode');
 
         // Pattern transition elements
         this.elements.transitionDurationSlider = document.getElementById('transition-duration-slider');
@@ -5031,7 +5032,10 @@ class AdminApp {
         // Effect buttons
         const effectBtns = {
             'btn-bitmap-blackout': () => {
-                this.ws.send({ type: 'bitmap_effects', action: 'blackout', zone: el.bitmapZone?.value || 'main', enabled: true });
+                this.state.bitmap.blackout = !this.state.bitmap.blackout;
+                this.ws.send({ type: 'bitmap_effects', action: 'blackout', zone: el.bitmapZone?.value || 'main', enabled: this.state.bitmap.blackout });
+                const btn = document.getElementById('btn-bitmap-blackout');
+                if (btn) btn.classList.toggle('firing', this.state.bitmap.blackout);
             },
             'btn-bitmap-freeze': () => {
                 this.state.bitmap.frozen = !this.state.bitmap.frozen;
@@ -5056,8 +5060,11 @@ class AdminApp {
                 const washDisplay = document.getElementById('val-bitmap-wash-opacity');
                 if (washDisplay) washDisplay.textContent = '0%';
                 this.state.bitmap.frozen = false;
+                this.state.bitmap.blackout = false;
                 const freezeBtn = document.getElementById('btn-bitmap-freeze');
                 if (freezeBtn) freezeBtn.classList.remove('firing');
+                const blackoutBtn = document.getElementById('btn-bitmap-blackout');
+                if (blackoutBtn) blackoutBtn.classList.remove('firing');
             },
             'btn-bitmap-firework': () => {
                 this.ws.send({ type: 'bitmap_firework' });
@@ -5186,6 +5193,29 @@ class AdminApp {
                 this.state.bitmap.zone = el.bitmapZone.value;
             });
         }
+
+        // Composition: Sync Mode
+        if (el.bitmapSyncMode) {
+            el.bitmapSyncMode.addEventListener('change', () => {
+                this.ws.send({
+                    type: 'bitmap_composition',
+                    action: 'set_sync_mode',
+                    mode: el.bitmapSyncMode.value
+                });
+            });
+        }
+
+        // Composition: Shared Palette
+        if (el.bitmapSharedPalette) {
+            el.bitmapSharedPalette.addEventListener('change', () => {
+                const val = el.bitmapSharedPalette.value;
+                this.ws.send({
+                    type: 'bitmap_composition',
+                    action: 'set_shared_palette',
+                    palette: val || 'none'
+                });
+            });
+        }
     }
 
     /** Convert "#RRGGBB" hex color to ARGB integer (full alpha) for Minecraft plugin */
@@ -5236,6 +5266,12 @@ class AdminApp {
 
         const currentVal = select.value;
         while (select.firstChild) select.removeChild(select.firstChild);
+
+        // Add "Instant" option first (no transition, instant cut)
+        const instantOpt = document.createElement('option');
+        instantOpt.value = 'INSTANT';
+        instantOpt.textContent = 'Instant';
+        select.appendChild(instantOpt);
 
         this.state.bitmap.transitions.forEach(t => {
             const opt = document.createElement('option');
