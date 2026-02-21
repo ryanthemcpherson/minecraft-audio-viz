@@ -126,14 +126,18 @@ public class BitmapRendererBackend implements RendererBackend {
             // Clean up any existing entities first
             poolManager.cleanupZone(zoneName);
 
-            Location origin = zone.getOrigin().clone();
-
-            // Calculate pixel spacing based on zone size
+            // Calculate pixel scale based on zone size
             double zoneWidth = zone.getSize().getX();
             double zoneHeight = zone.getSize().getY();
             float pixelScaleX = (float) (zoneWidth / finalWidth);
             float pixelScaleY = (float) (zoneHeight / finalHeight);
             float pixelScale = Math.min(pixelScaleX, pixelScaleY);
+
+            // Center the grid within the zone face
+            double gridWorldWidth = finalWidth * pixelScale;
+            double gridWorldHeight = finalHeight * pixelScale;
+            double offsetX = (zoneWidth - gridWorldWidth) / 2.0 / zoneWidth;
+            double offsetY = (zoneHeight - gridWorldHeight) / 2.0 / zoneHeight;
 
             // Spawn grid of TextDisplay "pixels"
             Map<String, Entity> pool = new LinkedHashMap<>();
@@ -143,26 +147,15 @@ public class BitmapRendererBackend implements RendererBackend {
                     int idx = py * finalWidth + px;
                     String entityId = "bmp_" + idx;
 
-                    // Position: origin + grid offset
-                    // X maps to columns, Y maps to rows (bottom-up for natural coords)
-                    double worldX = origin.getX() + (px + 0.5) * pixelScale;
-                    double worldY = origin.getY() + (finalHeight - 1 - py + 0.5) * pixelScale;
-                    double worldZ = origin.getZ(); // Flat on Z plane
+                    // Use zone's localToWorld for correct positioning with rotation
+                    // Normalized coordinates: 0-1 within zone bounds
+                    double localX = offsetX + ((px + 0.5) * pixelScale) / zoneWidth;
+                    double localY = offsetY + ((finalHeight - 1 - py + 0.5) * pixelScale) / zoneHeight;
+                    double localZ = 0.5; // Center on the Z face of the zone
 
-                    // Apply zone rotation
-                    double radians = Math.toRadians(zone.getRotation());
-                    double relX = worldX - origin.getX();
-                    double relZ = worldZ - origin.getZ();
-                    double rotX = relX * Math.cos(radians) - relZ * Math.sin(radians);
-                    double rotZ = relX * Math.sin(radians) + relZ * Math.cos(radians);
-
-                    Location pixelLoc = new Location(
-                        origin.getWorld(),
-                        origin.getX() + rotX,
-                        worldY,
-                        origin.getZ() + rotZ,
-                        zone.getRotation(), 0
-                    );
+                    Location pixelLoc = zone.localToWorld(localX, localY, localZ);
+                    pixelLoc.setYaw(zone.getRotation());
+                    pixelLoc.setPitch(0);
 
                     final float scale = pixelScale;
                     TextDisplay display = pixelLoc.getWorld().spawn(pixelLoc, TextDisplay.class, entity -> {
