@@ -1628,12 +1628,14 @@ public class MessageHandler {
         BitmapRendererBackend renderer = plugin.getBitmapRenderer();
         BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
 
-        // Initialize the grid of TextDisplay entities
+        // Initialize the grid of TextDisplay entities (may scale down dimensions)
         var zone = plugin.getZoneManager().getZone(zoneName);
-        renderer.initializeBitmapGrid(zone, width, height);
+        int[] actualDims = renderer.initializeBitmapGrid(zone, width, height);
+        int actualWidth = actualDims[0];
+        int actualHeight = actualDims[1];
 
-        // Activate the pattern manager for this zone
-        patternMgr.activateZone(zoneName, patternId, width, height);
+        // Activate the pattern manager with the ACTUAL scaled dimensions
+        patternMgr.activateZone(zoneName, patternId, actualWidth, actualHeight);
 
         // Set zone backend to BITMAP in registry
         plugin.getRendererRegistry().setZoneBackends(zoneName,
@@ -1643,10 +1645,11 @@ public class MessageHandler {
         JsonObject response = new JsonObject();
         response.addProperty("type", "bitmap_initialized");
         response.addProperty("zone", zoneName);
-        response.addProperty("width", width);
-        response.addProperty("height", height);
-        response.addProperty("pattern", patternId);
-        response.addProperty("pixel_count", width * height);
+        response.addProperty("width", actualWidth);
+        response.addProperty("height", actualHeight);
+        response.addProperty("pattern", patternMgr.getActivePatternId(zoneName));
+        response.addProperty("pixel_count", actualWidth * actualHeight);
+        response.addProperty("active", true);
         return response;
     }
 

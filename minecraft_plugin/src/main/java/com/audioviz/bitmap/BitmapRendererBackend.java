@@ -96,13 +96,9 @@ public class BitmapRendererBackend implements RendererBackend {
 
     /**
      * Initialize a bitmap grid with explicit dimensions.
-     * Spawns width × height TextDisplay entities in a flat grid within the zone.
-     *
-     * @param zone   the visualization zone
-     * @param width  grid width in pixels
-     * @param height grid height in pixels
+     * Returns the actual dimensions used as {width, height} (may be scaled down).
      */
-    public void initializeBitmapGrid(VisualizationZone zone, int width, int height) {
+    public int[] initializeBitmapGrid(VisualizationZone zone, int width, int height) {
         // Clamp dimensions
         width = Math.max(1, Math.min(MAX_BITMAP_WIDTH, width));
         height = Math.max(1, Math.min(MAX_BITMAP_HEIGHT, height));
@@ -201,6 +197,8 @@ public class BitmapRendererBackend implements RendererBackend {
             plugin.getLogger().info("Bitmap grid initialized: " + finalWidth + "x" + finalHeight +
                 " (" + count + " pixels) for zone '" + zoneName + "'");
         });
+
+        return new int[]{width, height};
     }
 
     /**
