@@ -1288,14 +1288,30 @@ class AdminApp {
 
             case 'bitmap_initialized':
                 this.state.bitmap.initialized = true;
+                this.state.bitmap.width = data.width || 16;
+                this.state.bitmap.height = data.height || 12;
                 this._updateBitmapStatus(data);
                 this._showToast(`Bitmap initialized: ${data.width || '?'}x${data.height || '?'}`, 'success');
+                // Show bitmap in 3D preview
+                if (this._bitmapPreview) {
+                    const zone = data.zone || this.state.bitmap.zone;
+                    const zg = this._previewZoneGroups[zone];
+                    if (zg) {
+                        this._bitmapPreview.activate(zone, data.width || 16, data.height || 12,
+                            data.pattern || this.state.bitmap.activePattern || 'bmp_plasma', zg);
+                    }
+                    this._bitmapPreview.setVisible(true);
+                }
                 break;
 
             case 'bitmap_pattern_set':
             case 'bitmap_transition_started':
                 this.state.bitmap.activePattern = data.pattern;
                 this._highlightBitmapPattern(data.pattern);
+                // Update bitmap preview pattern
+                if (this._bitmapPreview && data.zone) {
+                    this._bitmapPreview.setPattern(data.zone, data.pattern);
+                }
                 break;
 
             case 'bitmap_palette_set':
@@ -3876,6 +3892,11 @@ class AdminApp {
                 this._previewBlockIndicators = new BlockIndicatorSystem(this._previewScene, 8);
             }
 
+            // Initialize bitmap LED wall preview
+            if (typeof BitmapPreview !== 'undefined') {
+                this._bitmapPreview = new BitmapPreview();
+            }
+
             // Setup preview controls
             this._setupPreviewControls();
             this._setupPreviewMouseControls();
@@ -4103,8 +4124,9 @@ class AdminApp {
         // Dispose stage blocks on rebuild (allow re-scan)
         this._disposeStageBlocks();
 
-        // Dispose old zone groups
+        // Dispose old zone groups (and their bitmap planes)
         for (const [name, zg] of Object.entries(this._previewZoneGroups)) {
+            if (this._bitmapPreview) this._bitmapPreview.deactivate(name);
             zg.blocks.forEach(block => {
                 block.geometry.dispose();
                 if (block.material && block.material !== this._bandColorMaterials?.[block.userData.bandIndex]) {
@@ -4130,6 +4152,21 @@ class AdminApp {
             this._previewStageMode = true;
             // Pre-create zone groups
             zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
+
+            // Activate bitmap preview for each zone (hidden until bitmap is initialized)
+            if (this._bitmapPreview) {
+                zones.forEach(z => {
+                    const zg = this._previewZoneGroups[z.name];
+                    if (zg) {
+                        const bw = this.state.bitmap.width || 16;
+                        const bh = this.state.bitmap.height || 12;
+                        const bp = this.state.bitmap.activePattern || 'bmp_plasma';
+                        this._bitmapPreview.activate(z.name, bw, bh, bp, zg);
+                    }
+                });
+                this._bitmapPreview.setVisible(this.state.bitmap.initialized);
+            }
+
             // Switch environment to stage mode — hide procedural env, grid, and ground
             if (this._mcEnvironment) {
                 this._mcEnvironment.setVisible(false);
@@ -4424,6 +4461,16 @@ class AdminApp {
             // Update particle system
             if (this._previewParticleSystem) {
                 this._previewParticleSystem.update(dt);
+            }
+
+            // Update bitmap LED wall preview
+            if (this._bitmapPreview && this.state.bitmap.initialized) {
+                this._bitmapPreview.update(dt, {
+                    bands: Array.isArray(this.state.bands) ? this.state.bands : [0, 0, 0, 0, 0],
+                    amplitude: this.state.amplitude || 0,
+                    isBeat: !!this.state.isBeat,
+                    beatIntensity: this.state.beatIntensity || 0,
+                });
             }
 
             // Auto rotate camera
@@ -4978,6 +5025,7 @@ class AdminApp {
                 if (display) display.textContent = `${val}%`;
                 this.state.bitmap.brightness = val;
                 sendBrightness(val);
+                if (this._bitmapPreview) this._bitmapPreview.effects.brightness = val / 100;
             });
         }
 
@@ -5036,6 +5084,7 @@ class AdminApp {
                 this.ws.send({ type: 'bitmap_effects', action: 'blackout', zone: el.bitmapZone?.value || 'main', enabled: this.state.bitmap.blackout });
                 const btn = document.getElementById('btn-bitmap-blackout');
                 if (btn) btn.classList.toggle('firing', this.state.bitmap.blackout);
+                if (this._bitmapPreview) this._bitmapPreview.effects.blackout = this.state.bitmap.blackout;
             },
             'btn-bitmap-freeze': () => {
                 this.state.bitmap.frozen = !this.state.bitmap.frozen;
@@ -5047,6 +5096,7 @@ class AdminApp {
                 });
                 const btn = document.getElementById('btn-bitmap-freeze');
                 if (btn) btn.classList.toggle('firing', this.state.bitmap.frozen);
+                if (this._bitmapPreview) this._bitmapPreview.effects.frozen = this.state.bitmap.frozen;
             },
             'btn-bitmap-reset': () => {
                 this.ws.send({ type: 'bitmap_effects', action: 'reset', zone: el.bitmapZone?.value || 'main' });
@@ -5065,6 +5115,13 @@ class AdminApp {
                 if (freezeBtn) freezeBtn.classList.remove('firing');
                 const blackoutBtn = document.getElementById('btn-bitmap-blackout');
                 if (blackoutBtn) blackoutBtn.classList.remove('firing');
+                // Reset preview effects
+                if (this._bitmapPreview) {
+                    this._bitmapPreview.effects.brightness = 1.0;
+                    this._bitmapPreview.effects.blackout = false;
+                    this._bitmapPreview.effects.frozen = false;
+                    this._bitmapPreview.effects.washOpacity = 0;
+                }
             },
             'btn-bitmap-firework': () => {
                 this.ws.send({ type: 'bitmap_firework' });
