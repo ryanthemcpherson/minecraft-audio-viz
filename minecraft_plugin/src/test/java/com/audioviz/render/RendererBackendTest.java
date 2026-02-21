@@ -140,7 +140,7 @@ class RendererBackendTest {
 
         @Test
         void exactThreeBackendTypes() {
-            assertEquals(3, RendererBackendType.values().length);
+            assertEquals(4, RendererBackendType.values().length);
         }
     }
 
