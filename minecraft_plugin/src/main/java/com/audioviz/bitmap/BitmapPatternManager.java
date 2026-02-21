@@ -85,18 +85,8 @@ public class BitmapPatternManager {
      * Update the audio state used by the self-tick loop.
      * Called from message handlers when audio data arrives.
      */
-    private long audioUpdateCounter = 0;
-
     public void updateAudioState(AudioState audio) {
         this.latestAudioState = audio;
-        audioUpdateCounter++;
-        if (audioUpdateCounter % 100 == 1) {
-            double[] bands = audio.getBands();
-            plugin.getLogger().info("[BitmapAudio] updateAudioState called! bands[0]="
-                + (bands.length > 0 ? String.format("%.3f", bands[0]) : "none")
-                + " amp=" + String.format("%.3f", audio.getAmplitude())
-                + " updates=" + audioUpdateCounter);
-        }
     }
 
     // ========== Pattern Registry ==========
@@ -271,8 +261,6 @@ public class BitmapPatternManager {
      *   <li>Push to renderer backend (dirty-checked entity updates)</li>
      * </ol>
      */
-    private long debugLogCounter = 0;
-
     public void tick(AudioState audio) {
         if (zoneStates.isEmpty()) return;
 
@@ -280,18 +268,6 @@ public class BitmapPatternManager {
         double time = (now - startTimeMs) / 1000.0;
         double dt = (now - lastTickMs) / 1000.0;
         lastTickMs = now;
-
-        // Debug: log every 100 ticks (~5s)
-        debugLogCounter++;
-        boolean debugThisTick = (debugLogCounter % 100 == 1);
-        if (debugThisTick) {
-            double[] bands = audio.getBands();
-            plugin.getLogger().info("[BitmapTick] zones=" + zoneStates.size()
-                + " bands=" + (bands.length > 0 ? String.format("%.3f", bands[0]) : "none")
-                + " amp=" + String.format("%.3f", audio.getAmplitude())
-                + " beat=" + audio.isBeat()
-                + " time=" + String.format("%.1f", time));
-        }
 
         // Refresh game state (throttled internally to every ~1s)
         gameStateModulator.refreshWorldState();
@@ -314,34 +290,11 @@ public class BitmapPatternManager {
                     state.pattern.render(state.buffer, audio, time);
                 }
 
-                // Debug: sample pixel values after pattern render
-                if (debugThisTick) {
-                    int w = state.buffer.getWidth();
-                    int h = state.buffer.getHeight();
-                    int centerIdx = (h / 2) * w + (w / 2);
-                    int[] raw = state.buffer.getRawPixels();
-                    int px0 = raw.length > 0 ? raw[0] : -1;
-                    int pxC = centerIdx < raw.length ? raw[centerIdx] : -1;
-                    plugin.getLogger().info("[BitmapTick] zone=" + zoneName
-                        + " pattern=" + state.pattern.getId()
-                        + " buf=" + w + "x" + h
-                        + " px[0]=0x" + String.format("%08X", px0)
-                        + " px[center]=0x" + String.format("%08X", pxC));
-                }
-
                 // Step 2: Game state modulation (time of day, weather tinting)
                 gameStateModulator.modulate(state.buffer, dt);
 
                 // Step 3: Post-processing effects (strobe, freeze, palette, brightness)
                 effectsProcessor.process(state.buffer, audio, time);
-
-                // Debug: sample pixel values after effects
-                if (debugThisTick) {
-                    int[] raw = state.buffer.getRawPixels();
-                    int px0 = raw.length > 0 ? raw[0] : -1;
-                    plugin.getLogger().info("[BitmapTick] zone=" + zoneName
-                        + " afterFx px[0]=0x" + String.format("%08X", px0));
-                }
 
                 // Step 4: Push to renderer backend (dirty-checked)
                 renderer.applyFrame(zoneName, state.buffer);
