@@ -4965,6 +4965,7 @@ class AdminApp {
                 this.ws.send({
                     type: 'bitmap_effects',
                     action: 'brightness',
+                    zone: el.bitmapZone?.value || 'main',
                     level: val / 100
                 });
             }, 50);
@@ -4984,6 +4985,7 @@ class AdminApp {
                 this.ws.send({
                     type: 'bitmap_effects',
                     action: 'strobe',
+                    zone: el.bitmapZone?.value || 'main',
                     enabled: el.bitmapStrobe.checked
                 });
             });
@@ -4995,6 +4997,7 @@ class AdminApp {
                 this.ws.send({
                     type: 'bitmap_effects',
                     action: 'beat_flash',
+                    zone: el.bitmapZone?.value || 'main',
                     enabled: el.bitmapBeatFlash.checked
                 });
             });
@@ -5008,6 +5011,7 @@ class AdminApp {
             this.ws.send({
                 type: 'bitmap_effects',
                 action: 'wash',
+                zone: el.bitmapZone?.value || 'main',
                 color,
                 opacity
             });
@@ -5026,20 +5030,21 @@ class AdminApp {
         // Effect buttons
         const effectBtns = {
             'btn-bitmap-blackout': () => {
-                this.ws.send({ type: 'bitmap_effects', action: 'blackout', enabled: true });
+                this.ws.send({ type: 'bitmap_effects', action: 'blackout', zone: el.bitmapZone?.value || 'main', enabled: true });
             },
             'btn-bitmap-freeze': () => {
                 this.state.bitmap.frozen = !this.state.bitmap.frozen;
                 this.ws.send({
                     type: 'bitmap_effects',
                     action: 'freeze',
+                    zone: el.bitmapZone?.value || 'main',
                     enabled: this.state.bitmap.frozen
                 });
                 const btn = document.getElementById('btn-bitmap-freeze');
                 if (btn) btn.classList.toggle('firing', this.state.bitmap.frozen);
             },
             'btn-bitmap-reset': () => {
-                this.ws.send({ type: 'bitmap_effects', action: 'reset' });
+                this.ws.send({ type: 'bitmap_effects', action: 'reset', zone: el.bitmapZone?.value || 'main' });
                 // Reset local UI state
                 if (el.bitmapBrightness) el.bitmapBrightness.value = 100;
                 const brightDisplay = document.getElementById('val-bitmap-brightness');
