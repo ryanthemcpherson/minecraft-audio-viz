@@ -661,7 +661,7 @@ function connectWebSocket() {
                     handleStageBlocksResponse(data);
                 } else if (data.type === 'bitmap_initialized') {
                     handleBitmapInitialized(data);
-                } else if (data.type === 'bitmap_pattern_changed') {
+                } else if (data.type === 'bitmap_pattern_set' || data.type === 'bitmap_transition_started') {
                     if (bitmapPreview && data.zone) {
                         bitmapPreview.setPattern(data.zone, data.pattern);
                     }
