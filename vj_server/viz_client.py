@@ -153,9 +153,11 @@ class VizClient:
                         self._last_pong = time.time()
                         continue
 
-                    # Discard batch_updated responses from fire-and-forget
-                    # batch_update_fast() calls to prevent queue flooding
-                    if msg_type == "batch_updated":
+                    # Discard "ok" and "batch_updated" responses from fire-and-forget
+                    # batch_update_fast() calls to prevent queue flooding.
+                    # batch_update returns {"type":"ok"} at ~20 TPS which would
+                    # drown out real responses (bitmap_initialized, etc.)
+                    if msg_type in ("batch_updated", "ok"):
                         continue
 
                     # Queue response messages for send() to pick up
@@ -209,7 +211,6 @@ class VizClient:
                         "bitmap_composition_updated",
                         "bitmap_transition_started",
                         "bitmap_composition_zones",
-                        "ok",
                         "error",
                         "connected",
                     ):
