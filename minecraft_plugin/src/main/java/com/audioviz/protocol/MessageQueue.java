@@ -397,6 +397,16 @@ public class MessageQueue {
             AudioState audioState = new AudioState(
                 bands, amplitude, isBeat, beatIntensity, tempoConfidence, beatPhase, frame);
             plugin.getParticleVisualizationManager().updateAudioState(audioState);
+
+            // Forward audio state to bitmap pattern manager (self-ticks at 20 TPS)
+            if (plugin.getBitmapPatternManager() != null) {
+                plugin.getBitmapPatternManager().updateAudioState(audioState);
+            }
+
+            // Forward audio state to decorator manager
+            if (plugin.getDecoratorManager() != null) {
+                plugin.getDecoratorManager().updateAudioState(audioState);
+            }
         }
     }
 
