@@ -85,8 +85,18 @@ public class BitmapPatternManager {
      * Update the audio state used by the self-tick loop.
      * Called from message handlers when audio data arrives.
      */
+    private long audioUpdateCounter = 0;
+
     public void updateAudioState(AudioState audio) {
         this.latestAudioState = audio;
+        audioUpdateCounter++;
+        if (audioUpdateCounter % 100 == 1) {
+            double[] bands = audio.getBands();
+            plugin.getLogger().info("[BitmapAudio] updateAudioState called! bands[0]="
+                + (bands.length > 0 ? String.format("%.3f", bands[0]) : "none")
+                + " amp=" + String.format("%.3f", audio.getAmplitude())
+                + " updates=" + audioUpdateCounter);
+        }
     }
 
     // ========== Pattern Registry ==========
