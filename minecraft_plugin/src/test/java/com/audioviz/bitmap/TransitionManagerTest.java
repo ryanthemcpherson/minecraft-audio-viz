@@ -285,7 +285,7 @@ class TransitionManagerTest {
 
         @Test
         void wipeProgressesFromEdge() {
-            WipeTransition wipe = new WipeTransition(WipeTransition.Direction.LEFT);
+            WipeTransition wipe = new WipeTransition(WipeTransition.Direction.LEFT, 0.08);
             BitmapFrameBuffer from = new BitmapFrameBuffer(8, 4);
             BitmapFrameBuffer to = new BitmapFrameBuffer(8, 4);
             BitmapFrameBuffer out = new BitmapFrameBuffer(8, 4);
