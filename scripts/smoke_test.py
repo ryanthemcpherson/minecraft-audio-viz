@@ -767,7 +767,16 @@ async def run_smoke_tests(host: str, port: int, quick: bool = False):
 
     try:
         async with websockets.connect(uri, open_timeout=10) as ws:
-            print("  Connected! Running smoke tests...\n")
+            # Drain the initial "connected" message the plugin sends on connect
+            try:
+                hello = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                hello_data = json.loads(hello)
+                if hello_data.get("type") == "connected":
+                    print("  Connected! Running smoke tests...\n")
+                else:
+                    print(f"  Connected (unexpected hello: {hello_data.get('type')}).\n")
+            except asyncio.TimeoutError:
+                print("  Connected (no hello message). Running smoke tests...\n")
 
             # Always run ping
             await test_ping(ws, suite)
