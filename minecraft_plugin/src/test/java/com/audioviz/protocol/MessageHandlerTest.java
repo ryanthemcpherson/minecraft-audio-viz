@@ -14,6 +14,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,7 @@ class MessageHandlerTest {
     @Mock private ParticleVisualizationManager particleVizManager;
     @Mock private BeatEventManager beatEventManager;
     @Mock private RendererRegistry rendererRegistry;
+    @Mock private FileConfiguration mockConfig;
     @Mock private World mockWorld;
 
     private MessageHandler handler;
@@ -57,6 +59,8 @@ class MessageHandlerTest {
         when(plugin.getParticleVisualizationManager()).thenReturn(particleVizManager);
         when(plugin.getBeatEventManager()).thenReturn(beatEventManager);
         when(plugin.getRendererRegistry()).thenReturn(rendererRegistry);
+        when(plugin.getConfig()).thenReturn(mockConfig);
+        when(mockConfig.getInt(anyString(), anyInt())).thenAnswer(inv -> inv.getArgument(1));
 
         when(mockWorld.getName()).thenReturn("world");
 
