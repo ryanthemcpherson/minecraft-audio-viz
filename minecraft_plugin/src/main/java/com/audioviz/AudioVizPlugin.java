@@ -2,6 +2,10 @@ package com.audioviz;
 
 import com.audioviz.bedrock.BedrockPlayerListener;
 import com.audioviz.bedrock.BedrockSupport;
+import com.audioviz.bitmap.BitmapPatternManager;
+import com.audioviz.bitmap.BitmapRendererBackend;
+import com.audioviz.bitmap.composition.CompositionManager;
+import com.audioviz.bitmap.effects.EffectsProcessor;
 import com.audioviz.commands.AudioVizCommand;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
@@ -47,6 +51,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private ZoneBoundaryRenderer zoneBoundaryRenderer;
     private ZoneSelectionManager zoneSelectionManager;
     private StageZonePlacementManager zonePlacementManager;
+    private BitmapRendererBackend bitmapRenderer;
+    private BitmapPatternManager bitmapPatternManager;
+    private CompositionManager compositionManager;
 
     @Override
     public void onEnable() {
@@ -80,6 +87,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
         // Initialize renderer backend registry (backend selection + capability reporting)
         this.rendererRegistry = new RendererRegistry(this);
+
+        // Initialize bitmap rendering subsystem
+        this.bitmapRenderer = new BitmapRendererBackend(this, entityPoolManager);
+        this.bitmapPatternManager = new BitmapPatternManager(this, bitmapRenderer);
+        this.compositionManager = new CompositionManager();
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -214,6 +226,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Stop decorator manager before entity cleanup
         if (decoratorManager != null) {
             decoratorManager.stop();
+        }
+
+        // Shutdown bitmap pattern manager
+        if (bitmapPatternManager != null) {
+            bitmapPatternManager.shutdown();
         }
 
         // Shutdown voice chat integration before WebSocket server
@@ -351,5 +368,25 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public StageZonePlacementManager getZonePlacementManager() {
         return zonePlacementManager;
+    }
+
+    public BitmapRendererBackend getBitmapRenderer() {
+        return bitmapRenderer;
+    }
+
+    public BitmapPatternManager getBitmapPatternManager() {
+        return bitmapPatternManager;
+    }
+
+    public CompositionManager getCompositionManager() {
+        return compositionManager;
+    }
+
+    /**
+     * Convenience getter for the global bitmap effects processor.
+     * Delegates to BitmapPatternManager which owns the EffectsProcessor.
+     */
+    public EffectsProcessor getGlobalBitmapEffects() {
+        return bitmapPatternManager != null ? bitmapPatternManager.getEffectsProcessor() : null;
     }
 }

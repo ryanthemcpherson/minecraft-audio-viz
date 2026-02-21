@@ -35,6 +35,7 @@
 - [Project Structure](#project-structure)
 - [Development](#development)
 - [Known Limitations](#known-limitations)
+- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 ---
@@ -43,7 +44,8 @@
 
 - **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
 - **Real-time FFT Analysis** — 5-band frequency processing with ultra-low latency (~20ms)
-- **27 Visualization Patterns** — from Spectrum Bars to Galaxy Spirals, Black Holes, Auroras, and more
+- **40 Visualization Patterns** — from Spectrum Bars to Galaxy Spirals, Black Holes, Auroras, and more
+- **Bitmap LED Wall** — flat 2D pixel-grid display using text display entities as pixels, inspired by [TheCymaera](https://github.com/TheCymaera/minecraft-text-display-experiments)
 - **6 Audio Presets** — auto, edm, chill, rock, hiphop, classical
 - **Minecraft Rendering** — Display Entity batching with interpolation, zone management, beat-reactive particles
 - **3D Browser Preview** — WebGL scene with full Minecraft rendering parity
@@ -175,7 +177,9 @@ cd minecraft_plugin && mvn package
 
 ---
 
-## Visualization Patterns (27)
+## Visualization Patterns (40)
+
+### 3D Entity Patterns (27)
 
 | Pattern | Key | Description |
 |---------|-----|-------------|
@@ -206,6 +210,26 @@ cd minecraft_plugin && mvn package
 | Aurora | `aurora` | Northern lights effect |
 | Ocean Waves | `ocean` | Ocean wave simulation |
 | Fireflies | `fireflies` | Swarm of glowing fireflies |
+
+### Bitmap LED Wall Patterns (13)
+
+Flat 2D pixel-grid patterns rendered on a virtual LED wall using text display entities as pixels. Inspired by [TheCymaera's text display experiments](https://github.com/TheCymaera/minecraft-text-display-experiments).
+
+| Pattern | Key | Description |
+|---------|-----|-------------|
+| Spectrum Bars | `bmp_spectrum_bars` | Classic LED bar graph with color mapping |
+| Spectrogram | `bmp_spectrogram` | Scrolling frequency × time heat map |
+| Plasma | `bmp_plasma` | Audio-reactive plasma shader effect |
+| Waveform | `bmp_waveform` | Oscilloscope-style waveform display |
+| VU Meter | `bmp_vu_meter` | Stereo VU meter with peak hold |
+| Marquee | `bmp_marquee` | Scrolling text with reactive colors |
+| Track Display | `bmp_track_display` | Now-playing artist/title overlay |
+| Countdown | `bmp_countdown` | Event countdown timer |
+| Chat Wall | `bmp_chat_wall` | Live player chat messages on the wall |
+| Crowd Cam | `bmp_crowd_cam` | Spotlight frames for nearby players |
+| Minimap | `bmp_minimap` | Overhead map with pulsing player dots |
+| Fireworks | `bmp_firework` | Interactive firework particle system |
+| Image | `bmp_image` | Static/animated image display |
 
 ---
 
@@ -388,6 +412,12 @@ cd minecraft_plugin && mvn package
 - **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server can run on Linux/Docker, but DJs must run on Windows.
 - **Display Entities require Java Edition** — Bedrock players (via Geyser) need to use Particles mode instead.
 - **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
+
+---
+
+## Acknowledgments
+
+The **Bitmap LED Wall** rendering system was inspired by [TheCymaera's Minecraft Text Display Experiments](https://github.com/TheCymaera/minecraft-text-display-experiments) ([video](https://youtu.be/uZmEYYs0ZKs)). TheCymaera pioneered the technique of using text display entities as individually-addressable pixels — setting `text` to a space character and manipulating the `background` ARGB value to create flat pixel grids, bitmap displays, and interactive paint canvases within Minecraft. MCAV adapted this approach for real-time audio-reactive visualization, adding a frame buffer pipeline, VJ control protocol, transition engine, and effects processing on top of the core pixel-grid concept.
 
 ---
 

@@ -1162,6 +1162,8 @@ class VJServer:
                         # Check for messages from the pending DJ (heartbeat/disconnect)
                         try:
                             msg = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                            if len(msg) > 65536:
+                                continue
                             msg_data = json.loads(msg)
                             if msg_data.get("type") == "ping":
                                 await websocket.send(json.dumps({"type": "pong"}))
@@ -2259,7 +2261,7 @@ class VJServer:
 
         scene_path = scenes_dir / f"{name}.json"
         # Ensure resolved path stays within scenes_dir
-        if not scene_path.resolve().parent == scenes_dir.resolve():
+        if not scene_path.resolve().is_relative_to(scenes_dir.resolve()):
             raise ValueError("Invalid scene path")
         with open(scene_path, "w") as f:
             json.dump(scene_data, f, indent=2)
@@ -2269,7 +2271,7 @@ class VJServer:
         name = self._sanitize_scene_name(name)
         scenes_dir = Path("configs/scenes")
         scene_path = scenes_dir / f"{name}.json"
-        if not scene_path.resolve().parent == scenes_dir.resolve():
+        if not scene_path.resolve().is_relative_to(scenes_dir.resolve()):
             raise ValueError("Invalid scene path")
         if not scene_path.exists():
             raise FileNotFoundError(f"Scene '{name}' not found")
@@ -2282,7 +2284,7 @@ class VJServer:
         name = self._sanitize_scene_name(name)
         scenes_dir = Path("configs/scenes")
         scene_path = scenes_dir / f"{name}.json"
-        if not scene_path.resolve().parent == scenes_dir.resolve():
+        if not scene_path.resolve().is_relative_to(scenes_dir.resolve()):
             raise ValueError("Invalid scene path")
         if not scene_path.exists():
             raise FileNotFoundError(f"Scene '{name}' not found")
@@ -3409,15 +3411,13 @@ class VJServer:
 
     async def _approve_pending_dj(self, dj_id: str):
         """Approve a pending DJ and move them to the active DJ list."""
-        if not dj_id or dj_id not in self._pending_djs:
-            logger.warning(f"Cannot approve DJ {dj_id}: not in pending queue")
-            return
-
-        info = self._pending_djs.pop(dj_id)
-        ws = info["websocket"]
-
-        # Create the DJ connection object
         async with self._dj_lock:
+            if not dj_id or dj_id not in self._pending_djs:
+                logger.warning(f"Cannot approve DJ {dj_id}: not in pending queue")
+                return
+
+            info = self._pending_djs.pop(dj_id)
+            ws = info["websocket"]
             if dj_id in self._djs:
                 logger.warning(f"DJ {dj_id} already in active list")
                 return

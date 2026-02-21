@@ -24,7 +24,8 @@ public class RendererRegistry {
 
     private final Set<RendererBackendType> supportedBackends = EnumSet.of(
         RendererBackendType.DISPLAY_ENTITIES,
-        RendererBackendType.PARTICLES
+        RendererBackendType.PARTICLES,
+        RendererBackendType.BITMAP
     );
 
     // Backends that are selectable but not considered production-ready.
@@ -83,7 +84,8 @@ public class RendererRegistry {
             return hologramProviderAvailable && hologramBackendImplemented;
         }
         return backendType == RendererBackendType.DISPLAY_ENTITIES
-            || backendType == RendererBackendType.PARTICLES;
+            || backendType == RendererBackendType.PARTICLES
+            || backendType == RendererBackendType.BITMAP;
     }
 
     public void setZoneBackends(String zoneName, RendererBackendType active, RendererBackendType fallback) {
