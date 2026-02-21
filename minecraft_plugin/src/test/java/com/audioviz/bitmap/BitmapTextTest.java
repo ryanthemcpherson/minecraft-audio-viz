@@ -150,7 +150,7 @@ class BitmapTextTest {
         @Test
         void drawTextCenteredOnSmallBuffer() {
             BitmapFrameBuffer buf = new BitmapFrameBuffer(32, 16);
-            BitmapTextRenderer.drawTextCentered(buf, "HI", 4, 0xFFFFFFFF);
+            BitmapTextRenderer.drawTextCentered(buf, "HI", 0xFFFFFFFF);
 
             // "HI" is 11px wide (5+1+5). Centered in 32px: x starts at ~10
             // Check that something is near the center, not at the left edge
@@ -193,8 +193,8 @@ class BitmapTextTest {
         @Test
         void drawTwoLinesFitOnBuffer() {
             BitmapFrameBuffer buf = new BitmapFrameBuffer(32, 16);
-            BitmapTextRenderer.drawTwoLines(buf, "TOP", "BOT",
-                0xFFFF0000, 0xFF00FF00);
+            BitmapTextRenderer.drawTwoLines(buf, "TOP", 0xFFFF0000,
+                "BOT", 0xFF00FF00);
 
             // First line should have red pixels in top half
             boolean topRed = false;

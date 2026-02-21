@@ -257,7 +257,7 @@ class BitmapMessageHandlerTest {
             JsonObject response = handler.handleMessage("bitmap_countdown", msg);
 
             assertEquals("ok", response.get("type").getAsString());
-            verify(countdown).start(eq(10), any());
+            verify(countdown).start(eq(10));
         }
 
         @Test
@@ -394,7 +394,7 @@ class BitmapMessageHandlerTest {
         @DisplayName("bitmap_palette sets known palette")
         void setPaletteKnown() {
             // ColorPalette.BUILT_IN has at least "fire", "ocean", "neon", etc.
-            String validPaletteId = ColorPalette.BUILT_IN.get(0).getId();
+            String validPaletteId = ColorPalette.BUILT_IN[0].getId();
 
             JsonObject msg = new JsonObject();
             msg.addProperty("palette", validPaletteId);
@@ -635,7 +635,7 @@ class BitmapMessageHandlerTest {
             when(bitmapRenderer.isBitmapZone("main")).thenReturn(true);
             when(bitmapPatternManager.getActivePatternId("main")).thenReturn("bmp_spectrum_bars");
 
-            BitmapRendererBackend.GridConfig config = mock(BitmapRendererBackend.GridConfig.class);
+            BitmapRendererBackend.BitmapGridConfig config = mock(BitmapRendererBackend.BitmapGridConfig.class);
             when(config.width()).thenReturn(48);
             when(config.height()).thenReturn(27);
             when(config.pixelCount()).thenReturn(1296);
