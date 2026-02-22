@@ -5,7 +5,10 @@ import java.util.*;
 
 /**
  * Spectrum bars visualization - vertical bars that bounce with frequency bands.
+ *
+ * @deprecated Superseded by Lua pattern engine (patterns/*.lua). No message type routes to this class.
  */
+@Deprecated
 public class SpectrumBars extends VisualizationPattern {
 
     public SpectrumBars() {

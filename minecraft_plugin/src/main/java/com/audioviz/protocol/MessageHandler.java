@@ -500,7 +500,7 @@ public class MessageHandler {
         double localX = particle.has("x") ? particle.get("x").getAsDouble() : 0.5;
         double localY = particle.has("y") ? particle.get("y").getAsDouble() : 0.5;
         double localZ = particle.has("z") ? particle.get("z").getAsDouble() : 0.5;
-        int count = particle.has("count") ? particle.get("count").getAsInt() : 10;
+        int count = Math.min(particle.has("count") ? particle.get("count").getAsInt() : 10, 200);
 
         try {
             org.bukkit.Particle bukkitParticle = org.bukkit.Particle.valueOf(particleName.toUpperCase());

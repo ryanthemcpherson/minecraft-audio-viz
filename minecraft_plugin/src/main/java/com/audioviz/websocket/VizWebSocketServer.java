@@ -34,7 +34,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private final MessageQueue messageQueue;
     private final Gson gson;
     private final ConcurrentHashMap<WebSocket, ClientInfo> clients;
-    private final Map<WebSocket, Long> lastPongTime;
+    private final ConcurrentHashMap<WebSocket, Long> lastPongTime;
 
     // Enable async processing for high-frequency messages
     private boolean asyncEnabled = true;
