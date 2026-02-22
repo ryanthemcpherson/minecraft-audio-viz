@@ -73,6 +73,9 @@ from vj_server.patterns import (
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.viz_client import VizClient
 
+# Feature flag: set MCAV_ASYNC_LUA=0 to disable threaded Lua execution
+_USE_ASYNC_LUA = os.environ.get("MCAV_ASYNC_LUA", "1") != "0"
+
 # ---------------------------------------------------------------------------
 # Input validation helpers (security hardening)
 # ---------------------------------------------------------------------------
@@ -4532,10 +4535,16 @@ class VJServer:
                 f"Stage zone '{zone_name}': pattern={pattern_name}, entities={zs.entity_count}"
             )
 
-    def _calculate_entities_for_zone(
+    async def _calculate_entities_for_zone(
         self, zone_state: ZonePatternState, audio_state: "AudioState", zone_name: str = ""
     ) -> List[dict]:
-        """Calculate entity positions for a specific zone, with crossfade support."""
+        """Calculate entity positions for a specific zone, with crossfade support.
+
+        When MCAV_ASYNC_LUA is enabled, Lua pattern calculation runs on a
+        thread pool worker via asyncio.to_thread so it doesn't block the
+        event loop.  Lupa releases the GIL during Lua execution, so this
+        gives true parallelism for multi-zone setups.
+        """
         if zone_state.transitioning:
             elapsed = time.monotonic() - zone_state.transition_start
 
@@ -4552,14 +4561,26 @@ class VJServer:
                                 zone_name or self.zone, pending, zone_state.block_type
                             )
                         )
+                if _USE_ASYNC_LUA:
+                    return await asyncio.to_thread(
+                        zone_state.pattern.calculate_entities, audio_state
+                    )
                 return zone_state.pattern.calculate_entities(audio_state)
 
             t = elapsed / zone_state.transition_duration
             alpha = self._smoothstep(t)
-            old_entities = zone_state.old_pattern.calculate_entities(audio_state)
-            new_entities = zone_state.pattern.calculate_entities(audio_state)
+            if _USE_ASYNC_LUA:
+                old_entities, new_entities = await asyncio.gather(
+                    asyncio.to_thread(zone_state.old_pattern.calculate_entities, audio_state),
+                    asyncio.to_thread(zone_state.pattern.calculate_entities, audio_state),
+                )
+            else:
+                old_entities = zone_state.old_pattern.calculate_entities(audio_state)
+                new_entities = zone_state.pattern.calculate_entities(audio_state)
             return self._blend_entities(old_entities, new_entities, alpha)
 
+        if _USE_ASYNC_LUA:
+            return await asyncio.to_thread(zone_state.pattern.calculate_entities, audio_state)
         return zone_state.pattern.calculate_entities(audio_state)
 
     def _calculate_entities(
@@ -5117,18 +5138,25 @@ class VJServer:
                         beat_phase=beat_phase,
                     )
                     calc_start = time.perf_counter()
+                    # Collect zones that need Lua calculation
+                    calc_tasks = {}
                     for zone_name, zone_state in self._zone_patterns.items():
                         if self._freeze and zone_state.last_entities:
                             zone_entities[zone_name] = zone_state.last_entities
                         elif self._blackout:
                             zone_entities[zone_name] = []
                         else:
-                            zents = self._calculate_entities_for_zone(
+                            calc_tasks[zone_name] = self._calculate_entities_for_zone(
                                 zone_state, audio_state, zone_name
                             )
+                    # Run all zone calculations concurrently (each on its own thread
+                    # when MCAV_ASYNC_LUA is enabled — lupa releases the GIL)
+                    if calc_tasks:
+                        results = await asyncio.gather(*calc_tasks.values())
+                        for zn, zents in zip(calc_tasks.keys(), results):
                             zents = self._apply_effects(zents, visual_bands)
-                            zone_state.last_entities = zents
-                            zone_entities[zone_name] = zents
+                            self._zone_patterns[zn].last_entities = zents
+                            zone_entities[zn] = zents
                     calc_ms = (time.perf_counter() - calc_start) * 1000.0
 
                     # Apply per-band material overrides to entities
