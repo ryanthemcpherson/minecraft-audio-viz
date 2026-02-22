@@ -134,7 +134,10 @@ function calculate(audio, config, dt)
     local flap_base = math.sin(state.flap_phase) * 0.04 * (1 + audio.amplitude * 0.5)
 
     -- === BODY CORE (fibonacci ellipsoid) ===
-    local body_points = fibonacci_sphere(body_count)
+    if not state.body_points or #state.body_points ~= body_count then
+        state.body_points = fibonacci_sphere(body_count)
+    end
+    local body_points = state.body_points
     local body_rx = 0.04 * state.body_scale
     local body_ry = 0.08 * state.body_scale
     local body_rz = 0.035 * state.body_scale
@@ -163,8 +166,11 @@ function calculate(audio, config, dt)
     end
     local beak_count = head_count - head_sphere_count
 
-    -- Head sphere
-    local head_points = fibonacci_sphere(head_sphere_count)
+    -- Head sphere (cached)
+    if not state.head_points or #state.head_points ~= head_sphere_count then
+        state.head_points = fibonacci_sphere(head_sphere_count)
+    end
+    local head_points = state.head_points
     local head_bob = state.smooth_bands[3] * 0.02
 
     for i = 1, head_sphere_count do
