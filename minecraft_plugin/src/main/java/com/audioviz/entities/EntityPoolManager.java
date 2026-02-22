@@ -34,8 +34,10 @@ public class EntityPoolManager {
     // Track entity types for each entity
     private final Map<UUID, EntityType> entityTypes;
 
-    // Cache last applied material per entity to avoid redundant block data updates
-    private final Map<String, String> entityMaterialCache;
+    // Cache last applied material per entity to avoid redundant block data updates.
+    // Nested map: zoneName (lowercase) → entityId → materialName.
+    // Enables O(1) zone-level invalidation instead of prefix-scanning all keys.
+    private final Map<String, Map<String, String>> entityMaterialCache;
 
     // Limits to prevent memory issues
     private static final int MAX_ZONES = 100;
@@ -51,7 +53,7 @@ public class EntityPoolManager {
         this.plugin = plugin;
         this.entityPools = new ConcurrentHashMap<>();
         this.entityTypes = new ConcurrentHashMap<>();
-        this.entityMaterialCache = new ConcurrentHashMap<>();
+        this.entityMaterialCache = new ConcurrentHashMap<>(); // zone → entityId → material
         this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
     }
 
@@ -103,8 +105,7 @@ public class EntityPoolManager {
 
             // Invalidate material cache — init_pool reset all entities to the
             // pool material, so cached per-entity overrides are now stale.
-            String cachePrefix = zoneName.toLowerCase() + ":";
-            entityMaterialCache.keySet().removeIf(key -> key.startsWith(cachePrefix));
+            entityMaterialCache.remove(zoneName.toLowerCase());
 
             if (finalCount > currentCount) {
                 // Add more entities — spawn at sibling positions so they
@@ -206,6 +207,11 @@ public class EntityPoolManager {
         }
     }
 
+    // PERFORMANCE: Cache Material.matchMaterial() results to avoid repeated enum scans.
+    // Material names are case-insensitive; matchMaterial does uppercase conversion + linear scan.
+    // This turns O(n) enum lookups into O(1) hash lookups after first resolution.
+    private static final ConcurrentHashMap<String, Material> MATERIAL_CACHE = new ConcurrentHashMap<>();
+
     /**
      * PERFORMANCE: Batch update multiple entities in a single scheduler task.
      * This is much more efficient than individual updates when updating many entities.
@@ -216,7 +222,8 @@ public class EntityPoolManager {
     public void batchUpdateEntities(String zoneName, List<EntityUpdate> updates) {
         if (updates == null || updates.isEmpty()) return;
 
-        Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
+        String zoneKey = zoneName.toLowerCase();
+        Map<String, Entity> pool = entityPools.get(zoneKey);
         if (pool == null) return;
 
         // Record stats
@@ -260,15 +267,22 @@ public class EntityPoolManager {
 
                 // Apply material update (only when changed, to avoid redundant block data updates)
                 if (update.hasMaterial() && update.material() != null && entity instanceof BlockDisplay blockDisplay) {
-                    String cacheKey = zoneName.toLowerCase() + ":" + update.entityId();
-                    String lastMaterial = entityMaterialCache.get(cacheKey);
+                    Map<String, String> zoneMatCache = entityMaterialCache
+                        .computeIfAbsent(zoneKey, k -> new ConcurrentHashMap<>());
+                    String lastMaterial = zoneMatCache.get(update.entityId());
                     if (!update.material().equals(lastMaterial)) {
-                        Material mat = Material.matchMaterial(update.material());
+                        Material mat = MATERIAL_CACHE.get(update.material());
+                        if (mat == null) {
+                            mat = Material.matchMaterial(update.material());
+                            if (mat != null) {
+                                MATERIAL_CACHE.put(update.material(), mat);
+                            }
+                        }
                         if (mat != null && mat.isBlock()) {
                             blockDisplay.setBlock(mat.createBlockData());
                         }
                         // Cache even invalid names to avoid repeated lookups
-                        entityMaterialCache.put(cacheKey, update.material());
+                        zoneMatCache.put(update.entityId(), update.material());
                     }
                 }
             }
@@ -472,6 +486,45 @@ public class EntityPoolManager {
     }
 
     /**
+     * Batch update TextDisplay backgrounds from raw ARGB pixel data.
+     * Avoids creating intermediate Color objects for each pixel — significantly
+     * reduces GC pressure on the bitmap hot path (called every tick at 20 TPS).
+     *
+     * @param zoneName  the zone to update
+     * @param entityIds ordered entity ID array (index corresponds to argbPixels index)
+     * @param argbPixels raw ARGB pixel values
+     * @param count     number of entries to process
+     */
+    public boolean batchUpdateTextBackgroundsRaw(String zoneName, String[] entityIds, int[] argbPixels, int count) {
+        if (entityIds == null || argbPixels == null || count <= 0) return false;
+
+        Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
+        if (pool == null) return false;
+
+        Runnable apply = () -> {
+            for (int i = 0; i < count; i++) {
+                Entity entity = pool.get(entityIds[i]);
+                if (entity instanceof TextDisplay display) {
+                    int argb = argbPixels[i];
+                    display.setBackgroundColor(Color.fromARGB(
+                        (argb >> 24) & 0xFF, (argb >> 16) & 0xFF,
+                        (argb >> 8) & 0xFF, argb & 0xFF));
+                    if (!" ".equals(display.getText())) {
+                        display.setText(" ");
+                    }
+                }
+            }
+        };
+
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
+        return true;
+    }
+
+    /**
      * Register an externally-spawned entity pool with the pool manager.
      * Used by {@link com.audioviz.bitmap.BitmapRendererBackend} which spawns its own
      * TextDisplay grid but needs lifecycle tracking (cleanup, entity count queries).
@@ -520,9 +573,8 @@ public class EntityPoolManager {
         Map<String, Entity> pool = entityPools.remove(zoneName.toLowerCase());
         if (pool == null) return;
 
-        // Clear material cache entries for this zone
-        String prefix = zoneName.toLowerCase() + ":";
-        entityMaterialCache.keySet().removeIf(key -> key.startsWith(prefix));
+        // Clear material cache entries for this zone (O(1) with nested map)
+        entityMaterialCache.remove(zoneName.toLowerCase());
 
         runEntityMutation(() -> {
             for (Entity entity : pool.values()) {

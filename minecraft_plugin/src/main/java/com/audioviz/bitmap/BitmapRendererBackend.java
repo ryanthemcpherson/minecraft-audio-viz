@@ -250,30 +250,68 @@ public class BitmapRendererBackend implements RendererBackend {
         int[] currentPixels = frame.getRawPixels();
         int[] lastPixels = lastFramePixels.get(zoneKey);
 
-        // Dirty-check: only update pixels whose color changed since last frame
+        // Dirty-check: only update pixels whose color changed since last frame.
+        // Collects dirty pixel indices into reusable arrays to avoid Map + Color
+        // object allocation on the hot path (called every tick at 20 TPS).
         boolean fullFrame = (lastPixels == null || lastPixels.length != currentPixels.length);
-        Map<String, Color> colorUpdates = new LinkedHashMap<>();
         int totalPixels = Math.min(currentPixels.length, config.width() * config.height());
+
+        // Reuse thread-local scratch arrays to avoid per-frame allocation
+        String[] dirtyIds = getDirtyIdsScratch(totalPixels);
+        int[] dirtyArgb = getDirtyArgbScratch(totalPixels);
+        int dirtyCount = 0;
 
         for (int i = 0; i < totalPixels; i++) {
             int argb = currentPixels[i];
             if (fullFrame || argb != lastPixels[i]) {
-                int a = (argb >> 24) & 0xFF;
-                int r = (argb >> 16) & 0xFF;
-                int g = (argb >> 8) & 0xFF;
-                int b = argb & 0xFF;
-                colorUpdates.put("bmp_" + i, Color.fromARGB(a, r, g, b));
+                dirtyIds[dirtyCount] = getBmpEntityId(i);
+                dirtyArgb[dirtyCount] = argb;
+                dirtyCount++;
             }
         }
 
-        if (colorUpdates.isEmpty()) return;
+        if (dirtyCount == 0) return;
 
-        boolean applied = poolManager.batchUpdateTextBackgrounds(zoneName, colorUpdates);
+        boolean applied = poolManager.batchUpdateTextBackgroundsRaw(zoneName, dirtyIds, dirtyArgb, dirtyCount);
         if (applied) {
             int[] snapshot = new int[currentPixels.length];
             System.arraycopy(currentPixels, 0, snapshot, 0, currentPixels.length);
             lastFramePixels.put(zoneKey, snapshot);
         }
+    }
+
+    // --- Scratch buffers for dirty-pixel collection (avoids per-frame allocation) ---
+    private String[] dirtyIdsScratch = new String[0];
+    private int[] dirtyArgbScratch = new int[0];
+
+    private String[] getDirtyIdsScratch(int minCapacity) {
+        if (dirtyIdsScratch.length < minCapacity) {
+            dirtyIdsScratch = new String[minCapacity];
+        }
+        return dirtyIdsScratch;
+    }
+
+    private int[] getDirtyArgbScratch(int minCapacity) {
+        if (dirtyArgbScratch.length < minCapacity) {
+            dirtyArgbScratch = new int[minCapacity];
+        }
+        return dirtyArgbScratch;
+    }
+
+    /** Cached "bmp_N" entity ID strings to avoid per-pixel string concatenation. */
+    private String[] bmpEntityIdCache = new String[0];
+
+    private String getBmpEntityId(int index) {
+        if (index >= bmpEntityIdCache.length) {
+            int newLen = Math.max(index + 1, bmpEntityIdCache.length * 2);
+            String[] expanded = new String[newLen];
+            System.arraycopy(bmpEntityIdCache, 0, expanded, 0, bmpEntityIdCache.length);
+            for (int i = bmpEntityIdCache.length; i < newLen; i++) {
+                expanded[i] = "bmp_" + i;
+            }
+            bmpEntityIdCache = expanded;
+        }
+        return bmpEntityIdCache[index];
     }
 
     /**

@@ -36,7 +36,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private static AudioVizPlugin instance;
     private ZoneManager zoneManager;
     private EntityPoolManager entityPoolManager;
-    private VizWebSocketServer webSocketServer;
+    private volatile VizWebSocketServer webSocketServer;
     private MenuManager menuManager;
     private ChatInputManager chatInputManager;
     private BeatEventManager beatEventManager;
