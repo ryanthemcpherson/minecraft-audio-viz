@@ -207,7 +207,7 @@
 
                 <!-- Audio Settings Panel -->
                 <div class="panel collapsible">
-                    <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                    <div class="panel-header">
                         <span class="panel-title">Audio Settings</span>
                         <span class="collapse-icon"></span>
                     </div>
@@ -242,7 +242,7 @@
 
                 <!-- Band Sensitivity Panel -->
                 <div class="panel collapsible collapsed">
-                    <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                    <div class="panel-header">
                         <span class="panel-title">Band Sensitivity</span>
                         <span class="collapse-icon"></span>
                     </div>
@@ -331,6 +331,12 @@
                 </span>
             </div>
         </footer>
+    </div>
+
+    <!-- DJ info overlay -->
+    <div id="dj-overlay" style="display:none; position:fixed; bottom:20px; left:20px; align-items:center; gap:10px; padding:8px 14px; background:rgba(8,9,13,0.8); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.06); border-radius:8px; z-index:100;">
+        <img id="dj-overlay-avatar" style="width:28px; height:28px; border-radius:50%; object-fit:cover; display:none;" />
+        <span id="dj-overlay-name" style="color:#f5f5f5; font-size:13px; font-weight:500;"></span>
     </div>
 
     <!-- Beat flash overlay -->
