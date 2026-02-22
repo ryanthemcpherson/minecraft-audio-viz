@@ -209,13 +209,13 @@ public class SettingsMenu implements Menu {
         switch (slot) {
             // Max entities
             case SLOT_MAX_ENTITIES -> {
-                int current = plugin.getConfig().getInt("performance.max_entities_per_zone", 100);
+                int current = plugin.getConfig().getInt("performance.max_entities_per_zone", 256);
                 int step = click.isShiftClick() ? 50 : 10;
                 int newValue;
                 if (click.isRightClick()) {
                     newValue = Math.max(10, current - step);
                 } else {
-                    newValue = Math.min(500, current + step);
+                    newValue = Math.min(1000, current + step);
                 }
                 plugin.getConfig().set("performance.max_entities_per_zone", newValue);
                 playSound(player, Sound.UI_BUTTON_CLICK);

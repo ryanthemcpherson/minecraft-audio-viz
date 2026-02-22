@@ -136,6 +136,7 @@ public class StageManager {
      * Activate a stage: initialize entity pools for all zones.
      */
     public void activateStage(Stage stage) {
+        int defaultEntityCount = plugin.getConfig().getInt("defaults.entity_count", 16);
         for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
             StageZoneRole role = entry.getKey();
             String zoneName = entry.getValue();
@@ -144,7 +145,9 @@ public class StageManager {
             Material material = Material.matchMaterial(config.getBlockType());
             if (material == null) material = Material.SEA_LANTERN;
 
-            plugin.getEntityPoolManager().initializeBlockPool(zoneName, config.getEntityCount(), material);
+            // Use at least the config default so stale saved values don't under-allocate
+            int entityCount = Math.max(config.getEntityCount(), defaultEntityCount);
+            plugin.getEntityPoolManager().initializeBlockPool(zoneName, entityCount, material);
         }
 
         stage.setActive(true);

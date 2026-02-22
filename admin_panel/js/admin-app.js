@@ -131,8 +131,9 @@ class AdminApp {
         // DOM elements cache
         this.elements = {};
 
-        // 3D Preview components (lazy-loaded)
+        // 3D Preview components (eagerly init on connect, lives in preview strip)
         this._previewInitialized = false;
+        this._previewStripCollapsed = localStorage.getItem('mcav-preview-collapsed') === 'true';
         this._previewScene = null;
         this._previewCamera = null;
         this._previewRenderer = null;
@@ -140,8 +141,8 @@ class AdminApp {
         this._previewParticleSystem = null;
         this._previewBlockIndicators = null;
         this._previewFailed = false;
-        this._previewAutoRotate = true;
-        this._previewShowGrid = true;
+        this._previewAutoRotate = false;
+        this._previewShowGrid = false;
         this._previewAnimationId = null;
         this._previewLastFrameTime = 0;
         this._previewFps = 60;
@@ -185,6 +186,7 @@ class AdminApp {
         this._setupDJQueueDelegation();
         this._setupDJPendingDelegation();
         this._initBitmapControls();
+        this._initPreviewStrip();
         this._updateTabIndicator();
         window.addEventListener('resize', () => this._updateTabIndicator());
 
@@ -368,6 +370,8 @@ class AdminApp {
 
         // Bitmap LED Wall elements
         this.elements.bitmapZone = document.getElementById('bitmap-zone');
+        this.elements.bitmapAutoSize = document.getElementById('bitmap-auto-size');
+        this.elements.bitmapManualDims = document.getElementById('bitmap-manual-dims');
         this.elements.bitmapWidth = document.getElementById('bitmap-width');
         this.elements.bitmapHeight = document.getElementById('bitmap-height');
         this.elements.btnBitmapInit = document.getElementById('btn-bitmap-init');
@@ -845,7 +849,7 @@ class AdminApp {
         // Stage selector
         if (this.elements.stageSelect) {
             this.elements.stageSelect.addEventListener('change', () => {
-                this.state.selectedStage = this.elements.stageSelect.value || null;
+                this.state.selectedStage = this.elements.stageSelect.value || this.state.selectedStage;
                 // Auto-select all zones of the new stage
                 this.state.selectedZones.clear();
                 const zones = this.state.allZones || [];
@@ -1011,10 +1015,16 @@ class AdminApp {
             this.ws.send({ type: 'get_voice_status' });
             this.ws.send({ type: 'list_scenes' });
 
-            // Fetch bitmap data if bitmap tab is already active
-            const activeTab = document.querySelector('.tab.active');
-            if (activeTab && activeTab.dataset.tab === 'bitmap') {
-                this._fetchBitmapData();
+            // Fetch bitmap data on connect (LED Wall is now inline in Mixer)
+            this._fetchBitmapData();
+
+            // Eagerly init 3D preview (lives in always-visible strip now)
+            if (!this._previewInitialized && !this._previewFailed) {
+                this._initPreview().then(() => {
+                    if (this._previewInitialized && !this._previewStripCollapsed) {
+                        this._startPreviewAnimation();
+                    }
+                });
             }
         });
 
@@ -1072,10 +1082,10 @@ class AdminApp {
                 if (data.stages) {
                     this._handleStagesList({ stages: data.stages });
                 }
-                if (data.stage !== undefined) {
-                    this.state.selectedStage = data.stage || null;
+                if (data.stage !== undefined && data.stage) {
+                    this.state.selectedStage = data.stage;
                     if (this.elements.stageSelect) {
-                        this.elements.stageSelect.value = data.stage || '';
+                        this.elements.stageSelect.value = data.stage;
                     }
                 }
                 // Handle initial MC status from vj_state
@@ -1083,6 +1093,10 @@ class AdminApp {
                     this.state.minecraftConnected = data.minecraft_connected;
                     this._updateServiceIndicators();
                     this._updateMCDependentControls();
+                    // Auto-fetch bitmap data when Minecraft is connected
+                    if (data.minecraft_connected && !this.state.bitmap.dataFetched) {
+                        this._fetchBitmapData();
+                    }
                 }
                 // Handle initial pending DJs from vj_state
                 if (data.pending_djs) {
@@ -1287,25 +1301,25 @@ class AdminApp {
                 this._renderBitmapPalettes();
                 break;
 
-            case 'bitmap_initialized':
+            case 'bitmap_initialized': {
                 this.state.bitmap.initialized = true;
                 this.state.bitmap.width = data.width || 16;
                 this.state.bitmap.height = data.height || 12;
+                const initZone = data.zone || this.state.bitmap.zone;
+                this.state.bitmap.initializedZones.add(initZone);
                 this._updateBitmapStatus(data);
                 this._showToast(`Bitmap initialized: ${data.width || '?'}x${data.height || '?'}`, 'success');
-                // Track this zone as initialized and show its bitmap in 3D preview
+                // Show bitmap in 3D preview
                 if (this._bitmapPreview) {
-                    const zone = data.zone || this.state.bitmap.zone;
-                    this.state.bitmap.initializedZones.add(zone);
-                    const zg = this._previewZoneGroups[zone];
+                    const zg = this._previewZoneGroups[initZone];
                     if (zg) {
-                        this._bitmapPreview.activate(zone, data.width || 16, data.height || 12,
+                        this._bitmapPreview.activate(initZone, data.width || 16, data.height || 12,
                             data.pattern || this.state.bitmap.activePattern || 'bmp_plasma', zg);
                     }
-                    // Only show the initialized zone's bitmap plane
-                    this._bitmapPreview.setZoneVisible(zone, true);
+                    this._bitmapPreview.setZoneVisible(initZone, true);
                 }
                 break;
+            }
 
             case 'bitmap_pattern_set':
             case 'bitmap_transition_started':
@@ -1471,9 +1485,10 @@ class AdminApp {
                 this.elements.stageSelect.appendChild(option);
             });
 
-            // Auto-select first stage if none selected
-            if (!this.state.selectedStage && this.state.stages.length > 0) {
-                this.state.selectedStage = this.state.stages[0].name;
+            // Always ensure a stage is selected
+            const stageNames = this.state.stages.map(s => s.name);
+            if (!this.state.selectedStage || !stageNames.includes(this.state.selectedStage)) {
+                this.state.selectedStage = stageNames.length > 0 ? stageNames[0] : null;
             }
 
             if (this.state.selectedStage) {
@@ -2492,32 +2507,7 @@ class AdminApp {
             panel.classList.toggle('active', panel.id === `${tabName}-panel`);
         });
 
-        // Initialize 3D preview on first switch to preview tab
-        if (tabName === 'preview' && !this._previewInitialized) {
-            this._initPreview();
-        }
-
-        // Fetch bitmap data on first switch to bitmap tab
-        if (tabName === 'bitmap' && !this.state.bitmap.dataFetched && this.state.connected) {
-            this._fetchBitmapData();
-        }
-
-        // Handle preview animation based on tab visibility
-        if (tabName === 'preview') {
-            if (!this._previewFailed) {
-                this._startPreviewAnimation();
-            } else {
-                this._showToast('3D Preview unavailable on this browser/GPU', 'warning');
-            }
-            // Show preview stats in header
-            const statsEl = document.getElementById('preview-stats');
-            if (statsEl) statsEl.classList.remove('hidden');
-        } else {
-            this._stopPreviewAnimation();
-            // Hide preview stats in header
-            const statsEl = document.getElementById('preview-stats');
-            if (statsEl) statsEl.classList.add('hidden');
-        }
+        // Preview animation is handled by the strip, not by tab switching
     }
 
     _updateTabIndicator() {
@@ -3447,8 +3437,14 @@ class AdminApp {
         // Notify on status change
         if (data.connected && !wasConnected) {
             this._showToast('Minecraft connected', 'success');
+            // Auto-fetch bitmap data when Minecraft reconnects
+            if (!this.state.bitmap.dataFetched) {
+                this._fetchBitmapData();
+            }
         } else if (!data.connected && wasConnected) {
             this._showToast('Minecraft disconnected', 'warning');
+            // Reset bitmap data state so it re-fetches on reconnect
+            this.state.bitmap.dataFetched = false;
         }
     }
 
@@ -3788,6 +3784,48 @@ class AdminApp {
             return false;
         } finally {
             this._threeLoadInFlight = false;
+        }
+    }
+
+    _initPreviewStrip() {
+        const strip = document.getElementById('preview-strip');
+        const collapseBtn = document.getElementById('preview-strip-collapse');
+        if (!strip) return;
+
+        // Apply saved collapsed state
+        if (this._previewStripCollapsed) {
+            strip.classList.add('collapsed');
+            if (collapseBtn) {
+                collapseBtn.querySelector('.collapse-arrow').textContent = '\u25B2'; // ▲
+            }
+        }
+
+        // Collapse toggle
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', () => {
+                this._previewStripCollapsed = !this._previewStripCollapsed;
+                strip.classList.toggle('collapsed', this._previewStripCollapsed);
+                collapseBtn.querySelector('.collapse-arrow').textContent =
+                    this._previewStripCollapsed ? '\u25B2' : '\u25BC';
+                localStorage.setItem('mcav-preview-collapsed', String(this._previewStripCollapsed));
+
+                if (this._previewStripCollapsed) {
+                    this._stopPreviewAnimation();
+                } else {
+                    this._onPreviewResize();
+                    this._startPreviewAnimation();
+                }
+            });
+        }
+
+        // Listen for strip body transition end to resize canvas
+        const body = strip.querySelector('.preview-strip-body');
+        if (body) {
+            body.addEventListener('transitionend', () => {
+                if (!this._previewStripCollapsed) {
+                    this._onPreviewResize();
+                }
+            });
         }
     }
 
@@ -4624,29 +4662,17 @@ class AdminApp {
 
     _updatePreviewMeters() {
         for (let i = 0; i < 5; i++) {
-            const meterBar = document.getElementById(`preview-band-${i}`);
-            if (meterBar) {
-                const height = Math.round(this.state.bands[i] * 100);
-                meterBar.style.height = height + '%';
+            // Strip meters (horizontal, use width)
+            const stripBar = document.getElementById(`strip-band-${i}`);
+            if (stripBar) {
+                const pct = Math.round(this.state.bands[i] * 100);
+                stripBar.style.width = pct + '%';
             }
         }
     }
 
     _updatePreviewStats() {
-        // Block stats
-        const blockStatsEl = document.getElementById('preview-stat-blocks');
-        if (blockStatsEl && this._previewBlockIndicators) {
-            const stats = this._previewBlockIndicators.getStats();
-            blockStatsEl.textContent = `${stats.active}/${stats.total}`;
-        }
-
-        // Particle stats
-        const particleStatsEl = document.getElementById('preview-stat-particles');
-        if (particleStatsEl && this._previewParticleSystem) {
-            particleStatsEl.textContent = this._previewParticleSystem.getActiveCount();
-        }
-
-        // Header stats (when preview tab is active)
+        // Strip header stats
         const headerBlockCount = document.getElementById('preview-block-count');
         const headerParticleCount = document.getElementById('preview-particle-count');
         if (headerBlockCount && this._previewBlockIndicators) {
@@ -4987,19 +5013,41 @@ class AdminApp {
     _initBitmapControls() {
         const el = this.elements;
 
-        // Init button
+        // Advanced panel toggle
+        const advToggle = document.getElementById('btn-bitmap-advanced');
+        const advPanel = document.getElementById('bitmap-advanced-panel');
+        if (advToggle && advPanel) {
+            advToggle.addEventListener('click', () => {
+                const open = advPanel.style.display !== 'none';
+                advPanel.style.display = open ? 'none' : '';
+                advToggle.classList.toggle('open', !open);
+            });
+        }
+
+        // Auto-size checkbox toggles manual dimension inputs
+        if (el.bitmapAutoSize) {
+            el.bitmapAutoSize.addEventListener('change', () => {
+                if (el.bitmapManualDims) {
+                    el.bitmapManualDims.style.display = el.bitmapAutoSize.checked ? 'none' : '';
+                }
+            });
+        }
+
+        // Re-init button (in advanced panel)
         if (el.btnBitmapInit) {
             el.btnBitmapInit.addEventListener('click', () => {
                 const zone = el.bitmapZone?.value || 'main';
-                const width = parseInt(el.bitmapWidth?.value) || 16;
-                const height = parseInt(el.bitmapHeight?.value) || 12;
-                this.ws.send({
+                const autoSize = el.bitmapAutoSize?.checked ?? true;
+                const msg = {
                     type: 'init_bitmap',
                     zone,
-                    width,
-                    height,
                     pattern: this.state.bitmap.activePattern || 'bmp_spectrum'
-                });
+                };
+                if (!autoSize) {
+                    msg.width = parseInt(el.bitmapWidth?.value) || 16;
+                    msg.height = parseInt(el.bitmapHeight?.value) || 12;
+                }
+                this.ws.send(msg);
             });
         }
 
@@ -5411,23 +5459,41 @@ class AdminApp {
 
     _setBitmapPattern(patternId) {
         const zone = this.elements.bitmapZone?.value || 'main';
-        const transition = this.elements.bitmapTransition?.value;
-        const duration = parseInt(this.elements.bitmapTransitionDuration?.value) || 20;
 
-        if (transition && transition !== 'INSTANT') {
-            this.ws.send({
-                type: 'bitmap_transition',
-                zone,
-                pattern: patternId,
-                transition,
-                duration_ticks: duration
-            });
-        } else {
-            this.ws.send({
-                type: 'set_bitmap_pattern',
+        // Auto-init: if zone not yet initialized, send init_bitmap instead
+        // The init message accepts a pattern field, so the zone will start with this pattern
+        if (!this.state.bitmap.initializedZones.has(zone)) {
+            const autoSize = this.elements.bitmapAutoSize?.checked ?? true;
+            const msg = {
+                type: 'init_bitmap',
                 zone,
                 pattern: patternId
-            });
+            };
+            if (!autoSize) {
+                msg.width = parseInt(this.elements.bitmapWidth?.value) || 16;
+                msg.height = parseInt(this.elements.bitmapHeight?.value) || 12;
+            }
+            this.ws.send(msg);
+        } else {
+            // Zone already initialized — switch pattern (with optional transition)
+            const transition = this.elements.bitmapTransition?.value;
+            const duration = parseInt(this.elements.bitmapTransitionDuration?.value) || 20;
+
+            if (transition && transition !== 'INSTANT') {
+                this.ws.send({
+                    type: 'bitmap_transition',
+                    zone,
+                    pattern: patternId,
+                    transition,
+                    duration_ticks: duration
+                });
+            } else {
+                this.ws.send({
+                    type: 'set_bitmap_pattern',
+                    zone,
+                    pattern: patternId
+                });
+            }
         }
 
         this.state.bitmap.activePattern = patternId;
@@ -5473,12 +5539,11 @@ class AdminApp {
             this.state.bitmap.initialized = true;
             const w = data.width || this.state.bitmap.width;
             const h = data.height || this.state.bitmap.height;
-            const pattern = data.pattern || this.state.bitmap.activePattern || '?';
-            statusEl.textContent = `Active: ${w}x${h} — ${pattern}`;
             statusEl.classList.add('active');
+            statusEl.title = `Active: ${w}x${h}`;
         } else {
-            statusEl.textContent = 'Not initialized';
             statusEl.classList.remove('active');
+            statusEl.title = 'Not initialized';
         }
 
         if (data.pattern) {

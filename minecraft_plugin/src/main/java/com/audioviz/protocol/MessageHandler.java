@@ -1622,8 +1622,8 @@ public class MessageHandler {
      * {
      *   "type": "init_bitmap",
      *   "zone": "zone_name",
-     *   "width": 32,
-     *   "height": 16,
+     *   "width": 32,          // optional — omit for auto-sizing from zone geometry
+     *   "height": 16,         // optional — omit for auto-sizing from zone geometry
      *   "pattern": "bmp_spectrum"  // optional, default "bmp_spectrum"
      * }
      */
@@ -1639,20 +1639,25 @@ public class MessageHandler {
             return createError("Zone not found: " + zoneName);
         }
 
-        int width = message.has("width") ? message.get("width").getAsInt() : 32;
-        int height = message.has("height") ? message.get("height").getAsInt() : 16;
+        boolean hasWidth = message.has("width") && message.get("width").getAsInt() > 0;
+        boolean hasHeight = message.has("height") && message.get("height").getAsInt() > 0;
         String patternId = message.has("pattern") ? message.get("pattern").getAsString() : "bmp_spectrum";
-
-        // Clamp dimensions
-        width = Math.max(2, Math.min(128, width));
-        height = Math.max(2, Math.min(64, height));
 
         BitmapRendererBackend renderer = plugin.getBitmapRenderer();
         BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
 
-        // Initialize the grid of TextDisplay entities (may scale down dimensions)
         var zone = plugin.getZoneManager().getZone(zoneName);
-        int[] actualDims = renderer.initializeBitmapGrid(zone, width, height);
+        int[] actualDims;
+
+        if (hasWidth && hasHeight) {
+            // Explicit dimensions provided
+            int width = Math.max(2, Math.min(128, message.get("width").getAsInt()));
+            int height = Math.max(2, Math.min(64, message.get("height").getAsInt()));
+            actualDims = renderer.initializeBitmapGrid(zone, width, height);
+        } else {
+            // Auto-size from zone geometry
+            actualDims = renderer.initializeBitmapGrid(zone);
+        }
         int actualWidth = actualDims[0];
         int actualHeight = actualDims[1];
 
