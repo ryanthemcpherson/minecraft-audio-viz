@@ -2,23 +2,26 @@
    Audio Visualizer Control Center - Professional Dark Theme
    VJ-optimized UX overhaul
    ========================================================================== */
+@import url('./mcav-tokens.css');
 
 /* CSS Variables */
 :root {
     /* Background colors */
-    --bg-primary: #0a0a0f;
-    --bg-secondary: #12121a;
+    --bg-primary: var(--mcav-bg-primary);
+    --bg-secondary: var(--mcav-bg-secondary);
     --bg-tertiary: #1a1a25;
     --bg-elevated: #22222e;
 
     /* Accent colors */
-    --accent: #00D4FF;
+    --accent: var(--mcav-cyan);
+    --accent-blue: var(--mcav-blue);
+    --accent-amber: var(--mcav-amber);
     --accent-hover: #33DDFF;
     --accent-dim: rgba(0, 212, 255, 0.2);
 
     /* Text colors */
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
+    --text-primary: var(--mcav-text-primary);
+    --text-secondary: var(--mcav-text-secondary);
     --text-muted: #64748b;
 
     /* Status colors */
@@ -53,7 +56,7 @@
     --status-bar-height: 44px;
 
     /* Borders & Shadows */
-    --border-color: rgba(255, 255, 255, 0.08);
+    --border-color: var(--mcav-border-subtle);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
