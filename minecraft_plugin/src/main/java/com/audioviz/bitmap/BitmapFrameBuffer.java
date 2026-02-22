@@ -32,9 +32,9 @@ public class BitmapFrameBuffer {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("Dimensions must be positive: " + width + "x" + height);
         }
-        if ((long) width * height > 10_000) {
+        if ((long) width * height > 16_384) {
             throw new IllegalArgumentException("Bitmap too large: " + width + "x" + height +
-                " = " + (width * height) + " pixels (max 10000)");
+                " = " + (width * height) + " pixels (max 16384)");
         }
         this.width = width;
         this.height = height;

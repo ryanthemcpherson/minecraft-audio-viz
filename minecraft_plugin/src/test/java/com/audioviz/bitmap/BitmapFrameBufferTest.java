@@ -31,14 +31,14 @@ class BitmapFrameBufferTest {
 
         @Test
         void tooLargeThrows() {
-            // 10_000 pixel limit
+            // 16_384 pixel limit
             assertThrows(IllegalArgumentException.class, () -> new BitmapFrameBuffer(200, 200));
         }
 
         @Test
         void maxSizeOk() {
-            // 100x100 = 10_000 exactly — should be fine
-            assertDoesNotThrow(() -> new BitmapFrameBuffer(100, 100));
+            // 128x128 = 16_384 exactly — should be fine
+            assertDoesNotThrow(() -> new BitmapFrameBuffer(128, 128));
         }
 
         @Test
