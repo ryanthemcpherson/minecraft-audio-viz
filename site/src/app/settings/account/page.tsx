@@ -30,7 +30,7 @@ function timeAgo(dateStr: string | null): string {
 
 export default function AccountSettingsPage() {
   const router = useRouter();
-  const { user, accessToken, loading: authLoading, setAuth } = useAuth();
+  const { user, accessToken, loading: authLoading, setAuth, logout } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -185,8 +185,7 @@ export default function AccountSettingsPage() {
     try {
       await deleteAccount(accessToken, deletePassword);
       // Clear auth and redirect to home
-      setAuth(null as unknown as string, null as unknown as string, null as unknown as User);
-      clearStoredRefreshToken();
+      await logout();
       router.push("/");
     } catch (err: unknown) {
       setDeleteError(err instanceof Error ? err.message : "Failed to delete account");

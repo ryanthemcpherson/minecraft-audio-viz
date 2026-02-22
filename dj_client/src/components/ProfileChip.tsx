@@ -7,12 +7,14 @@ interface ProfileChipProps {
 }
 
 function getInitials(name: string): string {
+  if (!name) return '?';
   return name
     .split(/\s+/)
     .slice(0, 2)
-    .map((w) => w[0])
+    .map((w) => w[0] ?? '')
+    .filter(Boolean)
     .join('')
-    .toUpperCase();
+    .toUpperCase() || '?';
 }
 
 export default function ProfileChip({ user, onSignOut }: ProfileChipProps) {

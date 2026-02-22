@@ -512,6 +512,11 @@ async def forgot_password(
 
     log_auth_event("password_reset_request", email=body.email, ip_address=ip)
 
+    # Commit the token first, then send email as best-effort.
+    # This prevents dirty session state if the email send raises an
+    # unexpected exception, and avoids locking users out of password reset.
+    await session.commit()
+
     if token:
         try:
             await send_password_reset_email(
@@ -520,14 +525,9 @@ async def forgot_password(
                 settings=settings,
             )
         except RuntimeError:
-            await session.rollback()
-            raise HTTPException(status_code=503, detail="Email service not configured")
+            logger.warning("Email service not configured for password reset")
         except Exception:
             logger.exception("Failed to send password reset email")
-            await session.rollback()
-            raise HTTPException(status_code=503, detail="Failed to send email")
-
-    await session.commit()
     # Always return success to prevent email enumeration
     return {"message": "If an account with that email exists, a reset link has been sent."}
 

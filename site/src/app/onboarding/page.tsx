@@ -58,7 +58,7 @@ export default function OnboardingPage() {
   const [djName, setDjName] = useState("");
   const [djBio, setDjBio] = useState("");
   const [djGenres, setDjGenres] = useState("");
-  const [createdProfileUserId, setCreatedProfileUserId] = useState<string | null>(null);
+  const [createdProfileSlug, setCreatedProfileSlug] = useState<string | null>(null);
 
   // Check if user needs onboarding
   useEffect(() => {
@@ -152,13 +152,13 @@ export default function OnboardingPage() {
     setError("");
 
     try {
-      await createDJProfile(accessToken, {
+      const profile = await createDJProfile(accessToken, {
         dj_name: djName,
         bio: djBio || undefined,
         genres: djGenres || undefined,
       });
       await completeOnboarding(accessToken, "dj");
-      setCreatedProfileUserId(user.id);
+      setCreatedProfileSlug(profile.slug ?? null);
       setStep("dj_complete");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -653,9 +653,9 @@ export default function OnboardingPage() {
                   Download DJ Client
                 </Link>
 
-                {createdProfileUserId && (
+                {createdProfileSlug && (
                   <Link
-                    href={`/dj/${createdProfileUserId}`}
+                    href={`/dj/${createdProfileSlug}`}
                     className="rounded-lg border border-white/10 px-4 py-3 text-sm font-medium text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
                   >
                     View your profile
