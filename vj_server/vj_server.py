@@ -17,6 +17,7 @@ Architecture:
 
 import argparse
 import asyncio
+import base64
 import bisect
 import http.server
 import json
@@ -375,6 +376,14 @@ class DJConnection:
 
     # Voice streaming state
     voice_streaming: bool = False  # Whether this DJ is sending voice audio
+
+    # DJ profile data (populated from coordinator on connect)
+    avatar_url: Optional[str] = None
+    color_palette: Optional[List[str]] = None
+    block_palette: Optional[List[str]] = None
+    slug: Optional[str] = None
+    bio: Optional[str] = None
+    genres: Optional[str] = None
 
     # Frame buffer for visual delay (timestamped audio state ring buffer)
     _frame_buffer: deque = field(default_factory=deque)  # (timestamp, data) pairs; trimmed manually
@@ -1238,6 +1247,7 @@ class VJServer:
                     "direct_mode": direct_mode,
                     "priority": priority,
                     "code": code,
+                    "coordinator_token": data.get("token"),  # Coordinator JWT for profile lookup
                 }
                 self._pending_djs[dj_id] = pending_info
 
@@ -1480,6 +1490,40 @@ class VJServer:
                 f"[DJ CONNECT] {dj_name} ({dj_id}){mode_str} from {websocket.remote_address}"
             )
             self._dj_connects += 1
+
+            # Fetch DJ profile from coordinator (non-blocking, best-effort)
+            coordinator_token = data.get("token")
+            if coordinator_token and self._coordinator:
+                try:
+                    # Decode JWT payload to get dj_session_id (sub claim)
+                    payload_b64 = coordinator_token.split(".")[1]
+                    payload_b64 += "=" * (4 - len(payload_b64) % 4)
+                    payload = mjson.decode(base64.urlsafe_b64decode(payload_b64))
+                    dj_session_id = payload.get("sub")
+
+                    if dj_session_id:
+                        profile = await asyncio.wait_for(
+                            self._coordinator.fetch_dj_profile(str(dj_session_id)),
+                            timeout=5.0,
+                        )
+                        if profile:
+                            dj.dj_name = profile.get("dj_name", dj.dj_name)
+                            dj.avatar_url = profile.get("avatar_url")
+                            dj.color_palette = profile.get("color_palette")
+                            dj.block_palette = profile.get("block_palette")
+                            dj.slug = profile.get("slug")
+                            dj.bio = profile.get("bio")
+                            dj.genres = profile.get("genres")
+                            dj_name = dj.dj_name  # Update local var for auth_response
+                            logger.info(
+                                "[DJ PROFILE] Loaded profile for %s: slug=%s, %d colors, %d blocks",
+                                dj.dj_name,
+                                dj.slug,
+                                len(dj.color_palette) if dj.color_palette else 0,
+                                len(dj.block_palette) if dj.block_palette else 0,
+                            )
+                except Exception as exc:
+                    logger.warning("[DJ PROFILE] Failed to load profile for %s: %s", dj_id, exc)
 
             # Build auth success response
             auth_response = {
@@ -3561,6 +3605,41 @@ class VJServer:
 
         self._dj_connects += 1
         logger.info(f"[DJ APPROVED] {info['dj_name']} ({dj_id})")
+
+        # Fetch DJ profile from coordinator (non-blocking, best-effort)
+        coordinator_token = info.get("coordinator_token")
+        if coordinator_token and self._coordinator:
+            try:
+                # Decode JWT payload to get dj_session_id (sub claim)
+                payload_b64 = coordinator_token.split(".")[1]
+                payload_b64 += "=" * (4 - len(payload_b64) % 4)
+                payload = mjson.decode(base64.urlsafe_b64decode(payload_b64))
+                dj_session_id = payload.get("sub")
+
+                if dj_session_id:
+                    profile = await asyncio.wait_for(
+                        self._coordinator.fetch_dj_profile(str(dj_session_id)),
+                        timeout=5.0,
+                    )
+                    if profile:
+                        dj = self._djs.get(dj_id)
+                        if dj:
+                            dj.dj_name = profile.get("dj_name", dj.dj_name)
+                            dj.avatar_url = profile.get("avatar_url")
+                            dj.color_palette = profile.get("color_palette")
+                            dj.block_palette = profile.get("block_palette")
+                            dj.slug = profile.get("slug")
+                            dj.bio = profile.get("bio")
+                            dj.genres = profile.get("genres")
+                            logger.info(
+                                "[DJ PROFILE] Loaded profile for %s: slug=%s, %d colors, %d blocks",
+                                dj.dj_name,
+                                dj.slug,
+                                len(dj.color_palette) if dj.color_palette else 0,
+                                len(dj.block_palette) if dj.block_palette else 0,
+                            )
+            except Exception as exc:
+                logger.warning("[DJ PROFILE] Failed to load profile for %s: %s", dj_id, exc)
 
         # Send auth_success to the DJ (same type as dj_auth path,
         # so the Rust client handles it via the existing ServerMessage enum)
