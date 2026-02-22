@@ -88,6 +88,16 @@ _NONPRINTABLE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _MATERIAL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
+def _json_str(data) -> str:
+    """Encode to JSON string for WebSocket text frames.
+
+    msgspec.json.encode() returns bytes which websockets sends as binary
+    frames.  JavaScript's JSON.parse() and Java's onMessage(String) both
+    require text frames, so we must decode to str before sending.
+    """
+    return mjson.encode(data).decode()
+
+
 def _sanitize_name(value: str, max_length: int = 64, default: str = "DJ") -> str:
     """Sanitize a DJ name or ID: strip non-printable chars, enforce length limit."""
     value = _NONPRINTABLE_RE.sub("", value).strip()
@@ -1152,7 +1162,7 @@ class VJServer:
         if dj.direct_mode:
             dj.mc_connected = frame_data.get("mc_connected", False)
         await websocket.send(
-            mjson.encode(
+            _json_str(
                 {
                     "type": "heartbeat_ack",
                     "server_time": now,
@@ -1163,9 +1173,7 @@ class VJServer:
         # Periodic clock resync (every 30s)
         if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
             try:
-                await websocket.send(
-                    mjson.encode({"type": "clock_sync_request", "server_time": now})
-                )
+                await websocket.send(_json_str({"type": "clock_sync_request", "server_time": now}))
                 dj._last_clock_resync = now
             except Exception:
                 pass
@@ -1243,7 +1251,7 @@ class VJServer:
                     if _contains_slur(dj_name):
                         logger.warning("DJ code auth rejected: DJ name failed content filter")
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "auth_error",
                                     "error": "DJ name contains language that is not allowed",
@@ -1263,7 +1271,7 @@ class VJServer:
                     if code not in self._connect_codes:
                         logger.warning(f"DJ code auth failed: invalid code {code}")
                         await websocket.send(
-                            mjson.encode({"type": "auth_error", "error": "Invalid connect code"})
+                            _json_str({"type": "auth_error", "error": "Invalid connect code"})
                         )
                         await websocket.close(4004, "Invalid connect code")
                         return
@@ -1272,7 +1280,7 @@ class VJServer:
                     if not connect_code.is_valid():
                         logger.warning(f"DJ code auth failed: expired code {code}")
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "auth_error",
                                     "error": "Connect code has expired",
@@ -1307,7 +1315,7 @@ class VJServer:
 
                 # Tell the DJ they're waiting for approval
                 await websocket.send(
-                    mjson.encode(
+                    _json_str(
                         {
                             "type": "auth_pending",
                             "message": "Waiting for VJ approval...",
@@ -1318,7 +1326,7 @@ class VJServer:
 
                 # Notify admin panel
                 await self._broadcast_to_browsers(
-                    mjson.encode(
+                    _json_str(
                         {
                             "type": "dj_pending",
                             "dj": {
@@ -1343,7 +1351,7 @@ class VJServer:
                                 continue
                             msg_data = mjson.decode(msg)
                             if msg_data.get("type") == "ping":
-                                await websocket.send(mjson.encode({"type": "pong"}))
+                                await websocket.send(_json_str({"type": "pong"}))
                         except asyncio.TimeoutError:
                             # Just a timeout on recv, keep waiting
                             pass
@@ -1354,7 +1362,7 @@ class VJServer:
                                 f"Pending DJ {dj_name} disconnected while waiting for approval"
                             )
                             await self._broadcast_to_browsers(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "dj_denied",
                                         "dj_id": dj_id,
@@ -1382,7 +1390,7 @@ class VJServer:
                 try:
                     t1 = time.time()
                     await websocket.send(
-                        mjson.encode({"type": "clock_sync_request", "server_time": t1})
+                        _json_str({"type": "clock_sync_request", "server_time": t1})
                     )
                     sync_deadline = asyncio.get_running_loop().time() + 5.0
                     while True:
@@ -1441,7 +1449,7 @@ class VJServer:
 
                 # Send explicit stream route (same as dj_auth path)
                 try:
-                    await websocket.send(mjson.encode(self._build_stream_route_message(dj_id, dj)))
+                    await websocket.send(_json_str(self._build_stream_route_message(dj_id, dj)))
                 except Exception as e:
                     logger.debug(f"Failed to send stream route to DJ {dj_id}: {e}")
 
@@ -1489,7 +1497,7 @@ class VJServer:
                     if _contains_slur(dj_name):
                         logger.warning("DJ auth rejected: DJ name failed content filter")
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "auth_error",
                                     "error": "DJ name contains language that is not allowed",
@@ -1579,16 +1587,14 @@ class VJServer:
                 "dual" if (direct_mode and self._active_dj_id == dj_id) else "relay"
             )
 
-            await websocket.send(mjson.encode(auth_response))
+            await websocket.send(_json_str(auth_response))
             logger.info(f"[DJ AUTH SUCCESS] {dj_name} ({dj_id}) authenticated, priority={priority}")
 
             # Perform clock synchronization to handle clock skew between DJ and server
             # Uses NTP-style algorithm: send server time, DJ responds with its time
             try:
                 t1 = time.time()  # Server time when sync request sent
-                await websocket.send(
-                    mjson.encode({"type": "clock_sync_request", "server_time": t1})
-                )
+                await websocket.send(_json_str({"type": "clock_sync_request", "server_time": t1}))
                 # Wait for DJ response with timeout
                 sync_response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                 t4 = time.time()  # Server time when response received
@@ -1643,7 +1649,7 @@ class VJServer:
 
             # Send explicit routing policy after handshake.
             try:
-                await websocket.send(mjson.encode(self._build_stream_route_message(dj_id, dj)))
+                await websocket.send(_json_str(self._build_stream_route_message(dj_id, dj)))
             except Exception as e:
                 logger.debug(f"Failed to send initial stream route to DJ {dj_id}: {e}")
 
@@ -1656,7 +1662,7 @@ class VJServer:
 
             # Broadcast DJ joined with full profile to browser clients
             await self._broadcast_to_browsers(
-                mjson.encode(
+                _json_str(
                     {
                         "type": "dj_joined",
                         "dj": self._dj_profile_dict(dj),
@@ -1696,7 +1702,7 @@ class VJServer:
                                 self._band_materials = list(cleaned)
                                 self._band_materials_source = "dj_palette"
                                 await self._broadcast_to_browsers(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "band_materials_sync",
                                             "materials": self._band_materials,
@@ -1753,7 +1759,7 @@ class VJServer:
                 # Broadcast DJ left to browser clients
                 if _left_dj_name:
                     await self._broadcast_to_browsers(
-                        mjson.encode(
+                        _json_str(
                             {
                                 "type": "dj_left",
                                 "dj_id": dj_id,
@@ -2124,13 +2130,13 @@ class VJServer:
         for did, dj in djs_snapshot:
             try:
                 await dj.websocket.send(
-                    mjson.encode({"type": "status_update", "is_active": did == dj_id})
+                    _json_str({"type": "status_update", "is_active": did == dj_id})
                 )
             except Exception as e:
                 logger.debug(f"Failed to send status to DJ {did}: {e}")
             # Push per-DJ stream routing policy after every active switch.
             try:
-                await dj.websocket.send(mjson.encode(self._build_stream_route_message(did, dj)))
+                await dj.websocket.send(_json_str(self._build_stream_route_message(did, dj)))
             except Exception as e:
                 logger.debug(f"Failed to send stream route to DJ {did}: {e}")
 
@@ -2138,7 +2144,7 @@ class VJServer:
 
         # Broadcast band materials after DJ switch
         await self._broadcast_to_browsers(
-            mjson.encode(
+            _json_str(
                 {
                     "type": "band_materials_sync",
                     "materials": self._band_materials,
@@ -2188,7 +2194,7 @@ class VJServer:
             djs_snapshot = list(self._djs.items())
         for did, dj in djs_snapshot:
             try:
-                await dj.websocket.send(mjson.encode(self._build_stream_route_message(did, dj)))
+                await dj.websocket.send(_json_str(self._build_stream_route_message(did, dj)))
             except Exception as e:
                 logger.debug(f"Failed to broadcast stream route to DJ {did}: {e}")
 
@@ -2538,7 +2544,7 @@ class VJServer:
                 if not authenticated:
                     logger.warning(f"Browser VJ auth failed from {websocket.remote_address}")
                     await websocket.send(
-                        mjson.encode(
+                        _json_str(
                             {
                                 "type": "auth_error",
                                 "error": "Invalid VJ password",
@@ -2547,7 +2553,7 @@ class VJServer:
                     )
                     await websocket.close(4004, "Authentication failed")
                     return
-                await websocket.send(mjson.encode({"type": "auth_success"}))
+                await websocket.send(_json_str({"type": "auth_success"}))
                 logger.info(f"Browser VJ auth succeeded from {websocket.remote_address}")
             except asyncio.TimeoutError:
                 logger.warning(f"Browser auth timeout from {websocket.remote_address}")
@@ -2610,7 +2616,7 @@ class VJServer:
             for info in self._pending_djs.values()
         ]
         await websocket.send(
-            mjson.encode(
+            _json_str(
                 {
                     "type": "vj_state",
                     "patterns": list_patterns(),
@@ -2655,7 +2661,7 @@ class VJServer:
                         else:
                             logger.debug(f"Browser rate limit: dropping {msg_type}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "error",
                                         "message": "Rate limited — too many commands",
@@ -2665,7 +2671,7 @@ class VJServer:
                             continue
 
                     if msg_type == "ping":
-                        await websocket.send(mjson.encode({"type": "pong"}))
+                        await websocket.send(_json_str({"type": "pong"}))
 
                     elif msg_type == "pong":
                         # Record pong response for heartbeat tracking
@@ -2683,7 +2689,7 @@ class VJServer:
                             for info in self._pending_djs.values()
                         ]
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "vj_state",
                                     "patterns": list_patterns(),
@@ -2773,7 +2779,7 @@ class VJServer:
                         )
 
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "connect_code_generated",
                                     "code": connect_code.code,
@@ -2799,9 +2805,7 @@ class VJServer:
                             for code in self._connect_codes.values()
                             if code.is_valid()
                         ]
-                        await websocket.send(
-                            mjson.encode({"type": "connect_codes", "codes": codes})
-                        )
+                        await websocket.send(_json_str({"type": "connect_codes", "codes": codes}))
 
                     elif msg_type == "revoke_connect_code":
                         # Revoke a connect code
@@ -2813,7 +2817,7 @@ class VJServer:
 
                     elif msg_type == "get_dj_roster":
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "dj_roster",
                                     "roster": self._get_dj_roster(),
@@ -2833,7 +2837,7 @@ class VJServer:
                             for info in self._pending_djs.values()
                         ]
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "pending_djs",
                                     "pending": pending_list,
@@ -2955,7 +2959,7 @@ class VJServer:
                             logger.info(f"Band materials set: {self._band_materials}")
                             # Sync to all browser clients
                             await self._broadcast_to_browsers(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "band_materials_sync",
                                         "materials": self._band_materials,
@@ -2990,7 +2994,7 @@ class VJServer:
                         self._visual_delay_ms = max(0.0, min(500.0, float(delay)))
                         logger.info(f"Visual delay set to {self._visual_delay_ms:.0f}ms")
                         await self._broadcast_to_browsers(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "visual_delay_sync",
                                     "delay_ms": self._visual_delay_ms,
@@ -3004,7 +3008,7 @@ class VJServer:
                             self._visual_delay_mode = mode
                             logger.info(f"Visual delay mode set to {mode}")
                             await self._broadcast_to_browsers(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "visual_delay_mode_sync",
                                         "mode": self._visual_delay_mode,
@@ -3022,7 +3026,7 @@ class VJServer:
                         logger.info(f"Pattern transition duration set to {clamped}s")
                         # Broadcast to all browsers
                         await self._broadcast_to_browsers(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "transition_duration_sync",
                                     "duration": clamped,
@@ -3036,7 +3040,7 @@ class VJServer:
                         test_ts = time.time()
                         # Flash all browsers
                         await self._broadcast_to_browsers(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "sync_test_flash",
                                     "server_time": test_ts,
@@ -3048,7 +3052,7 @@ class VJServer:
                         if dj:
                             try:
                                 await dj.websocket.send(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "sync_test_tone",
                                             "server_time": test_ts,
@@ -3064,11 +3068,11 @@ class VJServer:
                             try:
                                 zones = await self.viz_client.get_zones()
                                 await websocket.send(
-                                    mjson.encode({"type": "zones", "zones": zones or []})
+                                    _json_str({"type": "zones", "zones": zones or []})
                                 )
                             except Exception as e:
                                 logger.warning(f"Failed to get zones: {e}")
-                                await websocket.send(mjson.encode({"type": "zones", "zones": []}))
+                                await websocket.send(_json_str({"type": "zones", "zones": []}))
 
                     elif msg_type == "get_zone":
                         # Forward to Minecraft
@@ -3076,7 +3080,7 @@ class VJServer:
                         if self.viz_client and self.viz_client.connected:
                             try:
                                 zone = await self.viz_client.get_zone(zone_name)
-                                await websocket.send(mjson.encode({"type": "zone", "zone": zone}))
+                                await websocket.send(_json_str({"type": "zone", "zone": zone}))
                             except Exception as e:
                                 logger.warning(f"Failed to get zone: {e}")
 
@@ -3086,19 +3090,19 @@ class VJServer:
                             try:
                                 result = await self.viz_client.send({"type": "get_stages"})
                                 if result:
-                                    await websocket.send(mjson.encode(result))
+                                    await websocket.send(_json_str(result))
                                 else:
                                     await websocket.send(
-                                        mjson.encode({"type": "stages", "stages": [], "count": 0})
+                                        _json_str({"type": "stages", "stages": [], "count": 0})
                                     )
                             except Exception as e:
                                 logger.warning(f"Failed to get stages: {e}")
                                 await websocket.send(
-                                    mjson.encode({"type": "stages", "stages": [], "count": 0})
+                                    _json_str({"type": "stages", "stages": [], "count": 0})
                                 )
                         else:
                             await websocket.send(
-                                mjson.encode({"type": "stages", "stages": [], "count": 0})
+                                _json_str({"type": "stages", "stages": [], "count": 0})
                             )
 
                     elif msg_type == "trigger_effect":
@@ -3207,7 +3211,7 @@ class VJServer:
                             if dj_id == self._active_dj_id:
                                 await self._send_banner_config_to_minecraft(dj_id)
                             await websocket.send(
-                                mjson.encode({"type": "banner_profile_saved", "dj_id": dj_id})
+                                _json_str({"type": "banner_profile_saved", "dj_id": dj_id})
                             )
                             logger.info(f"Banner profile saved for DJ: {dj_id}")
 
@@ -3218,7 +3222,7 @@ class VJServer:
                         safe_profile = {k: v for k, v in profile.items() if k != "image_pixels"}
                         safe_profile["has_image"] = bool(profile.get("image_pixels"))
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "banner_profile",
                                     "dj_id": dj_id,
@@ -3234,7 +3238,7 @@ class VJServer:
                             summary["has_image"] = bool(prof.get("image_pixels"))
                             profiles_summary[did] = summary
                         await websocket.send(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "all_banner_profiles",
                                     "profiles": profiles_summary,
@@ -3260,7 +3264,7 @@ class VJServer:
                                 if dj_id == self._active_dj_id:
                                     await self._send_banner_config_to_minecraft(dj_id)
                                 await websocket.send(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "banner_logo_processed",
                                             "dj_id": dj_id,
@@ -3275,7 +3279,7 @@ class VJServer:
                                 )
                             else:
                                 await websocket.send(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "error",
                                             "message": "Failed to process logo image. Is Pillow installed?",
@@ -3296,10 +3300,10 @@ class VJServer:
                         if self.viz_client and self.viz_client.connected:
                             response = await self.viz_client.send({"type": "get_voice_status"})
                             if response:
-                                await websocket.send(mjson.encode(response))
+                                await websocket.send(_json_str(response))
                         else:
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "voice_status",
                                         "available": False,
@@ -3322,10 +3326,10 @@ class VJServer:
                             finally:
                                 self.viz_client.connect_timeout = saved_timeout
                             if result:
-                                await websocket.send(mjson.encode(result))
+                                await websocket.send(_json_str(result))
                             else:
                                 await websocket.send(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "stage_blocks",
                                             "error": "Scan failed or timed out",
@@ -3334,7 +3338,7 @@ class VJServer:
                                 )
                         else:
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "stage_blocks",
                                         "error": "Minecraft not connected",
@@ -3347,21 +3351,21 @@ class VJServer:
                         logger.info(
                             f"Voice subscriber added. Total: {len(self._voice_subscribers)}"
                         )
-                        await websocket.send(mjson.encode({"type": "subscribe_voice_ack"}))
+                        await websocket.send(_json_str({"type": "subscribe_voice_ack"}))
 
                     elif msg_type == "unsubscribe_voice":
                         self._voice_subscribers.discard(websocket)
                         logger.info(
                             f"Voice subscriber removed. Total: {len(self._voice_subscribers)}"
                         )
-                        await websocket.send(mjson.encode({"type": "unsubscribe_voice_ack"}))
+                        await websocket.send(_json_str({"type": "unsubscribe_voice_ack"}))
 
                     elif msg_type == "save_scene":
                         # Save current VJ state as a named scene
                         scene_name = data.get("name", "").strip()
                         if not scene_name:
                             await websocket.send(
-                                mjson.encode({"type": "error", "message": "Scene name is required"})
+                                _json_str({"type": "error", "message": "Scene name is required"})
                             )
                             continue
 
@@ -3371,7 +3375,7 @@ class VJServer:
 
                             if _contains_slur(scene_name):
                                 await websocket.send(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "error",
                                             "message": "Scene name contains language that is not allowed",
@@ -3387,17 +3391,17 @@ class VJServer:
                             self._save_scene_to_file(scene_name, scene_data)
                             logger.info(f"Scene saved: {scene_name}")
                             await websocket.send(
-                                mjson.encode({"type": "scene_saved", "name": scene_name})
+                                _json_str({"type": "scene_saved", "name": scene_name})
                             )
                             # Broadcast updated scene list to all browsers
                             scenes = self._list_scenes()
                             await self._broadcast_to_browsers(
-                                mjson.encode({"type": "scenes_list", "scenes": scenes})
+                                _json_str({"type": "scenes_list", "scenes": scenes})
                             )
                         except Exception as e:
                             logger.error(f"Failed to save scene '{scene_name}': {e}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {"type": "error", "message": f"Failed to save scene: {str(e)}"}
                                 )
                             )
@@ -3407,7 +3411,7 @@ class VJServer:
                         scene_name = data.get("name", "").strip()
                         if not scene_name:
                             await websocket.send(
-                                mjson.encode({"type": "error", "message": "Scene name is required"})
+                                _json_str({"type": "error", "message": "Scene name is required"})
                             )
                             continue
 
@@ -3416,19 +3420,19 @@ class VJServer:
                             await self._apply_scene_state(scene_data)
                             logger.info(f"Scene loaded: {scene_name}")
                             await websocket.send(
-                                mjson.encode({"type": "scene_loaded", "name": scene_name})
+                                _json_str({"type": "scene_loaded", "name": scene_name})
                             )
                         except FileNotFoundError:
                             logger.warning(f"Scene not found: {scene_name}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {"type": "error", "message": f"Scene '{scene_name}' not found"}
                                 )
                             )
                         except Exception as e:
                             logger.error(f"Failed to load scene '{scene_name}': {e}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {"type": "error", "message": f"Failed to load scene: {str(e)}"}
                                 )
                             )
@@ -3438,14 +3442,14 @@ class VJServer:
                         scene_name = data.get("name", "").strip()
                         if not scene_name:
                             await websocket.send(
-                                mjson.encode({"type": "error", "message": "Scene name is required"})
+                                _json_str({"type": "error", "message": "Scene name is required"})
                             )
                             continue
 
                         # Prevent deletion of built-in scenes
                         if scene_name in ["Chill Lounge", "EDM Stage", "Rock Arena", "Ambient"]:
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {"type": "error", "message": "Cannot delete built-in scenes"}
                                 )
                             )
@@ -3455,24 +3459,24 @@ class VJServer:
                             self._delete_scene_file(scene_name)
                             logger.info(f"Scene deleted: {scene_name}")
                             await websocket.send(
-                                mjson.encode({"type": "scene_deleted", "name": scene_name})
+                                _json_str({"type": "scene_deleted", "name": scene_name})
                             )
                             # Broadcast updated scene list to all browsers
                             scenes = self._list_scenes()
                             await self._broadcast_to_browsers(
-                                mjson.encode({"type": "scenes_list", "scenes": scenes})
+                                _json_str({"type": "scenes_list", "scenes": scenes})
                             )
                         except FileNotFoundError:
                             logger.warning(f"Scene not found: {scene_name}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {"type": "error", "message": f"Scene '{scene_name}' not found"}
                                 )
                             )
                         except Exception as e:
                             logger.error(f"Failed to delete scene '{scene_name}': {e}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "error",
                                         "message": f"Failed to delete scene: {str(e)}",
@@ -3485,12 +3489,12 @@ class VJServer:
                         try:
                             scenes = self._list_scenes()
                             await websocket.send(
-                                mjson.encode({"type": "scenes_list", "scenes": scenes})
+                                _json_str({"type": "scenes_list", "scenes": scenes})
                             )
                         except Exception as e:
                             logger.error(f"Failed to list scenes: {e}")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {"type": "error", "message": f"Failed to list scenes: {str(e)}"}
                                 )
                             )
@@ -3542,17 +3546,17 @@ class VJServer:
                                 if msg_type in FIRE_AND_FORGET:
                                     # Send without waiting for response — instant for the UI
                                     await self.viz_client.ws.send(self.viz_client._encode(data))
-                                    await websocket.send(mjson.encode({"type": "ok"}))
+                                    await websocket.send(_json_str({"type": "ok"}))
                                     logger.debug(f"Fire-and-forget {msg_type} to Minecraft")
                                 else:
                                     response = await self.viz_client.send(data)
                                     if response:
-                                        await websocket.send(mjson.encode(response))
+                                        await websocket.send(_json_str(response))
                                         logger.debug(f"Forwarded {msg_type} to Minecraft")
                             except Exception as e:
                                 logger.warning(f"Failed to forward {msg_type} to Minecraft: {e}")
                                 await websocket.send(
-                                    mjson.encode(
+                                    _json_str(
                                         {
                                             "type": "error",
                                             "message": f"Failed to forward to Minecraft: {e}",
@@ -3562,7 +3566,7 @@ class VJServer:
                         else:
                             logger.warning(f"Cannot forward {msg_type}: Minecraft not connected")
                             await websocket.send(
-                                mjson.encode(
+                                _json_str(
                                     {
                                         "type": "error",
                                         "message": "Minecraft not connected",
@@ -3589,7 +3593,7 @@ class VJServer:
 
     async def _broadcast_dj_roster(self):
         """Broadcast DJ roster to all browser clients."""
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "dj_roster",
                 "roster": self._get_dj_roster(),
@@ -3620,7 +3624,7 @@ class VJServer:
         if mc_connected != self._last_mc_connected:
             self._last_mc_connected = mc_connected
             await self._broadcast_to_browsers(
-                mjson.encode(
+                _json_str(
                     {
                         "type": "minecraft_status",
                         "connected": mc_connected,
@@ -3664,7 +3668,7 @@ class VJServer:
         # so the Rust client handles it via the existing ServerMessage enum)
         try:
             await ws.send(
-                mjson.encode(
+                _json_str(
                     {
                         "type": "auth_success",
                         "dj_id": dj_id,
@@ -3692,7 +3696,7 @@ class VJServer:
         await self._broadcast_dj_roster()
         await self._broadcast_stream_routes()
         await self._broadcast_to_browsers(
-            mjson.encode(
+            _json_str(
                 {
                     "type": "dj_approved",
                     "dj_id": dj_id,
@@ -3704,7 +3708,7 @@ class VJServer:
         dj = self._djs.get(dj_id)
         if dj:
             await self._broadcast_to_browsers(
-                mjson.encode(
+                _json_str(
                     {
                         "type": "dj_joined",
                         "dj": self._dj_profile_dict(dj),
@@ -3726,7 +3730,7 @@ class VJServer:
         # Send denial and close
         try:
             await ws.send(
-                mjson.encode(
+                _json_str(
                     {
                         "type": "auth_denied",
                         "message": "Connection denied by VJ",
@@ -3738,7 +3742,7 @@ class VJServer:
             pass
 
         await self._broadcast_to_browsers(
-            mjson.encode(
+            _json_str(
                 {
                     "type": "dj_denied",
                     "dj_id": dj_id,
@@ -3853,7 +3857,7 @@ class VJServer:
             if code.is_valid()
         ]
 
-        message = mjson.encode({"type": "connect_codes", "codes": codes})
+        message = _json_str({"type": "connect_codes", "codes": codes})
 
         dead_clients = set()
         for client in list(self._broadcast_clients):
@@ -3865,7 +3869,7 @@ class VJServer:
 
     async def _broadcast_pattern_change(self):
         """Broadcast pattern change to all browser clients."""
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "pattern_changed",
                 "pattern": self._pattern_name,
@@ -3888,7 +3892,7 @@ class VJServer:
 
     async def _broadcast_pattern_sync_to_djs(self):
         """Broadcast pattern sync to all connected DJs (for direct mode)."""
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "pattern_sync",
                 "pattern": self._pattern_name,
@@ -3910,7 +3914,7 @@ class VJServer:
 
     async def _broadcast_config_sync_to_djs(self):
         """Broadcast config sync (entity count, zone) to all connected DJs."""
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "config_sync",
                 "entity_count": self.entity_count,
@@ -3926,7 +3930,7 @@ class VJServer:
 
     async def _broadcast_config_to_browsers(self):
         """Broadcast config changes (entity count, zone, pattern) to all browser clients."""
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "config_update",
                 "entity_count": self.entity_count,
@@ -3945,7 +3949,7 @@ class VJServer:
 
     async def _broadcast_preset_to_djs(self, preset: dict, preset_name: str = None):
         """Broadcast preset changes (attack/release/threshold) to all DJs."""
-        message = mjson.encode({"type": "preset_sync", "preset": preset})
+        message = _json_str({"type": "preset_sync", "preset": preset})
 
         for dj in list(self._djs.values()):
             try:
@@ -3954,7 +3958,7 @@ class VJServer:
                 logger.debug(f"Failed to send preset sync to DJ {dj.dj_id}: {e}")
 
         # Also broadcast to browser clients
-        browser_msg = mjson.encode(
+        browser_msg = _json_str(
             {
                 "type": "preset_changed",
                 "preset": preset_name or "custom",
@@ -3971,7 +3975,7 @@ class VJServer:
 
     async def _broadcast_effect_trigger(self, effect: str):
         """Broadcast effect trigger to all clients."""
-        message = mjson.encode({"type": "effect_triggered", "effect": effect})
+        message = _json_str({"type": "effect_triggered", "effect": effect})
 
         # Send to browser clients
         dead_clients = set()
@@ -3991,7 +3995,7 @@ class VJServer:
 
     async def _broadcast_to_djs(self, msg: dict):
         """Broadcast a message dict to all connected DJs."""
-        message = mjson.encode(msg)
+        message = _json_str(msg)
         for dj in list(self._djs.values()):
             try:
                 await dj.websocket.send(message)
@@ -4073,7 +4077,7 @@ class VJServer:
         if self._active_dj_id and self._active_dj_id in self._djs:
             active_dj_profile = self._dj_profile_dict(self._djs[self._active_dj_id])
 
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "state",
                 "entities": entities,
@@ -4269,7 +4273,7 @@ class VJServer:
                     continue
 
                 # Send ping to all browser clients
-                ping_message = mjson.encode({"type": "ping"})
+                ping_message = _json_str({"type": "ping"})
                 current_time = time.time()
                 dead_clients = set()
 
@@ -4474,7 +4478,7 @@ class VJServer:
 
     async def _broadcast_pattern_list(self):
         """Broadcast updated pattern list to all browser clients."""
-        message = mjson.encode(
+        message = _json_str(
             {
                 "type": "patterns",
                 "patterns": list_patterns(),
@@ -5052,7 +5056,7 @@ class VJServer:
 
         # Broadcast to voice subscribers (Discord bot, etc.)
         if self._voice_subscribers:
-            voice_msg = mjson.encode(
+            voice_msg = _json_str(
                 {
                     "type": "voice_audio",
                     "data": pcm_data,
@@ -5080,7 +5084,7 @@ class VJServer:
 
     async def _broadcast_voice_status(self, status: dict):
         """Broadcast voice_status to all connected browser clients."""
-        await self._broadcast_to_browsers(mjson.encode(status))
+        await self._broadcast_to_browsers(_json_str(status))
 
     async def _link_sync_loop(self):
         """Poll Ableton Link for tempo/beat/phase at ~60Hz."""
@@ -5113,7 +5117,7 @@ class VJServer:
                         logger.info(f"[LINK] Peers: {peers}, Tempo: {tempo:.1f} BPM")
                         # Broadcast Link status to admin panel
                         await self._broadcast_to_browsers(
-                            mjson.encode(
+                            _json_str(
                                 {
                                     "type": "link_status",
                                     "enabled": True,
