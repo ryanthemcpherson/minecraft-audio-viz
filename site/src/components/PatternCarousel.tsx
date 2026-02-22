@@ -1,13 +1,52 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { listPatterns } from "@/lib/patterns";
 import CarouselCard from "./CarouselCard";
 
 const CATEGORIES = ["All", "Original", "Epic", "Cosmic", "Organic", "Spectrum"];
 const AUTO_CYCLE_MS = 12_000;
 
-export default function PatternCarousel() {
+/**
+ * Error boundary around the entire pattern carousel.
+ * Catches errors from Fengari/Lua VM initialization, pattern loading,
+ * or any rendering failure that escapes the per-card CanvasErrorBoundary.
+ */
+class CarouselErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  state = { hasError: false, error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <section id="patterns" className="mx-auto max-w-7xl px-6 py-24">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">
+              Visualization Patterns
+            </h2>
+            <p className="mt-6 text-text-secondary">
+              Pattern previews could not be loaded. Please try refreshing the page.
+            </p>
+            {this.state.error && (
+              <p className="mt-2 text-sm text-red-400/70">
+                {this.state.error.message}
+              </p>
+            )}
+          </div>
+        </section>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function PatternCarouselInner() {
   const allPatterns = useMemo(() => listPatterns(), []);
   const [activeCategory, setActiveCategory] = useState("All");
   const [startIndex, setStartIndex] = useState(0);
@@ -178,5 +217,13 @@ export default function PatternCarousel() {
         </div>
       )}
     </section>
+  );
+}
+
+export default function PatternCarousel() {
+  return (
+    <CarouselErrorBoundary>
+      <PatternCarouselInner />
+    </CarouselErrorBoundary>
   );
 }
