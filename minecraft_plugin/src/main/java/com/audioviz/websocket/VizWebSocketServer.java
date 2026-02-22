@@ -176,14 +176,31 @@ public class VizWebSocketServer extends WebSocketServer {
      * false-matching keywords in payload data.
      */
     private boolean isHighFrequencyMessage(String message) {
-        // Check the prefix where the "type" field appears in serialized JSON
-        String prefix = message.substring(0, Math.min(message.length(), 60));
-        return prefix.contains("\"type\":\"batch_update\"") ||
-               prefix.contains("\"type\": \"batch_update\"") ||
-               prefix.contains("\"type\":\"audio_state\"") ||
-               prefix.contains("\"type\": \"audio_state\"") ||
-               prefix.contains("\"type\":\"voice_audio\"") ||
-               prefix.contains("\"type\": \"voice_audio\"");
+        // Check the prefix where the "type" field appears in serialized JSON.
+        // Use indexOf with a limit to avoid allocating a substring every call.
+        int limit = Math.min(message.length(), 60);
+        return containsWithin(message, "\"type\":\"batch_update\"", limit) ||
+               containsWithin(message, "\"type\": \"batch_update\"", limit) ||
+               containsWithin(message, "\"type\":\"audio_state\"", limit) ||
+               containsWithin(message, "\"type\": \"audio_state\"", limit) ||
+               containsWithin(message, "\"type\":\"voice_audio\"", limit) ||
+               containsWithin(message, "\"type\": \"voice_audio\"", limit);
+    }
+
+    /**
+     * Check if {@code needle} appears within the first {@code limit} characters of {@code haystack},
+     * without allocating a substring.
+     */
+    private static boolean containsWithin(String haystack, String needle, int limit) {
+        int maxStart = limit - needle.length();
+        if (maxStart < 0) return false;
+        // regionMatches does char-by-char comparison with no allocation
+        for (int i = 0; i <= maxStart; i++) {
+            if (haystack.regionMatches(i, needle, 0, needle.length())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

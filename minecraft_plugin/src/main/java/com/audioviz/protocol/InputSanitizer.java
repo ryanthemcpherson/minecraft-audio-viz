@@ -34,12 +34,12 @@ public final class InputSanitizer {
 
     /**
      * Sanitize an int value: clamp to [min, max].
+     * Values outside the range are clamped (not replaced with defaultVal) for consistency
+     * with the double/float sanitizers. The defaultVal is reserved for truly invalid states
+     * if needed in future, but ints cannot be NaN so clamping always applies.
      */
     public static int sanitizeInt(int value, int min, int max, int defaultVal) {
-        if (value < min || value > max) {
-            return Math.max(min, Math.min(max, value));
-        }
-        return value;
+        return Math.max(min, Math.min(max, value));
     }
 
     // --- Convenience constants for common field ranges ---
