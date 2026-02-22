@@ -188,6 +188,24 @@ class CoordinatorClient:
             name=result["name"],
         )
 
+    async def fetch_dj_profile(self, dj_session_id: str) -> Optional[dict]:
+        """Fetch DJ profile for a session from the coordinator.
+
+        Returns profile dict or None if unavailable.
+        """
+        try:
+            return await self._request(
+                "GET",
+                f"/internal/dj-profile/{dj_session_id}",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch DJ profile for session %s: %s",
+                dj_session_id,
+                exc,
+            )
+            return None
+
     async def end_show(self, show_id: str) -> None:
         """End a show on the coordinator."""
         try:
