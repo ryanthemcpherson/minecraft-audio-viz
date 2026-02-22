@@ -7,7 +7,14 @@ to Minecraft and browser clients.
 """
 
 from .config import AudioConfig, ServerConfig, get_preset, list_presets
-from .patterns import AudioState, PatternConfig, VisualizationPattern, get_pattern, list_patterns
+from .patterns import (
+    AudioState,
+    PatternConfig,
+    VisualizationPattern,
+    get_pattern,
+    list_patterns,
+    refresh_pattern_cache,
+)
 from .vj_server import DJAuthConfig, DJConnection, VJServer
 
 __all__ = [
@@ -21,6 +28,7 @@ __all__ = [
     "VisualizationPattern",
     "get_pattern",
     "list_patterns",
+    "refresh_pattern_cache",
     "get_preset",
     "list_presets",
 ]

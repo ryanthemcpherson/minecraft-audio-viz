@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,7 +66,13 @@ async def resolve_connect_code(
     if server is None:
         raise HTTPException(status_code=503, detail="Server registered but currently offline")
 
-    # Atomically increment current DJ count only if below max_djs
+    # Atomically increment current DJ count only if below max_djs.
+    # NOTE: current_djs is only incremented here but never decremented automatically.
+    # TODO: Implement a decrement mechanism via one of:
+    #   1. A POST /disconnect/{dj_session_id} endpoint called by the DJ client on graceful disconnect
+    #   2. A periodic heartbeat check that decrements for stale DJSession records
+    #   3. VJ server webhook notifying coordinator when a DJ WebSocket closes
+    # Until then, current_djs may drift upward and require manual reset or show recreation.
     result_update = await session.execute(
         update(Show)
         .where(Show.id == show.id, Show.current_djs < Show.max_djs)
@@ -111,3 +119,41 @@ async def resolve_connect_code(
         show_name=show.name,
         dj_count=show.current_djs,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /disconnect/{dj_session_id}  --  called by DJ client on graceful disconnect
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/disconnect/{dj_session_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Notify coordinator that a DJ has disconnected",
+)
+async def disconnect_dj(
+    dj_session_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Record DJ disconnect and decrement the show's current_djs counter."""
+    stmt = select(DJSession).where(
+        DJSession.id == dj_session_id,
+        DJSession.disconnected_at.is_(None),
+    )
+    dj_session_row = (await session.execute(stmt)).scalar_one_or_none()
+    if dj_session_row is None:
+        return Response(status_code=204)  # Already disconnected or not found — idempotent
+
+    dj_session_row.disconnected_at = datetime.now(timezone.utc)
+
+    # Decrement current_djs (floor at 0)
+    await session.execute(
+        update(Show)
+        .where(Show.id == dj_session_row.show_id, Show.current_djs > 0)
+        .values(current_djs=Show.current_djs - 1)
+    )
+    await session.commit()
+
+    logger.info("DJ disconnected: dj_session=%s show_id=%s", dj_session_id, dj_session_row.show_id)
+    return Response(status_code=204)

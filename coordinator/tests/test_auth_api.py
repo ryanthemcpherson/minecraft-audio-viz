@@ -194,9 +194,11 @@ class TestRefresh:
 class TestLogout:
     async def test_logout_revokes_token(self, client: AsyncClient) -> None:
         data = await _register(client)
+        headers = {"Authorization": f"Bearer {data['access_token']}"}
         resp = await client.post(
             "/api/v1/auth/logout",
             json={"refresh_token": data["refresh_token"]},
+            headers=headers,
         )
         assert resp.status_code == 204
 

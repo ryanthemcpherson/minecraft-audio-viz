@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import secrets
 import time
-from datetime import datetime, timezone
+import uuid as _uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_session
 from app.dependencies.auth import get_current_user, require_admin
+from app.models.db import DesktopExchangeCode, User
 from app.models.db import RefreshToken as RefreshTokenModel
-from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
     ChangePasswordRequest,
@@ -50,20 +54,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _OAUTH_STATE_TTL = 600  # seconds
 _EXCHANGE_CODE_TTL = 60  # seconds
 
-# In-memory store for desktop OAuth exchange codes: code -> (AuthResponse dict, created_at)
-_desktop_exchange_codes: dict[str, tuple[dict[str, Any], float]] = {}
 
-
-def _cleanup_expired_exchange_codes() -> None:
-    """Remove expired desktop OAuth exchange codes to prevent memory leaks."""
-    now = time.time()
-    expired = [
-        code
-        for code, (_, created_at) in _desktop_exchange_codes.items()
-        if now - created_at > _EXCHANGE_CODE_TTL
-    ]
-    for code in expired:
-        del _desktop_exchange_codes[code]
+async def _cleanup_expired_exchange_codes(session: AsyncSession) -> None:
+    """Remove expired desktop OAuth exchange codes from the database."""
+    now = datetime.now(timezone.utc)
+    await session.execute(
+        sa_delete(DesktopExchangeCode).where(DesktopExchangeCode.expires_at < now)
+    )
 
 
 def _create_oauth_state(
@@ -167,13 +164,7 @@ async def register(
             logger.warning("Failed to send verification email to %s", body.email, exc_info=True)
 
     # Re-fetch user for response
-    from sqlalchemy import select
-
-    from app.models.db import User as UserModel
-
-    user = (
-        await session.execute(select(UserModel).where(UserModel.id == result.user_id))
-    ).scalar_one()
+    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
 
     return _auth_response(result, user)
 
@@ -223,13 +214,7 @@ async def login(
 
     log_auth_event("login", user_id=str(result.user_id), email=body.email, ip_address=ip)
 
-    from sqlalchemy import select
-
-    from app.models.db import User as UserModel
-
-    user = (
-        await session.execute(select(UserModel).where(UserModel.id == result.user_id))
-    ).scalar_one()
+    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
 
     return _auth_response(result, user)
 
@@ -316,25 +301,23 @@ async def discord_callback(
 
     log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="discord")
 
-    from sqlalchemy import select
-
-    from app.models.db import User as UserModel
-
-    user = (
-        await session.execute(select(UserModel).where(UserModel.id == result.user_id))
-    ).scalar_one()
+    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
 
     auth_resp = _auth_response(result, user)
 
     # Desktop deep-link flow: store auth response behind a one-time exchange code
     # and redirect to the desktop app via custom URL scheme.
     if state_payload.get("desktop"):
-        _cleanup_expired_exchange_codes()
+        await _cleanup_expired_exchange_codes(session)
         exchange_code = secrets.token_urlsafe(32)
-        _desktop_exchange_codes[exchange_code] = (
-            auth_resp.model_dump(mode="json"),
-            time.time(),
+        row = DesktopExchangeCode(
+            code=exchange_code,
+            user_id=user.id,
+            payload=_json.dumps(auth_resp.model_dump(mode="json")),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EXCHANGE_CODE_TTL),
         )
+        session.add(row)
+        await session.commit()
         scheme = settings.desktop_deep_link_scheme
         redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
         html = (
@@ -430,24 +413,22 @@ async def google_callback(
 
     log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="google")
 
-    from sqlalchemy import select
-
-    from app.models.db import User as UserModel
-
-    user = (
-        await session.execute(select(UserModel).where(UserModel.id == result.user_id))
-    ).scalar_one()
+    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
 
     auth_resp = _auth_response(result, user)
 
     # Desktop deep-link flow
     if state_payload.get("desktop"):
-        _cleanup_expired_exchange_codes()
+        await _cleanup_expired_exchange_codes(session)
         exchange_code = secrets.token_urlsafe(32)
-        _desktop_exchange_codes[exchange_code] = (
-            auth_resp.model_dump(mode="json"),
-            time.time(),
+        row = DesktopExchangeCode(
+            code=exchange_code,
+            user_id=user.id,
+            payload=_json.dumps(auth_resp.model_dump(mode="json")),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EXCHANGE_CODE_TTL),
         )
+        session.add(row)
+        await session.commit()
         scheme = settings.desktop_deep_link_scheme
         redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
         html = (
@@ -473,17 +454,34 @@ async def google_callback(
 )
 async def exchange_desktop_code(
     body: ExchangeCodeRequest,
+    session: AsyncSession = Depends(get_session),
 ) -> AuthResponse:
     """Exchange a one-time code (from the desktop deep-link callback) for auth tokens."""
-    _cleanup_expired_exchange_codes()
-    entry = _desktop_exchange_codes.pop(body.exchange_code, None)
-    if entry is None:
+    await _cleanup_expired_exchange_codes(session)
+
+    stmt = select(DesktopExchangeCode).where(
+        DesktopExchangeCode.code == body.exchange_code,
+        DesktopExchangeCode.used.is_(False),
+    )
+    row = (await session.execute(stmt)).scalar_one_or_none()
+
+    if row is None:
         raise HTTPException(status_code=400, detail="Invalid or already used exchange code")
 
-    data, created_at = entry
-    if time.time() - created_at > _EXCHANGE_CODE_TTL:
+    now = datetime.now(timezone.utc)
+    expires = (
+        row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    )
+    if expires < now:
+        row.used = True
+        await session.commit()
         raise HTTPException(status_code=400, detail="Exchange code expired")
 
+    # Mark as used (one-time)
+    row.used = True
+    await session.commit()
+
+    data = _json.loads(row.payload)
     return AuthResponse(**data)
 
 
@@ -598,13 +596,7 @@ async def refresh(
 
     log_auth_event("token_refreshed", user_id=str(result.user_id), ip_address=ip)
 
-    from sqlalchemy import select
-
-    from app.models.db import User as UserModel
-
-    user = (
-        await session.execute(select(UserModel).where(UserModel.id == result.user_id))
-    ).scalar_one()
+    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
 
     return _auth_response(result, user)
 
@@ -629,24 +621,22 @@ def _build_user_profile_response(user: User) -> UserProfileResponse:
 
     dj_profile = None
     if user.dj_profile is not None:
-        import json
-
         color_palette = None
         if user.dj_profile.color_palette:
             try:
-                parsed = json.loads(user.dj_profile.color_palette)
+                parsed = _json.loads(user.dj_profile.color_palette)
                 if isinstance(parsed, list):
                     color_palette = parsed
-            except (json.JSONDecodeError, TypeError):
+            except (_json.JSONDecodeError, TypeError):
                 pass
 
         block_palette = None
         if user.dj_profile.block_palette:
             try:
-                parsed = json.loads(user.dj_profile.block_palette)
+                parsed = _json.loads(user.dj_profile.block_palette)
                 if isinstance(parsed, list):
                     block_palette = parsed
-            except (json.JSONDecodeError, TypeError):
+            except (_json.JSONDecodeError, TypeError):
                 pass
 
         dj_profile = DJProfileResponse(
@@ -777,12 +767,15 @@ async def delete_account(
     user.is_active = False
 
     # Revoke all refresh tokens
-    from sqlalchemy import select as sa_select
-
-    from app.models.db import RefreshToken as RT
-
     active_tokens = (
-        (await session.execute(sa_select(RT).where(RT.user_id == user.id, RT.revoked.is_(False))))
+        (
+            await session.execute(
+                select(RefreshTokenModel).where(
+                    RefreshTokenModel.user_id == user.id,
+                    RefreshTokenModel.revoked.is_(False),
+                )
+            )
+        )
         .scalars()
         .all()
     )
@@ -810,15 +803,23 @@ async def delete_account(
 async def logout(
     body: LogoutRequest,
     request: Request,
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    await auth_service.revoke_refresh_token(
-        refresh_token_value=body.refresh_token,
-        session=session,
+    # Verify the refresh token belongs to the authenticated user before revoking
+    token_hash = auth_service._hash_refresh_token(body.refresh_token)
+    stmt = select(RefreshTokenModel).where(
+        RefreshTokenModel.token_hash == token_hash,
+        RefreshTokenModel.user_id == user.id,
     )
+    token_row = (await session.execute(stmt)).scalar_one_or_none()
+    if token_row is None:
+        raise HTTPException(status_code=404, detail="Refresh token not found for this user")
+
+    token_row.revoked = True
     await session.commit()
 
-    log_auth_event("logout", ip_address=_client_ip(request))
+    log_auth_event("logout", user_id=str(user.id), ip_address=_client_ip(request))
 
     return Response(status_code=204)
 
@@ -909,24 +910,25 @@ async def resend_verification(
 async def list_sessions(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
+    offset: int = Query(0, ge=0, description="Number of sessions to skip"),
 ) -> list[SessionInfo]:
-    from sqlalchemy import select as sa_select
-
-    stmt = sa_select(RefreshTokenModel).where(
-        RefreshTokenModel.user_id == user.id,
-        RefreshTokenModel.revoked.is_(False),
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(RefreshTokenModel)
+        .where(
+            RefreshTokenModel.user_id == user.id,
+            RefreshTokenModel.revoked.is_(False),
+            RefreshTokenModel.expires_at > now,
+        )
+        .order_by(RefreshTokenModel.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
 
-    now = datetime.now(timezone.utc)
     result = []
     for row in rows:
-        expires = (
-            row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
-        )
-        if expires < now:
-            continue  # skip expired
-
         result.append(
             SessionInfo(
                 id=row.id,
@@ -958,16 +960,12 @@ async def revoke_session(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    import uuid as _uuid
-
-    from sqlalchemy import select as sa_select
-
     try:
         sid = _uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
-    stmt = sa_select(RefreshTokenModel).where(
+    stmt = select(RefreshTokenModel).where(
         RefreshTokenModel.id == sid,
         RefreshTokenModel.user_id == user.id,
         RefreshTokenModel.revoked.is_(False),

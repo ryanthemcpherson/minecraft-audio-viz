@@ -18,6 +18,9 @@
     "dj_name": {
       "type": "string",
       "minLength": 1
+    },
+    "direct_mode": {
+      "type": "boolean"
     }
   },
   "required": ["type", "code", "dj_name"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 _CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 _PRESIGNED_TTL = 300  # 5 minutes
+_VALID_CONTEXT_RE = re.compile(r"^[a-z0-9_-]+$")
 
 
 def create_r2_client(settings: Settings):
@@ -41,6 +43,11 @@ def generate_presigned_upload(
     """
     if content_type not in _CONTENT_TYPES:
         raise ValueError(f"Unsupported content type: {content_type}")
+
+    if not _VALID_CONTEXT_RE.match(context):
+        raise ValueError(
+            f"Invalid context: {context!r}. Must match [a-z0-9_-]+ (no slashes or special chars)."
+        )
 
     ext = _EXTENSIONS[content_type]
     random_name = secrets.token_urlsafe(16)

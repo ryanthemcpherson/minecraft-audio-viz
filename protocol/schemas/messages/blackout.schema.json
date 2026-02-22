@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "blackout.schema.json",
+  "title": "BlackoutMessage",
+  "description": "Toggle blackout mode. Hides all entities when enabled. Also accepted as 'set_blackout'.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "enum": ["blackout", "set_blackout"]
+    },
+    "v": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether to enable blackout. If omitted, toggles current state."
+    }
+  },
+  "required": ["type"]
+}

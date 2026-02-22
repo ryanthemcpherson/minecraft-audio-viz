@@ -152,6 +152,23 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class DesktopExchangeCode(Base):
+    """One-time exchange codes for desktop OAuth deep-link flow.
+
+    Previously stored in-memory; now persisted so codes survive restarts.
+    """
+
+    __tablename__ = "desktop_exchange_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    payload: Mapped[str] = mapped_column(String(4000), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # VJ server, show & DJ session models
 # ---------------------------------------------------------------------------
