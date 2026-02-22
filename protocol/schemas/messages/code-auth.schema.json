@@ -21,6 +21,10 @@
     },
     "direct_mode": {
       "type": "boolean"
+    },
+    "token": {
+      "type": "string",
+      "description": "Coordinator JWT for profile lookup (optional)"
     }
   },
   "required": ["type", "code", "dj_name"]
