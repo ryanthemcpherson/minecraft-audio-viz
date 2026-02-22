@@ -69,10 +69,11 @@ public class BitmapFractalZoom extends BitmapPattern {
                 }
 
                 if (iter == MAX_ITER) {
-                    buffer.setPixel(px, py, BitmapFrameBuffer.packARGB(255, 2, 2, 5));
+                    // Interior of set — leave transparent
                 } else {
                     // Smooth coloring
-                    double smoothIter = iter + 1 - Math.log(Math.log(Math.sqrt(zr * zr + zi * zi))) / Math.log(2);
+                    double mag = Math.max(1.0001, Math.sqrt(zr * zr + zi * zi));
+                    double smoothIter = iter + 1 - Math.log(Math.log(mag)) / Math.log(2);
                     float hue = (float) ((smoothIter * 8 + hueShift) % 360);
                     float sat = 0.8f + (float) (amplitude * 0.2);
                     float bri = (float) Math.min(1.0, 0.5 + amplitude * 0.3 + beatPulse * 0.2);

@@ -16,6 +16,7 @@ import java.util.Random;
 public class BitmapInkDrop extends BitmapPattern {
 
     private double[][] inkR, inkG, inkB;
+    private double[][] tmpR, tmpG, tmpB; // Reusable diffusion buffers
     private boolean initialized = false;
     private final Random rng = new Random(17);
 
@@ -33,6 +34,9 @@ public class BitmapInkDrop extends BitmapPattern {
             inkR = new double[w][h];
             inkG = new double[w][h];
             inkB = new double[w][h];
+            tmpR = new double[w][h];
+            tmpG = new double[w][h];
+            tmpB = new double[w][h];
             initialized = true;
         }
 
@@ -78,10 +82,6 @@ public class BitmapInkDrop extends BitmapPattern {
         double diffRate = 0.08 + audio.getAmplitude() * 0.04;
         double evapRate = 0.003;
 
-        double[][] newR = new double[w][h];
-        double[][] newG = new double[w][h];
-        double[][] newB = new double[w][h];
-
         for (int x = 0; x < w; x++) {
             for (int y = 0; y < h; y++) {
                 double sumR = inkR[x][y], sumG = inkG[x][y], sumB = inkB[x][y];
@@ -101,14 +101,16 @@ public class BitmapInkDrop extends BitmapPattern {
                 double avgR = sumR / (neighbors + 1);
                 double avgG = sumG / (neighbors + 1);
                 double avgB = sumB / (neighbors + 1);
-                newR[x][y] = Math.max(0, inkR[x][y] + (avgR - inkR[x][y]) * diffRate - evapRate);
-                newG[x][y] = Math.max(0, inkG[x][y] + (avgG - inkG[x][y]) * diffRate - evapRate);
-                newB[x][y] = Math.max(0, inkB[x][y] + (avgB - inkB[x][y]) * diffRate - evapRate);
+                tmpR[x][y] = Math.max(0, inkR[x][y] + (avgR - inkR[x][y]) * diffRate - evapRate);
+                tmpG[x][y] = Math.max(0, inkG[x][y] + (avgG - inkG[x][y]) * diffRate - evapRate);
+                tmpB[x][y] = Math.max(0, inkB[x][y] + (avgB - inkB[x][y]) * diffRate - evapRate);
             }
         }
-        inkR = newR;
-        inkG = newG;
-        inkB = newB;
+        // Swap buffers
+        double[][] swp;
+        swp = inkR; inkR = tmpR; tmpR = swp;
+        swp = inkG; inkG = tmpG; tmpG = swp;
+        swp = inkB; inkB = tmpB; tmpB = swp;
 
         // Render
         for (int y = 0; y < h; y++) {
@@ -116,9 +118,7 @@ public class BitmapInkDrop extends BitmapPattern {
                 int r = Math.min(255, (int) (inkR[x][y] * 255));
                 int g = Math.min(255, (int) (inkG[x][y] * 255));
                 int b = Math.min(255, (int) (inkB[x][y] * 255));
-                if (r + g + b < 5) {
-                    buffer.setPixel(x, y, BitmapFrameBuffer.packARGB(255, 2, 2, 5));
-                } else {
+                if (r + g + b >= 5) {
                     buffer.setPixel(x, y, BitmapFrameBuffer.rgb(r, g, b));
                 }
             }
@@ -129,6 +129,7 @@ public class BitmapInkDrop extends BitmapPattern {
     public void reset() {
         initialized = false;
         inkR = null; inkG = null; inkB = null;
+        tmpR = null; tmpG = null; tmpB = null;
     }
 
     @Override

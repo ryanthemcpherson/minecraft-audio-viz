@@ -30,9 +30,6 @@ public class BitmapTerrain extends BitmapPattern {
     /** Stored terrain heights for each column (normalized 0.0-1.0). */
     private double[] terrainHeights;
 
-    /** Tick counter for scroll timing. */
-    private int scrollCounter = 0;
-
     /** Smooth beat pulse for seismic bumps. */
     private double beatPulse = 0.0;
 
@@ -78,7 +75,6 @@ public class BitmapTerrain extends BitmapPattern {
         }
 
         // Scroll terrain left every tick
-        scrollCounter++;
         System.arraycopy(terrainHeights, 1, terrainHeights, 0, w - 1);
 
         // Generate new terrain height for the rightmost column
@@ -179,7 +175,6 @@ public class BitmapTerrain extends BitmapPattern {
     @Override
     public void reset() {
         terrainHeights = null;
-        scrollCounter = 0;
         beatPulse = 0.0;
     }
 

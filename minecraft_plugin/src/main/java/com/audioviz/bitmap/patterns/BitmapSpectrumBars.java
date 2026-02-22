@@ -80,7 +80,7 @@ public class BitmapSpectrumBars extends BitmapPattern {
             int barX = band * (barWidth + gap);
 
             // Draw bar with VU gradient
-            int fillRows = (int) (value * h);
+            int fillRows = (int) (value * (h - 1));
             for (int row = 0; row < fillRows && row < h; row++) {
                 // Gradient position: 0 = bottom, 1 = top of bar
                 float gradientT = (float) row / h;

@@ -28,16 +28,8 @@ public class BitmapAurora extends BitmapPattern {
         int w = buffer.getWidth();
         int h = buffer.getHeight();
 
-        // Dark sky background with slight gradient
-        for (int y = 0; y < h; y++) {
-            double t = (double) y / h;
-            int bg = BitmapFrameBuffer.lerpColor(
-                BitmapFrameBuffer.rgb(2, 3, 15),    // Top: dark blue
-                BitmapFrameBuffer.rgb(1, 1, 5), t); // Bottom: near black
-            for (int x = 0; x < w; x++) {
-                buffer.setPixel(x, y, bg);
-            }
-        }
+        // Clear to transparent — curtain pixels are drawn over the Minecraft world
+        buffer.clear();
 
         double mid = audio.getMid();
         double bass = audio.getBass();

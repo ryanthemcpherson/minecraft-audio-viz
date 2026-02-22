@@ -15,6 +15,7 @@ public class BitmapGridWarp extends BitmapPattern {
     private static final int COLOR_CYAN = BitmapFrameBuffer.rgb(0, 255, 230);
     private static final int COLOR_MAGENTA = BitmapFrameBuffer.rgb(255, 0, 200);
     private static final int BG = 0x00000000;
+    private static final int OPAQUE_BLACK = BitmapFrameBuffer.packARGB(255, 0, 0, 0);
 
     public BitmapGridWarp() {
         super("bmp_gridwarp", "Bitmap Grid Warp",
@@ -45,7 +46,7 @@ public class BitmapGridWarp extends BitmapPattern {
                 int py = gridY + (int) warp;
                 if (py >= 0 && py < h) {
                     float glow = (float) (0.5 + amplitude * 0.5);
-                    int color = BitmapFrameBuffer.lerpColor(BG, COLOR_CYAN, glow);
+                    int color = BitmapFrameBuffer.lerpColor(OPAQUE_BLACK, COLOR_CYAN, glow);
                     buffer.setPixel(x, py, color);
                     // Glow: dim adjacent pixels
                     if (py - 1 >= 0) {
@@ -69,7 +70,7 @@ public class BitmapGridWarp extends BitmapPattern {
                 int px = gridX + (int) warp;
                 if (px >= 0 && px < w) {
                     float glow = (float) (0.4 + amplitude * 0.6);
-                    int color = BitmapFrameBuffer.lerpColor(BG, COLOR_MAGENTA, glow);
+                    int color = BitmapFrameBuffer.lerpColor(OPAQUE_BLACK, COLOR_MAGENTA, glow);
                     buffer.setPixel(px, y, color);
                 }
             }

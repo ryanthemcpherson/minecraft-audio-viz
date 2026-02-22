@@ -18,6 +18,7 @@ public class BitmapScanLines extends BitmapPattern {
 
     private static final int PHOSPHOR_GREEN = BitmapFrameBuffer.rgb(30, 255, 100);
     private static final int BG = 0x00000000;
+    private static final int OPAQUE_BLACK = BitmapFrameBuffer.packARGB(255, 0, 0, 0);
 
     public BitmapScanLines() {
         super("bmp_scanlines", "Bitmap Scan Lines",
@@ -88,7 +89,7 @@ public class BitmapScanLines extends BitmapPattern {
                 if (totalBri < 0.01) {
                     buffer.setPixel(x, y, BG);
                 } else {
-                    int color = BitmapFrameBuffer.lerpColor(BG, PHOSPHOR_GREEN, (float) totalBri);
+                    int color = BitmapFrameBuffer.lerpColor(OPAQUE_BLACK, PHOSPHOR_GREEN, (float) totalBri);
                     buffer.setPixel(x, y, color);
                 }
             }

@@ -13,6 +13,10 @@ import com.audioviz.patterns.AudioState;
  */
 public class BitmapWavePropagation extends BitmapPattern {
 
+    // Reusable column accumulators (sized lazily)
+    private double[] columnR, columnG, columnB;
+    private int lastWidth;
+
     // Wave properties per band: [frequency multiplier, speed, vertical center offset]
     private static final double[][] WAVE_PROPS = {
         {1.0, 0.3, 0.0},    // Bass: slow, large
@@ -45,13 +49,21 @@ public class BitmapWavePropagation extends BitmapPattern {
         double[] bands = audio.getBands();
         double amplitude = audio.getAmplitude();
 
+        // Resize accumulators if needed
+        if (columnR == null || lastWidth != h) {
+            columnR = new double[h];
+            columnG = new double[h];
+            columnB = new double[h];
+            lastWidth = h;
+        }
+
         for (int x = 0; x < w; x++) {
             double nx = (double) x / w;
 
-            // Accumulate wave contributions per pixel column
-            double[] columnR = new double[h];
-            double[] columnG = new double[h];
-            double[] columnB = new double[h];
+            // Clear column accumulators
+            java.util.Arrays.fill(columnR, 0, h, 0.0);
+            java.util.Arrays.fill(columnG, 0, h, 0.0);
+            java.util.Arrays.fill(columnB, 0, h, 0.0);
 
             for (int b = 0; b < Math.min(5, bands.length); b++) {
                 double freq = WAVE_PROPS[b][0];

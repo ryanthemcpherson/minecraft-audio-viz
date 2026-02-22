@@ -38,7 +38,7 @@ public class BitmapTunnelZoom extends BitmapPattern {
 
         double speed = 0.5 + bass * 2.0 + beatJump * 0.3;
         scrollOffset += speed * 0.05;
-        hueRotation += (float) (amplitude * 2.0);
+        hueRotation = (hueRotation + (float) (amplitude * 2.0)) % 360f;
 
         buffer.clear();
 

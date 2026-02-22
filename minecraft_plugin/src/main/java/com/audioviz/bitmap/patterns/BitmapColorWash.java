@@ -73,7 +73,7 @@ public class BitmapColorWash extends BitmapPattern {
                 double dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
                 double radialFade = 1.0 - (dist / maxDist) * 0.4; // 60-100% brightness
                 int dimmed = BitmapFrameBuffer.lerpColor(
-                    BitmapFrameBuffer.packARGB(255, 2, 2, 5), color, (float) (radialFade * washIntensity));
+                    BitmapFrameBuffer.packARGB(255, 0, 0, 0), color, (float) (radialFade * washIntensity));
                 buffer.setPixel(x, y, dimmed);
             }
         }
