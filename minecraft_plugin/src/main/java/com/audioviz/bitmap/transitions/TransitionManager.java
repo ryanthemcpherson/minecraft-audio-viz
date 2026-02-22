@@ -40,6 +40,7 @@ public class TransitionManager {
         register(new WipeTransition(WipeTransition.Direction.DOWN, 0.08));
         register(new IrisTransition(true, 0.06));
         register(new IrisTransition(false, 0.06));
+        register(new ChannelChangeTransition());
     }
 
     public void register(BitmapTransition transition) {

@@ -95,6 +95,35 @@ public class BitmapRendererBackend implements RendererBackend {
     }
 
     /**
+     * Auto-size a bitmap grid from zone geometry.
+     * Uses bitmap.pixels_per_block and bitmap.max_pixels_per_zone from config.
+     * Returns the actual dimensions used as {width, height}.
+     */
+    public int[] initializeBitmapGrid(VisualizationZone zone) {
+        int pixelsPerBlock = plugin.getConfig().getInt("bitmap.pixels_per_block", 3);
+        int maxPixels = plugin.getConfig().getInt("bitmap.max_pixels_per_zone", 500);
+
+        double zoneW = zone.getSize().getX();
+        double zoneH = zone.getSize().getY();
+
+        int targetW = Math.max(1, (int) Math.round(zoneW * pixelsPerBlock));
+        int targetH = Math.max(1, (int) Math.round(zoneH * pixelsPerBlock));
+
+        // Scale down proportionally if over budget
+        if (targetW * targetH > maxPixels) {
+            double ratio = Math.sqrt((double) maxPixels / (targetW * targetH));
+            targetW = Math.max(1, (int) (targetW * ratio));
+            targetH = Math.max(1, (int) (targetH * ratio));
+        }
+
+        plugin.getLogger().info("Auto-sized bitmap for zone '" + zone.getName() +
+            "': zone=" + zoneW + "x" + zoneH + " → " + targetW + "x" + targetH +
+            " (" + (targetW * targetH) + " pixels)");
+
+        return initializeBitmapGrid(zone, targetW, targetH);
+    }
+
+    /**
      * Initialize a bitmap grid with explicit dimensions.
      * Returns the actual dimensions used as {width, height} (may be scaled down).
      */
@@ -103,12 +132,12 @@ public class BitmapRendererBackend implements RendererBackend {
         width = Math.max(1, Math.min(MAX_BITMAP_WIDTH, width));
         height = Math.max(1, Math.min(MAX_BITMAP_HEIGHT, height));
 
-        int maxEntities = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
-        if (width * height > maxEntities) {
+        int maxPixels = plugin.getConfig().getInt("bitmap.max_pixels_per_zone", 500);
+        if (width * height > maxPixels) {
             plugin.getLogger().warning("Bitmap " + width + "x" + height + " = " +
-                (width * height) + " exceeds max_entities_per_zone (" + maxEntities +
+                (width * height) + " exceeds bitmap.max_pixels_per_zone (" + maxPixels +
                 "). Scaling down.");
-            double ratio = Math.sqrt((double) maxEntities / (width * height));
+            double ratio = Math.sqrt((double) maxPixels / (width * height));
             width = Math.max(1, (int) (width * ratio));
             height = Math.max(1, (int) (height * ratio));
         }
