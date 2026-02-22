@@ -69,7 +69,7 @@ function calculate(audio, config, dt)
     state.rotation = state.rotation + 0.15 * dt
 
     -- Beat response
-    if audio.beat then
+    if audio.is_beat then
         state.beat_intensity = 1.0
         state.body_scale = 1.12
         state.flap_phase = math.pi * 0.5 -- snap wings to full extension

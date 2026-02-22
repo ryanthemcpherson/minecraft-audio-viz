@@ -52,7 +52,7 @@ function calculate(audio, config, dt)
     end
 
     -- Wobble on beat
-    if audio.beat then
+    if audio.is_beat then
         state.pulse = 1.0
         state.glow = 1.0
         state.wobble = 0.15 * audio.amplitude

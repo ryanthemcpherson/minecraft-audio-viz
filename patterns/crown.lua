@@ -50,7 +50,7 @@ function calculate(audio, config, dt)
 
     local bands = audio.bands
     local amplitude = audio.amplitude or 0
-    local beat = audio.beat
+    local beat = audio.is_beat
     local beat_phase = audio.beat_phase or 0
 
     -- Smooth bands

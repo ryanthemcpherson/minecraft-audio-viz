@@ -22,13 +22,13 @@ function calculate(audio, config, dt)
         state.velocities = {}
         state.flash = 0
 
-        -- Initialize positions on fibonacci sphere
-        local sphere = fibonacci_sphere(n)
+        -- Initialize positions on fibonacci sphere (cache for reuse)
+        state.sphere = fibonacci_sphere(n)
         for i = 1, n do
             state.positions[i] = {
-                x = 0.5 + sphere[i].x * 0.4,
-                y = 0.5 + sphere[i].y * 0.4,
-                z = 0.5 + sphere[i].z * 0.4,
+                x = 0.5 + state.sphere[i].x * 0.4,
+                y = 0.5 + state.sphere[i].y * 0.4,
+                z = 0.5 + state.sphere[i].z * 0.4,
             }
             state.velocities[i] = {x = 0, y = 0, z = 0}
         end
@@ -45,7 +45,7 @@ function calculate(audio, config, dt)
     end
 
     -- Beat handling
-    if audio.beat then
+    if audio.is_beat then
         if state.phase == "build" then
             state.build_beats = state.build_beats + 1
             state.build_progress = math.min(1.0, state.build_beats / target_beats)
@@ -56,16 +56,15 @@ function calculate(audio, config, dt)
                 state.drop_timer = 0
                 state.flash = 1.0
 
-                -- Generate explosion velocities
-                local dirs = fibonacci_sphere(n)
+                -- Generate explosion velocities using cached sphere
                 for i = 1, n do
                     local speed = 1.2 + math.random() * 0.6
                     -- Amplitude scales explosion
                     speed = speed * (0.8 + audio.amplitude * 0.5)
                     state.velocities[i] = {
-                        x = dirs[i].x * speed,
-                        y = dirs[i].y * speed + 0.3,  -- slight upward bias
-                        z = dirs[i].z * speed,
+                        x = state.sphere[i].x * speed,
+                        y = state.sphere[i].y * speed + 0.3,  -- slight upward bias
+                        z = state.sphere[i].z * speed,
                     }
                 end
             end
@@ -87,14 +86,13 @@ function calculate(audio, config, dt)
         -- Bass wobble on radius
         local wobble = audio.bands[1] * 0.03
 
-        local sphere = fibonacci_sphere(n)
         for i = 1, n do
             local r = radius + wobble * math.sin(i * 0.5 + state.time * 3)
 
-            -- Apply orbit rotation
-            local sx = sphere[i].x * r
-            local sy = sphere[i].y * r
-            local sz = sphere[i].z * r
+            -- Apply orbit rotation using cached sphere points
+            local sx = state.sphere[i].x * r
+            local sy = state.sphere[i].y * r
+            local sz = state.sphere[i].z * r
 
             -- Rotate around Y axis
             local angle = state.orbit_phase + (i / n) * 0.3
@@ -138,13 +136,12 @@ function calculate(audio, config, dt)
             state.orbit_phase = 0
             state.flash = 0
 
-            -- Reset positions to sphere
-            local sphere = fibonacci_sphere(n)
+            -- Reset positions to sphere using cached points
             for i = 1, n do
                 state.positions[i] = {
-                    x = 0.5 + sphere[i].x * 0.35,
-                    y = 0.5 + sphere[i].y * 0.35,
-                    z = 0.5 + sphere[i].z * 0.35,
+                    x = 0.5 + state.sphere[i].x * 0.35,
+                    y = 0.5 + state.sphere[i].y * 0.35,
+                    z = 0.5 + state.sphere[i].z * 0.35,
                 }
                 state.velocities[i] = {x = 0, y = 0, z = 0}
             end

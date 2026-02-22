@@ -150,6 +150,7 @@ function calculate(audio, config, dt)
             y = y,
             z = z,
             scale = math.min(config.max_scale, math.max(0.05, scale)),
+            rotation = 0,
             band = band_idx,
             visible = total_glow > 0.15,  -- Only visible when glowing enough
         }

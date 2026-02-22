@@ -16,7 +16,7 @@ function calculate(audio, config, dt)
 
     -- Faster rotation with energy
     local speed = 2.4 + audio.peak * 3.4
-    if audio.beat then
+    if audio.is_beat then
         speed = speed * 1.5
         state.intensity = 1.0
     end
@@ -69,7 +69,7 @@ function calculate(audio, config, dt)
             -- Scale - larger when close
             local scale = config.base_scale * (1.55 - depth) + audio.bands[band_idx + 1] * 0.35
 
-            if audio.beat then
+            if audio.is_beat then
                 scale = scale * 1.2
             end
 
@@ -79,6 +79,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z_pos),
                 scale = math.min(config.max_scale, scale),
+                rotation = 0,
                 band = band_idx,
                 visible = true,
             }

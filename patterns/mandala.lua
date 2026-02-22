@@ -17,7 +17,7 @@ function calculate(audio, config, dt)
     state.petal_boost = state.petal_boost or 0
 
     -- Beat pulse
-    if audio.beat then
+    if audio.is_beat then
         state.pulse = 1.0
         state.petal_boost = 1.0
     end
@@ -67,7 +67,7 @@ function calculate(audio, config, dt)
             local scale = config.base_scale + audio.bands[ring + 1] * 0.5
             scale = scale + state.petal_boost * 0.3 * (1.0 - ring / 5)
 
-            if audio.beat then
+            if audio.is_beat then
                 scale = scale * 1.2
             end
 
@@ -77,6 +77,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, scale),
+                rotation = 0,
                 band = ring,
                 visible = true,
             }

@@ -30,7 +30,7 @@ function calculate(audio, config, dt)
     state.time = state.time + dt
 
     -- Beat: trigger ballyhoo (all snap to center)
-    if audio.beat then
+    if audio.is_beat then
         state.snap_timer = 1.0  -- full beat cycle to return
     end
 

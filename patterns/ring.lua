@@ -13,31 +13,13 @@ state = {
     breath = 0.0,
 }
 
--- Generate fibonacci sphere points for even distribution
-local function generate_sphere_points(n)
-    local points = {}
-    local phi = math.pi * (3.0 - math.sqrt(5.0))  -- Golden angle
-
-    for i = 0, n - 1 do
-        local y = 1 - (i / (n - 1)) * 2  -- y goes from 1 to -1
-        local radius = math.sqrt(1 - y * y)
-        local theta = phi * i
-
-        local x = math.cos(theta) * radius
-        local z = math.sin(theta) * radius
-        points[#points + 1] = { x, y, z }
-    end
-
-    return points
-end
-
 -- Main calculation function
 function calculate(audio, config, dt)
     local n = config.entity_count
 
-    -- Initialize sphere points
+    -- Initialize sphere points (using fibonacci_sphere from lib.lua)
     if #state.sphere_points ~= n then
-        state.sphere_points = generate_sphere_points(n)
+        state.sphere_points = fibonacci_sphere(n)
     end
 
     -- Rotation
@@ -56,9 +38,9 @@ function calculate(audio, config, dt)
     local base_radius = 0.15 + state.breath * 0.2
 
     for i = 1, n do
-        local px = state.sphere_points[i][1]
-        local py = state.sphere_points[i][2]
-        local pz = state.sphere_points[i][3]
+        local px = state.sphere_points[i].x
+        local py = state.sphere_points[i].y
+        local pz = state.sphere_points[i].z
 
         -- Apply Y rotation
         local cos_y = math.cos(state.rotation_y)

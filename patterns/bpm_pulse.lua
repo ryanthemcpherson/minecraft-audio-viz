@@ -26,7 +26,7 @@ function calculate(audio, config, dt)
 
     -- BPM-synced pulse: sharp attack on beat, smooth decay
     local pulse = beat_pulse(audio.beat_phase, 1, 5.0)
-    -- Half-time pulse for variety
+    -- Half-time pulse for variety (divisor < 1 slows phase → one pulse per 2 beats)
     local half_pulse = beat_pulse(audio.beat_phase, 0.5, 3.0)
 
     -- Generate sphere points

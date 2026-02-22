@@ -19,7 +19,7 @@ function calculate(audio, config, dt)
     state.time = state.time + dt
 
     -- Spawn new wave on beat (max 4 concurrent)
-    if audio.beat then
+    if audio.is_beat then
         local active = 0
         for _, w in ipairs(state.waves) do
             if w.life > 0 then active = active + 1 end

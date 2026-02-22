@@ -24,7 +24,7 @@ function calculate(audio, config, dt)
         local splash_x = 0.2 + math.random() * 0.6
         local splash_z = 0.2 + math.random() * 0.6
         state.splashes[#state.splashes + 1] = {
-            x = splash_x, z = splash_z, time = 0.0, intensity = audio.beat_intensity
+            x = splash_x, z = splash_z, time = 0.0, intensity = (audio.beat_intensity or 0.5)
         }
     end
 
@@ -68,7 +68,7 @@ function calculate(audio, config, dt)
             -- Small shimmer (highs)
             local wave_high = math.sin(x_norm * math.pi * 8 + state.wave_time * 3) * 0.015
             wave_high = wave_high + math.sin(z_norm * math.pi * 7 - state.wave_time * 2.5) * 0.01
-            wave_high = wave_high * (0.2 + audio.bands[5] * 2 + audio.bands[5] * 2)
+            wave_high = wave_high * (0.2 + audio.bands[4] * 2 + audio.bands[5] * 2)
 
             -- Combine waves
             local y = center + wave_bass + wave_mid + wave_high
@@ -109,6 +109,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, scale),
+                rotation = 0,
                 band = band_idx,
                 visible = true,
             }

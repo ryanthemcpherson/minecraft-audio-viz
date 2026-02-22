@@ -25,7 +25,7 @@ function calculate(audio, config, dt)
     state.smooth_high = smooth(state.smooth_high, audio.bands[5], 0.3, dt)
 
     -- Beat: freeze sweep momentarily
-    if audio.beat then
+    if audio.is_beat then
         state.freeze_timer = 0.15
     end
 

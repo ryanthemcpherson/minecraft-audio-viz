@@ -78,7 +78,7 @@ function calculate(audio, config, dt)
     state.rotation_z = state.rotation_z + (0.15 * speed_mult) * dt
 
     -- Pulse on beat
-    if audio.beat then
+    if audio.is_beat then
         state.pulse = 1.0
     end
     state.pulse = decay(state.pulse, 0.9, dt)
@@ -128,7 +128,7 @@ function calculate(audio, config, dt)
         local band_idx = (i - 1) % 5
         local scale = config.base_scale + audio.bands[band_idx + 1] * 0.4
 
-        if audio.beat then
+        if audio.is_beat then
             scale = scale * 1.3
         end
 

@@ -218,7 +218,7 @@ function calculate(audio, config, dt)
     end
 
     -- Beat response
-    if audio.beat then
+    if audio.is_beat then
         state.head_bob = 0.025 * audio.peak
         state.beat_intensity = 1.0
         state.eye_glow = 1.0
@@ -229,7 +229,7 @@ function calculate(audio, config, dt)
 
     -- Jaw opens with bass
     local target_jaw = audio.bands[1] * 0.08 + audio.bands[2] * 0.04
-    if audio.beat then
+    if audio.is_beat then
         target_jaw = target_jaw + 0.06
     end
     state.jaw_open = smooth(state.jaw_open, target_jaw, 0.25, dt)
@@ -317,7 +317,7 @@ function calculate(audio, config, dt)
         end
 
         -- Global beat pulse
-        if audio.beat then
+        if audio.is_beat then
             base_scale = base_scale * 1.15
         end
 
