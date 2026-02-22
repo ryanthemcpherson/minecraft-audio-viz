@@ -294,7 +294,10 @@ function calculate(audio, config, dt)
 
     -- === POMMEL ===
     local pommel_brightness = clamp(math.floor(6 + state.beat_intensity * 6), 0, 15)
-    local pommel_pts = fibonacci_sphere(pommel_count)
+    if not state.pommel_pts or #state.pommel_pts ~= pommel_count then
+        state.pommel_pts = fibonacci_sphere(pommel_count)
+    end
+    local pommel_pts = state.pommel_pts
     for i = 1, pommel_count do
         local pt = pommel_pts[i]
         local px = CENTER + pt.x * POMMEL_RADIUS

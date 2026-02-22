@@ -29,8 +29,11 @@ function calculate(audio, config, dt)
     -- Half-time pulse for variety (divisor < 1 slows phase → one pulse per 2 beats)
     local half_pulse = beat_pulse(audio.beat_phase, 0.5, 3.0)
 
-    -- Generate sphere points
-    local points = fibonacci_sphere(n)
+    -- Generate sphere points (cached)
+    if not state.points or #state.points ~= n then
+        state.points = fibonacci_sphere(n)
+    end
+    local points = state.points
 
     for i = 1, n do
         local p = points[i]
