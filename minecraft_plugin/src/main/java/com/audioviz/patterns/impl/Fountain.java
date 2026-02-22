@@ -3,6 +3,8 @@ package com.audioviz.patterns.impl;
 import com.audioviz.patterns.*;
 import java.util.*;
 
+// Superseded by Lua pattern engine (patterns/*.lua). No message type routes to this class.
+@Deprecated
 public class Fountain extends VisualizationPattern {
     private double time = 0;
 

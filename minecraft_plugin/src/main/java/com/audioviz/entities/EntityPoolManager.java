@@ -164,12 +164,17 @@ public class EntityPoolManager {
         VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
         if (zone == null) return;
 
+        if (count > maxEntitiesPerZone) {
+            count = maxEntitiesPerZone;
+        }
+
+        final int finalCount = count;
         Map<String, Entity> pool = entityPools.computeIfAbsent(zoneName.toLowerCase(), k -> new ConcurrentHashMap<>());
 
         Bukkit.getScheduler().runTask(plugin, () -> {
             Location spawnLoc = zone.getOrigin().clone();
 
-            for (int i = 0; i < count; i++) {
+            for (int i = 0; i < finalCount; i++) {
                 String entityId = "text_" + i;
                 if (pool.containsKey(entityId)) continue;
 
