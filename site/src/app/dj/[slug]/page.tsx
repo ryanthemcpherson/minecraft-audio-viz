@@ -8,6 +8,17 @@ import type { DJProfile } from "@/lib/auth";
 
 const BAND_LABELS = ["Bass", "Low-mid", "Mid", "High-mid", "High"];
 
+/** Validate a color string against hex color format or reject it. */
+function sanitizeColor(color: string): string | null {
+  if (/^#[0-9a-fA-F]{3,8}$/.test(color)) return color;
+  return null;
+}
+
+/** Filter an array of color strings, keeping only valid hex colors. */
+function sanitizeColorPalette(colors: string[]): string[] {
+  return colors.map((c) => sanitizeColor(c)).filter((c): c is string => c !== null);
+}
+
 export default function PublicDJProfilePage() {
   const params = useParams();
   const slug = params.slug as string;
@@ -41,9 +52,10 @@ export default function PublicDJProfilePage() {
     );
   }
 
-  const colors = profile.color_palette && profile.color_palette.length >= 2
-    ? profile.color_palette
-    : ["#6366f1", "#8b5cf6"];
+  const rawColors = profile.color_palette && profile.color_palette.length >= 2
+    ? sanitizeColorPalette(profile.color_palette)
+    : [];
+  const colors = rawColors.length >= 2 ? rawColors : ["#6366f1", "#8b5cf6"];
 
   const bannerStyle = profile.banner_url
     ? { backgroundImage: `url(${profile.banner_url})`, backgroundSize: "cover", backgroundPosition: "center" }
@@ -67,6 +79,7 @@ export default function PublicDJProfilePage() {
               width={112}
               height={112}
               className="h-28 w-28 rounded-full border-4 border-[#08090d] object-cover"
+              /* User-uploaded avatar URLs are dynamic (S3 presigned); cannot add to remotePatterns */
               unoptimized
             />
           ) : (
@@ -173,7 +186,7 @@ export default function PublicDJProfilePage() {
               Color Palette
             </h3>
             <div className="flex gap-3">
-              {profile.color_palette.map((color, i) => (
+              {sanitizeColorPalette(profile.color_palette).map((color, i) => (
                 <div key={i} className="flex flex-col items-center gap-1.5">
                   <div
                     className="h-10 w-10 rounded-lg border border-white/10"
@@ -185,7 +198,7 @@ export default function PublicDJProfilePage() {
             </div>
             {/* Gradient bar */}
             <div className="mt-3 flex h-2 overflow-hidden rounded-full">
-              {profile.color_palette.map((color, i) => (
+              {sanitizeColorPalette(profile.color_palette).map((color, i) => (
                 <div key={i} className="flex-1" style={{ backgroundColor: color }} />
               ))}
             </div>

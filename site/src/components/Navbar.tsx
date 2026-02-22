@@ -111,6 +111,7 @@ export default function Navbar() {
                         width={28}
                         height={28}
                         className="h-7 w-7 rounded-full"
+                        /* Avatar URLs come from Discord/Google OAuth or S3 uploads — domains are dynamic */
                         unoptimized
                       />
                     ) : (

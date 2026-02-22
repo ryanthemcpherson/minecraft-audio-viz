@@ -14,7 +14,7 @@ export type { EntityData, AudioState, PatternConfig };
 export interface PatternInstance {
   config: PatternConfig;
   update(dt: number): void;
-  calculateEntities(audio: AudioState): EntityData[];
+  calculateEntities(audio: AudioState, dt?: number): EntityData[];
 }
 
 export interface PatternMeta {
@@ -57,8 +57,8 @@ class PendingPattern implements PatternInstance {
     this._inner?.update(dt);
   }
 
-  calculateEntities(audio: AudioState): EntityData[] {
-    if (this._inner) return this._inner.calculateEntities(audio);
+  calculateEntities(audio: AudioState, dt?: number): EntityData[] {
+    if (this._inner) return this._inner.calculateEntities(audio, dt);
     return [];
   }
 }
