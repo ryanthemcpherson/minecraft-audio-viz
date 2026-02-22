@@ -143,11 +143,17 @@ impl VoiceStreamer {
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
         if !enabled {
-            // Clear buffered data when disabled
+            // Clear buffered data and reset encoder state when disabled
             let mut inner = self.inner.lock();
             inner.residual.clear();
             inner.frame_buffer.clear();
             inner.frames.clear();
+            #[cfg(feature = "voice-opus")]
+            if let Some(ref mut encoder) = inner.opus_encoder {
+                if let Err(e) = encoder.reset_state() {
+                    log::warn!("Failed to reset Opus encoder state: {}", e);
+                }
+            }
         }
     }
 

@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,3 +163,62 @@ async def get_show(
         created_at=show.created_at,
         ended_at=show.ended_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /shows/disconnect/{session_id}
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/shows/disconnect/{session_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Disconnect a DJ session (idempotent)",
+)
+async def disconnect_dj(
+    session_id: uuid.UUID,
+    server: VJServer = Depends(_authenticate_server),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Mark a DJ session as disconnected and decrement the show's DJ count.
+
+    This endpoint is **idempotent**: disconnecting an already-disconnected or
+    non-existent session returns 204 without error.
+    """
+    stmt = select(DJSession).where(DJSession.id == session_id)
+    result = await session.execute(stmt)
+    dj_session = result.scalar_one_or_none()
+
+    if dj_session is None or dj_session.disconnected_at is not None:
+        return Response(status_code=204)
+
+    # Verify server ownership
+    show_stmt = select(Show).where(Show.id == dj_session.show_id)
+    show_result = await session.execute(show_stmt)
+    show = show_result.scalar_one_or_none()
+
+    if show is None or show.server_id != server.id:
+        return Response(status_code=204)
+
+    now = datetime.now(timezone.utc)
+
+    # Mark session disconnected
+    await session.execute(
+        update(DJSession)
+        .where(DJSession.id == session_id, DJSession.disconnected_at.is_(None))
+        .values(disconnected_at=now)
+    )
+
+    # Decrement current_djs (floor at 0)
+    await session.execute(
+        update(Show)
+        .where(Show.id == show.id, Show.current_djs > 0)
+        .values(current_djs=Show.current_djs - 1)
+    )
+
+    await session.commit()
+
+    logger.info("DJ disconnected: session_id=%s show_id=%s", session_id, show.id)
+
+    return Response(status_code=204)
