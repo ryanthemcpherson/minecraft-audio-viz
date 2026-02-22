@@ -10,7 +10,7 @@ export class WebSocketService extends EventTarget {
         this.host = options.host || 'localhost';
         this.port = options.port || 8766;
         this.vjPassword = options.vjPassword || '';
-        this.reconnectInterval = options.reconnectInterval || 2000;
+        this.reconnectInterval = options.reconnectInterval || 1000;
         this.maxReconnectAttempts = options.maxReconnectAttempts || 10;
 
         this.ws = null;
@@ -236,7 +236,7 @@ export class WebSocketService extends EventTarget {
         }
 
         const delay = Math.min(
-            this.reconnectInterval * Math.pow(1.5, this.reconnectAttempts - 1),
+            this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1),
             30000 // Max 30 seconds
         );
 
