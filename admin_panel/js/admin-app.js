@@ -186,6 +186,7 @@ class AdminApp {
         this._setupDJQueueDelegation();
         this._setupDJPendingDelegation();
         this._initBitmapControls();
+        this._setupDjLogoListeners();
         this._initPreviewStrip();
         this._updateTabIndicator();
         window.addEventListener('resize', () => this._updateTabIndicator());
@@ -390,6 +391,13 @@ class AdminApp {
         this.elements.bitmapLayerOpacity = document.getElementById('bitmap-layer-opacity');
         this.elements.bitmapSharedPalette = document.getElementById('bitmap-shared-palette');
         this.elements.bitmapSyncMode = document.getElementById('bitmap-sync-mode');
+
+        // DJ Logo elements
+        this.elements.djLogoSection = document.getElementById('dj-logo-section');
+        this.elements.djLogoModeGrid = document.getElementById('dj-logo-mode-grid');
+        this.elements.djLogoThreshold = document.getElementById('dj-logo-threshold');
+        this.elements.djLogoFile = document.getElementById('dj-logo-file');
+        this.elements.btnDjLogoLoad = document.getElementById('btn-dj-logo-load');
 
         // Pattern transition elements
         this.elements.transitionDurationSlider = document.getElementById('transition-duration-slider');
@@ -5335,6 +5343,85 @@ class AdminApp {
         }
     }
 
+    // ========== DJ Logo Controls ==========
+
+    _setupDjLogoListeners() {
+        const el = this.elements;
+        const zone = () => el.bitmapZone?.value || 'main';
+
+        // Mode buttons
+        if (el.djLogoModeGrid) {
+            el.djLogoModeGrid.querySelectorAll('[data-logo-mode]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.ws.send({
+                        type: 'bitmap_dj_logo',
+                        zone: zone(),
+                        action: 'set_mode',
+                        mode: btn.dataset.logoMode
+                    });
+                    el.djLogoModeGrid.querySelectorAll('.pattern-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
+        }
+
+        // Threshold slider
+        if (el.djLogoThreshold) {
+            let thresholdTimer = null;
+            el.djLogoThreshold.addEventListener('input', () => {
+                const val = el.djLogoThreshold.value;
+                document.getElementById('val-dj-logo-threshold').textContent = val;
+                clearTimeout(thresholdTimer);
+                thresholdTimer = setTimeout(() => {
+                    this.ws.send({
+                        type: 'bitmap_dj_logo',
+                        zone: zone(),
+                        action: 'set_threshold',
+                        threshold: parseInt(val)
+                    });
+                }, 50);
+            });
+        }
+
+        // Load image button
+        if (el.btnDjLogoLoad) {
+            el.btnDjLogoLoad.addEventListener('click', () => {
+                const path = el.djLogoFile?.value?.trim();
+                if (!path) return;
+                this._djLogoLoaded = true;
+                this.ws.send({
+                    type: 'bitmap_dj_logo',
+                    zone: zone(),
+                    action: 'load_file',
+                    path
+                });
+            });
+        }
+    }
+
+    _updateDjLogoVisibility(patternId) {
+        const section = this.elements.djLogoSection;
+        if (!section) return;
+        if (patternId === 'bmp_dj_logo') {
+            section.classList.remove('hidden');
+            section.classList.remove('collapsed');
+            // Auto-load image on first selection only
+            const path = this.elements.djLogoFile?.value?.trim();
+            if (path && !this._djLogoLoaded) {
+                this._djLogoLoaded = true;
+                const zone = this.elements.bitmapZone?.value || 'main';
+                this.ws.send({
+                    type: 'bitmap_dj_logo',
+                    zone,
+                    action: 'load_file',
+                    path
+                });
+            }
+        } else {
+            section.classList.add('hidden');
+        }
+    }
+
     /** Convert "#RRGGBB" hex color to ARGB integer (full alpha) for Minecraft plugin */
     _hexToArgbInt(hex) {
         if (!hex) return 0xFFFFFFFF;
@@ -5499,6 +5586,7 @@ class AdminApp {
 
         this.state.bitmap.activePattern = patternId;
         this._highlightBitmapPattern(patternId);
+        this._updateDjLogoVisibility(patternId);
     }
 
     _setBitmapPalette(paletteId) {

@@ -11,6 +11,7 @@ import com.audioviz.bitmap.effects.ColorPalette;
 import com.audioviz.bitmap.effects.EffectsProcessor;
 import com.audioviz.bitmap.effects.LayerCompositor;
 import com.audioviz.bitmap.gamestate.FireworkPattern;
+import com.audioviz.bitmap.media.DJLogoPattern;
 import com.audioviz.bitmap.media.ImagePattern;
 import com.audioviz.bitmap.text.ChatWallPattern;
 import com.audioviz.bitmap.text.CountdownPattern;
@@ -144,6 +145,7 @@ public class MessageHandler {
             case "bitmap_firework" -> handleBitmapFirework(message);
             // Bitmap image/media
             case "bitmap_image" -> handleBitmapImage(message);
+            case "bitmap_dj_logo" -> handleBitmapDjLogo(message);
             // Bitmap composition
             case "bitmap_composition" -> handleBitmapComposition(message);
             // Voice chat
@@ -2358,6 +2360,87 @@ public class MessageHandler {
                 try {
                     imagePattern.setMode(ImagePattern.ModulationMode.valueOf(modeName));
                 } catch (IllegalArgumentException ignored) {}
+            }
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "ok");
+        return response;
+    }
+
+    // ========== DJ Logo Handler ==========
+
+    private JsonObject handleBitmapDjLogo(JsonObject message) {
+        String zone = message.get("zone").getAsString().toLowerCase();
+        String action = message.has("action") ? message.get("action").getAsString() : "load_file";
+
+        BitmapPatternManager patternMgr = plugin.getBitmapPatternManager();
+        if (patternMgr == null) return createError("Bitmap not initialized");
+
+        BitmapPattern pattern = patternMgr.getPattern("bmp_dj_logo");
+        if (!(pattern instanceof DJLogoPattern logoPattern)) {
+            return createError("DJ Logo pattern not registered");
+        }
+
+        switch (action) {
+            case "load_file" -> {
+                String path = message.get("path").getAsString();
+                java.io.File file = new java.io.File(path);
+                // Resolve relative paths against plugin data folder
+                if (!file.isAbsolute()) {
+                    file = new java.io.File(plugin.getDataFolder(), path);
+                }
+                BitmapFrameBuffer buf = patternMgr.getFrameBuffer(zone);
+                if (buf != null) {
+                    boolean ok = logoPattern.loadFromFile(file, buf.getWidth(), buf.getHeight());
+                    if (ok && patternMgr.isActive(zone)) {
+                        patternMgr.setPattern(zone, "bmp_dj_logo");
+                    }
+                    if (!ok) return createError("Failed to load image: " + path);
+                } else {
+                    return createError("Zone not active: " + zone);
+                }
+            }
+            case "load_pixels" -> {
+                if (message.has("pixels")) {
+                    String b64 = message.get("pixels").getAsString();
+                    byte[] bytes = Base64.getDecoder().decode(b64);
+                    ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+                    int[] pixels = new int[bytes.length / 4];
+                    bb.asIntBuffer().get(pixels);
+
+                    int w = message.get("width").getAsInt();
+                    int h = message.get("height").getAsInt();
+                    logoPattern.loadFromPixels(pixels, w, h);
+
+                    if (patternMgr.isActive(zone)) {
+                        patternMgr.setPattern(zone, "bmp_dj_logo");
+                    }
+                }
+            }
+            case "set_mode" -> {
+                String modeName = message.get("mode").getAsString().toUpperCase();
+                try {
+                    logoPattern.setMode(DJLogoPattern.LogoMode.valueOf(modeName));
+                } catch (IllegalArgumentException ignored) {
+                    return createError("Unknown mode: " + modeName);
+                }
+            }
+            case "set_threshold" -> {
+                int threshold = message.get("threshold").getAsInt();
+                logoPattern.setThreshold(threshold);
+            }
+            case "set_palette" -> {
+                String paletteId = message.get("palette").getAsString();
+                ColorPalette found = null;
+                for (ColorPalette p : ColorPalette.BUILT_IN) {
+                    if (p.getId().equals(paletteId)) { found = p; break; }
+                }
+                if (found != null) {
+                    logoPattern.setPalette(found);
+                } else {
+                    return createError("Unknown palette: " + paletteId);
+                }
             }
         }
 

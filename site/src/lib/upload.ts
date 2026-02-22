@@ -8,6 +8,8 @@ import { getPresignedUploadUrl } from "./auth";
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_BANNER_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_AVATAR_WIDTH = 256;
+const MAX_AVATAR_HEIGHT = 128;
 
 /**
  * Upload an image file to R2 via presigned URL.
@@ -29,16 +31,22 @@ export async function uploadImage(
     throw new Error(`File too large. Maximum size is ${maxMB}MB`);
   }
 
+  // Resize avatars to max 256x128 for LED wall compatibility
+  let uploadFile = file;
+  if (context === "avatar") {
+    uploadFile = await resizeImage(file, MAX_AVATAR_WIDTH, MAX_AVATAR_HEIGHT);
+  }
+
   const { upload_url, public_url } = await getPresignedUploadUrl(
     accessToken,
     context,
-    file.type
+    uploadFile.type
   );
 
   const uploadRes = await fetch(upload_url, {
     method: "PUT",
-    headers: { "Content-Type": file.type },
-    body: file,
+    headers: { "Content-Type": uploadFile.type },
+    body: uploadFile,
   });
 
   if (!uploadRes.ok) {
@@ -46,4 +54,35 @@ export async function uploadImage(
   }
 
   return public_url;
+}
+
+/**
+ * Resize an image to fit within maxWidth x maxHeight, preserving aspect ratio.
+ * Returns the original file if already within bounds.
+ */
+async function resizeImage(
+  file: File,
+  maxWidth: number,
+  maxHeight: number
+): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+
+  if (bitmap.width <= maxWidth && bitmap.height <= maxHeight) {
+    bitmap.close();
+    return file;
+  }
+
+  const scale = Math.min(maxWidth / bitmap.width, maxHeight / bitmap.height);
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+  return new File([blob], file.name.replace(/\.\w+$/, ".png"), {
+    type: "image/png",
+  });
 }

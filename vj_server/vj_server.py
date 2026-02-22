@@ -206,6 +206,28 @@ FORWARD_TO_MINECRAFT = {
     "bitmap_firework",
     "bitmap_composition",
     "bitmap_image",
+    "bitmap_dj_logo",
+}
+
+# Subset of FORWARD_TO_MINECRAFT that don't need a response relayed back.
+# Fire-and-forget: send to Minecraft, immediately ack to the browser client.
+FIRE_AND_FORGET = {
+    "bitmap_dj_logo",
+    "bitmap_effects",
+    "bitmap_palette",
+    "bitmap_marquee",
+    "bitmap_track_display",
+    "bitmap_countdown",
+    "bitmap_chat",
+    "bitmap_layer",
+    "bitmap_firework",
+    "bitmap_image",
+    "set_bitmap_pattern",
+    "bitmap_transition",
+    "set_particle_effect",
+    "set_particle_config",
+    "set_particle_viz_config",
+    "banner_config",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -3343,10 +3365,16 @@ class VJServer:
 
                         if self.viz_client and self.viz_client.connected:
                             try:
-                                response = await self.viz_client.send(data)
-                                if response:
-                                    await websocket.send(json.dumps(response))
-                                    logger.debug(f"Forwarded {msg_type} to Minecraft")
+                                if msg_type in FIRE_AND_FORGET:
+                                    # Send without waiting for response — instant for the UI
+                                    await self.viz_client.ws.send(json.dumps(data))
+                                    await websocket.send(json.dumps({"type": "ok"}))
+                                    logger.debug(f"Fire-and-forget {msg_type} to Minecraft")
+                                else:
+                                    response = await self.viz_client.send(data)
+                                    if response:
+                                        await websocket.send(json.dumps(response))
+                                        logger.debug(f"Forwarded {msg_type} to Minecraft")
                             except Exception as e:
                                 logger.warning(f"Failed to forward {msg_type} to Minecraft: {e}")
                                 await websocket.send(

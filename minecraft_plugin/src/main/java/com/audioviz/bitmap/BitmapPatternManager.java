@@ -3,6 +3,7 @@ package com.audioviz.bitmap;
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.bitmap.effects.EffectsProcessor;
 import com.audioviz.bitmap.gamestate.*;
+import com.audioviz.bitmap.media.DJLogoPattern;
 import com.audioviz.bitmap.media.ImagePattern;
 import com.audioviz.bitmap.patterns.*;
 import com.audioviz.bitmap.text.*;
@@ -112,6 +113,7 @@ public class BitmapPatternManager {
 
         // Media patterns (Phase 3)
         register(new ImagePattern());
+        register(new DJLogoPattern());
     }
 
     /**

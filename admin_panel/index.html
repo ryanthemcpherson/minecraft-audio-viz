@@ -442,6 +442,32 @@
                             </div>
                         </section>
 
+                        <!-- DJ Logo Controls (shown when bmp_dj_logo is active) -->
+                        <section class="mixer-section collapsible collapsed hidden" id="dj-logo-section">
+                            <h3 class="section-title">DJ Logo</h3>
+                            <div class="controls-grid">
+                                <div class="control-row">
+                                    <label>Mode</label>
+                                    <div class="bitmap-grid" id="dj-logo-mode-grid">
+                                        <button class="pattern-btn active" data-logo-mode="aura_glow">Aura Glow</button>
+                                        <button class="pattern-btn" data-logo-mode="spectrum_fill">Spectrum Fill</button>
+                                        <button class="pattern-btn" data-logo-mode="silhouette_pulse">Silhouette</button>
+                                        <button class="pattern-btn" data-logo-mode="ring_burst">Ring Burst</button>
+                                    </div>
+                                </div>
+                                <div class="control-row">
+                                    <label for="dj-logo-threshold">Threshold</label>
+                                    <input type="range" id="dj-logo-threshold" class="slider" min="1" max="255" value="128">
+                                    <span class="control-value" id="val-dj-logo-threshold">128</span>
+                                </div>
+                                <div class="control-row">
+                                    <label for="dj-logo-file">Image</label>
+                                    <input type="text" id="dj-logo-file" class="control-input" placeholder="path on server..." value="gnarlie_logo_whiteback.png" style="flex:1;">
+                                    <button id="btn-dj-logo-load" class="btn btn-secondary btn-sm" style="margin-left:4px;">Load</button>
+                                </div>
+                            </div>
+                        </section>
+
                         <!-- Bitmap Effects -->
                         <section class="mixer-section collapsible collapsed" id="ledwall-effects-section">
                             <h3 class="section-title">Bitmap Effects</h3>
