@@ -73,6 +73,12 @@ public class BitmapFireflies extends BitmapPattern {
             beatPulse *= 0.85;
         }
 
+        // --- Recount active fireflies before spawning ---
+        activeCount = 0;
+        for (int i = 0; i < MAX_FIREFLIES; i++) {
+            if (flyLife[i] > 0.01) activeCount++;
+        }
+
         // --- Spawn new fireflies on beat ---
         if (audio.isBeat()) {
             int spawnCount = 2 + (int) (audio.getBeatIntensity() * 3);

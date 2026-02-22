@@ -39,8 +39,11 @@ public class BitmapLightning extends BitmapPattern {
 
         // Ambient purple glow at bottom
         double amplitude = audio.getAmplitude();
-        for (int y = h * 3 / 4; y < h; y++) {
-            double t = (double) (y - h * 3 / 4) / (h / 4);
+        int glowStart = h * 3 / 4;
+        int glowRange = h - glowStart;
+        if (glowRange < 1) glowRange = 1;
+        for (int y = glowStart; y < h; y++) {
+            double t = (double) (y - glowStart) / glowRange;
             int glow = BitmapFrameBuffer.lerpColor(BG,
                 BitmapFrameBuffer.rgb(15, 5, 30), (float) (t * amplitude * 0.5));
             for (int x = 0; x < w; x++) {

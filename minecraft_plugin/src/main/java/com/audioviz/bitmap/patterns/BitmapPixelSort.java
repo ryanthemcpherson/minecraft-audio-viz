@@ -98,17 +98,22 @@ public class BitmapPixelSort extends BitmapPattern {
             run[i] = buffer.getPixel(start + i, y);
         }
 
-        // Sort by brightness
-        Integer[] indices = new Integer[len];
-        for (int i = 0; i < len; i++) indices[i] = i;
-        Arrays.sort(indices, (a, b) -> {
-            int ba = brightness(run[a]);
-            int bb = brightness(run[b]);
-            return reverse ? bb - ba : ba - bb;
-        });
-
+        // Sort by brightness using a keyed sort (pack brightness + index)
+        long[] keyed = new long[len];
         for (int i = 0; i < len; i++) {
-            buffer.setPixel(start + i, y, run[indices[i]]);
+            int bri = brightness(run[i]);
+            keyed[i] = ((long) bri << 32) | i;
+        }
+        Arrays.sort(keyed);
+
+        if (reverse) {
+            for (int i = 0; i < len; i++) {
+                buffer.setPixel(start + i, y, run[(int) (keyed[len - 1 - i] & 0xFFFFFFFFL)]);
+            }
+        } else {
+            for (int i = 0; i < len; i++) {
+                buffer.setPixel(start + i, y, run[(int) (keyed[i] & 0xFFFFFFFFL)]);
+            }
         }
     }
 

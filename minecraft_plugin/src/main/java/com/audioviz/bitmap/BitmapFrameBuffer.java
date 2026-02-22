@@ -289,14 +289,14 @@ public class BitmapFrameBuffer {
      * Useful for fade-to-black or amplitude-reactive dimming.
      */
     public void applyBrightness(double multiplier) {
-        if (multiplier >= 1.0) return;
+        if (multiplier == 1.0) return;
         multiplier = Math.max(0.0, multiplier);
         for (int i = 0; i < pixels.length; i++) {
             int argb = pixels[i];
             int a = (argb >> 24) & 0xFF;
-            int r = (int) (((argb >> 16) & 0xFF) * multiplier);
-            int g = (int) (((argb >> 8) & 0xFF) * multiplier);
-            int b = (int) ((argb & 0xFF) * multiplier);
+            int r = Math.min(255, (int) (((argb >> 16) & 0xFF) * multiplier));
+            int g = Math.min(255, (int) (((argb >> 8) & 0xFF) * multiplier));
+            int b = Math.min(255, (int) ((argb & 0xFF) * multiplier));
             pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
         }
     }
