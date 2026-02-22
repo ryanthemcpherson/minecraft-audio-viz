@@ -2697,18 +2697,69 @@ input:disabled + .toggle-slider {
 /* ============================================
    LED Wall Inline (inside Mixer tab)
    ============================================ */
-.ledwall-status-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    margin-bottom: var(--spacing-sm);
+/* Bitmap status dot (inline in section title) */
+.bitmap-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    margin-left: var(--spacing-xs);
+    vertical-align: middle;
+    opacity: 0.5;
+    transition: background 0.3s, opacity 0.3s;
+}
+
+.bitmap-status-dot.active {
+    background: var(--accent-secondary);
+    opacity: 1;
+    box-shadow: 0 0 6px var(--accent-secondary);
+}
+
+/* Bitmap advanced panel */
+.bitmap-advanced-row {
+    margin-top: var(--spacing-sm);
+    border-top: 1px solid var(--border-color);
+    padding-top: var(--spacing-xs);
+}
+
+.bitmap-advanced-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    padding: var(--spacing-xs) 0;
+    transition: color 0.2s;
+}
+
+.bitmap-advanced-toggle:hover {
+    color: var(--text-secondary);
+}
+
+.bitmap-advanced-toggle::before {
+    content: '\25B6';
+    display: inline-block;
+    margin-right: var(--spacing-xs);
+    font-size: 0.6em;
+    transition: transform 0.2s;
+}
+
+.bitmap-advanced-toggle.open::before {
+    transform: rotate(90deg);
+}
+
+.bitmap-advanced-panel {
+    padding-top: var(--spacing-sm);
 }
 
 .ledwall-init-row {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
-    margin-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
 }
 
 .ledwall-zone-select {
@@ -4491,15 +4542,7 @@ input:disabled + .toggle-slider {
     margin-top: var(--spacing-md);
 }
 
-.bitmap-status-text {
-    font-family: var(--font-mono);
-    font-size: var(--font-size-sm);
-    color: var(--text-muted);
-}
-
-.bitmap-status-text.active {
-    color: var(--accent-secondary);
-}
+/* Legacy .bitmap-status-text removed — replaced by .bitmap-status-dot */
 
 .bitmap-overlay-group {
     margin-bottom: var(--spacing-md);

@@ -1093,6 +1093,10 @@ class AdminApp {
                     this.state.minecraftConnected = data.minecraft_connected;
                     this._updateServiceIndicators();
                     this._updateMCDependentControls();
+                    // Auto-fetch bitmap data when Minecraft is connected
+                    if (data.minecraft_connected && !this.state.bitmap.dataFetched) {
+                        this._fetchBitmapData();
+                    }
                 }
                 // Handle initial pending DJs from vj_state
                 if (data.pending_djs) {
@@ -1297,25 +1301,25 @@ class AdminApp {
                 this._renderBitmapPalettes();
                 break;
 
-            case 'bitmap_initialized':
+            case 'bitmap_initialized': {
                 this.state.bitmap.initialized = true;
                 this.state.bitmap.width = data.width || 16;
                 this.state.bitmap.height = data.height || 12;
+                const initZone = data.zone || this.state.bitmap.zone;
+                this.state.bitmap.initializedZones.add(initZone);
                 this._updateBitmapStatus(data);
                 this._showToast(`Bitmap initialized: ${data.width || '?'}x${data.height || '?'}`, 'success');
-                // Track this zone as initialized and show its bitmap in 3D preview
+                // Show bitmap in 3D preview
                 if (this._bitmapPreview) {
-                    const zone = data.zone || this.state.bitmap.zone;
-                    this.state.bitmap.initializedZones.add(zone);
-                    const zg = this._previewZoneGroups[zone];
+                    const zg = this._previewZoneGroups[initZone];
                     if (zg) {
-                        this._bitmapPreview.activate(zone, data.width || 16, data.height || 12,
+                        this._bitmapPreview.activate(initZone, data.width || 16, data.height || 12,
                             data.pattern || this.state.bitmap.activePattern || 'bmp_plasma', zg);
                     }
-                    // Only show the initialized zone's bitmap plane
-                    this._bitmapPreview.setZoneVisible(zone, true);
+                    this._bitmapPreview.setZoneVisible(initZone, true);
                 }
                 break;
+            }
 
             case 'bitmap_pattern_set':
             case 'bitmap_transition_started':
@@ -3433,8 +3437,14 @@ class AdminApp {
         // Notify on status change
         if (data.connected && !wasConnected) {
             this._showToast('Minecraft connected', 'success');
+            // Auto-fetch bitmap data when Minecraft reconnects
+            if (!this.state.bitmap.dataFetched) {
+                this._fetchBitmapData();
+            }
         } else if (!data.connected && wasConnected) {
             this._showToast('Minecraft disconnected', 'warning');
+            // Reset bitmap data state so it re-fetches on reconnect
+            this.state.bitmap.dataFetched = false;
         }
     }
 
@@ -5003,6 +5013,17 @@ class AdminApp {
     _initBitmapControls() {
         const el = this.elements;
 
+        // Advanced panel toggle
+        const advToggle = document.getElementById('btn-bitmap-advanced');
+        const advPanel = document.getElementById('bitmap-advanced-panel');
+        if (advToggle && advPanel) {
+            advToggle.addEventListener('click', () => {
+                const open = advPanel.style.display !== 'none';
+                advPanel.style.display = open ? 'none' : '';
+                advToggle.classList.toggle('open', !open);
+            });
+        }
+
         // Auto-size checkbox toggles manual dimension inputs
         if (el.bitmapAutoSize) {
             el.bitmapAutoSize.addEventListener('change', () => {
@@ -5012,7 +5033,7 @@ class AdminApp {
             });
         }
 
-        // Init button
+        // Re-init button (in advanced panel)
         if (el.btnBitmapInit) {
             el.btnBitmapInit.addEventListener('click', () => {
                 const zone = el.bitmapZone?.value || 'main';
@@ -5438,23 +5459,41 @@ class AdminApp {
 
     _setBitmapPattern(patternId) {
         const zone = this.elements.bitmapZone?.value || 'main';
-        const transition = this.elements.bitmapTransition?.value;
-        const duration = parseInt(this.elements.bitmapTransitionDuration?.value) || 20;
 
-        if (transition && transition !== 'INSTANT') {
-            this.ws.send({
-                type: 'bitmap_transition',
-                zone,
-                pattern: patternId,
-                transition,
-                duration_ticks: duration
-            });
-        } else {
-            this.ws.send({
-                type: 'set_bitmap_pattern',
+        // Auto-init: if zone not yet initialized, send init_bitmap instead
+        // The init message accepts a pattern field, so the zone will start with this pattern
+        if (!this.state.bitmap.initializedZones.has(zone)) {
+            const autoSize = this.elements.bitmapAutoSize?.checked ?? true;
+            const msg = {
+                type: 'init_bitmap',
                 zone,
                 pattern: patternId
-            });
+            };
+            if (!autoSize) {
+                msg.width = parseInt(this.elements.bitmapWidth?.value) || 16;
+                msg.height = parseInt(this.elements.bitmapHeight?.value) || 12;
+            }
+            this.ws.send(msg);
+        } else {
+            // Zone already initialized — switch pattern (with optional transition)
+            const transition = this.elements.bitmapTransition?.value;
+            const duration = parseInt(this.elements.bitmapTransitionDuration?.value) || 20;
+
+            if (transition && transition !== 'INSTANT') {
+                this.ws.send({
+                    type: 'bitmap_transition',
+                    zone,
+                    pattern: patternId,
+                    transition,
+                    duration_ticks: duration
+                });
+            } else {
+                this.ws.send({
+                    type: 'set_bitmap_pattern',
+                    zone,
+                    pattern: patternId
+                });
+            }
         }
 
         this.state.bitmap.activePattern = patternId;
@@ -5500,12 +5539,11 @@ class AdminApp {
             this.state.bitmap.initialized = true;
             const w = data.width || this.state.bitmap.width;
             const h = data.height || this.state.bitmap.height;
-            const pattern = data.pattern || this.state.bitmap.activePattern || '?';
-            statusEl.textContent = `Active: ${w}x${h} — ${pattern}`;
             statusEl.classList.add('active');
+            statusEl.title = `Active: ${w}x${h}`;
         } else {
-            statusEl.textContent = 'Not initialized';
             statusEl.classList.remove('active');
+            statusEl.title = 'Not initialized';
         }
 
         if (data.pattern) {

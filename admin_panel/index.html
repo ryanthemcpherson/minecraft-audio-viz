@@ -400,25 +400,7 @@
 
                         <!-- Bitmap Patterns (LED Wall) -->
                         <section class="mixer-section collapsible collapsed" id="ledwall-section">
-                            <h3 class="section-title">Bitmap Patterns</h3>
-                            <div class="ledwall-status-bar">
-                                <span id="bitmap-status" class="bitmap-status-text">Not initialized</span>
-                                <button id="btn-bitmap-init" class="btn btn-secondary btn-sm">Init</button>
-                            </div>
-                            <div class="ledwall-init-row">
-                                <select id="bitmap-zone" class="control-select ledwall-zone-select">
-                                    <option value="main">main</option>
-                                </select>
-                                <label class="ledwall-auto-size-label">
-                                    <input type="checkbox" id="bitmap-auto-size" checked>
-                                    <span>Auto</span>
-                                </label>
-                                <span id="bitmap-manual-dims" style="display:none;">
-                                    <input type="number" id="bitmap-width" class="control-input ledwall-dim" value="16" min="4" max="128">
-                                    <span class="ledwall-dim-sep">&times;</span>
-                                    <input type="number" id="bitmap-height" class="control-input ledwall-dim" value="12" min="4" max="64">
-                                </span>
-                            </div>
+                            <h3 class="section-title">Bitmap Patterns <span id="bitmap-status" class="bitmap-status-dot" title="Not initialized"></span></h3>
                             <div id="bitmap-pattern-grid" class="bitmap-grid">
                                 <!-- Populated by JS -->
                             </div>
@@ -436,6 +418,26 @@
                                     <label for="bitmap-transition-duration">Duration</label>
                                     <input type="range" id="bitmap-transition-duration" class="slider" min="0" max="100" value="20">
                                     <span class="control-value" id="val-bitmap-transition-duration">20 ticks</span>
+                                </div>
+                            </div>
+                            <div class="bitmap-advanced-row">
+                                <button class="bitmap-advanced-toggle" id="btn-bitmap-advanced">Advanced</button>
+                                <div class="bitmap-advanced-panel" id="bitmap-advanced-panel" style="display:none;">
+                                    <div class="ledwall-init-row">
+                                        <select id="bitmap-zone" class="control-select ledwall-zone-select">
+                                            <option value="main">main</option>
+                                        </select>
+                                        <label class="ledwall-auto-size-label">
+                                            <input type="checkbox" id="bitmap-auto-size" checked>
+                                            <span>Auto</span>
+                                        </label>
+                                        <span id="bitmap-manual-dims" style="display:none;">
+                                            <input type="number" id="bitmap-width" class="control-input ledwall-dim" value="16" min="4" max="128">
+                                            <span class="ledwall-dim-sep">&times;</span>
+                                            <input type="number" id="bitmap-height" class="control-input ledwall-dim" value="12" min="4" max="64">
+                                        </span>
+                                        <button id="btn-bitmap-init" class="btn btn-secondary btn-sm">Re-init</button>
+                                    </div>
                                 </div>
                             </div>
                         </section>
