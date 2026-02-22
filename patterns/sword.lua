@@ -78,7 +78,7 @@ function calculate(audio, config, dt)
     state.rotation = state.rotation + 0.15 * dt
 
     -- Beat response
-    if audio.beat then
+    if audio.is_beat then
         state.beat_intensity = 1.0
         state.sword_scale = 1.08
         -- Spawn energy pulse (max 3)

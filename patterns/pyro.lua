@@ -31,7 +31,7 @@ function calculate(audio, config, dt)
     local gravity = 0.4 - audio.amplitude * 0.15
 
     -- Launch new firework on beat (max 5 concurrent)
-    if audio.beat then
+    if audio.is_beat then
         local active = 0
         for _, fw in ipairs(state.fireworks) do
             if fw.phase ~= "dead" then active = active + 1 end

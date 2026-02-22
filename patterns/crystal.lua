@@ -105,7 +105,7 @@ function calculate(audio, config, dt)
     state.growth = smooth(state.growth, target_growth, 0.05, dt)
 
     -- Beat triggers growth spurt
-    if audio.beat then
+    if audio.is_beat then
         state.growth_spurt = 0.35
     end
     state.growth_spurt = decay(state.growth_spurt, 0.9, dt)
@@ -158,7 +158,7 @@ function calculate(audio, config, dt)
                 scale = scale + sparkle * audio.bands[5] * 0.45 + audio.bands[5] * 0.3
             end
 
-            if audio.beat then
+            if audio.is_beat then
                 scale = scale * (1.2 + depth_val * 0.1)
             end
 

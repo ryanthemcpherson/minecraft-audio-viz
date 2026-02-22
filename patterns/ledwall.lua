@@ -48,7 +48,7 @@ function calculate(audio, config, dt)
     end
 
     -- Beat handling
-    if audio.beat then
+    if audio.is_beat then
         state.beat_count = state.beat_count + 1
         state.flash = 1.0
         state.mode_timer = state.mode_timer + 1

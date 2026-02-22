@@ -21,7 +21,7 @@ function calculate(audio, config, dt)
     state.arm_twist = 2.3 + audio.bands[5] * 2.2 + audio.bands[4] * 0.8
 
     -- Core pulse on beat
-    if audio.beat then
+    if audio.is_beat then
         state.core_pulse = 1.0
     end
     state.core_pulse = decay(state.core_pulse, 0.9, dt)
@@ -58,6 +58,7 @@ function calculate(audio, config, dt)
             y = clamp(y),
             z = clamp(z),
             scale = math.min(config.max_scale, scale),
+            rotation = 0,
             band = band_idx,
             visible = true,
         }
@@ -100,7 +101,7 @@ function calculate(audio, config, dt)
             local scale = config.base_scale + bass_react + high_react
             scale = scale + state.core_pulse * 0.15 * (1 - t)
 
-            if audio.beat then
+            if audio.is_beat then
                 scale = scale * 1.15
             end
 
@@ -110,6 +111,7 @@ function calculate(audio, config, dt)
                 y = clamp(y),
                 z = clamp(z),
                 scale = math.min(config.max_scale, scale),
+                rotation = 0,
                 band = band_idx,
                 visible = true,
             }

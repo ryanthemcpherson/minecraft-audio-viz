@@ -210,7 +210,7 @@ function calculate(audio, config, dt)
 
     -- Pump target: bass drives base offset, beat adds spike
     local pump_target = audio.bands[1] * 0.03
-    if audio.beat then
+    if audio.is_beat then
         state.pump_y = state.pump_y + 0.04 * audio.peak
         state.beat_intensity = 1.0
         state.tilt = state.tilt + 0.05

@@ -18,7 +18,7 @@ function calculate(audio, config, dt)
     state.rotation = state.rotation + (0.3 + audio.peak * 0.35) * dt
 
     -- Invert on strong beats
-    if audio.beat and audio.beat_intensity > 0.6 then
+    if audio.is_beat and audio.beat_intensity > 0.6 then
         if state.invert > 0.5 then
             state.invert = 0
         else
@@ -62,7 +62,7 @@ function calculate(audio, config, dt)
     local function place(rx, rz, y, band, extra_scale)
         if entity_idx >= n then return end
         local scale = config.base_scale + audio.bands[band + 1] * 0.4 + (extra_scale or 0)
-        if audio.beat then scale = scale * 1.25 end
+        if audio.is_beat then scale = scale * 1.25 end
         entities[#entities + 1] = {
             id = string.format("block_%d", entity_idx),
             x = clamp(center + rx),

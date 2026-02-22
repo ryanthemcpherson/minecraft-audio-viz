@@ -20,7 +20,7 @@ function calculate(audio, config, dt)
     state.rotation = state.rotation + (0.5 + audio.peak * 2.0) * dt
 
     -- Flash on beat
-    if audio.beat then
+    if audio.is_beat then
         state.flash = 1.0
     end
     state.flash = decay(state.flash, 0.85, dt)
@@ -36,7 +36,7 @@ function calculate(audio, config, dt)
         -- Beam target length based on frequency band
         local band_idx = beam % 5
         local target_length = 0.1 + audio.bands[band_idx + 1] * 0.35
-        if audio.beat then
+        if audio.is_beat then
             target_length = target_length + 0.1
         end
 

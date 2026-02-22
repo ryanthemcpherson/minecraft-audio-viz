@@ -46,6 +46,7 @@ function calculate(audio, config, dt)
             y = clamp(y, 0, 1),
             z = clamp(z, 0, 1),
             scale = math.min(config.max_scale, scale),
+            rotation = 0,
             band = 0,
             visible = true,
         }
@@ -111,6 +112,7 @@ function calculate(audio, config, dt)
                 y = clamp(y, 0, 1),
                 z = clamp(z, 0, 1),
                 scale = math.min(config.max_scale, scale),
+                rotation = 0,
                 band = band_idx - 1,
                 visible = true,
             }

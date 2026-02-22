@@ -263,7 +263,7 @@ function calculate(audio, config, dt)
     end
 
     -- Beat response
-    if audio.beat then
+    if audio.is_beat then
         state.head_bob = 0.025 * audio.peak
         state.beat_intensity = 1.0
         state.eye_glow = 1.0
@@ -281,7 +281,7 @@ function calculate(audio, config, dt)
 
     -- Jaw opens with bass
     local target_jaw = audio.bands[1] * 0.10
-    if audio.beat then
+    if audio.is_beat then
         target_jaw = target_jaw + 0.08
     end
     state.jaw_open = smooth(state.jaw_open, target_jaw, 0.25, dt)
@@ -388,7 +388,7 @@ function calculate(audio, config, dt)
             base_scale = base_scale * 0.8
             band_idx = 0
             -- Fire breath effect: on beat with strong bass
-            local fire_breath = audio.beat and audio.bands[1] > 0.6
+            local fire_breath = audio.is_beat and audio.bands[1] > 0.6
             if fire_breath then
                 part_glow = true
                 part_brightness = 15
@@ -442,7 +442,7 @@ function calculate(audio, config, dt)
         end
 
         -- Global beat pulse
-        if audio.beat then
+        if audio.is_beat then
             base_scale = base_scale * 1.1
         end
 
