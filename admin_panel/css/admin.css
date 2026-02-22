@@ -3,23 +3,26 @@
    Dark, club-inspired design with neon accents
    Inspired by Resolume / TouchDesigner / VDMX
    ============================================ */
+@import url('./mcav-tokens.css');
 
 /* CSS Custom Properties (Design Tokens) */
 :root {
     /* Colors - Deep space theme */
-    --bg-primary: #060611;
-    --bg-secondary: #0c0c1e;
+    --bg-primary: var(--mcav-bg-primary);
+    --bg-secondary: var(--mcav-bg-secondary);
     --bg-tertiary: #151530;
     --bg-panel: rgba(12, 12, 35, 0.65);
     --bg-surface: rgba(20, 20, 50, 0.5);
     --bg-hover: rgba(0, 212, 255, 0.08);
+    --bg-card: var(--mcav-bg-card);
 
-    --text-primary: #eaeaf0;
-    --text-secondary: #7a7aa0;
+    --text-primary: var(--mcav-text-primary);
+    --text-secondary: var(--mcav-text-secondary);
     --text-muted: #6B6B9E;
 
-    --accent-primary: #00D4FF;
-    --accent-secondary: #44bd32;
+    --accent-primary: var(--mcav-cyan);
+    --accent-secondary: var(--mcav-blue);
+    --accent-amber: var(--mcav-amber);
     --accent-danger: #ff4757;
     --accent-warning: #ffa502;
     --accent-purple: #8B5CF6;
@@ -46,7 +49,7 @@
     --spacing-xl: 32px;
 
     /* Borders */
-    --border-color: rgba(255, 255, 255, 0.06);
+    --border-color: var(--mcav-border-subtle);
     --border-subtle: rgba(255, 255, 255, 0.03);
     --border-visible: rgba(255, 255, 255, 0.1);
     --border-radius-xs: 3px;
@@ -58,8 +61,8 @@
     --border-radius-pill: 20px;
 
     /* Typography */
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    --font-sans: var(--mcav-font-sans);
+    --font-mono: var(--mcav-font-mono);
     --font-size-2xs: 9px;
     --font-size-xs: 10px;
     --font-size-sm: 11px;

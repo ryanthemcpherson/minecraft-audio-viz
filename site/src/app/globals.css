@@ -1,17 +1,18 @@
 @import "tailwindcss";
+@import "../../../shared/tokens.css";
 
 @theme {
-  --color-bg-primary: #08090d;
-  --color-bg-secondary: #0f1118;
-  --color-bg-card: rgba(255, 255, 255, 0.03);
-  --color-border-subtle: rgba(255, 255, 255, 0.06);
-  --color-disc-cyan: #00CCFF;
-  --color-disc-blue: #5B6AFF;
-  --color-noteblock-amber: #FFAA00;
-  --color-text-primary: #f5f5f5;
-  --color-text-secondary: #a1a1aa;
+  --color-bg-primary: var(--mcav-bg-primary);
+  --color-bg-secondary: var(--mcav-bg-secondary);
+  --color-bg-card: var(--mcav-bg-card);
+  --color-border-subtle: var(--mcav-border-subtle);
+  --color-disc-cyan: var(--mcav-cyan);
+  --color-disc-blue: var(--mcav-blue);
+  --color-noteblock-amber: var(--mcav-amber);
+  --color-text-primary: var(--mcav-text-primary);
+  --color-text-secondary: var(--mcav-text-secondary);
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: var(--mcav-font-sans);
 }
 
 /* ---- Base Styles ---- */
@@ -79,11 +80,6 @@ body {
   opacity: 0;
 }
 
-.animate-slide-up-delay-3 {
-  animation: slide-up 0.8s ease-out 0.3s forwards;
-  opacity: 0;
-}
-
 .animate-fade-in {
   animation: fade-in 1s ease-out forwards;
 }
@@ -109,13 +105,23 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .glass-card:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
+}
+
+/* Flat card — solid bg, no blur, for content grids */
+.flat-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: border-color 0.2s ease;
+}
+
+.flat-card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 /* ---- Glow Effects ---- */

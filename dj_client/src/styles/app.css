@@ -1,23 +1,27 @@
 /* MCAV DJ Client Styles */
+@import "../../../shared/tokens.css";
 
 :root {
-  --bg-0: #050b12;
-  --bg-1: #0a1524;
+  --bg-0: var(--mcav-bg-primary);
+  --bg-1: var(--mcav-bg-secondary);
   --bg-2: #101f33;
   --panel: rgba(10, 24, 39, 0.78);
   --panel-border: rgba(98, 188, 255, 0.28);
   --surface: rgba(14, 30, 48, 0.92);
   --surface-soft: rgba(18, 39, 62, 0.8);
   --input-bg: rgba(7, 18, 30, 0.8);
-  --text-primary: #e9f6ff;
-  --text-secondary: #9ab5cf;
+  --text-primary: var(--mcav-text-primary);
+  --text-secondary: var(--mcav-text-secondary);
   --text-muted: #6d87a1;
-  --accent: #43c5ff;
+  --accent: var(--mcav-cyan);
   --accent-strong: #1ee0c8;
-  --accent-warm: #ff9f43;
+  --accent-warm: var(--mcav-amber);
   --success: #2fe098;
   --warning: #ffd166;
   --danger: #ff6767;
+  --border: var(--mcav-border-subtle);
+  --font-sans: var(--mcav-font-sans);
+  --font-mono: var(--mcav-font-mono);
   --radius-lg: 20px;
   --radius-md: 13px;
   --radius-sm: 10px;
@@ -94,6 +98,43 @@ body {
   background: var(--surface);
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-md);
+}
+
+.shortcuts-help h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.shortcuts-list {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.shortcut-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.shortcut-label {
+  opacity: 0.7;
+}
+
+.show-name-section {
+  text-align: center;
+  padding: 10px 16px !important;
+}
+
+.show-name-section .input-label {
+  margin: 0;
+}
+
+.input-label--inline {
+  margin-bottom: 0;
+}
+
+.input-label--spaced {
+  margin-bottom: 6px;
 }
 
 kbd {
