@@ -432,6 +432,7 @@ function App() {
 
       let connHost: string;
       let connPort: number;
+      let coordinatorToken: string | null = null;
 
       if (directConnect) {
         // Direct connection — use user-provided server host/port
@@ -444,6 +445,7 @@ function App() {
         connHost = wsUrl.hostname;
         connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
         setShowName(resolved.show_name);
+        coordinatorToken = resolved.token ?? null;
       }
 
       await invoke('connect_with_code', {
@@ -452,6 +454,7 @@ function App() {
         serverHost: connHost,
         serverPort: connPort,
         blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
+        coordinatorToken,
       });
 
       // Start audio capture
@@ -690,7 +693,6 @@ function App() {
             onClick={() => setShowShortcutsHelp(prev => !prev)}
             title="Keyboard Shortcuts"
             type="button"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <rect x="3" y="6" width="14" height="9" rx="1" stroke="currentColor" strokeWidth="1.5"/>
@@ -733,22 +735,22 @@ function App() {
 
       {showShortcutsHelp && (
         <div className="shortcuts-help">
-          <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '14px' }}>Keyboard Shortcuts</h3>
-          <div style={{ display: 'grid', gap: '8px', fontSize: '13px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ opacity: 0.7 }}>Disconnect</span>
+          <h3>Keyboard Shortcuts</h3>
+          <div className="shortcuts-list">
+            <div className="shortcut-row">
+              <span className="shortcut-label">Disconnect</span>
               <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + D</kbd>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ opacity: 0.7 }}>Refresh audio sources</span>
+            <div className="shortcut-row">
+              <span className="shortcut-label">Refresh audio sources</span>
               <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + R</kbd>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ opacity: 0.7 }}>Toggle test audio</span>
+            <div className="shortcut-row">
+              <span className="shortcut-label">Toggle test audio</span>
               <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + T</kbd>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ opacity: 0.7 }}>Close overlay / Stop test</span>
+            <div className="shortcut-row">
+              <span className="shortcut-label">Close overlay / Stop test</span>
               <kbd>Esc</kbd>
             </div>
           </div>
@@ -943,8 +945,8 @@ function App() {
         ) : (
           <>
             {showName && (
-              <section className="section" style={{ textAlign: 'center', padding: '10px 16px' }}>
-                <span className="input-label" style={{ margin: 0 }}>{showName}</span>
+              <section className="section show-name-section">
+                <span className="input-label">{showName}</span>
               </section>
             )}
 
@@ -972,7 +974,7 @@ function App() {
             </section>
 
             <section className="section preset-section">
-              <span className="input-label" style={{ marginBottom: '6px' }}>Audio Preset</span>
+              <span className="input-label input-label--spaced">Audio Preset</span>
               <div className="preset-buttons">
                 {PRESETS.map(name => (
                   <button
@@ -994,7 +996,7 @@ function App() {
             <section className="section voice-section">
               <div className="voice-header">
                 <div className="voice-title">
-                  <span className="input-label" style={{ marginBottom: 0 }}>Voice Streaming</span>
+                  <span className="input-label input-label--inline">Voice Streaming</span>
                   {voiceStatus.streaming && (
                     <span className="voice-live-badge">STREAMING</span>
                   )}

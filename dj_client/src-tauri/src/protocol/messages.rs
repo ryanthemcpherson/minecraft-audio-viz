@@ -36,15 +36,18 @@ pub struct CodeAuthMessage {
     pub dj_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct_mode: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 impl CodeAuthMessage {
-    pub fn new(code: String, dj_name: String) -> Self {
+    pub fn new(code: String, dj_name: String, token: Option<String>) -> Self {
         Self {
             msg_type: "code_auth".to_string(),
             code,
             dj_name,
             direct_mode: Some(true),
+            token,
         }
     }
 }
@@ -405,7 +408,7 @@ mod tests {
 
     #[test]
     fn code_auth_message_serializes_expected_shape() {
-        let msg = CodeAuthMessage::new("BEAT-7K3M".to_string(), "DJ Spark".to_string());
+        let msg = CodeAuthMessage::new("BEAT-7K3M".to_string(), "DJ Spark".to_string(), None);
         let json = serde_json::to_value(&msg).expect("code auth should serialize");
 
         assert_eq!(json["type"], "code_auth");
@@ -427,7 +430,7 @@ mod tests {
 
     #[test]
     fn code_auth_message_sets_direct_mode_true() {
-        let msg = CodeAuthMessage::new("BEAT-7K3M".to_string(), "DJ Spark".to_string());
+        let msg = CodeAuthMessage::new("BEAT-7K3M".to_string(), "DJ Spark".to_string(), None);
         let json = serde_json::to_value(&msg).expect("code auth should serialize");
 
         assert_eq!(json["type"], "code_auth");
