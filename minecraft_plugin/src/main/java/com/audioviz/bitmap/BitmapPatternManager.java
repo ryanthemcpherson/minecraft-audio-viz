@@ -100,6 +100,40 @@ public class BitmapPatternManager {
         register(new BitmapWaveform());
         register(new BitmapVUMeter());
 
+        // Tier 1: Festival staples — high impact, low complexity
+        register(new BitmapFire());
+        register(new BitmapMatrixRain());
+        register(new BitmapStarfield());
+        register(new BitmapConcentricRings());
+        register(new BitmapRadialBurst());
+        register(new BitmapColorWash());
+        register(new BitmapAurora());
+        register(new BitmapTunnelZoom());
+        register(new BitmapCheckerboardFlash());
+        register(new BitmapParticleRain());
+
+        // Tier 2: Advanced effects — moderate complexity
+        register(new BitmapGridWarp());
+        register(new BitmapKaleidoscope());
+        register(new BitmapMoire());
+        register(new BitmapLightning());
+        register(new BitmapPixelSort());
+        register(new BitmapRipple());
+        register(new BitmapCircularSpectrum());
+        register(new BitmapScanLines());
+        register(new BitmapWavePropagation());
+
+        // Tier 3: Complex simulations — high visual fidelity
+        register(new BitmapFractalZoom());
+        register(new BitmapInkDrop());
+        register(new BitmapDataMosh());
+        register(new BitmapTerrain());
+        register(new BitmapGalaxy());
+        register(new BitmapHexGrid());
+        register(new BitmapFireflies());
+        register(new BitmapDigitalNoise());
+        register(new BitmapRotatingGeometry());
+
         // Text patterns (Phase 3)
         register(new MarqueePattern());
         register(new TrackDisplayPattern());
