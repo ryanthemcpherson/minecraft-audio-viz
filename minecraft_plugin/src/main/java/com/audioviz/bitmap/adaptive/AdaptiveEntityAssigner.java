@@ -61,6 +61,8 @@ public class AdaptiveEntityAssigner {
             boolean geoDirty = !wasActive
                 || x != lastX[i] || y != lastY[i]
                 || scaleX != lastScaleX[i] || scaleY != lastScaleY[i];
+            // bgDirty tracks only the top color (entity background). Bottom color is
+            // conveyed via TextUpdate (the ▄ character's text color).
             boolean bgDirty = !wasActive || rect.topARGB() != lastTopARGB[i];
             boolean bottomDirty = !wasActive || rect.bottomARGB() != lastBottomARGB[i];
 
