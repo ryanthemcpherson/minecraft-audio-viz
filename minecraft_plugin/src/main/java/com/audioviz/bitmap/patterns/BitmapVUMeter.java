@@ -39,7 +39,7 @@ public class BitmapVUMeter extends BitmapPattern {
         int h = buffer.getHeight();
 
         // Clear to near-black
-        buffer.fill(BitmapFrameBuffer.packARGB(255, 3, 3, 8));
+        buffer.clear();
 
         double[] bands = audio.getBands();
         double cx = w / 2.0;

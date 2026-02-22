@@ -34,7 +34,7 @@ public class BitmapSpectrumBars extends BitmapPattern {
     private static final int COLOR_YELLOW = BitmapFrameBuffer.rgb(255, 255, 0);
     private static final int COLOR_RED    = BitmapFrameBuffer.rgb(255, 30, 0);
     private static final int COLOR_PEAK   = BitmapFrameBuffer.rgb(255, 255, 255);
-    private static final int COLOR_BG     = BitmapFrameBuffer.packARGB(255, 5, 5, 15);
+    private static final int COLOR_BG     = 0x00000000;
 
     public BitmapSpectrumBars() {
         super("bmp_spectrum", "Bitmap Spectrum Bars", "Classic LED wall spectrum analyzer with peak hold");
