@@ -216,7 +216,8 @@ export default function AdminPage() {
     }
   };
 
-  if (loading) {
+  // Show spinner while auth is loading OR if the user isn't an admin (redirect is pending)
+  if (loading || !user || !accessToken || !user.is_admin) {
     return (
       <main className="flex min-h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-disc-cyan border-t-transparent" />
@@ -371,6 +372,7 @@ export default function AdminPage() {
                                 width={28}
                                 height={28}
                                 className="h-7 w-7 rounded-full"
+                                /* Avatar URLs come from Discord/Google OAuth or S3 uploads — domains are dynamic */
                                 unoptimized
                               />
                             ) : (

@@ -63,6 +63,7 @@ export function middleware(request: NextRequest) {
         maxAge: 60,
         httpOnly: false,
         sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
       });
     } else if (code && state) {
       // Success — pass code and state via cookie.
@@ -75,6 +76,7 @@ export function middleware(request: NextRequest) {
         maxAge: 60,
         httpOnly: false,
         sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
       });
     }
 

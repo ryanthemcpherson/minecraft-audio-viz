@@ -73,6 +73,11 @@ const BLOCK_TYPE_OPTIONS = [
 
 const BAND_LABELS = ["Bass", "Low-mid", "Mid", "High-mid", "High"];
 
+/** Validate a color string against hex color format. */
+function isValidColor(color: string): boolean {
+  return /^#[0-9a-fA-F]{3,8}$/.test(color);
+}
+
 export default function ProfileEditPage() {
   const router = useRouter();
   const { user, accessToken, loading: authLoading } = useAuth();
@@ -127,7 +132,8 @@ export default function ProfileEditPage() {
           setSlug(p.slug || "");
           setBio(p.bio || "");
           setGenres(p.genres || "");
-          setColors(p.color_palette && p.color_palette.length >= 3 ? p.color_palette : DEFAULT_COLORS);
+          const safeColors = p.color_palette?.filter(isValidColor);
+          setColors(safeColors && safeColors.length >= 3 ? safeColors : DEFAULT_COLORS);
           setIsPublic(p.is_public);
           setAvatarUrl(p.avatar_url);
           setBannerUrl(p.banner_url);
@@ -302,7 +308,7 @@ export default function ProfileEditPage() {
               style={
                 bannerUrl
                   ? { backgroundImage: `url(${bannerUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-                  : colors.length >= 2
+                  : colors.length >= 2 && isValidColor(colors[0]) && isValidColor(colors[colors.length - 1])
                     ? { background: `linear-gradient(135deg, ${colors[0]}, ${colors[colors.length - 1]})` }
                     : undefined
               }
@@ -339,6 +345,7 @@ export default function ProfileEditPage() {
             >
               {avatarUrl ? (
                 <>
+                  {/* User-uploaded avatar URLs are dynamic (S3 presigned); cannot add to remotePatterns */}
                   <Image src={avatarUrl} alt="Avatar" width={96} height={96} className="h-full w-full rounded-full object-cover" unoptimized />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity hover:opacity-100">
                     <span className="text-xs text-white">
