@@ -50,7 +50,12 @@ class VizClient:
         self._last_pong: float = 0
 
         # Response queue for request/response pattern (only used when heartbeat enabled)
-        self._pending_responses: asyncio.Queue = asyncio.Queue()
+        # TODO: Replace with correlation-ID-based dict[str, asyncio.Future] so that
+        # concurrent send() calls receive their own response instead of racing on a
+        # shared FIFO.  Requires adding a `req_id` field to outgoing messages and
+        # matching it in the receive loop.  For now, maxsize prevents unbounded growth
+        # if responses are never consumed.
+        self._pending_responses: asyncio.Queue = asyncio.Queue(maxsize=100)
         self._use_receive_loop: bool = False  # Set to True when receive loop is started
 
         # Logging flags for batch_update_fast
@@ -214,7 +219,17 @@ class VizClient:
                         "error",
                         "connected",
                     ):
-                        await self._pending_responses.put(data)
+                        try:
+                            self._pending_responses.put_nowait(data)
+                        except asyncio.QueueFull:
+                            # Discard oldest response to make room — prevents
+                            # the receive loop from blocking when send() callers
+                            # aren't consuming responses fast enough.
+                            try:
+                                self._pending_responses.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                            self._pending_responses.put_nowait(data)
                         continue
 
                     # Route to registered handlers
