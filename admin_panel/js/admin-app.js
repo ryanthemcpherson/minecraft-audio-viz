@@ -1137,6 +1137,18 @@ class AdminApp {
                 if (data.banner_profiles) {
                     this.state.bannerProfiles = data.banner_profiles;
                 }
+                // Restore bitmap zone init state from server
+                if (data.bitmap_zones) {
+                    for (const [zoneName, info] of Object.entries(data.bitmap_zones)) {
+                        if (info.initialized) {
+                            this.state.bitmap.initializedZones.add(zoneName);
+                            this.state.bitmap.initialized = true;
+                            this.state.bitmap.width = info.width;
+                            this.state.bitmap.height = info.height;
+                            this._updateBitmapStatus(info);
+                        }
+                    }
+                }
                 // Handle band materials state
                 if (data.band_materials) {
                     this._syncBandMaterials(data.band_materials);

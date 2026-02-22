@@ -450,6 +450,9 @@ class ZonePatternState:
     minecraft_pool_size: int = 0
     last_entities: List[dict] = field(default_factory=list)
     block_type: str = "SEA_LANTERN"
+    bitmap_initialized: bool = False
+    bitmap_width: int = 0
+    bitmap_height: int = 0
 
 
 @dataclass
@@ -921,6 +924,18 @@ class VJServer:
     def _get_zone_patterns_dict(self) -> Dict[str, str]:
         """Get a dict mapping zone_name -> pattern_name for all zones."""
         return {zn: zs.pattern_name for zn, zs in self._zone_patterns.items()}
+
+    def _get_bitmap_zones_dict(self) -> Dict[str, dict]:
+        """Get bitmap init state for all zones (for vj_state sync)."""
+        return {
+            zn: {
+                "initialized": zs.bitmap_initialized,
+                "width": zs.bitmap_width,
+                "height": zs.bitmap_height,
+            }
+            for zn, zs in self._zone_patterns.items()
+            if zs.bitmap_initialized
+        }
 
     @property
     def active_dj(self) -> Optional[DJConnection]:
@@ -2640,6 +2655,7 @@ class VJServer:
                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                         for did, prof in self._dj_banner_profiles.items()
                     },
+                    "bitmap_zones": self._get_bitmap_zones_dict(),
                 }
             )
         )
@@ -2713,6 +2729,7 @@ class VJServer:
                                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                                         for did, prof in self._dj_banner_profiles.items()
                                     },
+                                    "bitmap_zones": self._get_bitmap_zones_dict(),
                                 }
                             )
                         )
@@ -4123,6 +4140,33 @@ class VJServer:
             await asyncio.gather(*send_tasks)
         self._broadcast_clients -= dead_clients
 
+    async def _auto_init_bitmap_zones(self, zone_names: list[str]):
+        """Auto-initialize bitmap grids for all zones after Minecraft connect."""
+        for zn in zone_names:
+            zs = self._get_zone_state(zn)
+            pattern = zs.pattern_name if zs.pattern_name.startswith("bmp_") else "bmp_spectrum"
+            try:
+                response = await asyncio.wait_for(
+                    self.viz_client.init_bitmap(zn, pattern=pattern),
+                    timeout=10.0,
+                )
+                if response and response.get("type") == "bitmap_initialized":
+                    zs.bitmap_initialized = True
+                    zs.bitmap_width = response.get("width", 0)
+                    zs.bitmap_height = response.get("height", 0)
+                    logger.info(
+                        f"Bitmap auto-init: zone '{zn}' → "
+                        f"{zs.bitmap_width}x{zs.bitmap_height} pattern={pattern}"
+                    )
+                    # Broadcast to browser clients so admin panel syncs
+                    await self._broadcast_to_browsers(_json_str(response))
+                else:
+                    logger.warning(f"Bitmap auto-init: zone '{zn}' returned unexpected response")
+            except asyncio.TimeoutError:
+                logger.warning(f"Bitmap auto-init: timeout for zone '{zn}'")
+            except Exception as e:
+                logger.warning(f"Bitmap auto-init: failed for zone '{zn}': {e}")
+
     async def connect_minecraft(self) -> bool:
         """Connect to Minecraft server with timeout."""
         # Clean up existing client before creating new one
@@ -4174,17 +4218,8 @@ class VJServer:
         for zn in zone_names:
             self._get_zone_state(zn)
 
-        try:
-            await asyncio.wait_for(
-                self.viz_client.init_pool(
-                    self.zone, self.entity_count, self._get_zone_state(self.zone).block_type
-                ),
-                timeout=5.0,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Timeout initializing entity pool, continuing anyway")
-
-        await asyncio.sleep(0.5)
+        # Auto-initialize bitmap grids for all zones
+        await self._auto_init_bitmap_zones(zone_names)
 
         return True
 
