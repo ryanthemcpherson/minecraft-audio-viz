@@ -5,7 +5,7 @@ import com.audioviz.patterns.AudioState;
 /**
  * Base class for 2D bitmap visualization patterns.
  *
- * <p>While {@link com.audioviz.patterns.VisualizationPattern} calculates 3D entity
+ * <p>While the old VisualizationPattern system calculated 3D entity
  * positions for volumetric effects (spirals, cubes, spheres), BitmapPattern writes
  * pixel colors to a 2D {@link BitmapFrameBuffer} — like an LED wall.
  *
