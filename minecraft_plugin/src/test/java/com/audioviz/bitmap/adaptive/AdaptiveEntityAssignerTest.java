@@ -25,9 +25,9 @@ class AdaptiveEntityAssignerTest {
 
         assertEquals(2, diff.geometryUpdates().size());
         assertEquals(2, diff.backgroundUpdates().size());
-        // Uniform rect (BLACK,BLACK) needs text update to set space; non-uniform (RED,GREEN) needs ▄ text
-        // Both need text updates on first frame
-        assertTrue(diff.textUpdates().size() >= 1); // at least the non-uniform one
+        // Both slots need text updates on first frame:
+        // uniform (BLACK,BLACK) → sentinel -1 (space), non-uniform (RED,GREEN) → GREEN
+        assertEquals(2, diff.textUpdates().size());
     }
 
     @Test
