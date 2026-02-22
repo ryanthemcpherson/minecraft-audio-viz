@@ -64,6 +64,7 @@ public class BitmapRendererBackend implements RendererBackend {
     /** Zone name → last frame buffer snapshot (for dirty-checking optimization). */
     private final Map<String, int[]> lastFramePixels = new ConcurrentHashMap<>();
 
+
     /** Default interpolation ticks for smooth color blending. */
     private static final int DEFAULT_INTERPOLATION_TICKS = 3;
 
@@ -178,7 +179,8 @@ public class BitmapRendererBackend implements RendererBackend {
 
                     // Use zone's localToWorld for correct positioning with rotation
                     // Normalized coordinates: 0-1 within zone bounds
-                    double localX = offsetX + ((px + 0.5) * pixelScale) / zoneWidth;
+                    // Flip X so pixel 0 is viewer's left (entities face audience at rotation+180)
+                    double localX = offsetX + ((finalWidth - 1 - px + 0.5) * pixelScale) / zoneWidth;
                     double localY = offsetY + ((finalHeight - 1 - py + 0.5) * pixelScale) / zoneHeight;
                     double localZ = 0.5; // Center on the Z face of the zone
 
@@ -248,32 +250,29 @@ public class BitmapRendererBackend implements RendererBackend {
         int[] currentPixels = frame.getRawPixels();
         int[] lastPixels = lastFramePixels.get(zoneKey);
 
-        // Build color update map (only changed pixels)
-        Map<String, Color> colorUpdates = new LinkedHashMap<>();
+        // Dirty-check: only update pixels whose color changed since last frame
         boolean fullFrame = (lastPixels == null || lastPixels.length != currentPixels.length);
+        Map<String, Color> colorUpdates = new LinkedHashMap<>();
+        int totalPixels = Math.min(currentPixels.length, config.width() * config.height());
 
-        for (int i = 0; i < currentPixels.length && i < config.width() * config.height(); i++) {
+        for (int i = 0; i < totalPixels; i++) {
             int argb = currentPixels[i];
             if (fullFrame || argb != lastPixels[i]) {
-                String entityId = "bmp_" + i;
                 int a = (argb >> 24) & 0xFF;
                 int r = (argb >> 16) & 0xFF;
                 int g = (argb >> 8) & 0xFF;
                 int b = argb & 0xFF;
-                colorUpdates.put(entityId, Color.fromARGB(a, r, g, b));
+                colorUpdates.put("bmp_" + i, Color.fromARGB(a, r, g, b));
             }
         }
 
-        if (!colorUpdates.isEmpty()) {
-            boolean applied = poolManager.batchUpdateTextBackgrounds(zoneName, colorUpdates);
-            // Only snapshot if the pool existed and updates were applied.
-            // If pool isn't registered yet (async spawn in progress), skip the snapshot
-            // so the next frame treats all pixels as dirty and retries the full update.
-            if (applied) {
-                int[] snapshot = new int[currentPixels.length];
-                System.arraycopy(currentPixels, 0, snapshot, 0, currentPixels.length);
-                lastFramePixels.put(zoneKey, snapshot);
-            }
+        if (colorUpdates.isEmpty()) return;
+
+        boolean applied = poolManager.batchUpdateTextBackgrounds(zoneName, colorUpdates);
+        if (applied) {
+            int[] snapshot = new int[currentPixels.length];
+            System.arraycopy(currentPixels, 0, snapshot, 0, currentPixels.length);
+            lastFramePixels.put(zoneKey, snapshot);
         }
     }
 
