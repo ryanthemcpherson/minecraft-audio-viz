@@ -67,6 +67,7 @@ public class MessageQueue {
 
     // Trig cache for batch: maps rotation float bits to precomputed [cos, sin].
     // Cleared each tick. Uses Float.floatToRawIntBits as key for exact float matching.
+    // Accessed only on main server thread via processTick().
     private final HashMap<Integer, float[]> trigCache = new HashMap<>();
 
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
