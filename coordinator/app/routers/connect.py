@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -66,19 +66,17 @@ async def resolve_connect_code(
     if server is None:
         raise HTTPException(status_code=503, detail="Server registered but currently offline")
 
-    # Atomically increment current DJ count only if below max_djs.
-    # NOTE: current_djs is only incremented here but never decremented automatically.
-    # TODO: Implement a decrement mechanism via one of:
-    #   1. A POST /disconnect/{dj_session_id} endpoint called by the DJ client on graceful disconnect
-    #   2. A periodic heartbeat check that decrements for stale DJSession records
-    #   3. VJ server webhook notifying coordinator when a DJ WebSocket closes
-    # Until then, current_djs may drift upward and require manual reset or show recreation.
-    result_update = await session.execute(
-        update(Show)
-        .where(Show.id == show.id, Show.current_djs < Show.max_djs)
-        .values(current_djs=Show.current_djs + 1)
+    # Compute active DJ count from DJSession table (avoids counter drift
+    # when DJs crash or drop without explicit disconnect).
+    active_count = await session.scalar(
+        select(func.count())
+        .select_from(DJSession)
+        .where(
+            DJSession.show_id == show.id,
+            DJSession.disconnected_at.is_(None),
+        )
     )
-    if result_update.rowcount == 0:
+    if active_count >= show.max_djs:
         raise HTTPException(status_code=409, detail="Show is full — maximum DJ limit reached")
 
     # Create a DJ session record
@@ -91,6 +89,11 @@ async def resolve_connect_code(
         ip_address=client_ip,
     )
     session.add(dj_session)
+
+    # Sync the cached counter to match reality (new session included: +1)
+    await session.execute(
+        update(Show).where(Show.id == show.id).values(current_djs=active_count + 1)
+    )
 
     await session.commit()
 

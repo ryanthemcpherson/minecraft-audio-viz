@@ -638,11 +638,23 @@ function connectWebSocket() {
     const statusEl = document.getElementById('connection-status');
     const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
 
+    // VJ password: check URL param, then localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const vjPassword = urlParams.get('vj_password')
+        || localStorage.getItem('mcav_vj_password')
+        || '';
+
     try {
         const wsHost = window.location.hostname || 'localhost';
         ws = new WebSocket(`ws://${wsHost}:${CONFIG.wsPort}`);
 
         ws.onopen = () => {
+            // Send VJ auth if a password is available
+            if (vjPassword) {
+                ws.send(JSON.stringify({ type: 'vj_auth', password: vjPassword }));
+                // Auth response handled in onmessage
+            }
+
             if (statusEl) statusEl.classList.add('connected');
             if (statusEl) statusEl.classList.remove('error');
             if (statusText) statusText.textContent = 'Connected';
@@ -658,6 +670,21 @@ function connectWebSocket() {
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
+                if (data.type === 'auth_error') {
+                    console.error('[WS] VJ auth failed:', data.error);
+                    if (statusText) statusText.textContent = 'Auth Failed';
+                    if (statusEl) statusEl.classList.add('error');
+                    const newPassword = prompt(`VJ Auth Failed: ${data.error || 'Invalid password'}\nEnter VJ password:`);
+                    if (newPassword) {
+                        localStorage.setItem('mcav_vj_password', newPassword);
+                        ws.close();
+                        setTimeout(connectWebSocket, 500);
+                    }
+                    return;
+                } else if (data.type === 'auth_success') {
+                    console.log('[WS] VJ auth succeeded');
+                    return;
+                }
                 if (data.type === 'audio' || data.type === 'state') {
                     updateAudioState(data);
                 } else if (data.type === 'patterns' || data.type === 'pattern_changed') {

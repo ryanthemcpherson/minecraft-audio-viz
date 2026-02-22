@@ -104,6 +104,13 @@ class LuaPattern(VisualizationPattern):
 
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 
+        # Sandbox: remove dangerous globals before loading any pattern code
+        self._lua.execute("""
+            os = nil; io = nil; debug = nil; package = nil
+            require = nil; load = nil; loadfile = nil; dofile = nil
+            collectgarbage = nil; rawget = nil; rawset = nil
+        """)
+
         # Load lib.lua (prefer pre-loaded cache, fall back to disk)
         patterns_dir = Path(__file__).parent.parent / "patterns"
         lib_text = _lib_cache

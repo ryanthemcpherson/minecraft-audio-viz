@@ -2414,6 +2414,83 @@ class VJServer:
 
     async def _handle_browser_client(self, websocket):
         """Handle browser preview/admin panel connection."""
+
+        # --- VJ Authentication Gate ---
+        if self.require_auth:
+            try:
+                raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                auth_data = json.loads(raw)
+                if auth_data.get("type") != "vj_auth":
+                    await websocket.close(4003, "Expected vj_auth message")
+                    return
+                password = auth_data.get("password", "")
+                # Check against any configured VJ operator
+                from vj_server.auth import verify_password
+
+                authenticated = False
+                for vj_id, vj_info in self.auth_config.vj_operators.items():
+                    if verify_password(password, vj_info.get("key_hash", "")):
+                        authenticated = True
+                        break
+                if not authenticated:
+                    logger.warning(f"Browser VJ auth failed from {websocket.remote_address}")
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "auth_error",
+                                "error": "Invalid VJ password",
+                            }
+                        )
+                    )
+                    await websocket.close(4004, "Authentication failed")
+                    return
+                await websocket.send(json.dumps({"type": "auth_success"}))
+                logger.info(f"Browser VJ auth succeeded from {websocket.remote_address}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Browser auth timeout from {websocket.remote_address}")
+                await websocket.close(4003, "Auth timeout")
+                return
+            except (json.JSONDecodeError, Exception) as exc:
+                logger.warning(f"Browser auth error: {exc}")
+                await websocket.close(4003, "Auth error")
+                return
+
+        # --- Rate limiter for state-mutating browser commands ---
+        _RATE_LIMITED_COMMANDS = {
+            "set_pattern",
+            "set_entity_count",
+            "set_block_count",
+            "set_zone",
+            "set_preset",
+            "set_band_sensitivity",
+            "set_band_materials",
+            "set_audio_setting",
+            "set_visual_delay",
+            "set_visual_delay_mode",
+            "set_transition_duration",
+            "set_zone_config",
+            "generate_connect_code",
+            "revoke_connect_code",
+            "set_active_dj",
+            "kick_dj",
+            "approve_dj",
+            "deny_dj",
+            "reorder_dj_queue",
+            "trigger_effect",
+            "blackout",
+            "set_blackout",
+            "freeze",
+            "set_freeze",
+            "set_banner_profile",
+            "upload_banner_logo",
+            "voice_config",
+            "save_scene",
+            "load_scene",
+            "delete_scene",
+        }
+        _cmd_rate_tokens = 10.0
+        _cmd_rate_last_refill = time.time()
+
         self._broadcast_clients.add(websocket)
         self._browser_connects += 1
         logger.info(f"Browser client connected. Total: {len(self._broadcast_clients)}")
@@ -2463,6 +2540,26 @@ class VJServer:
                 try:
                     data = json.loads(message)
                     msg_type = data.get("type")
+
+                    # Rate-limit state-mutating commands (10/sec token bucket)
+                    if msg_type in _RATE_LIMITED_COMMANDS:
+                        now_rl = time.time()
+                        elapsed_rl = now_rl - _cmd_rate_last_refill
+                        _cmd_rate_last_refill = now_rl
+                        _cmd_rate_tokens = min(10.0, _cmd_rate_tokens + elapsed_rl * 10.0)
+                        if _cmd_rate_tokens >= 1.0:
+                            _cmd_rate_tokens -= 1.0
+                        else:
+                            logger.debug(f"Browser rate limit: dropping {msg_type}")
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "message": "Rate limited — too many commands",
+                                    }
+                                )
+                            )
+                            continue
 
                     if msg_type == "ping":
                         await websocket.send(json.dumps({"type": "pong"}))

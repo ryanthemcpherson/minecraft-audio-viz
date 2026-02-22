@@ -9,6 +9,7 @@ export class WebSocketService extends EventTarget {
 
         this.host = options.host || 'localhost';
         this.port = options.port || 8766;
+        this.vjPassword = options.vjPassword || '';
         this.reconnectInterval = options.reconnectInterval || 2000;
         this.maxReconnectAttempts = options.maxReconnectAttempts || 10;
 
@@ -123,6 +124,21 @@ export class WebSocketService extends EventTarget {
         this.isConnecting = false;
         this.reconnectAttempts = 0;
 
+        // Send VJ auth if a password is configured
+        if (this.vjPassword) {
+            this.ws.send(JSON.stringify({ type: 'vj_auth', password: this.vjPassword }));
+            // Wait for auth_success or auth_error before proceeding
+            this._awaitingAuth = true;
+            return;
+        }
+
+        this._completeConnection();
+    }
+
+    /**
+     * Complete connection setup after auth succeeds (or is skipped)
+     */
+    _completeConnection() {
         this._emit('connected');
         this._startPingInterval();
 
@@ -157,6 +173,22 @@ export class WebSocketService extends EventTarget {
     _onMessage(event) {
         try {
             const data = JSON.parse(event.data);
+
+            // Handle VJ auth response
+            if (this._awaitingAuth) {
+                if (data.type === 'auth_success') {
+                    console.log('[WS] VJ auth succeeded');
+                    this._awaitingAuth = false;
+                    this._completeConnection();
+                    return;
+                } else if (data.type === 'auth_error') {
+                    console.error('[WS] VJ auth failed:', data.error);
+                    this._awaitingAuth = false;
+                    this.shouldReconnect = false;
+                    this._emit('auth_failed', data);
+                    return;
+                }
+            }
 
             // Track successful message exchange and reset backoff
             // This ensures backoff resets after the connection is actually working, not just opened

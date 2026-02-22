@@ -20,6 +20,14 @@ export default function PatternCarousel() {
     return allPatterns.filter((p) => p.category === activeCategory);
   }, [allPatterns, activeCategory]);
 
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: allPatterns.length };
+    for (const p of allPatterns) {
+      counts[p.category] = (counts[p.category] || 0) + 1;
+    }
+    return counts;
+  }, [allPatterns]);
+
   const selectCategory = useCallback((cat: string) => {
     setActiveCategory(cat);
     setStartIndex(0);
@@ -85,10 +93,7 @@ export default function PatternCarousel() {
       <div className="mb-8 flex flex-wrap items-center justify-center gap-2">
         {CATEGORIES.map((cat) => {
           const isActive = activeCategory === cat;
-          const count =
-            cat === "All"
-              ? allPatterns.length
-              : allPatterns.filter((p) => p.category === cat).length;
+          const count = categoryCounts[cat] ?? 0;
 
           return (
             <button
@@ -138,7 +143,7 @@ export default function PatternCarousel() {
         >
           {visibleCards.map(({ slotIndex, pattern }) => (
             <CarouselCard
-              key={`${startIndex}-${slotIndex}`}
+              key={pattern.id}
               meta={pattern}
               index={startIndex + slotIndex}
             />

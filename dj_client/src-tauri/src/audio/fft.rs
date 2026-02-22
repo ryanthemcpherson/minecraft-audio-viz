@@ -3,6 +3,7 @@
 use super::{capture::AnalysisResult, AudioConfig};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Audio preset for tuning FFT analysis to different music styles
@@ -238,9 +239,11 @@ impl BassLane {
 
 /// FFT analyzer for audio visualization
 pub struct FftAnalyzer {
-    planner: FftPlanner<f32>,
     fft_size: usize,
+    fft_plan: Arc<dyn rustfft::Fft<f32>>,
     window: Vec<f32>,
+    fft_buffer: Vec<Complex<f32>>,
+    magnitudes: Vec<f32>,
 
     // Band boundaries (bin indices for 5 bands)
     band_boundaries: [(usize, usize); 5],
@@ -293,6 +296,14 @@ impl FftAnalyzer {
             })
             .collect();
 
+        // Pre-compute FFT plan once (avoids per-frame lookup)
+        let mut planner = FftPlanner::new();
+        let fft_plan = planner.plan_fft_forward(fft_size);
+
+        // Pre-allocate scratch buffers (avoids per-frame Vec allocation)
+        let fft_buffer = vec![Complex::new(0.0, 0.0); fft_size];
+        let magnitudes = vec![0.0f32; fft_size / 2];
+
         // Calculate band boundaries for 5 bands:
         // Bass (40-250Hz), Low (250-500Hz), Mid (500-2000Hz), High (2-6kHz), Air (6-20kHz)
         let freq_to_bin = |freq: f32| -> usize {
@@ -308,9 +319,11 @@ impl FftAnalyzer {
         ];
 
         Self {
-            planner: FftPlanner::new(),
             fft_size,
+            fft_plan,
             window,
+            fft_buffer,
+            magnitudes,
             band_boundaries,
             smoothed_bands: [0.0; 5],
             band_max: [0.001; 5],
@@ -359,32 +372,31 @@ impl FftAnalyzer {
             return AnalysisResult::default();
         }
 
-        // Apply window and prepare FFT input
-        let mut buffer: Vec<Complex<f32>> = samples
-            .iter()
-            .take(self.fft_size)
-            .zip(self.window.iter())
-            .map(|(&s, &w)| Complex::new(s * w, 0.0))
-            .collect();
+        // Apply window and prepare FFT input (reuse pre-allocated buffer)
+        for (i, (&s, &w)) in samples.iter().zip(self.window.iter()).enumerate().take(self.fft_size) {
+            self.fft_buffer[i] = Complex::new(s * w, 0.0);
+        }
+        // Zero remaining if samples < fft_size
+        for i in samples.len().min(self.fft_size)..self.fft_size {
+            self.fft_buffer[i] = Complex::new(0.0, 0.0);
+        }
 
-        // Perform FFT
-        let fft = self.planner.plan_fft_forward(self.fft_size);
-        fft.process(&mut buffer);
+        // Perform FFT (using cached plan)
+        self.fft_plan.process(&mut self.fft_buffer);
 
-        // Calculate magnitude spectrum
-        let magnitudes: Vec<f32> = buffer
-            .iter()
-            .take(self.fft_size / 2)
-            .map(|c| c.norm())
-            .collect();
+        // Calculate magnitude spectrum (reuse pre-allocated buffer)
+        let half = self.fft_size / 2;
+        for i in 0..half {
+            self.magnitudes[i] = self.fft_buffer[i].norm();
+        }
 
         // Extract bands
         let mut raw_bands = [0.0f32; 5];
         for (i, &(start, end)) in self.band_boundaries.iter().enumerate() {
             let start = start.max(1);
-            let end = end.min(magnitudes.len());
+            let end = end.min(self.magnitudes.len());
             if start < end {
-                let sum: f32 = magnitudes[start..end].iter().sum();
+                let sum: f32 = self.magnitudes[start..end].iter().sum();
                 raw_bands[i] = sum / (end - start) as f32;
             }
         }
