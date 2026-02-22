@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 
 interface DJProfile {
@@ -72,13 +71,12 @@ export default function NowPlaying({ wsUrl }: NowPlayingProps) {
         style={{ background: primaryColor }}
       />
       {activeDj.avatar_url ? (
-        <Image
+        <img
           src={activeDj.avatar_url}
           alt={activeDj.dj_name}
           width={32}
           height={32}
-          className="rounded-full object-cover"
-          unoptimized
+          className="h-8 w-8 rounded-full object-cover"
         />
       ) : (
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.08] text-sm font-semibold text-[#a1a1aa]">
