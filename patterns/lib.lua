@@ -101,6 +101,26 @@ function simple_noise(x, y, z, seed)
     return 1.0 - m / 1073741824.0
 end
 
+-- Pack entity table-of-tables into a flat numeric array for fast Python bridge transfer.
+-- Returns (flat_array, entity_count). Fields per entity: x, y, z, scale, rotation, band, visible.
+-- Python reads by index arithmetic: entity i's x = flat[i*7 + 1] (Lua 1-indexed).
+function flat_pack(entities)
+    local flat = {}
+    local n = 0
+    local count = #entities
+    for i = 1, count do
+        local e = entities[i]
+        n = n + 1; flat[n] = e.x or 0.5
+        n = n + 1; flat[n] = e.y or 0.5
+        n = n + 1; flat[n] = e.z or 0.5
+        n = n + 1; flat[n] = e.scale or 0.2
+        n = n + 1; flat[n] = e.rotation or 0
+        n = n + 1; flat[n] = e.band or 0
+        n = n + 1; flat[n] = (e.visible == false) and 0 or 1
+    end
+    return flat, count
+end
+
 -- Normalize pattern output to exactly n entities.
 -- Truncates overflow and pads with invisible placeholders when underfilled.
 function normalize_entities(entities, n)
