@@ -13,8 +13,12 @@ import java.util.List;
  */
 class AdaptivePipelineTest {
 
+    private static final int BLACK = 0xFF000000;
+    private static final int RED   = 0xFFFF0000;
+    private static final int CYAN  = 0xFF00CCFF;
+
     @Test
-    @DisplayName("64x64 solid color: merges to 1 rect")
+    @DisplayName("64x64 solid color: merges to 1 rect, assigner produces 1 update")
     void solidImage() {
         BitmapFrameBuffer buf = new BitmapFrameBuffer(64, 64);
         buf.fill(0xFF112233);
@@ -25,16 +29,20 @@ class AdaptivePipelineTest {
         assertEquals(64, rects.get(0).w());
         assertEquals(32, rects.get(0).h()); // 64 pixel rows → 32 cell rows
         assertTrue(rects.get(0).isUniform());
+
+        // Full pipeline: assign to entity slots
+        var assigner = new AdaptiveEntityAssigner(500);
+        var diff = assigner.assign(rects, 1.0f);
+        assertEquals(1, diff.geometryUpdates().size());
+        assertEquals(1, diff.backgroundUpdates().size());
     }
 
     @Test
-    @DisplayName("64x64 with center square: background merges, detail doesn't")
+    @DisplayName("64x64 with center square: significant merging, full pipeline")
     void imageWithCenterSquare() {
         BitmapFrameBuffer buf = new BitmapFrameBuffer(64, 64);
-        buf.fill(0xFF000000); // black background
-
-        // Draw a 16x16 red square in the center
-        buf.fillRect(24, 24, 16, 16, 0xFFFF0000);
+        buf.fill(BLACK);
+        buf.fillRect(24, 24, 16, 16, RED);
 
         List<MergedRect> rects = CellGridMerger.merge(buf.getRawPixels(), 64, 64);
 
@@ -44,14 +52,20 @@ class AdaptivePipelineTest {
         // Verify total coverage
         int totalCells = rects.stream().mapToInt(MergedRect::cellCount).sum();
         assertEquals(64 * 32, totalCells);
+
+        // Full pipeline: all rects fit within budget, first frame all dirty
+        var assigner = new AdaptiveEntityAssigner(500);
+        var diff = assigner.assign(rects, 1.0f);
+        assertEquals(rects.size(), diff.geometryUpdates().size());
+        assertFalse(diff.poolExhausted());
     }
 
     @Test
     @DisplayName("assigner reports zero dirty on identical frames")
     void staticImageZeroDirty() {
         BitmapFrameBuffer buf = new BitmapFrameBuffer(32, 32);
-        buf.fill(0xFF000000);
-        buf.fillRect(8, 8, 16, 16, 0xFFFF0000);
+        buf.fill(BLACK);
+        buf.fillRect(8, 8, 16, 16, RED);
 
         var assigner = new AdaptiveEntityAssigner(500);
 
@@ -70,7 +84,7 @@ class AdaptivePipelineTest {
     @DisplayName("spectrum bars pattern: entity count within budget")
     void spectrumBarsEntityCount() {
         BitmapFrameBuffer buf = new BitmapFrameBuffer(64, 32);
-        buf.fill(0xFF000000);
+        buf.fill(BLACK);
 
         // Simulate 5 spectrum bars
         for (int band = 0; band < 5; band++) {
@@ -78,21 +92,26 @@ class AdaptivePipelineTest {
             int barW = 10;
             double height = 0.3 + band * 0.15;
             int fillRows = (int) (height * 32);
-            buf.fillRect(barX, 32 - fillRows, barW, fillRows, 0xFF00CCFF);
+            buf.fillRect(barX, 32 - fillRows, barW, fillRows, CYAN);
         }
 
         List<MergedRect> rects = CellGridMerger.merge(buf.getRawPixels(), 64, 32);
 
         // Black background should merge heavily; bars are solid blocks
-        // Total should be well under 500
         assertTrue(rects.size() < 200, "Expected <200 rects for simple bars, got " + rects.size());
+
+        // Full pipeline: assign and verify all fit
+        var assigner = new AdaptiveEntityAssigner(500);
+        var diff = assigner.assign(rects, 1.0f);
+        assertEquals(rects.size(), diff.geometryUpdates().size());
+        assertFalse(diff.poolExhausted());
     }
 
     @Test
     @DisplayName("odd pixel height handled correctly")
     void oddPixelHeight() {
         BitmapFrameBuffer buf = new BitmapFrameBuffer(4, 3);
-        buf.fill(0xFFFF0000);
+        buf.fill(RED);
 
         List<MergedRect> rects = CellGridMerger.merge(buf.getRawPixels(), 4, 3);
 
