@@ -34,17 +34,40 @@ class Settings(BaseSettings):
             self.database_url = self.database_url.replace(
                 "postgresql://", "postgresql+asyncpg://", 1
             )
-        # Refuse to start with the default JWT secret in production
-        if self.user_jwt_secret == _INSECURE_DEFAULT_SECRET:
-            env = os.environ.get("MCAV_ENV", "development").lower()
-            if env in ("production", "prod", "staging"):
-                raise ValueError(
-                    "MCAV_USER_JWT_SECRET must be set to a secure value in production. "
-                    'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
-                )
-            _logger.warning(
-                "Using insecure default JWT secret. Set MCAV_USER_JWT_SECRET for production."
-            )
+        # Validate JWT secret strength
+        self._validate_jwt_secret()
+
+    def _validate_jwt_secret(self) -> None:
+        """Reject insecure JWT secrets.
+
+        - Default placeholder or secrets < 32 chars always fail in production/staging.
+        - In development, they emit a loud warning via the ``warnings`` module so
+          it shows up even if logging isn't configured yet.
+        """
+        import warnings
+
+        is_default = self.user_jwt_secret == _INSECURE_DEFAULT_SECRET
+        is_short = len(self.user_jwt_secret) < 32
+        insecure = is_default or is_short
+
+        if not insecure:
+            return
+
+        hint = (
+            "Set MCAV_USER_JWT_SECRET to a random 32+ character string. "
+            'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+        )
+
+        env = os.environ.get("MCAV_ENV", "development").lower()
+        if env in ("production", "prod", "staging"):
+            raise ValueError(f"Insecure JWT secret in {env}! {hint}")
+
+        # Development: warn loudly but allow startup for local work
+        warnings.warn(
+            f"JWT secret is insecure (default={is_default}, length={len(self.user_jwt_secret)}). {hint}",
+            UserWarning,
+            stacklevel=2,
+        )
 
     # DJ-session JWT (per-server secrets – unchanged)
     jwt_default_expiry_minutes: int = 15

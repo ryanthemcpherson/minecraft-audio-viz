@@ -10,9 +10,18 @@ class AdminApp {
     constructor() {
         // WebSocket connection - use same host as the page was served from
         const wsHost = window.location.hostname || 'localhost';
+        // VJ password: check URL param, then localStorage, then prompt
+        const urlParams = new URLSearchParams(window.location.search);
+        let vjPassword = urlParams.get('vj_password')
+            || localStorage.getItem('mcav_vj_password')
+            || '';
+        if (vjPassword) {
+            localStorage.setItem('mcav_vj_password', vjPassword);
+        }
         this.ws = new WebSocketService({
             host: wsHost,
-            port: 8766
+            port: 8766,
+            vjPassword: vjPassword,
         });
 
         // Application state
@@ -189,7 +198,8 @@ class AdminApp {
         this._setupDjLogoListeners();
         this._initPreviewStrip();
         this._updateTabIndicator();
-        window.addEventListener('resize', () => this._updateTabIndicator());
+        this._boundUpdateTabIndicator = () => this._updateTabIndicator();
+        window.addEventListener('resize', this._boundUpdateTabIndicator);
 
         // Start connection
         this.ws.connect();
@@ -1043,6 +1053,19 @@ class AdminApp {
             this._setConnectionStatus('disconnected');
             this._updateServiceIndicators();
             this._resetGenerateButton();
+        });
+
+        this.ws.addEventListener('auth_failed', (e) => {
+            const detail = e.detail || {};
+            const msg = detail.error || 'Authentication failed';
+            this._setConnectionStatus('disconnected');
+            // Prompt user for VJ password and retry
+            const newPassword = prompt(`VJ Auth Failed: ${msg}\nEnter VJ password:`);
+            if (newPassword) {
+                localStorage.setItem('mcav_vj_password', newPassword);
+                this.ws.vjPassword = newPassword;
+                this.ws.manualReconnect();
+            }
         });
 
         this.ws.addEventListener('error', () => {
@@ -3951,7 +3974,8 @@ class AdminApp {
             this._setupPreviewMouseControls();
 
             // Handle window resize
-            window.addEventListener('resize', () => this._onPreviewResize());
+            this._boundOnPreviewResize = () => this._onPreviewResize();
+            window.addEventListener('resize', this._boundOnPreviewResize);
 
             this._previewInitialized = true;
             this._previewLastFrameTime = performance.now();

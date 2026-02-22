@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, useEffect, useState } from "react";
+import { useRef, useMemo, useEffect, useState, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
@@ -278,6 +278,11 @@ function VisualizerCanvas({ isVisible }: { isVisible: boolean }) {
     return window.innerWidth < 768;
   }, []);
 
+  const handleCreated = useCallback(({ gl }: { gl: THREE.WebGLRenderer }) => {
+    gl.toneMapping = THREE.ACESFilmicToneMapping;
+    gl.toneMappingExposure = 1.2;
+  }, []);
+
   return (
     <Canvas
       dpr={dpr}
@@ -300,10 +305,7 @@ function VisualizerCanvas({ isVisible }: { isVisible: boolean }) {
         height: "100%",
       }}
       frameloop="demand"
-      onCreated={({ gl }) => {
-        gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.2;
-      }}
+      onCreated={handleCreated}
     >
       <ambientLight intensity={0.4} />
       <pointLight position={[5, 8, 5]} intensity={0.6} color="#00CCFF" />
