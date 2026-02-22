@@ -59,6 +59,10 @@ class VizClient:
         self._pending_responses: asyncio.Queue = asyncio.Queue(maxsize=100)
         self._use_receive_loop: bool = False  # Set to True when receive loop is started
 
+        # Serialize send+wait-for-response to prevent FIFO queue race conditions
+        # when multiple coroutines call send() concurrently.
+        self._send_lock: asyncio.Lock = asyncio.Lock()
+
         # Logging flags for batch_update_fast
         self._audio_logged: bool = False
         self._last_fast_error: float = 0.0
@@ -172,6 +176,7 @@ class VizClient:
 
                     # Handle ping messages - respond with pong
                     if msg_type == "ping":
+                        self._last_pong = time.time()  # Ping proves connection alive
                         try:
                             await self.ws.send(self._encode({"type": "pong"}))
                         except Exception as e:
@@ -363,26 +368,37 @@ class VizClient:
         return False
 
     async def send(self, message: dict) -> Optional[dict]:
-        """Send a message and wait for response."""
+        """Send a message and wait for response.
+
+        Uses a lock to serialize concurrent callers when the receive loop is
+        active, preventing FIFO queue race conditions where response A is
+        consumed by caller B.
+        """
         if not self.ws or not self._connected:
             logger.error("Not connected")
             return None
 
         try:
-            await self.ws.send(self._encode(message))
-
-            # If receive loop is running, get response from queue
             if self._use_receive_loop:
-                try:
-                    response = await asyncio.wait_for(
-                        self._pending_responses.get(), timeout=self.connect_timeout
-                    )
-                    return response
-                except asyncio.TimeoutError:
-                    logger.error("Timeout waiting for response")
-                    return None
+                async with self._send_lock:
+                    # Drain stale responses that may have accumulated
+                    while not self._pending_responses.empty():
+                        try:
+                            self._pending_responses.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+
+                    await self.ws.send(self._encode(message))
+                    try:
+                        response = await asyncio.wait_for(
+                            self._pending_responses.get(), timeout=self.connect_timeout
+                        )
+                        return response
+                    except asyncio.TimeoutError:
+                        logger.error("Timeout waiting for response")
+                        return None
             else:
-                # Fallback for when receive loop isn't running
+                await self.ws.send(self._encode(message))
                 response = await self.ws.recv()
                 return mjson.decode(response)
 
