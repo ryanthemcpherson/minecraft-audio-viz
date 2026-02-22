@@ -541,15 +541,36 @@ public class EntityPoolManager {
             String[] bgIds, int[] bgArgb, int bgCount,
             String[] txtIds, Component[] txtComponents, int txtCount,
             String[] hideIds, int hideCount) {
+        batchUpdateAdaptive(zoneName, geoIds, geoTransforms, null, geoCount,
+                bgIds, bgArgb, bgCount, txtIds, txtComponents, txtCount, hideIds, hideCount);
+    }
+
+    /**
+     * Batch update for the adaptive bitmap renderer with entity teleportation.
+     * Applies geometry (transformation + teleport), background, and text updates
+     * in a single scheduler task to minimize main-thread scheduling overhead.
+     *
+     * @param geoLocations optional Location array for teleporting geometry-updated entities
+     *                     (parallel to geoIds); null entries are skipped
+     */
+    public void batchUpdateAdaptive(
+            String zoneName,
+            String[] geoIds, Transformation[] geoTransforms, Location[] geoLocations, int geoCount,
+            String[] bgIds, int[] bgArgb, int bgCount,
+            String[] txtIds, Component[] txtComponents, int txtCount,
+            String[] hideIds, int hideCount) {
 
         Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
         if (pool == null) return;
 
         Runnable apply = () -> {
-            // Geometry updates
+            // Geometry updates (transformation + optional teleport)
             for (int i = 0; i < geoCount; i++) {
                 Entity entity = pool.get(geoIds[i]);
                 if (entity instanceof TextDisplay display) {
+                    if (geoLocations != null && geoLocations[i] != null) {
+                        display.teleport(geoLocations[i]);
+                    }
                     display.setTransformation(geoTransforms[i]);
                     display.setInterpolationDelay(0);
                 }

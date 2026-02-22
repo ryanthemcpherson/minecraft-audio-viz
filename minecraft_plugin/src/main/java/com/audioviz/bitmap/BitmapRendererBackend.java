@@ -10,15 +10,21 @@ package com.audioviz.bitmap;
  *
  * MCAV adapted this approach for real-time audio visualization with a frame buffer
  * pipeline, dirty-pixel diffing, and VJ control protocol integration.
+ *
+ * v2 (adaptive): Uses half-block characters (▄) for 2 pixels per entity and greedy
+ * rectangle merging for uniform regions, dramatically reducing entity count.
  */
 
 import com.audioviz.AudioVizPlugin;
+import com.audioviz.bitmap.adaptive.*;
 import com.audioviz.entities.EntityPoolManager;
 import com.audioviz.entities.EntityUpdate;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.render.RendererBackend;
 import com.audioviz.render.RendererBackendType;
 import com.audioviz.zones.VisualizationZone;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -35,23 +41,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Renderer backend that creates a flat 2D grid of TextDisplay entities,
- * each acting as a single "pixel" via background color manipulation.
+ * each acting as one or more "pixels" via background color and half-block
+ * character manipulation.
  *
- * <p>This is the core integration of TheCymaera's bitmap display technique
- * into MCAV's renderer architecture. Each TextDisplay:
- * <ul>
- *   <li>Has {@code text = " "} (space character) so only background shows</li>
- *   <li>Uses {@code backgroundColor} as the pixel color (ARGB)</li>
- *   <li>Has {@code interpolationDuration = 2-3} for client-side smooth blending</li>
- *   <li>Uses {@code Billboard.FIXED} to face the configured direction</li>
- * </ul>
+ * <p>v2 uses the adaptive pipeline: half-block characters (▄) encode two
+ * vertical pixels per entity (top = background color, bottom = text color),
+ * and greedy rectangle merging collapses uniform regions into fewer entities.
+ * Dual dirty tracking (geometry + color) ensures minimal Bukkit API calls.
  *
- * <p>The server pushes color updates at 20 TPS via {@link #applyFrame}, but the
- * client interpolates between states, making the visual appear ~60fps smooth.
- * This is the same trick that makes TheCymaera's Mandelbrot demo look fluid.
- *
- * <p>Lifecycle: {@link #initialize} spawns the grid → {@link #applyFrame} pushes
- * colors each tick → {@link #teardown} despawns.
+ * <p>Lifecycle: {@link #initialize} spawns the pool → {@link #applyFrame}
+ * pushes colors each tick → {@link #teardown} despawns.
  */
 public class BitmapRendererBackend implements RendererBackend {
 
@@ -61,16 +60,15 @@ public class BitmapRendererBackend implements RendererBackend {
     /** Zone name → grid config for active bitmap zones. */
     private final Map<String, BitmapGridConfig> gridConfigs = new ConcurrentHashMap<>();
 
-    /** Zone name → last frame buffer snapshot (for dirty-checking optimization). */
-    private final Map<String, int[]> lastFramePixels = new ConcurrentHashMap<>();
-
+    /** Zone name → adaptive entity assigner (dirty tracking). */
+    private final Map<String, AdaptiveEntityAssigner> assigners = new ConcurrentHashMap<>();
 
     /** Default interpolation ticks for smooth color blending. */
     private static final int DEFAULT_INTERPOLATION_TICKS = 3;
 
     /** Maximum bitmap dimensions (prevents entity explosion). */
     private static final int MAX_BITMAP_WIDTH = 128;
-    private static final int MAX_BITMAP_HEIGHT = 64;
+    private static final int MAX_BITMAP_HEIGHT = 128;
 
     public BitmapRendererBackend(AudioVizPlugin plugin, EntityPoolManager poolManager) {
         this.plugin = plugin;
@@ -108,7 +106,8 @@ public class BitmapRendererBackend implements RendererBackend {
         double zoneH = zone.getSize().getY();
 
         int targetW = Math.max(1, (int) Math.round(zoneW * pixelsPerBlock));
-        int targetH = Math.max(1, (int) Math.round(zoneH * pixelsPerBlock));
+        // Double vertical resolution: half-block gives 2 pixels per entity row
+        int targetH = Math.max(1, (int) Math.round(zoneH * pixelsPerBlock) * 2);
 
         // Scale down proportionally if over budget
         if (targetW * targetH > maxPixels) {
@@ -126,6 +125,8 @@ public class BitmapRendererBackend implements RendererBackend {
 
     /**
      * Initialize a bitmap grid with explicit dimensions.
+     * Width and height are logical pixel dimensions. Height can be up to 128;
+     * half-block encoding means cellHeight = ceil(height/2) entity rows.
      * Returns the actual dimensions used as {width, height} (may be scaled down).
      */
     public int[] initializeBitmapGrid(VisualizationZone zone, int width, int height) {
@@ -144,100 +145,89 @@ public class BitmapRendererBackend implements RendererBackend {
         }
 
         String zoneName = zone.getName();
-        BitmapGridConfig config = new BitmapGridConfig(width, height, DEFAULT_INTERPOLATION_TICKS);
+        int cellWidth = width;
+        int cellHeight = CellGridMerger.cellGridHeight(height);
+        int maxEntities = cellWidth * cellHeight;
+
+        // Calculate pixel scale based on zone size / cell dimensions
+        double zoneWidth = zone.getSize().getX();
+        double zoneHeight = zone.getSize().getY();
+        float pixelScaleX = (float) (zoneWidth / cellWidth);
+        float pixelScaleY = (float) (zoneHeight / cellHeight);
+        float pixelScale = Math.min(pixelScaleX, pixelScaleY);
+
+        BitmapGridConfig config = new BitmapGridConfig(
+            width, height, cellWidth, cellHeight,
+            maxEntities, DEFAULT_INTERPOLATION_TICKS, pixelScale
+        );
         gridConfigs.put(zoneName.toLowerCase(), config);
 
-        int count = width * height;
+        // Create adaptive entity assigner for this zone
+        assigners.put(zoneName.toLowerCase(), new AdaptiveEntityAssigner(maxEntities));
+
         final int finalWidth = width;
         final int finalHeight = height;
+        final int finalMaxEntities = maxEntities;
+        final float finalPixelScale = pixelScale;
 
-        // Spawn TextDisplay entities as pixels
+        // Spawn TextDisplay entities as a pool, all starting invisible
         Bukkit.getScheduler().runTask(plugin, () -> {
             // Clean up any existing entities first
             poolManager.cleanupZone(zoneName);
 
-            // Calculate pixel scale based on zone size
-            double zoneWidth = zone.getSize().getX();
-            double zoneHeight = zone.getSize().getY();
-            float pixelScaleX = (float) (zoneWidth / finalWidth);
-            float pixelScaleY = (float) (zoneHeight / finalHeight);
-            float pixelScale = Math.min(pixelScaleX, pixelScaleY);
+            Location center = zone.getCenter();
+            center.setYaw(zone.getRotation() + 180);
+            center.setPitch(0);
 
-            // Center the grid within the zone face
-            double gridWorldWidth = finalWidth * pixelScale;
-            double gridWorldHeight = finalHeight * pixelScale;
-            double offsetX = (zoneWidth - gridWorldWidth) / 2.0 / zoneWidth;
-            double offsetY = (zoneHeight - gridWorldHeight) / 2.0 / zoneHeight;
-
-            // Spawn grid of TextDisplay "pixels"
+            // Spawn pool of entities at zone center (they get repositioned by applyFrame)
             Map<String, Entity> pool = new LinkedHashMap<>();
 
-            for (int py = 0; py < finalHeight; py++) {
-                for (int px = 0; px < finalWidth; px++) {
-                    int idx = py * finalWidth + px;
-                    String entityId = "bmp_" + idx;
+            for (int i = 0; i < finalMaxEntities; i++) {
+                String entityId = "bmp_" + i;
 
-                    // Use zone's localToWorld for correct positioning with rotation
-                    // Normalized coordinates: 0-1 within zone bounds
-                    // Flip X so pixel 0 is viewer's left (entities face audience at rotation+180)
-                    double localX = offsetX + ((finalWidth - 1 - px + 0.5) * pixelScale) / zoneWidth;
-                    double localY = offsetY + ((finalHeight - 1 - py + 0.5) * pixelScale) / zoneHeight;
-                    double localZ = 0.5; // Center on the Z face of the zone
+                TextDisplay display = center.getWorld().spawn(center, TextDisplay.class, entity -> {
+                    // Default text is the half-block character
+                    entity.text(Component.text(CellGridMerger.HALF_BLOCK));
+                    // Start invisible: transparent background, zero scale
+                    entity.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+                    entity.setBillboard(Display.Billboard.FIXED);
+                    entity.setBrightness(new Display.Brightness(15, 15));
+                    entity.setInterpolationDuration(DEFAULT_INTERPOLATION_TICKS);
+                    entity.setInterpolationDelay(0);
+                    entity.setTeleportDuration(0);
+                    entity.setSeeThrough(false);
+                    entity.setDefaultBackground(false);
+                    entity.setLineWidth(200); // Wide enough that text doesn't wrap
+                    entity.setPersistent(false);
 
-                    Location pixelLoc = zone.localToWorld(localX, localY, localZ);
-                    // Face TOWARD the audience (180° from zone's rotation direction)
-                    pixelLoc.setYaw(zone.getRotation() + 180);
-                    pixelLoc.setPitch(0);
+                    // Start at zero scale (invisible until first frame assigns them)
+                    entity.setTransformation(new Transformation(
+                        new Vector3f(0, 0, 0),
+                        new AxisAngle4f(0, 0, 0, 1),
+                        new Vector3f(0, 0, 0),
+                        new AxisAngle4f(0, 0, 0, 1)
+                    ));
+                });
 
-                    final float scale = pixelScale;
-                    TextDisplay display = pixelLoc.getWorld().spawn(pixelLoc, TextDisplay.class, entity -> {
-                        entity.setText(" ");
-                        entity.setBackgroundColor(Color.fromARGB(255, 0, 0, 0));
-                        entity.setBillboard(Display.Billboard.FIXED);
-                        entity.setBrightness(new Display.Brightness(15, 15));
-                        entity.setInterpolationDuration(DEFAULT_INTERPOLATION_TICKS);
-                        entity.setInterpolationDelay(0);
-                        entity.setTeleportDuration(0);
-                        entity.setSeeThrough(false);
-                        entity.setDefaultBackground(false);
-                        entity.setLineWidth(200); // Wide enough that space doesn't wrap
-                        entity.setPersistent(false);
-
-                        // Scale to pixel size using TheCymaera's non-uniform scaling.
-                        // A space character's background is ~1/8 block wide and ~1/4 block tall,
-                        // so we multiply by 8x and 4x respectively to fill the pixel area.
-                        entity.setTransformation(new Transformation(
-                            new Vector3f(
-                                (-0.1f + 0.5f) * scale,   // X recenter: 0.4 * scale
-                                (-0.5f + 0.5f) * scale,   // Y recenter: 0
-                                0f
-                            ),
-                            new AxisAngle4f(0, 0, 0, 1),
-                            new Vector3f(scale * 8.0f, scale * 4.0f, 1f),
-                            new AxisAngle4f(0, 0, 0, 1)
-                        ));
-                    });
-
-                    pool.put(entityId, display);
-                }
+                pool.put(entityId, display);
             }
 
             // Register with pool manager for lifecycle tracking
             poolManager.registerExternalPool(zoneName, pool);
 
-            plugin.getLogger().info("Bitmap grid initialized: " + finalWidth + "x" + finalHeight +
-                " (" + count + " pixels) for zone '" + zoneName + "'");
+            plugin.getLogger().info("Adaptive bitmap grid initialized: " + finalWidth + "x" + finalHeight +
+                " (" + finalMaxEntities + " entities, pixelScale=" +
+                String.format("%.3f", finalPixelScale) + ") for zone '" + zoneName + "'");
         });
 
         return new int[]{width, height};
     }
 
     /**
-     * Apply a frame buffer to the bitmap grid.
+     * Apply a frame buffer to the bitmap grid using the adaptive pipeline.
      * This is the hot path — called every tick (~20 TPS) by the pattern engine.
      *
-     * <p>Uses dirty-checking: only sends color updates for pixels that changed
-     * since the last frame, dramatically reducing entity update overhead.
+     * <p>Pipeline: pixels → cell grid → greedy merge → assign to slots → diff → batch update.
      *
      * @param zoneName the zone to update
      * @param frame    the frame buffer to render
@@ -247,71 +237,144 @@ public class BitmapRendererBackend implements RendererBackend {
         BitmapGridConfig config = gridConfigs.get(zoneKey);
         if (config == null) return;
 
-        int[] currentPixels = frame.getRawPixels();
-        int[] lastPixels = lastFramePixels.get(zoneKey);
+        AdaptiveEntityAssigner assigner = assigners.get(zoneKey);
+        if (assigner == null) return;
 
-        // Dirty-check: only update pixels whose color changed since last frame.
-        // Collects dirty pixel indices into reusable arrays to avoid Map + Color
-        // object allocation on the hot path (called every tick at 20 TPS).
-        boolean fullFrame = (lastPixels == null || lastPixels.length != currentPixels.length);
-        int totalPixels = Math.min(currentPixels.length, config.width() * config.height());
+        VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+        if (zone == null) return;
 
-        // Reuse thread-local scratch arrays to avoid per-frame allocation
-        String[] dirtyIds = getDirtyIdsScratch(totalPixels);
-        int[] dirtyArgb = getDirtyArgbScratch(totalPixels);
-        int dirtyCount = 0;
+        int[] pixels = frame.getRawPixels();
+        int logicalWidth = config.logicalWidth();
+        int logicalHeight = config.logicalHeight();
+        float pixelScale = config.pixelScale();
 
-        for (int i = 0; i < totalPixels; i++) {
-            int argb = currentPixels[i];
-            if (fullFrame || argb != lastPixels[i]) {
-                dirtyIds[dirtyCount] = getBmpEntityId(i);
-                dirtyArgb[dirtyCount] = argb;
-                dirtyCount++;
+        // 1. Merge: pixels → cell grid → greedy rectangles
+        List<MergedRect> rects = CellGridMerger.merge(pixels, logicalWidth, logicalHeight);
+
+        // 2. Assign: rects → pool slots with dirty tracking
+        AdaptiveEntityAssigner.FrameDiff diff = assigner.assign(rects, pixelScale);
+
+        // 3. Early exit if nothing changed
+        List<AdaptiveEntityAssigner.GeometryUpdate> geoUpdates = diff.geometryUpdates();
+        List<AdaptiveEntityAssigner.BackgroundUpdate> bgUpdates = diff.backgroundUpdates();
+        List<AdaptiveEntityAssigner.TextUpdate> txtUpdates = diff.textUpdates();
+        int hideStart = diff.hideStart();
+        int hideCount = diff.hideCount();
+
+        if (geoUpdates.isEmpty() && bgUpdates.isEmpty() && txtUpdates.isEmpty() && hideCount == 0) {
+            return;
+        }
+
+        // 4. Build arrays for batchUpdateAdaptive
+
+        // Zone geometry for world-space positioning
+        double zoneWidth = zone.getSize().getX();
+        double zoneHeight = zone.getSize().getY();
+        int cellWidth = config.cellWidth();
+        int cellHeight = config.cellHeight();
+
+        // Center the cell grid within the zone face
+        double gridWorldWidth = cellWidth * pixelScale;
+        double gridWorldHeight = cellHeight * pixelScale;
+        double offsetX = (zoneWidth - gridWorldWidth) / 2.0 / zoneWidth;
+        double offsetY = (zoneHeight - gridWorldHeight) / 2.0 / zoneHeight;
+
+        // --- Geometry: Transformation + teleport location ---
+        int geoCount = geoUpdates.size();
+        String[] geoIds = new String[geoCount];
+        Transformation[] geoTransforms = new Transformation[geoCount];
+        Location[] geoLocations = new Location[geoCount];
+
+        for (int i = 0; i < geoCount; i++) {
+            AdaptiveEntityAssigner.GeometryUpdate geo = geoUpdates.get(i);
+            geoIds[i] = geo.entityId();
+
+            float scaleX = geo.scaleX();
+            float scaleY = geo.scaleY();
+
+            // TheCymaera scaling: space bg is ~1/8 wide, ~1/4 tall
+            // With half-block (▄), the character itself is ~1/4 tall, bg is ~1/4 tall
+            // scaleX/scaleY are in world-space units (pixelScale * cellCount)
+            geoTransforms[i] = new Transformation(
+                new Vector3f(
+                    (-0.1f + 0.5f) * scaleX,  // X recenter: 0.4 * scaleX
+                    (-0.5f + 0.5f) * scaleY,  // Y recenter: 0
+                    0f
+                ),
+                new AxisAngle4f(0, 0, 0, 1),
+                new Vector3f(scaleX * 8.0f, scaleY * 4.0f, 1f),
+                new AxisAngle4f(0, 0, 0, 1)
+            );
+
+            // World-space position: convert cell (x, y) to normalized zone coords
+            // geo.x() and geo.y() are in world-space units from the assigner (cellX * pixelScale)
+            // Convert back to cell coords for positioning
+            float cellX = geo.x() / pixelScale;
+            float cellY = geo.y() / pixelScale;
+
+            // Flip X so cell 0 is viewer's left (entities face audience at rotation+180)
+            // Center the rect within its span (add half of rect width/height)
+            double localX = offsetX + ((cellWidth - 1 - cellX - (geo.scaleX() / pixelScale - 1) / 2.0) + 0.5) * pixelScale / zoneWidth;
+            double localY = offsetY + ((cellHeight - 1 - cellY - (geo.scaleY() / pixelScale - 1) / 2.0) + 0.5) * pixelScale / zoneHeight;
+            double localZ = 0.5; // Center on the Z face of the zone
+
+            Location loc = zone.localToWorld(localX, localY, localZ);
+            loc.setYaw(zone.getRotation() + 180);
+            loc.setPitch(0);
+            geoLocations[i] = loc;
+        }
+
+        // --- Background: direct ARGB ---
+        int bgCount = bgUpdates.size();
+        String[] bgIds = new String[bgCount];
+        int[] bgArgb = new int[bgCount];
+
+        for (int i = 0; i < bgCount; i++) {
+            AdaptiveEntityAssigner.BackgroundUpdate bg = bgUpdates.get(i);
+            bgIds[i] = bg.entityId();
+            bgArgb[i] = bg.argb();
+        }
+
+        // --- Text: Component with half-block color, or space for uniform ---
+        int txtCount = txtUpdates.size();
+        String[] txtIds = new String[txtCount];
+        Component[] txtComponents = new Component[txtCount];
+
+        for (int i = 0; i < txtCount; i++) {
+            AdaptiveEntityAssigner.TextUpdate txt = txtUpdates.get(i);
+            txtIds[i] = txt.entityId();
+
+            if (txt.argb() == -1) {
+                // Uniform cell: use space (only background shows)
+                txtComponents[i] = Component.text(" ");
+            } else {
+                // Half-block with bottom pixel color as text color
+                int argb = txt.argb();
+                int r = (argb >> 16) & 0xFF;
+                int g = (argb >> 8) & 0xFF;
+                int b = argb & 0xFF;
+                txtComponents[i] = Component.text(CellGridMerger.HALF_BLOCK,
+                    TextColor.color(r, g, b));
             }
         }
 
-        if (dirtyCount == 0) return;
-
-        boolean applied = poolManager.batchUpdateTextBackgroundsRaw(zoneName, dirtyIds, dirtyArgb, dirtyCount);
-        if (applied) {
-            int[] snapshot = new int[currentPixels.length];
-            System.arraycopy(currentPixels, 0, snapshot, 0, currentPixels.length);
-            lastFramePixels.put(zoneKey, snapshot);
+        // --- Hide: entity IDs from hideStart..hideStart+hideCount ---
+        String[] hideIds = new String[hideCount];
+        for (int i = 0; i < hideCount; i++) {
+            hideIds[i] = "bmp_" + (hideStart + i);
         }
-    }
 
-    // --- Scratch buffers for dirty-pixel collection (avoids per-frame allocation) ---
-    private String[] dirtyIdsScratch = new String[0];
-    private int[] dirtyArgbScratch = new int[0];
+        // 5. Batch update (includes teleport for geometry changes)
+        poolManager.batchUpdateAdaptive(zoneName,
+            geoIds, geoTransforms, geoLocations, geoCount,
+            bgIds, bgArgb, bgCount,
+            txtIds, txtComponents, txtCount,
+            hideIds, hideCount);
 
-    private String[] getDirtyIdsScratch(int minCapacity) {
-        if (dirtyIdsScratch.length < minCapacity) {
-            dirtyIdsScratch = new String[minCapacity];
+        if (diff.poolExhausted()) {
+            plugin.getLogger().warning("Adaptive pool exhausted for zone '" + zoneName +
+                "': " + rects.size() + " rects > " + config.entityCount() + " entities");
         }
-        return dirtyIdsScratch;
-    }
-
-    private int[] getDirtyArgbScratch(int minCapacity) {
-        if (dirtyArgbScratch.length < minCapacity) {
-            dirtyArgbScratch = new int[minCapacity];
-        }
-        return dirtyArgbScratch;
-    }
-
-    /** Cached "bmp_N" entity ID strings to avoid per-pixel string concatenation. */
-    private String[] bmpEntityIdCache = new String[0];
-
-    private String getBmpEntityId(int index) {
-        if (index >= bmpEntityIdCache.length) {
-            int newLen = Math.max(index + 1, bmpEntityIdCache.length * 2);
-            String[] expanded = new String[newLen];
-            System.arraycopy(bmpEntityIdCache, 0, expanded, 0, bmpEntityIdCache.length);
-            for (int i = bmpEntityIdCache.length; i < newLen; i++) {
-                expanded[i] = "bmp_" + i;
-            }
-            bmpEntityIdCache = expanded;
-        }
-        return bmpEntityIdCache[index];
     }
 
     /**
@@ -355,13 +418,7 @@ public class BitmapRendererBackend implements RendererBackend {
 
     @Override
     public void setVisible(String zoneName, boolean visible) {
-        if (visible) {
-            // Restore last frame
-            int[] last = lastFramePixels.get(zoneName.toLowerCase());
-            if (last != null) {
-                applyRawFrame(zoneName, last);
-            }
-        } else {
+        if (!visible) {
             // Blackout: set all pixels to transparent
             BitmapGridConfig config = gridConfigs.get(zoneName.toLowerCase());
             if (config != null) {
@@ -369,19 +426,20 @@ public class BitmapRendererBackend implements RendererBackend {
                 applyRawFrame(zoneName, black);
             }
         }
+        // For visible=true, the next applyFrame call will restore the display
     }
 
     @Override
     public void teardown(String zoneName) {
         gridConfigs.remove(zoneName.toLowerCase());
-        lastFramePixels.remove(zoneName.toLowerCase());
+        assigners.remove(zoneName.toLowerCase());
         poolManager.cleanupZone(zoneName);
     }
 
     @Override
     public int getElementCount(String zoneName) {
         BitmapGridConfig config = gridConfigs.get(zoneName.toLowerCase());
-        return config != null ? config.width() * config.height() : 0;
+        return config != null ? config.entityCount() : 0;
     }
 
     @Override
@@ -390,8 +448,7 @@ public class BitmapRendererBackend implements RendererBackend {
         if (config == null) return Collections.emptySet();
 
         Set<String> ids = new LinkedHashSet<>();
-        int count = config.width() * config.height();
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < config.entityCount(); i++) {
             ids.add("bmp_" + i);
         }
         return ids;
@@ -420,14 +477,31 @@ public class BitmapRendererBackend implements RendererBackend {
         if (config == null) return;
 
         gridConfigs.put(zoneName.toLowerCase(),
-            new BitmapGridConfig(config.width(), config.height(), ticks));
+            new BitmapGridConfig(config.logicalWidth(), config.logicalHeight(),
+                config.cellWidth(), config.cellHeight(),
+                config.entityCount(), ticks, config.pixelScale()));
         poolManager.setZoneInterpolation(zoneName, ticks);
     }
 
     /**
      * Immutable grid configuration for a bitmap zone.
+     *
+     * @param logicalWidth      pixel width of the frame buffer
+     * @param logicalHeight     pixel height of the frame buffer (can be up to 128)
+     * @param cellWidth         cell grid width (same as logicalWidth)
+     * @param cellHeight        cell grid height (ceil(logicalHeight / 2))
+     * @param entityCount       max entities in the pool (cellWidth * cellHeight)
+     * @param interpolationTicks client-side interpolation duration
+     * @param pixelScale        world-space size of one cell
      */
-    public record BitmapGridConfig(int width, int height, int interpolationTicks) {
-        public int pixelCount() { return width * height; }
+    public record BitmapGridConfig(
+        int logicalWidth, int logicalHeight,
+        int cellWidth, int cellHeight,
+        int entityCount, int interpolationTicks,
+        float pixelScale
+    ) {
+        public int pixelCount() { return logicalWidth * logicalHeight; }
+        public int width() { return logicalWidth; }
+        public int height() { return logicalHeight; }
     }
 }
