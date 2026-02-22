@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-profile.schema.json",
+  "title": "DJProfile",
+  "type": "object",
+  "properties": {
+    "dj_id": { "type": "string" },
+    "dj_name": { "type": "string" },
+    "avatar_url": { "type": ["string", "null"] },
+    "color_palette": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "block_palette": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "slug": { "type": ["string", "null"] },
+    "bio": { "type": ["string", "null"] },
+    "genres": { "type": ["string", "null"] }
+  },
+  "required": ["dj_id", "dj_name"]
+}
