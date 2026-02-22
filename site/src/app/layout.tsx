@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import AuthProvider from "@/components/AuthProvider";
+import NowPlaying from "@/components/NowPlaying";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -80,6 +81,9 @@ export default function RootLayout({
         <AuthProvider>
           <Navbar />
           <main id="main-content">{children}</main>
+          {process.env.NEXT_PUBLIC_VJ_WS_URL && (
+            <NowPlaying wsUrl={process.env.NEXT_PUBLIC_VJ_WS_URL} />
+          )}
         </AuthProvider>
       </body>
     </html>
