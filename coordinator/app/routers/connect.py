@@ -79,12 +79,25 @@ async def resolve_connect_code(
     if active_count >= show.max_djs:
         raise HTTPException(status_code=409, detail="Show is full — maximum DJ limit reached")
 
+    # Try to extract user identity from optional Authorization header
+    user_id = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from app.services.user_jwt import verify_user_token
+
+            payload = verify_user_token(auth_header[7:], jwt_secret=settings.user_jwt_secret)
+            user_id = payload.sub
+        except Exception:
+            pass  # Anonymous is fine — don't fail the connect flow
+
     # Create a DJ session record
     dj_session_id = uuid.uuid4()
     client_ip = request.client.host if request.client else "unknown"
     dj_session = DJSession(
         id=dj_session_id,
         show_id=show.id,
+        user_id=user_id,
         dj_name=f"DJ-{normalised}",
         ip_address=client_ip,
     )
@@ -121,6 +134,7 @@ async def resolve_connect_code(
         token=token,
         show_name=show.name,
         dj_count=show.current_djs,
+        dj_session_id=str(dj_session_id),
     )
 
 

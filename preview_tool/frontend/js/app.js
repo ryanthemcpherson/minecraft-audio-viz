@@ -332,6 +332,12 @@ function ensureBlockCount(count) {
 }
 
 function setupControls() {
+    // Collapsible panels
+    document.querySelectorAll('.panel.collapsible .panel-header').forEach(header => {
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', () => header.parentElement.classList.toggle('collapsed'));
+    });
+
     // Reset camera button
     const resetBtn = document.getElementById('btn-reset');
     if (resetBtn) {
@@ -720,6 +726,10 @@ function connectWebSocket() {
                     if (bitmapPreview && data.zone) {
                         bitmapPreview.setPattern(data.zone, data.pattern);
                     }
+                } else if (data.type === 'dj_joined') {
+                    console.log('[Preview] DJ joined:', data.dj && data.dj.dj_name);
+                } else if (data.type === 'dj_left') {
+                    console.log('[Preview] DJ left:', data.dj_name);
                 } else if (data.type === 'vj_state') {
                     // Initial state broadcast — extract zone info if present
                     if (data.zones && !zoneData) {
@@ -795,6 +805,11 @@ function updateAudioState(data) {
     audioState.frame = data.frame || 0;
     audioState.entities = data.entities || [];
     audioState.latencyMs = data.latency_ms || 0;
+
+    // Update DJ overlay from state broadcast
+    if (data.active_dj !== undefined) {
+        updateDJOverlay(data.active_dj);
+    }
 
     // Store per-zone entities for multi-zone positioning
     if (data.zone_entities) {
@@ -1626,6 +1641,31 @@ function disposeStageBlocks() {
         scene.remove(stageBlocksGroup);
         stageBlocksGroup = null;
     }
+}
+
+// === DJ Info Overlay ===
+
+function updateDJOverlay(activeDj) {
+    const overlay = document.getElementById('dj-overlay');
+    if (!overlay) return;
+
+    if (!activeDj) {
+        overlay.style.display = 'none';
+        return;
+    }
+
+    overlay.style.display = 'flex';
+    const avatar = document.getElementById('dj-overlay-avatar');
+    const name = document.getElementById('dj-overlay-name');
+
+    if (activeDj.avatar_url) {
+        avatar.src = activeDj.avatar_url;
+        avatar.style.display = 'block';
+    } else {
+        avatar.style.display = 'none';
+    }
+
+    name.textContent = activeDj.dj_name;
 }
 
 // Close WebSocket cleanly when leaving the page

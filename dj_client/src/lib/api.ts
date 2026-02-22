@@ -256,15 +256,31 @@ export async function refreshTokens(): Promise<AuthResponse> {
 
 export interface ResolvedConnectCode {
   websocket_url: string;
+  token: string;
   show_name: string;
+  dj_count: number;
+  dj_session_id: string;
 }
 
 export async function resolveConnectCode(
   code: string,
 ): Promise<ResolvedConnectCode> {
-  return apiFetch<ResolvedConnectCode>(
-    `/connect/${encodeURIComponent(code)}`,
-  );
+  // Send user auth if signed in so coordinator links the session to the user.
+  // Fall back to unauthenticated fetch when no tokens are available.
+  try {
+    return await authedFetch<ResolvedConnectCode>(
+      `/connect/${encodeURIComponent(code)}`,
+    );
+  } catch (e) {
+    // If the error is "Not signed in", fall back to unauthenticated fetch.
+    // Any other error (ApiError with 4xx/5xx) should propagate as-is.
+    if (e instanceof Error && e.message === 'Not signed in') {
+      return apiFetch<ResolvedConnectCode>(
+        `/connect/${encodeURIComponent(code)}`,
+      );
+    }
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------

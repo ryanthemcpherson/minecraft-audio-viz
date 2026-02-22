@@ -7,13 +7,14 @@ Uses only stdlib (no extra dependencies) via urllib + asyncio.to_thread.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+import msgspec.json as mjson
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +32,15 @@ class CoordinatorState:
 
     def save(self) -> None:
         _STATE_DIR.mkdir(parents=True, exist_ok=True)
-        _STATE_FILE.write_text(
-            json.dumps({"server_id": self.server_id, "jwt_secret": self.jwt_secret})
+        _STATE_FILE.write_bytes(
+            mjson.encode({"server_id": self.server_id, "jwt_secret": self.jwt_secret})
         )
 
     @classmethod
     def load(cls) -> "CoordinatorState":
         if _STATE_FILE.exists():
             try:
-                data = json.loads(_STATE_FILE.read_text())
+                data = mjson.decode(_STATE_FILE.read_bytes())
                 return cls(
                     server_id=data.get("server_id"),
                     jwt_secret=data.get("jwt_secret"),
@@ -86,7 +87,7 @@ class CoordinatorClient:
         auth: bool = True,
     ) -> dict:
         url = f"{self._base_url}{path}"
-        data = json.dumps(body).encode("utf-8") if body else None
+        data = mjson.encode(body) if body else None
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/json")
         req.add_header("User-Agent", "mcav-vj-server/1.0")
@@ -94,11 +95,11 @@ class CoordinatorClient:
             req.add_header("Authorization", f"Bearer {self._api_key}")
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
-                return json.loads(resp.read().decode("utf-8"))
+                return mjson.decode(resp.read())
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             try:
-                detail = json.loads(detail).get("detail", detail)
+                detail = mjson.decode(detail).get("detail", detail)
             except Exception:
                 pass
             raise RuntimeError(
@@ -186,6 +187,24 @@ class CoordinatorClient:
             connect_code=result["connect_code"],
             name=result["name"],
         )
+
+    async def fetch_dj_profile(self, dj_session_id: str) -> Optional[dict]:
+        """Fetch DJ profile for a session from the coordinator.
+
+        Returns profile dict or None if unavailable.
+        """
+        try:
+            return await self._request(
+                "GET",
+                f"/internal/dj-profile/{dj_session_id}",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch DJ profile for session %s: %s",
+                dj_session_id,
+                exc,
+            )
+            return None
 
     async def end_show(self, show_id: str) -> None:
         """End a show on the coordinator."""
