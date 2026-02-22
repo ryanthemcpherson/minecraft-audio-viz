@@ -120,11 +120,13 @@ public class ZoneManager {
             return;
         }
 
-        for (String zoneName : zonesSection.getKeys(false)) {
-            ConfigurationSection zoneData = zonesSection.getConfigurationSection(zoneName);
+        for (String yamlKey : zonesSection.getKeys(false)) {
+            ConfigurationSection zoneData = zonesSection.getConfigurationSection(yamlKey);
             if (zoneData == null) continue;
 
             try {
+                // Prefer explicit "name" field (handles dots in zone names); fall back to YAML key
+                String zoneName = zoneData.getString("name", yamlKey);
                 // Load zone data
                 UUID id = UUID.fromString(zoneData.getString("id", UUID.randomUUID().toString()));
                 String worldName = zoneData.getString("world", "world");
@@ -156,7 +158,7 @@ public class ZoneManager {
                 plugin.getLogger().info("Loaded zone: " + zone);
 
             } catch (Exception e) {
-                plugin.getLogger().warning("Failed to load zone '" + zoneName + "': " + e.getMessage());
+                plugin.getLogger().warning("Failed to load zone '" + yamlKey + "': " + e.getMessage());
             }
         }
 
@@ -170,7 +172,12 @@ public class ZoneManager {
         FileConfiguration config = new YamlConfiguration();
 
         for (VisualizationZone zone : zones.values()) {
-            String path = "zones." + zone.getName();
+            // Sanitize zone name for YAML key safety: dots create nested sections in
+            // Bukkit's YAML API, so replace them with underscores for the key path.
+            // Store original name explicitly so round-trips preserve it.
+            String safeKey = zone.getName().replace('.', '_');
+            String path = "zones." + safeKey;
+            config.set(path + ".name", zone.getName());
             config.set(path + ".id", zone.getId().toString());
             config.set(path + ".world", zone.getWorld().getName());
             config.set(path + ".origin.x", zone.getOrigin().getX());
