@@ -315,12 +315,16 @@ class LuaPattern(VisualizationPattern):
             if len(entities) > target_count:
                 entities = entities[:target_count]
             elif len(entities) < target_count:
-                pad_index = len(entities)
+                # Use stable padding IDs (__pad_0, __pad_1, ...) so they don't
+                # accumulate as stale keys in _entity_state across frames.
+                pad_seq = 0
                 while len(entities) < target_count:
-                    pad_id = f"block_{pad_index}"
-                    if pad_id in seen_ids:
-                        pad_id = f"__pad_{pad_index}"
-                    pad_index += 1
+                    pad_id = f"__pad_{pad_seq}"
+                    # Skip if a Lua-returned entity already claimed this ID
+                    while pad_id in seen_ids:
+                        pad_seq += 1
+                        pad_id = f"__pad_{pad_seq}"
+                    pad_seq += 1
                     seen_ids.add(pad_id)
                     self._entity_state[pad_id] = {
                         "x": 0.5,
