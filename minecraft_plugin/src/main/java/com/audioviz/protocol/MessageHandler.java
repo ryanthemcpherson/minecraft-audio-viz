@@ -1654,7 +1654,7 @@ public class MessageHandler {
         if (hasWidth && hasHeight) {
             // Explicit dimensions provided
             int width = Math.max(2, Math.min(128, message.get("width").getAsInt()));
-            int height = Math.max(2, Math.min(64, message.get("height").getAsInt()));
+            int height = Math.max(2, Math.min(128, message.get("height").getAsInt()));
             actualDims = renderer.initializeBitmapGrid(zone, width, height);
         } else {
             // Auto-size from zone geometry
