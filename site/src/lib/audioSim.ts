@@ -2,6 +2,10 @@
  * Synthetic Audio Simulator
  * Generates fake AudioState data with rhythmic beats and frequency sweeps.
  * Each gallery card uses a phase offset so they don't all pulse in sync.
+ *
+ * Results are cached per (time, phaseOffset) within the same animation frame
+ * to avoid redundant trig computation when multiple consumers request the
+ * same state.
  */
 
 import type { AudioState } from "./patterns/base";
@@ -9,10 +13,27 @@ import type { AudioState } from "./patterns/base";
 const BPM = 128;
 const BEAT_INTERVAL = 60 / BPM; // seconds per beat
 
+// Frame-level cache: keyed by "time|phaseOffset" string, cleared each rAF tick.
+let _cacheFrame = -1;
+const _cache = new Map<string, AudioState>();
+
 export function generateAudioState(
   time: number,
   phaseOffset: number = 0
 ): AudioState {
+  // Detect new animation frame by comparing against a monotonic frame counter.
+  // requestAnimationFrame timestamps aren't available here, so we use the
+  // elapsed-time value (which advances once per rAF tick in R3F).
+  const frameKey = time;
+  if (frameKey !== _cacheFrame) {
+    _cache.clear();
+    _cacheFrame = frameKey;
+  }
+
+  const cacheKey = `${time}|${phaseOffset}`;
+  const cached = _cache.get(cacheKey);
+  if (cached) return cached;
+
   const t = time + phaseOffset;
   const frame = Math.floor(t * 60);
 
@@ -51,7 +72,7 @@ export function generateAudioState(
   const isBeat = beatPhase < 0.08 && bass > 0.5;
   const beatIntensity = isBeat ? 0.5 + bass * 0.5 : 0;
 
-  return {
+  const result: AudioState = {
     bands,
     amplitude,
     isBeat,
@@ -60,4 +81,7 @@ export function generateAudioState(
     bpm: BPM,
     frame,
   };
+
+  _cache.set(cacheKey, result);
+  return result;
 }
