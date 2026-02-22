@@ -120,6 +120,8 @@ function App() {
   // Test audio state
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
+  const testIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keyboard shortcuts state
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
@@ -561,7 +563,7 @@ function App() {
       await invoke('start_capture', { sourceId: selectedSource });
 
       // Poll audio levels for 10 seconds
-      const interval = setInterval(async () => {
+      testIntervalRef.current = setInterval(async () => {
         try {
           const levels = await invoke<AudioLevels>('get_audio_levels');
           setTestBands(levels.bands);
@@ -571,8 +573,10 @@ function App() {
       }, 50);
 
       // Auto-stop after 10 seconds
-      setTimeout(() => {
-        clearInterval(interval);
+      testTimeoutRef.current = setTimeout(() => {
+        if (testIntervalRef.current) clearInterval(testIntervalRef.current);
+        testIntervalRef.current = null;
+        testTimeoutRef.current = null;
         void handleStopTest();
       }, 10000);
     } catch (err) {
@@ -582,6 +586,14 @@ function App() {
   };
 
   const handleStopTest = async () => {
+    if (testIntervalRef.current) {
+      clearInterval(testIntervalRef.current);
+      testIntervalRef.current = null;
+    }
+    if (testTimeoutRef.current) {
+      clearTimeout(testTimeoutRef.current);
+      testTimeoutRef.current = null;
+    }
     try {
       await invoke('stop_capture');
       setIsTestingAudio(false);

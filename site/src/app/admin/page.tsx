@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
@@ -111,12 +111,12 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [userSearch, setUserSearch] = useState("");
-  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Redirect non-admin users
   useEffect(() => {
-    if (!loading && (!user || !accessToken)) {
-      router.push("/login");
+    if (!loading && (!user || !accessToken || !user.is_admin)) {
+      router.push(user ? "/dashboard" : "/login");
     }
   }, [loading, user, accessToken, router]);
 
@@ -174,19 +174,18 @@ export default function AdminPage() {
   // Debounced user search
   const handleUserSearch = (value: string) => {
     setUserSearch(value);
-    if (searchTimeout) clearTimeout(searchTimeout);
-    setSearchTimeout(
-      setTimeout(() => {
-        if (tab === "users" && accessToken) {
-          fetchAdminUsers(accessToken, {
-            limit: 100,
-            search: value || undefined,
-          })
-            .then(setUsers)
-            .catch(() => {});
-        }
-      }, 300)
-    );
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      searchTimeoutRef.current = null;
+      if (tab === "users" && accessToken) {
+        fetchAdminUsers(accessToken, {
+          limit: 100,
+          search: value || undefined,
+        })
+          .then(setUsers)
+          .catch(() => {});
+      }
+    }, 300);
   };
 
   const toggleAdmin = async (userId: string, current: boolean) => {
