@@ -89,7 +89,7 @@ let ws = null;
 let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
-const BASE_RECONNECT_DELAY = 2000;  // 2 seconds
+const BASE_RECONNECT_DELAY = 1000;  // 1 second
 const MAX_RECONNECT_DELAY = 30000;  // 30 seconds
 
 // FPS tracking
@@ -226,6 +226,21 @@ function init() {
 
     // Connect WebSocket
     connectWebSocket();
+
+    // Click connection status to manually retry when failed
+    const connStatusEl = document.getElementById('connection-status');
+    if (connStatusEl) {
+        connStatusEl.style.cursor = 'pointer';
+        connStatusEl.title = 'Click to reconnect';
+        connStatusEl.addEventListener('click', () => {
+            if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS || !ws || ws.readyState === WebSocket.CLOSED) {
+                console.log('[WS] Manual reconnect triggered');
+                if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                reconnectAttempts = 0;
+                connectWebSocket();
+            }
+        });
+    }
 
     // Start animation
     lastFrameTime = performance.now();
@@ -715,16 +730,29 @@ function scheduleReconnect() {
 
     reconnectAttempts++;
 
+    const statusEl = document.getElementById('connection-status');
+    const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
+
     if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
         console.error('[WS] Max reconnect attempts reached');
-        const statusText = document.querySelector('#connection-status .status-text');
-        if (statusText) statusText.textContent = 'Failed (max retries)';
+        if (statusEl) {
+            statusEl.classList.remove('connected');
+            statusEl.classList.add('error');
+        }
+        if (statusText) statusText.textContent = 'Failed — click to retry';
         return;
     }
 
-    // Exponential backoff with cap
+    // Show reconnecting state
+    if (statusEl) {
+        statusEl.classList.remove('connected');
+        statusEl.classList.remove('error');
+    }
+    if (statusText) statusText.textContent = `Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`;
+
+    // Exponential backoff with cap (1s, 2s, 4s, 8s, ... up to 30s)
     const delay = Math.min(
-        BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts - 1),
+        BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1),
         MAX_RECONNECT_DELAY
     );
 
