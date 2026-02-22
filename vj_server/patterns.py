@@ -96,11 +96,22 @@ class LuaPattern(VisualizationPattern):
 
     def _load_lua(self, pattern_key: str):
         try:
-            from lupa import LuaRuntime
+            from lupa.luajit21 import LuaRuntime
+
+            logger.debug("Using LuaJIT 2.1 runtime")
         except ImportError:
-            # Fallback: if lupa not installed, use a no-op pattern
-            logger.warning("lupa not installed, Lua patterns unavailable")
-            return
+            try:
+                from lupa.luajit20 import LuaRuntime
+
+                logger.debug("Using LuaJIT 2.0 runtime")
+            except ImportError:
+                try:
+                    from lupa import LuaRuntime
+
+                    logger.debug("Using default Lua runtime (PUC Lua)")
+                except ImportError:
+                    logger.warning("lupa not installed, Lua patterns unavailable")
+                    return
 
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 

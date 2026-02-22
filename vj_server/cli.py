@@ -238,6 +238,16 @@ Examples:
         finally:
             await server.cleanup()
 
+    # Use uvloop for faster async I/O on Linux/macOS
+    if sys.platform != "win32":
+        try:
+            import uvloop
+
+            asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+            print("Using uvloop event loop")
+        except ImportError:
+            pass
+
     try:
         asyncio.run(_run_vj_server())
     except KeyboardInterrupt:
