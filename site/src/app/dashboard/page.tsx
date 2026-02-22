@@ -500,6 +500,7 @@ export default function DashboardPage() {
               width={56}
               height={56}
               className="h-14 w-14 rounded-full"
+              /* Avatar URLs come from Discord/Google OAuth or S3 uploads — domains are dynamic */
               unoptimized
             />
           ) : (
