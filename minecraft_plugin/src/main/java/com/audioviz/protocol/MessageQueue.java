@@ -65,10 +65,17 @@ public class MessageQueue {
     // Transformation constructor copies via new Quaternionf(axisAngle), so sharing is safe.
     private static final AxisAngle4f IDENTITY_ROTATION = new AxisAngle4f(0, 0, 0, 1);
 
-    // Trig cache for batch: maps rotation float bits to precomputed [cos, sin].
+    // Trig cache for batch: maps rotation float bits to packed cos/sin long.
     // Cleared each tick. Uses Float.floatToRawIntBits as key for exact float matching.
-    // Accessed only on main server thread via processTick().
-    private final HashMap<Integer, float[]> trigCache = new HashMap<>();
+    // Packed format: upper 32 bits = cos float bits, lower 32 bits = sin float bits.
+    private final HashMap<Integer, Long> trigCache = new HashMap<>(64);
+
+    // Reusable per-tick maps — cleared each tick instead of re-allocated.
+    private final HashMap<String, List<EntityUpdate>> updatesByZone = new HashMap<>(4);
+    private final HashMap<String, JsonObject> latestBatchByZone = new HashMap<>(4);
+
+    // Shared lambda for computeIfAbsent to avoid per-call lambda allocation
+    private static final java.util.function.Function<String, List<EntityUpdate>> NEW_UPDATE_LIST = k -> new ArrayList<>();
 
     // PERFORMANCE: Scratch JOML objects reused per entity in extractEntityUpdates.
     // Transformation constructor copies these internally, so mutating between calls is safe.
@@ -76,10 +83,6 @@ public class MessageQueue {
     private final Vector3f scratchTranslation = new Vector3f();
     private final Vector3f scratchScale = new Vector3f();
     private final AxisAngle4f scratchLeftRotation = new AxisAngle4f();
-
-    // Per-tick scratch maps — reused across ticks to avoid HashMap allocation every 50ms.
-    private final Map<String, List<EntityUpdate>> updatesByZone = new HashMap<>();
-    private final Map<String, JsonObject> latestBatchByZone = new HashMap<>();
 
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
@@ -167,7 +170,7 @@ public class MessageQueue {
      * Called on main thread every tick.
      */
     private void processTick() {
-        // Clear per-tick caches (reuse maps to avoid allocation every tick)
+        // Clear per-tick caches and reusable maps
         trigCache.clear();
         updatesByZone.values().forEach(List::clear);
         latestBatchByZone.clear();
@@ -201,7 +204,7 @@ public class MessageQueue {
         for (Map.Entry<String, JsonObject> entry : latestBatchByZone.entrySet()) {
             String zoneName = entry.getKey();
             JsonObject batch = entry.getValue();
-            List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(zoneName, k -> new ArrayList<>());
+            List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(zoneName, NEW_UPDATE_LIST);
             extractEntityUpdates(batch, zoneName, zoneUpdates);
             processAudioInfo(batch, zoneName);
         }
@@ -210,7 +213,7 @@ public class MessageQueue {
         EntityUpdate update;
         while ((update = entityUpdateQueue.poll()) != null) {
             // EntityUpdate doesn't have zone info, use "main" as default
-            updatesByZone.computeIfAbsent("main", k -> new ArrayList<>()).add(update);
+            updatesByZone.computeIfAbsent("main", NEW_UPDATE_LIST).add(update);
         }
 
         // Send entity updates per zone
@@ -290,17 +293,19 @@ public class MessageQueue {
                 pivotZ = pivotOffset;
             } else {
                 rotRad = (float) Math.toRadians(rotationY);
-                // Lookup cos/sin from per-tick cache, keyed by float bit pattern
+                // Lookup cos/sin from per-tick cache, keyed by float bit pattern.
+                // Values packed into a single long: upper 32 = cos bits, lower 32 = sin bits.
                 int rotBits = Float.floatToRawIntBits(rotRad);
-                float[] cached = trigCache.get(rotBits);
+                Long packed = trigCache.get(rotBits);
                 float cosR, sinR;
-                if (cached != null) {
-                    cosR = cached[0];
-                    sinR = cached[1];
+                if (packed != null) {
+                    cosR = Float.intBitsToFloat((int)(packed >>> 32));
+                    sinR = Float.intBitsToFloat((int)(packed & 0xFFFFFFFFL));
                 } else {
                     cosR = (float) Math.cos(rotRad);
                     sinR = (float) Math.sin(rotRad);
-                    trigCache.put(rotBits, new float[]{cosR, sinR});
+                    trigCache.put(rotBits,
+                        ((long) Float.floatToRawIntBits(cosR) << 32) | (Float.floatToRawIntBits(sinR) & 0xFFFFFFFFL));
                 }
                 pivotX = 0.5f - halfScale * (cosR + sinR);
                 pivotY = 0.5f - halfScale;
