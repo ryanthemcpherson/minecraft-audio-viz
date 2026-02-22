@@ -933,6 +933,19 @@ class VJServer:
                 return self._djs[self._active_dj_id]
             return None
 
+    def _dj_profile_dict(self, dj: DJConnection) -> dict:
+        """Build a profile dict for broadcasting to browser clients."""
+        return {
+            "dj_id": dj.dj_id,
+            "dj_name": dj.dj_name,
+            "avatar_url": dj.avatar_url,
+            "color_palette": dj.color_palette,
+            "block_palette": dj.block_palette,
+            "slug": dj.slug,
+            "bio": dj.bio,
+            "genres": dj.genres,
+        }
+
     def _get_dj_roster(self) -> List[dict]:
         """Get DJ roster for admin panel.
 
@@ -972,6 +985,10 @@ class VJServer:
                     "clock_sync_age_s": round(time.time() - dj._last_clock_resync, 0)
                     if dj._last_clock_resync > 0
                     else None,
+                    "avatar_url": dj.avatar_url,
+                    "color_palette": dj.color_palette,
+                    "block_palette": dj.block_palette,
+                    "slug": dj.slug,
                 }
             )
         # Sort by queue position (respects manual reordering)
@@ -1628,6 +1645,16 @@ class VJServer:
             # Broadcast roster update
             await self._broadcast_dj_roster()
 
+            # Broadcast DJ joined with full profile to browser clients
+            await self._broadcast_to_browsers(
+                mjson.encode(
+                    {
+                        "type": "dj_joined",
+                        "dj": self._dj_profile_dict(dj),
+                    }
+                )
+            )
+
             # Handle incoming frames
             async for message in websocket:
                 try:
@@ -1699,19 +1726,32 @@ class VJServer:
 
             # Clean up active DJs (with lock)
             if dj_id:
+                _left_dj_name = None
                 async with self._dj_lock:
                     if dj_id in self._djs:
-                        dj_name = self._djs[dj_id].dj_name
+                        _left_dj_name = self._djs[dj_id].dj_name
                         del self._djs[dj_id]
                         self._dj_palettes.pop(dj_id, None)
                         if dj_id in self._dj_queue:
                             self._dj_queue.remove(dj_id)
-                        logger.info(f"[DJ DISCONNECT] {dj_name} ({dj_id})")
+                        logger.info(f"[DJ DISCONNECT] {_left_dj_name} ({dj_id})")
                         self._dj_disconnects += 1
 
                         # If this was the active DJ, switch to next
                         if self._active_dj_id == dj_id:
                             await self._auto_switch_dj_locked()
+
+                # Broadcast DJ left to browser clients
+                if _left_dj_name:
+                    await self._broadcast_to_browsers(
+                        mjson.encode(
+                            {
+                                "type": "dj_left",
+                                "dj_id": dj_id,
+                                "dj_name": _left_dj_name,
+                            }
+                        )
+                    )
 
                 await self._broadcast_dj_roster()
 
@@ -3681,6 +3721,18 @@ class VJServer:
             )
         )
 
+        # Broadcast DJ joined with full profile to browser clients
+        dj = self._djs.get(dj_id)
+        if dj:
+            await self._broadcast_to_browsers(
+                mjson.encode(
+                    {
+                        "type": "dj_joined",
+                        "dj": self._dj_profile_dict(dj),
+                    }
+                )
+            )
+
     async def _deny_pending_dj(self, dj_id: str):
         """Deny a pending DJ and close their connection."""
         if not dj_id or dj_id not in self._pending_djs:
@@ -4037,6 +4089,11 @@ class VJServer:
             sync_confidence = self._calculate_sync_confidence(dj)
             visual_delay_ms = self._get_effective_delay_ms(dj)
 
+        # Build active DJ profile for state broadcast
+        active_dj_profile = None
+        if self._active_dj_id and self._active_dj_id in self._djs:
+            active_dj_profile = self._dj_profile_dict(self._djs[self._active_dj_id])
+
         message = mjson.encode(
             {
                 "type": "state",
@@ -4050,7 +4107,7 @@ class VJServer:
                 "instant_kick": instant_kick,  # Bass lane kick detection (instant)
                 "frame": self._frame_count,
                 "pattern": self._pattern_name,
-                "active_dj": self._active_dj_id,
+                "active_dj": active_dj_profile,
                 "latency_ms": round(latency_ms, 1),
                 "ping_ms": round(ping_ms, 1),
                 "pipeline_latency_ms": round(pipeline_latency_ms, 1),
@@ -4624,6 +4681,14 @@ class VJServer:
         event loop.  Lupa releases the GIL during Lua execution, so this
         gives true parallelism for multi-zone setups.
         """
+        # Inject active DJ palette into zone pattern config
+        active_dj = self._get_active_dj()
+        if zone_state.pattern and hasattr(zone_state.pattern, "set_dj_palette"):
+            if active_dj:
+                zone_state.pattern.set_dj_palette(active_dj.color_palette, active_dj.block_palette)
+            else:
+                zone_state.pattern.set_dj_palette(None, None)
+
         if zone_state.transitioning:
             elapsed = time.monotonic() - zone_state.transition_start
 
@@ -4681,6 +4746,16 @@ class VJServer:
             bpm=bpm,
             beat_phase=beat_phase,
         )
+
+        # Inject active DJ palette into pattern config
+        active_dj = self._get_active_dj()
+        if self._current_pattern and hasattr(self._current_pattern, "set_dj_palette"):
+            if active_dj:
+                self._current_pattern.set_dj_palette(
+                    active_dj.color_palette, active_dj.block_palette
+                )
+            else:
+                self._current_pattern.set_dj_palette(None, None)
 
         # Check if we're transitioning between patterns
         if self._transitioning:

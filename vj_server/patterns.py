@@ -400,6 +400,23 @@ class LuaPattern(VisualizationPattern):
                 entities.append(entity)
         return entities, seen_ids
 
+    def set_dj_palette(
+        self,
+        color_palette: Optional[List[str]],
+        block_palette: Optional[List[str]],
+    ) -> None:
+        """Update the DJ palette fields in the Lua config table."""
+        if self._config_table is None:
+            return
+        if color_palette:
+            self._config_table["dj_colors"] = self._lua.table_from(color_palette)
+        else:
+            self._config_table["dj_colors"] = None
+        if block_palette:
+            self._config_table["dj_blocks"] = self._lua.table_from(block_palette)
+        else:
+            self._config_table["dj_blocks"] = None
+
     def calculate_entities(self, audio: AudioState) -> list:
         if self._calculate is None:
             return []
