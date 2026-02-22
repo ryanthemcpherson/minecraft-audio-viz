@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-joined.schema.json",
+  "title": "DjJoinedMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "dj_joined" },
+    "v": { "type": "string" },
+    "dj": { "$ref": "../types/dj-profile.schema.json" }
+  },
+  "required": ["type", "dj"]
+}

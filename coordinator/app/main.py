@@ -27,6 +27,7 @@ from app.routers import (
     dashboard,
     dj_profiles,
     health,
+    internal,
     onboarding,
     orgs,
     servers,
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(tenants.router, prefix="/api/v1")
     application.include_router(uploads.router, prefix="/api/v1")
     application.include_router(dashboard.router, prefix="/api/v1")
+    application.include_router(internal.router, prefix="/api/v1")
     application.include_router(admin.router, prefix="/api/v1")
 
     # -- Exception handlers ----------------------------------------------------

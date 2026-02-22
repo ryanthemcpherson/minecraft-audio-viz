@@ -4502,6 +4502,42 @@ input:disabled + .toggle-slider {
     color: #ff5252;
 }
 
+/* DJ Avatar & Palette Swatches */
+.dj-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+}
+
+.dj-avatar-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-secondary, #a1a1aa);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.dj-name-palette {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.palette-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-left: 3px;
+    vertical-align: middle;
+}
+
 /* ============================================
    LED Wall (Bitmap) Panel
    ============================================ */

@@ -74,6 +74,12 @@
           "maximum": 1
         }
       }
+    },
+    "active_dj": {
+      "oneOf": [
+        { "$ref": "../types/dj-profile.schema.json" },
+        { "type": "null" }
+      ]
     }
   },
   "required": ["type", "bands", "amplitude", "is_beat", "beat_intensity"]

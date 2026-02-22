@@ -6,11 +6,15 @@ This module provides the pattern engine (LuaPattern) and registry functions.
 """
 
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Feature flag: set MCAV_FLAT_PACK=0 to disable flat array optimization
+_USE_FLAT_PACK = os.environ.get("MCAV_FLAT_PACK", "1") != "0"
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +86,8 @@ class LuaPattern(VisualizationPattern):
         self._pattern_key = pattern_key
         self._lua = None
         self._calculate = None
+        self._calculate_orig = None  # Original calculate (for optional field reads)
+        self._flat_mode = None  # "flat", "dual", or None (disabled)
         self._last_call_time = None
         self._audio_table = None
         self._bands_table = None
@@ -96,11 +102,22 @@ class LuaPattern(VisualizationPattern):
 
     def _load_lua(self, pattern_key: str):
         try:
-            from lupa import LuaRuntime
+            from lupa.luajit21 import LuaRuntime
+
+            logger.debug("Using LuaJIT 2.1 runtime")
         except ImportError:
-            # Fallback: if lupa not installed, use a no-op pattern
-            logger.warning("lupa not installed, Lua patterns unavailable")
-            return
+            try:
+                from lupa.luajit20 import LuaRuntime
+
+                logger.debug("Using LuaJIT 2.0 runtime")
+            except ImportError:
+                try:
+                    from lupa import LuaRuntime
+
+                    logger.debug("Using default Lua runtime (PUC Lua)")
+                except ImportError:
+                    logger.warning("lupa not installed, Lua patterns unavailable")
+                    return
 
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 
@@ -192,8 +209,213 @@ class LuaPattern(VisualizationPattern):
                     self.static_camera = bool(sc)
             except (KeyError, IndexError):
                 pass
+
+            # Inject flat_pack wrapper for fast Lua→Python bridge transfer
+            if _USE_FLAT_PACK and pattern_text is not None:
+                has_optional = any(
+                    kw in pattern_text for kw in ("glow", "brightness", "material", "interpolation")
+                )
+                self._calculate_orig = self._calculate
+                if has_optional:
+                    # Dual mode: return flat array + original tables for optional fields
+                    self._lua.execute("""
+                        local _orig = calculate
+                        function _flat_wrapper(audio, config, dt)
+                            local result = _orig(audio, config, dt)
+                            if not result then return nil, nil, 0 end
+                            local flat, count = flat_pack(result)
+                            return flat, result, count
+                        end
+                    """)
+                    self._calculate = self._lua.globals()["_flat_wrapper"]
+                    self._flat_mode = "dual"
+                else:
+                    # Flat-only mode: no optional fields to read
+                    self._lua.execute("""
+                        local _orig = calculate
+                        function _flat_wrapper(audio, config, dt)
+                            local result = _orig(audio, config, dt)
+                            if not result then return nil, 0 end
+                            local flat, count = flat_pack(result)
+                            return flat, count
+                        end
+                    """)
+                    self._calculate = self._lua.globals()["_flat_wrapper"]
+                    self._flat_mode = "flat"
+                logger.debug("Pattern %s: flat_pack mode=%s", pattern_key, self._flat_mode)
         else:
             logger.warning(f"Pattern file not found: {pattern_key}.lua")
+
+    def _smooth_entity(
+        self, entity_id, target_x, target_y, target_z, target_scale, target_rotation, dt
+    ):
+        """Apply dt-aware smoothing to entity position/scale/rotation.
+
+        Returns (x, y, z, scale, rotation).
+        """
+        prev = self._entity_state.get(entity_id)
+
+        if prev is None:
+            x, y, z = target_x, target_y, target_z
+            scale = target_scale
+            rotation = target_rotation % 360.0
+        else:
+            dt_ratio = dt / 0.016
+
+            # Position: fast for larger moves, gentler for tiny changes
+            pos_delta = max(
+                abs(target_x - prev["x"]),
+                abs(target_y - prev["y"]),
+                abs(target_z - prev["z"]),
+            )
+            base_pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
+            pos_alpha = 1.0 - (1.0 - base_pos_alpha) ** dt_ratio
+            x = prev["x"] + (target_x - prev["x"]) * pos_alpha
+            y = prev["y"] + (target_y - prev["y"]) * pos_alpha
+            z = prev["z"] + (target_z - prev["z"]) * pos_alpha
+            deadband = self._position_deadband
+            if abs(x - prev["x"]) < deadband:
+                x = prev["x"]
+            if abs(y - prev["y"]) < deadband:
+                y = prev["y"]
+            if abs(z - prev["z"]) < deadband:
+                z = prev["z"]
+
+            # Scale: faster attack, slower release
+            base_scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
+            scale_alpha = 1.0 - (1.0 - base_scale_alpha) ** dt_ratio
+            scale = prev["scale"] + (target_scale - prev["scale"]) * scale_alpha
+
+            # Rotation: shortest-path angle smoothing
+            current_rot = prev["rotation"] % 360.0
+            desired_rot = target_rotation % 360.0
+            delta_rot = ((desired_rot - current_rot + 180.0) % 360.0) - 180.0
+            rot_alpha = 1.0 - (1.0 - 0.52) ** dt_ratio
+            rotation = (current_rot + delta_rot * rot_alpha) % 360.0
+
+        self._entity_state[entity_id] = {
+            "x": x,
+            "y": y,
+            "z": z,
+            "scale": scale,
+            "rotation": rotation,
+        }
+        return x, y, z, scale, rotation
+
+    def _unpack_flat(self, flat, entity_count, dt, table_result):
+        """Unpack flat numeric array into entity dicts with smoothing."""
+        entities = []
+        stride = 7
+        for i in range(entity_count):
+            offset = i * stride
+            entity_id = f"block_{i}"
+            target_x = float(flat[offset + 1])  # Lua 1-indexed
+            target_y = float(flat[offset + 2])
+            target_z = float(flat[offset + 3])
+            target_scale = float(flat[offset + 4])
+            target_rotation = float(flat[offset + 5])
+            band = int(flat[offset + 6])
+            visible = flat[offset + 7] != 0
+
+            x, y, z, scale, rotation = self._smooth_entity(
+                entity_id,
+                target_x,
+                target_y,
+                target_z,
+                target_scale,
+                target_rotation,
+                dt,
+            )
+
+            entity = {
+                "id": entity_id,
+                "x": x,
+                "y": y,
+                "z": z,
+                "scale": scale,
+                "rotation": rotation,
+                "band": band,
+                "visible": visible,
+            }
+
+            # Read optional fields from original table (dual mode only)
+            if table_result is not None:
+                entry = table_result[i + 1]  # Lua 1-indexed
+                if entry is not None:
+                    if entry["glow"] is not None:
+                        entity["glow"] = bool(entry["glow"])
+                    if entry["brightness"] is not None:
+                        entity["brightness"] = int(entry["brightness"])
+                    if entry["material"] is not None:
+                        entity["material"] = str(entry["material"])
+                    if entry["interpolation"] is not None:
+                        entity["interpolation"] = int(entry["interpolation"])
+
+            entities.append(entity)
+        return entities
+
+    def _unpack_tables(self, result, dt):
+        """Legacy path: unpack Lua table-of-tables into entity dicts with smoothing."""
+        entities = []
+        seen_ids = set()
+        for i in range(1, len(result) + 1):
+            entry = result[i]
+            if entry is not None:
+                entity_id = str(entry["id"]) if entry["id"] else f"block_{i - 1}"
+                seen_ids.add(entity_id)
+                target_x = float(entry["x"] or 0.5)
+                target_y = float(entry["y"] or 0.5)
+                target_z = float(entry["z"] or 0.5)
+                target_scale = float(entry["scale"] or 0.2)
+                target_rotation = float(entry["rotation"] or 0.0)
+
+                x, y, z, scale, rotation = self._smooth_entity(
+                    entity_id,
+                    target_x,
+                    target_y,
+                    target_z,
+                    target_scale,
+                    target_rotation,
+                    dt,
+                )
+
+                entity = {
+                    "id": entity_id,
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                    "scale": scale,
+                    "rotation": rotation,
+                    "band": int(entry["band"] or 0),
+                    "visible": bool(entry["visible"]) if entry["visible"] is not None else True,
+                }
+                if entry["glow"] is not None:
+                    entity["glow"] = bool(entry["glow"])
+                if entry["brightness"] is not None:
+                    entity["brightness"] = int(entry["brightness"])
+                if entry["material"] is not None:
+                    entity["material"] = str(entry["material"])
+                if entry["interpolation"] is not None:
+                    entity["interpolation"] = int(entry["interpolation"])
+                entities.append(entity)
+        return entities, seen_ids
+
+    def set_dj_palette(
+        self,
+        color_palette: Optional[List[str]],
+        block_palette: Optional[List[str]],
+    ) -> None:
+        """Update the DJ palette fields in the Lua config table."""
+        if self._config_table is None:
+            return
+        if color_palette:
+            self._config_table["dj_colors"] = self._lua.table_from(color_palette)
+        else:
+            self._config_table["dj_colors"] = None
+        if block_palette:
+            self._config_table["dj_blocks"] = self._lua.table_from(block_palette)
+        else:
+            self._config_table["dj_blocks"] = None
 
     def calculate_entities(self, audio: AudioState) -> list:
         if self._calculate is None:
@@ -232,91 +454,34 @@ class LuaPattern(VisualizationPattern):
 
             result = self._calculate(audio_table, config_table, dt)
 
-            # Convert Lua table to Python list of dicts
+            # Convert Lua result to Python list of dicts
             entities = []
             seen_ids = set()
-            if result is not None:
-                for i in range(1, len(result) + 1):
-                    entry = result[i]
-                    if entry is not None:
-                        entity_id = str(entry["id"]) if entry["id"] else f"block_{i - 1}"
-                        seen_ids.add(entity_id)
-                        target_x = float(entry["x"] or 0.5)
-                        target_y = float(entry["y"] or 0.5)
-                        target_z = float(entry["z"] or 0.5)
-                        target_scale = float(entry["scale"] or 0.2)
-                        target_rotation = float(entry["rotation"] or 0.0)
-                        prev = self._entity_state.get(entity_id)
 
-                        if prev is None:
-                            x = target_x
-                            y = target_y
-                            z = target_z
-                            scale = target_scale
-                            rotation = target_rotation % 360.0
-                        else:
-                            # dt-aware smoothing: effective_alpha adapts to actual frame time
-                            # so animation speed is consistent regardless of frame rate.
-                            dt_ratio = dt / 0.016
+            if self._flat_mode == "flat" and result is not None:
+                # Fast path: flat array (7 values per entity), no optional fields
+                flat_result, entity_count = result, None
+                # unpack_returned_tuples=True means multi-return becomes a tuple
+                if isinstance(result, tuple):
+                    flat_result, entity_count = result
+                if flat_result is not None:
+                    entity_count = int(entity_count or 0)
+                    entities = self._unpack_flat(flat_result, entity_count, dt, None)
+                    seen_ids = {e["id"] for e in entities}
 
-                            # Fast for larger moves, gentler for tiny changes to reduce wobble.
-                            pos_delta = max(
-                                abs(target_x - prev["x"]),
-                                abs(target_y - prev["y"]),
-                                abs(target_z - prev["z"]),
-                            )
-                            base_pos_alpha = 0.78 if pos_delta > 0.035 else 0.48
-                            pos_alpha = 1.0 - (1.0 - base_pos_alpha) ** dt_ratio
-                            x = prev["x"] + (target_x - prev["x"]) * pos_alpha
-                            y = prev["y"] + (target_y - prev["y"]) * pos_alpha
-                            z = prev["z"] + (target_z - prev["z"]) * pos_alpha
-                            if abs(x - prev["x"]) < self._position_deadband:
-                                x = prev["x"]
-                            if abs(y - prev["y"]) < self._position_deadband:
-                                y = prev["y"]
-                            if abs(z - prev["z"]) < self._position_deadband:
-                                z = prev["z"]
+            elif self._flat_mode == "dual" and result is not None:
+                # Dual path: flat array + original tables for optional field reads
+                flat_result, table_result, entity_count = None, None, 0
+                if isinstance(result, tuple):
+                    flat_result, table_result, entity_count = result
+                if flat_result is not None:
+                    entity_count = int(entity_count or 0)
+                    entities = self._unpack_flat(flat_result, entity_count, dt, table_result)
+                    seen_ids = {e["id"] for e in entities}
 
-                            base_scale_alpha = 0.84 if target_scale > prev["scale"] else 0.56
-                            scale_alpha = 1.0 - (1.0 - base_scale_alpha) ** dt_ratio
-                            scale = prev["scale"] + (target_scale - prev["scale"]) * scale_alpha
-
-                            # Shortest-path angle smoothing.
-                            current_rot = prev["rotation"] % 360.0
-                            desired_rot = target_rotation % 360.0
-                            delta_rot = ((desired_rot - current_rot + 180.0) % 360.0) - 180.0
-                            rot_alpha = 1.0 - (1.0 - 0.52) ** dt_ratio
-                            rotation = (current_rot + delta_rot * rot_alpha) % 360.0
-
-                        self._entity_state[entity_id] = {
-                            "x": x,
-                            "y": y,
-                            "z": z,
-                            "scale": scale,
-                            "rotation": rotation,
-                        }
-                        entity = {
-                            "id": entity_id,
-                            "x": x,
-                            "y": y,
-                            "z": z,
-                            "scale": scale,
-                            "rotation": rotation,
-                            "band": int(entry["band"] or 0),
-                            "visible": bool(entry["visible"])
-                            if entry["visible"] is not None
-                            else True,
-                        }
-                        # Forward optional rendering fields when set by pattern
-                        if entry["glow"] is not None:
-                            entity["glow"] = bool(entry["glow"])
-                        if entry["brightness"] is not None:
-                            entity["brightness"] = int(entry["brightness"])
-                        if entry["material"] is not None:
-                            entity["material"] = str(entry["material"])
-                        if entry["interpolation"] is not None:
-                            entity["interpolation"] = int(entry["interpolation"])
-                        entities.append(entity)
+            elif result is not None:
+                # Legacy path: table-of-tables (no flat_pack)
+                entities, seen_ids = self._unpack_tables(result, dt)
             # Enforce a strict entity budget for all patterns.
             target_count = max(0, int(self.config.entity_count))
             if len(entities) > target_count:
