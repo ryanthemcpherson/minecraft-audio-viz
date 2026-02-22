@@ -2047,13 +2047,8 @@ public class MessageHandler {
             return createError("Unknown pattern: " + patternId);
         }
 
-        // Use composition manager if available, otherwise direct switch
-        CompositionManager comp = plugin.getCompositionManager();
-        if (comp != null && comp.getZone(zone) != null) {
-            comp.switchPattern(zone, newPattern, transitionId, durationTicks);
-        } else {
-            patternMgr.setPattern(zone, patternId);
-        }
+        // Route through BitmapPatternManager which owns the render loop
+        patternMgr.setPattern(zone, patternId, transitionId, durationTicks);
 
         JsonObject response = new JsonObject();
         response.addProperty("type", "bitmap_transition_started");
