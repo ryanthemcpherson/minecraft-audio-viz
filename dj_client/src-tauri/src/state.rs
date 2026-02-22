@@ -6,6 +6,7 @@ use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 /// Connection status
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -65,6 +66,9 @@ pub struct AppState {
     /// Shutdown signal sender for the bridge task
     pub bridge_shutdown_tx: Option<mpsc::Sender<()>>,
 
+    /// Handle for the bridge task (used to await completion on reconnect)
+    pub bridge_task_handle: Option<JoinHandle<()>>,
+
     /// Voice audio streamer (shared with audio capture thread)
     pub voice_streamer: Option<Arc<VoiceStreamer>>,
 
@@ -95,6 +99,7 @@ impl Default for AppState {
             server_port: 9000,
             audio_source_id: None,
             bridge_shutdown_tx: None,
+            bridge_task_handle: None,
             voice_streamer: None,
             voice_config: VoiceConfig::default(),
             voice_status: VoiceStatus::default(),
@@ -136,6 +141,7 @@ mod tests {
         assert_eq!(state.server_host, "192.168.1.204");
         assert_eq!(state.server_port, 9000);
         assert!(state.bridge_shutdown_tx.is_none());
+        assert!(state.bridge_task_handle.is_none());
         assert!(state.voice_streamer.is_none());
         assert!(!state.voice_config.enabled);
         assert_eq!(state.voice_config.channel_type, "static");

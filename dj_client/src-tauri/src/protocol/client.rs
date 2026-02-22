@@ -211,7 +211,7 @@ impl DjClient {
                 code.clone(),
                 self.config.dj_name.clone(),
             ))
-            .unwrap()
+            .map_err(|e| ClientError::SendError(format!("Failed to serialize auth message: {}", e)))?
         } else if let (Some(ref id), Some(ref key)) = (&self.config.dj_id, &self.config.dj_key) {
             // Credential-based authentication
             serde_json::to_string(&DjAuthMessage::new(
@@ -219,7 +219,7 @@ impl DjClient {
                 key.clone(),
                 self.config.dj_name.clone(),
             ))
-            .unwrap()
+            .map_err(|e| ClientError::SendError(format!("Failed to serialize auth message: {}", e)))?
         } else {
             return Err(ClientError::AuthenticationFailed(
                 "No credentials provided. Set a connect code or DJ ID/key in settings.".to_string(),
@@ -282,7 +282,8 @@ impl DjClient {
                                     .unwrap()
                                     .as_secs_f64();
                                 let response = ClockSyncResponse::new(now);
-                                let json = serde_json::to_string(&response).unwrap();
+                                let json = serde_json::to_string(&response)
+                                    .map_err(|e| ClientError::SendError(format!("Failed to serialize clock sync: {}", e)))?;
                                 write
                                     .send(Message::Text(json.into()))
                                     .await
@@ -338,9 +339,9 @@ impl DjClient {
                     }
                     _ = shutdown_rx.recv() => {
                         // Send going offline message
-                        let _ = write.send(Message::Text(
-                            serde_json::to_string(&GoingOfflineMessage::new()).unwrap().into()
-                        )).await;
+                        if let Ok(json) = serde_json::to_string(&GoingOfflineMessage::new()) {
+                            let _ = write.send(Message::Text(json.into())).await;
+                        }
                         let _ = write.close().await;
                         break;
                     }
@@ -392,49 +393,18 @@ impl DjClient {
                     hb.latency_ms = Some(latency_ms as f64);
                 }
                 hb.mc_connected = Some(mc_connected_flag.load(Ordering::Relaxed));
-                let msg = serde_json::to_string(&hb).unwrap();
+                let msg = match serde_json::to_string(&hb) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        log::error!("Failed to serialize heartbeat: {}", e);
+                        continue;
+                    }
+                };
                 if tx_heartbeat.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
             }
         });
-
-        Ok(())
-    }
-
-    /// Send audio frame
-    #[allow(clippy::too_many_arguments)]
-    pub async fn send_audio_frame(
-        &self,
-        seq: u64,
-        bands: [f32; 5],
-        peak: f32,
-        beat: bool,
-        beat_intensity: f32,
-        bpm: f32,
-        tempo_confidence: f32,
-        beat_phase: f32,
-    ) -> Result<(), ClientError> {
-        let tx = self.tx.as_ref().ok_or(ClientError::NotConnected)?;
-
-        let msg = AudioFrameMessage::new(
-            seq,
-            bands,
-            peak,
-            beat,
-            beat_intensity,
-            bpm,
-            tempo_confidence,
-            beat_phase,
-            0.0,   // instant_bass (not available in this code path)
-            false,  // instant_kick
-        );
-        let json =
-            serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
-
-        tx.send(Message::Text(json.into()))
-            .await
-            .map_err(|e| ClientError::SendError(e.to_string()))?;
 
         Ok(())
     }
@@ -556,8 +526,14 @@ async fn handle_server_message(
                 .as_secs_f64();
 
             let response = ClockSyncResponse::new(now);
-            let json = serde_json::to_string(&response).unwrap();
-            let _ = tx.send(Message::Text(json.into())).await;
+            match serde_json::to_string(&response) {
+                Ok(json) => {
+                    let _ = tx.send(Message::Text(json.into())).await;
+                }
+                Err(e) => {
+                    log::error!("Failed to serialize clock sync response: {}", e);
+                }
+            }
         }
         ServerMessage::HeartbeatAck(ack) => {
             // Calculate latency: prefer RTT from echoed heartbeat timestamp.

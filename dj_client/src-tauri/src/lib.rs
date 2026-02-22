@@ -51,46 +51,51 @@ async fn list_audio_sources() -> Result<Vec<AudioSource>, String> {
     audio::list_sources().map_err(|e| e.to_string())
 }
 
-/// Connect to VJ server with connect code
-#[tauri::command]
-async fn connect_with_code(
+/// Shared connection logic used by both `connect_with_code` and `connect_direct`.
+///
+/// Shuts down any existing bridge task, connects the client, optionally sends a
+/// block palette, and spawns a new bridge task.
+async fn connect_common(
     app_handle: AppHandle,
-    state: State<'_, AppStateWrapper>,
-    code: String,
+    state_arc: Arc<Mutex<AppState>>,
+    config: DjClientConfig,
+    connect_code: Option<String>,
     dj_name: String,
     server_host: String,
     server_port: u16,
     block_palette: Option<Vec<Option<String>>>,
 ) -> Result<(), String> {
-    content_filter::validate_no_slurs(&dj_name, "DJ name")?;
-
-    let config = DjClientConfig {
-        server_host: server_host.clone(),
-        server_port,
-        dj_name: dj_name.clone(),
-        connect_code: Some(code.clone()),
-        ..Default::default()
-    };
-
     // If a previous bridge task is still running (e.g. reconnecting after
-    // server restart), shut it down before starting a new connection.
+    // server restart), shut it down and await completion before starting a new
+    // connection to avoid two bridge tasks running concurrently.
     {
-        let old_tx = state.0.lock().bridge_shutdown_tx.take();
+        let (old_tx, old_handle) = {
+            let mut app_state = state_arc.lock();
+            (
+                app_state.bridge_shutdown_tx.take(),
+                app_state.bridge_task_handle.take(),
+            )
+        };
         if let Some(tx) = old_tx {
             log::info!("Shutting down existing bridge task before reconnecting");
             let _ = tx.send(()).await;
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            // Clean up old client
-            let old_client = state.0.lock().client.take();
-            if let Some(c) = old_client {
-                let _ = c.disconnect().await;
+        }
+        if let Some(handle) = old_handle {
+            match tokio::time::timeout(Duration::from_millis(500), handle).await {
+                Ok(_) => log::info!("Old bridge task stopped cleanly"),
+                Err(_) => log::warn!("Old bridge task did not stop within 500ms, proceeding anyway"),
             }
+        }
+        // Clean up old client
+        let old_client = state_arc.lock().client.take();
+        if let Some(c) = old_client {
+            let _ = c.disconnect().await;
         }
     }
 
     {
-        let mut app_state = state.0.lock();
-        app_state.connect_code = Some(code);
+        let mut app_state = state_arc.lock();
+        app_state.connect_code = connect_code;
         app_state.dj_name = dj_name;
         app_state.server_host = server_host;
         app_state.server_port = server_port;
@@ -114,20 +119,55 @@ async fn connect_with_code(
 
     // Store connected client and shutdown channel
     {
-        let mut app_state = state.0.lock();
+        let mut app_state = state_arc.lock();
         app_state.client = Some(client);
         app_state.bridge_shutdown_tx = Some(shutdown_tx);
         app_state.status.connected = true;
         app_state.status.error = None;
     }
 
-    // Spawn bridge task
-    let state_arc = state.0.clone();
-    tokio::spawn(async move {
-        run_bridge(state_arc, shutdown_rx, app_handle).await;
+    // Spawn bridge task and store its handle
+    let bridge_state = state_arc.clone();
+    let handle = tokio::spawn(async move {
+        run_bridge(bridge_state, shutdown_rx, app_handle).await;
     });
+    state_arc.lock().bridge_task_handle = Some(handle);
 
     Ok(())
+}
+
+/// Connect to VJ server with connect code
+#[tauri::command]
+async fn connect_with_code(
+    app_handle: AppHandle,
+    state: State<'_, AppStateWrapper>,
+    code: String,
+    dj_name: String,
+    server_host: String,
+    server_port: u16,
+    block_palette: Option<Vec<Option<String>>>,
+) -> Result<(), String> {
+    content_filter::validate_no_slurs(&dj_name, "DJ name")?;
+
+    let config = DjClientConfig {
+        server_host: server_host.clone(),
+        server_port,
+        dj_name: dj_name.clone(),
+        connect_code: Some(code.clone()),
+        ..Default::default()
+    };
+
+    connect_common(
+        app_handle,
+        state.0.clone(),
+        config,
+        Some(code),
+        dj_name,
+        server_host,
+        server_port,
+        block_palette,
+    )
+    .await
 }
 
 /// Connect to VJ server directly (no connect code needed, for testing)
@@ -150,51 +190,17 @@ async fn connect_direct(
         ..Default::default()
     };
 
-    // If a previous bridge task is still running, shut it down first.
-    {
-        let old_tx = state.0.lock().bridge_shutdown_tx.take();
-        if let Some(tx) = old_tx {
-            log::info!("Shutting down existing bridge task before reconnecting");
-            let _ = tx.send(()).await;
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            let old_client = state.0.lock().client.take();
-            if let Some(c) = old_client {
-                let _ = c.disconnect().await;
-            }
-        }
-    }
-
-    {
-        let mut app_state = state.0.lock();
-        app_state.dj_name = dj_name;
-        app_state.server_host = server_host;
-        app_state.server_port = server_port;
-        app_state.connect_code = None;
-    }
-
-    // Create and connect client (async, no mutex held)
-    let mut client = DjClient::new(config);
-    client.connect().await.map_err(|e| e.to_string())?;
-
-    // Create shutdown channel for bridge task
-    let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
-
-    // Store connected client and shutdown channel
-    {
-        let mut app_state = state.0.lock();
-        app_state.client = Some(client);
-        app_state.bridge_shutdown_tx = Some(shutdown_tx);
-        app_state.status.connected = true;
-        app_state.status.error = None;
-    }
-
-    // Spawn bridge task
-    let state_arc = state.0.clone();
-    tokio::spawn(async move {
-        run_bridge(state_arc, shutdown_rx, app_handle).await;
-    });
-
-    Ok(())
+    connect_common(
+        app_handle,
+        state.0.clone(),
+        config,
+        None,
+        dj_name,
+        server_host,
+        server_port,
+        None,
+    )
+    .await
 }
 
 /// Maximum number of automatic reconnection attempts before giving up.
@@ -213,7 +219,6 @@ async fn run_bridge(
 
     'reconnect: loop {
         let mut interval = tokio::time::interval(Duration::from_millis(16));
-        FRAME_SEQ.store(0, Ordering::Relaxed);
         // Direct MC publish is disabled: the VJ server's pattern engine handles
         // all zones (multi-zone, transitions, crossfades). The DJ client sends
         // audio frames to the VJ server which relays to Minecraft authoritatively.
@@ -522,6 +527,7 @@ async fn run_bridge(
         if shutdown_requested {
             let mut app_state = state_arc.lock();
             app_state.bridge_shutdown_tx = None;
+            app_state.bridge_task_handle = None;
             log::info!("Bridge task stopped (user disconnect)");
             break 'reconnect;
         }
@@ -531,6 +537,7 @@ async fn run_bridge(
         if reconnect_count > MAX_RECONNECT_ATTEMPTS {
             let mut app_state = state_arc.lock();
             app_state.bridge_shutdown_tx = None;
+            app_state.bridge_task_handle = None;
             app_state.status.error = Some("Connection lost (max retries reached)".to_string());
             let _ = app_handle.emit("dj-status", &app_state.status);
             log::error!(
@@ -562,6 +569,7 @@ async fn run_bridge(
             _ = shutdown_rx.recv() => {
                 let mut app_state = state_arc.lock();
                 app_state.bridge_shutdown_tx = None;
+                app_state.bridge_task_handle = None;
                 log::info!("Bridge task stopped during reconnect backoff (user disconnect)");
                 break 'reconnect;
             }
@@ -660,6 +668,11 @@ async fn stop_capture(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     if let Some(capture) = app_state.audio_capture.take() {
         capture.stop();
     }
+    // Clean up voice streamer so it stops buffering frames
+    if let Some(ref streamer) = app_state.voice_streamer {
+        streamer.set_enabled(false);
+    }
+    app_state.voice_streamer = None;
     Ok(())
 }
 
@@ -743,10 +756,11 @@ fn get_capture_status(state: State<'_, AppStateWrapper>) -> CaptureStatus {
 #[tauri::command]
 async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     // Signal bridge task to stop (it handles client disconnect)
-    let (shutdown_tx, capture, voice_streamer) = {
+    let (shutdown_tx, bridge_handle, capture, voice_streamer) = {
         let mut app_state = state.0.lock();
         (
             app_state.bridge_shutdown_tx.take(),
+            app_state.bridge_task_handle.take(),
             app_state.audio_capture.take(),
             app_state.voice_streamer.take(),
         )
@@ -759,8 +773,10 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
 
     if let Some(tx) = shutdown_tx {
         let _ = tx.send(()).await;
-        // Give bridge task a moment to clean up
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Await the bridge task handle instead of a fixed sleep
+        if let Some(handle) = bridge_handle {
+            let _ = tokio::time::timeout(Duration::from_millis(500), handle).await;
+        }
     } else {
         // No bridge task running, disconnect client directly
         let client = {

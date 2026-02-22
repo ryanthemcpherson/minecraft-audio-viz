@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "flash.schema.json",
+  "title": "FlashMessage",
+  "description": "Trigger a flash effect. This is a convenience alias — the same effect can be triggered via trigger_effect with effect='flash'.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "flash"
+    },
+    "v": {
+      "type": "string"
+    },
+    "intensity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Flash intensity (0-1)"
+    },
+    "duration": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Duration in milliseconds"
+    }
+  },
+  "required": ["type"]
+}

@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "type": {
-      "enum": ["state", "audio"]
+      "const": "state"
     },
     "v": {
       "type": "string"
@@ -59,6 +59,21 @@
     },
     "instant_kick": {
       "type": "boolean"
+    },
+    "bpm_info": {
+      "type": "object",
+      "description": "BPM estimation and tempo confidence data",
+      "properties": {
+        "bpm_estimate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tempo_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
     }
   },
   "required": ["type", "bands", "amplitude", "is_beat", "beat_intensity"]

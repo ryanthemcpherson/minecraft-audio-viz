@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bitmap-frame.schema.json",
+  "title": "BitmapFrameMessage",
+  "description": "Push a raw pixel frame to a bitmap zone. Supports base64-encoded binary (fast) or JSON array (debug-friendly) pixel formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "bitmap_frame"
+    },
+    "v": {
+      "type": "string"
+    },
+    "zone": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Target bitmap zone name"
+    },
+    "pixels": {
+      "type": "string",
+      "description": "Base64-encoded little-endian ARGB int array (fast path)"
+    },
+    "pixel_array": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "JSON array of 32-bit ARGB integers (debug-friendly path)"
+    }
+  },
+  "required": ["type", "zone"],
+  "oneOf": [
+    { "required": ["pixels"] },
+    { "required": ["pixel_array"] }
+  ]
+}

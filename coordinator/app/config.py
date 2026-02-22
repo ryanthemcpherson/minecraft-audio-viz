@@ -25,6 +25,8 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mcav"
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
 
     def model_post_init(self, __context: object) -> None:
         """Ensure the database URL uses the asyncpg driver and validate secrets."""

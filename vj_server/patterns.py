@@ -104,16 +104,24 @@ class LuaPattern(VisualizationPattern):
 
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 
-        # Load lib.lua
+        # Load lib.lua (prefer pre-loaded cache, fall back to disk)
         patterns_dir = Path(__file__).parent.parent / "patterns"
-        lib_path = patterns_dir / "lib.lua"
-        if lib_path.exists():
-            self._lua.execute(lib_path.read_text(encoding="utf-8"))
+        lib_text = _lib_cache
+        if lib_text is None:
+            lib_path = patterns_dir / "lib.lua"
+            if lib_path.exists():
+                lib_text = lib_path.read_text(encoding="utf-8")
+        if lib_text:
+            self._lua.execute(lib_text)
 
-        # Load pattern script
-        pattern_path = patterns_dir / f"{pattern_key}.lua"
-        if pattern_path.exists():
-            self._lua.execute(pattern_path.read_text(encoding="utf-8"))
+        # Load pattern script (prefer pre-loaded cache, fall back to disk)
+        pattern_text = _file_cache.get(pattern_key)
+        if pattern_text is None:
+            pattern_path = patterns_dir / f"{pattern_key}.lua"
+            if pattern_path.exists():
+                pattern_text = pattern_path.read_text(encoding="utf-8")
+        if pattern_text is not None:
+            self._lua.execute(pattern_text)
             self._calculate = self._lua.globals()["calculate"]
             # Pre-allocate persistent Lua tables for reuse each frame
             self._audio_table = self._lua.table_from(
@@ -178,7 +186,7 @@ class LuaPattern(VisualizationPattern):
             except (KeyError, IndexError):
                 pass
         else:
-            logger.warning(f"Pattern file not found: {pattern_path}")
+            logger.warning(f"Pattern file not found: {pattern_key}.lua")
 
     def calculate_entities(self, audio: AudioState) -> list:
         if self._calculate is None:
@@ -353,36 +361,37 @@ class LuaPattern(VisualizationPattern):
 
 _PATTERNS_DIR = Path(__file__).parent.parent / "patterns"
 
+# Pre-loaded file cache: pattern_key -> file_text (populated at startup, refreshed on hot-reload)
+_file_cache: Dict[str, str] = {}
+_lib_cache: Optional[str] = None
 
-def _lua_pattern_exists(key: str) -> bool:
-    """Check if a Lua pattern file exists for the given key."""
-    return (_PATTERNS_DIR / f"{key}.lua").exists()
-
-
-def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern:
-    """Get a pattern by name. Returns a LuaPattern instance."""
-    key = name.lower()
-    if not _lua_pattern_exists(key):
-        logger.warning(f"Pattern '{key}' not found, falling back to 'spectrum'")
-        key = "spectrum"
-    return LuaPattern(key, config)
+# Cached pattern metadata list (built once at startup, refreshed on hot-reload)
+_cached_patterns: Optional[List[Dict[str, Any]]] = None
 
 
-def get_recommended_entity_count(name: str, fallback: int = 64) -> int:
-    """Get recommended block count for a pattern from its Lua metadata."""
-    key = name.lower()
-    if _lua_pattern_exists(key):
-        try:
-            pat = LuaPattern(key)
-            if pat.recommended_entities is not None:
-                return pat.recommended_entities
-        except Exception:
-            pass
-    return max(1, min(256, int(fallback)))
+def _preload_pattern_files() -> None:
+    """Pre-load all pattern Lua files into memory to avoid blocking I/O in async context."""
+    global _lib_cache
+    if not _PATTERNS_DIR.is_dir():
+        return
+    lib_path = _PATTERNS_DIR / "lib.lua"
+    if lib_path.exists():
+        _lib_cache = lib_path.read_text(encoding="utf-8")
+    for lua_file in _PATTERNS_DIR.glob("*.lua"):
+        if lua_file.name == "lib.lua":
+            continue
+        _file_cache[lua_file.stem] = lua_file.read_text(encoding="utf-8")
 
 
-def list_patterns() -> List[Dict[str, Any]]:
-    """List all available patterns by scanning patterns/*.lua."""
+def refresh_pattern_cache() -> None:
+    """Rebuild the cached pattern list (called on startup and hot-reload)."""
+    global _cached_patterns
+    _preload_pattern_files()
+    _cached_patterns = _build_pattern_list()
+
+
+def _build_pattern_list() -> List[Dict[str, Any]]:
+    """Scan patterns/*.lua and build pattern metadata list."""
     result = []
     if not _PATTERNS_DIR.is_dir():
         return result
@@ -415,3 +424,38 @@ def list_patterns() -> List[Dict[str, Any]]:
                 }
             )
     return result
+
+
+def _lua_pattern_exists(key: str) -> bool:
+    """Check if a Lua pattern file exists for the given key."""
+    return (_PATTERNS_DIR / f"{key}.lua").exists()
+
+
+def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern:
+    """Get a pattern by name. Returns a LuaPattern instance."""
+    key = name.lower()
+    if not _lua_pattern_exists(key):
+        logger.warning(f"Pattern '{key}' not found, falling back to 'spectrum'")
+        key = "spectrum"
+    return LuaPattern(key, config)
+
+
+def get_recommended_entity_count(name: str, fallback: int = 64) -> int:
+    """Get recommended block count for a pattern from its Lua metadata."""
+    key = name.lower()
+    if _lua_pattern_exists(key):
+        try:
+            pat = LuaPattern(key)
+            if pat.recommended_entities is not None:
+                return pat.recommended_entities
+        except Exception:
+            pass
+    return max(1, min(256, int(fallback)))
+
+
+def list_patterns() -> List[Dict[str, Any]]:
+    """List all available patterns. Returns cached list (refreshed on hot-reload)."""
+    global _cached_patterns
+    if _cached_patterns is None:
+        refresh_pattern_cache()
+    return _cached_patterns

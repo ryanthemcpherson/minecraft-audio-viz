@@ -35,12 +35,13 @@ async def get_current_user(
     except (TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    # Note: User.dj_profile already has lazy="selectin" on the relationship,
+    # so it loads automatically without an explicit selectinload() here.
     stmt = (
         select(User)
         .where(User.id == user_id, User.is_active.is_(True))
         .options(
             selectinload(User.org_memberships).selectinload(OrgMember.organization),
-            selectinload(User.dj_profile),
         )
     )
     result = await session.execute(stmt)

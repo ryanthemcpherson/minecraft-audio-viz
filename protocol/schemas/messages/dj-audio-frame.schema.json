@@ -59,6 +59,10 @@
     },
     "i_kick": {
       "type": "boolean"
+    },
+    "direct_mode": {
+      "type": "boolean",
+      "description": "Whether this DJ is using direct Minecraft connection mode"
     }
   },
   "required": ["type", "seq", "ts", "bands", "peak", "beat", "beat_i", "bpm"]

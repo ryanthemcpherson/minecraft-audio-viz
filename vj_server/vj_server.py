@@ -56,6 +56,7 @@ except ImportError:
 
 from vj_server.beat_predictor import BeatPredictor
 from vj_server.config import PRESETS as AUDIO_PRESETS
+from vj_server.config import ServerConfig
 from vj_server.coordinator_client import CoordinatorClient
 from vj_server.patterns import (
     AudioState,
@@ -64,6 +65,7 @@ from vj_server.patterns import (
     get_pattern,
     get_recommended_entity_count,
     list_patterns,
+    refresh_pattern_cache,
 )
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.viz_client import VizClient
@@ -71,6 +73,20 @@ from vj_server.viz_client import VizClient
 # ---------------------------------------------------------------------------
 # Input validation helpers (security hardening)
 # ---------------------------------------------------------------------------
+
+# Regex for stripping non-printable characters (keeps printable ASCII + common Unicode)
+_NONPRINTABLE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+# Regex for valid Minecraft-style material names
+_MATERIAL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _sanitize_name(value: str, max_length: int = 64, default: str = "DJ") -> str:
+    """Sanitize a DJ name or ID: strip non-printable chars, enforce length limit."""
+    value = _NONPRINTABLE_RE.sub("", value).strip()
+    if not value:
+        return default
+    return value[:max_length]
 
 
 def _clamp_finite(val, lo: float, hi: float, default: float) -> float:
@@ -164,9 +180,10 @@ def _sanitize_entities(entities: list, max_count: int = 512) -> list:
             clean["glow"] = bool(e["glow"])
         if "visible" in e:
             clean["visible"] = bool(e["visible"])
-        # Material (pass through as string)
+        # Material (validate against safe pattern, default to STONE)
         if "material" in e and isinstance(e["material"], str):
-            clean["material"] = e["material"]
+            mat = e["material"]
+            clean["material"] = mat if _MATERIAL_RE.match(mat) else "STONE"
         result.append(clean)
     return result
 
@@ -332,7 +349,7 @@ class DJConnection:
     # End-to-end pipeline latency inferred from dj_audio_frame timestamps
     pipeline_latency_ms: float = 0.0
     frames_per_second: float = 0.0
-    _fps_samples: List[float] = field(default_factory=list)
+    _fps_samples: deque = field(default_factory=lambda: deque(maxlen=120))
 
     # Clock synchronization - offset to add to DJ timestamps to match server time
     # Positive offset means DJ clock is behind server clock
@@ -383,9 +400,10 @@ class DJConnection:
         """Update FPS calculation."""
         now = time.time()
         self._fps_samples.append(now)
-        # Keep last second of samples
+        # Evict samples older than 1 second from the left
         cutoff = now - 1.0
-        self._fps_samples = [t for t in self._fps_samples if t > cutoff]
+        while self._fps_samples and self._fps_samples[0] <= cutoff:
+            self._fps_samples.popleft()
         self.frames_per_second = len(self._fps_samples)
 
 
@@ -426,7 +444,7 @@ class DJAuthConfig:
             config._warn_plaintext_passwords()
             return config
         except Exception as e:
-            logger.warning(f"Failed to load auth config: {e}")
+            logger.error(f"Failed to load auth config: {e}")
             return cls()
 
     @classmethod
@@ -530,7 +548,10 @@ def _make_directory_handler(directory_map: dict):
 class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler that serves from multiple directories (legacy, prefer _make_directory_handler)."""
 
-    directory_map = {}
+    def __init__(self, *args, **kwargs):
+        if not hasattr(self, "directory_map"):
+            self.directory_map = {}
+        super().__init__(*args, **kwargs)
 
     def _safe_join(self, base: str, path: str) -> str:
         path = path.split("?", 1)[0].split("#", 1)[0]
@@ -645,6 +666,7 @@ class VJServer:
         self._auth_attempts: dict[str, list[float]] = {}  # IP -> list of attempt timestamps
         self._auth_rate_limit_max: int = 5  # max attempts per window
         self._auth_rate_limit_window: float = 60.0  # seconds
+        self._auth_last_cleanup: float = time.time()  # For time-based periodic cleanup
 
         # Coordinator integration (for centralized connect codes)
         self._coordinator: Optional["CoordinatorClient"] = None
@@ -1037,13 +1059,53 @@ class VJServer:
             )
             self._last_profile_log = now
 
+    async def _process_dj_heartbeat(self, dj: "DJConnection", websocket, frame_data: dict) -> None:
+        """Process a dj_heartbeat message (shared between code_auth and dj_auth paths)."""
+        now = time.time()
+        dj.last_heartbeat = now
+        reported_latency_ms = frame_data.get("latency_ms")
+        heartbeat_ts = frame_data.get("ts")
+        rtt_ms = None
+        if isinstance(reported_latency_ms, (int, float)) and math.isfinite(reported_latency_ms):
+            rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
+        elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
+            corrected_ts = (
+                float(heartbeat_ts) - dj.clock_offset if dj.clock_sync_done else float(heartbeat_ts)
+            )
+            rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
+        if rtt_ms is not None:
+            if dj.network_rtt_ms > 0:
+                dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
+            else:
+                dj.network_rtt_ms = rtt_ms
+            dj.latency_ms = dj.network_rtt_ms
+            dj._rtt_samples.append(rtt_ms)
+        if dj.direct_mode:
+            dj.mc_connected = frame_data.get("mc_connected", False)
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "heartbeat_ack",
+                    "server_time": now,
+                    "echo_ts": heartbeat_ts,
+                }
+            )
+        )
+        # Periodic clock resync (every 30s)
+        if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
+            try:
+                await websocket.send(json.dumps({"type": "clock_sync_request", "server_time": now}))
+                dj._last_clock_resync = now
+            except Exception:
+                pass
+
     def _check_auth_rate_limit(self, ip: str) -> bool:
         """Check if an IP has exceeded the auth rate limit. Returns True if rate limited."""
         now = time.time()
         window = self._auth_rate_limit_window
 
-        # Periodic cleanup: every 100th call, prune stale entries
-        if len(self._auth_attempts) > 50:
+        # Periodic cleanup: by size threshold or every 60 seconds
+        if len(self._auth_attempts) > 50 or (now - self._auth_last_cleanup) >= 60.0:
             stale_ips = [
                 addr
                 for addr, timestamps in self._auth_attempts.items()
@@ -1051,6 +1113,7 @@ class VJServer:
             ]
             for addr in stale_ips:
                 del self._auth_attempts[addr]
+            self._auth_last_cleanup = now
 
         if ip not in self._auth_attempts:
             self._auth_attempts[ip] = []
@@ -1100,7 +1163,7 @@ class VJServer:
             if msg_type == "code_auth":
                 # Code-based authentication (from DJ client)
                 code = data.get("code", "").upper()
-                dj_name = data.get("dj_name", "DJ")
+                dj_name = _sanitize_name(data.get("dj_name", "DJ"), default="DJ")
 
                 # Slur filter on DJ name
                 try:
@@ -1119,7 +1182,9 @@ class VJServer:
                         await websocket.close(4005, "Content policy violation")
                         return
                 except ImportError:
-                    pass  # better-profanity not installed — skip filter
+                    logger.warning(
+                        "better-profanity not installed — DJ name content filter disabled"
+                    )
 
                 # Validate connect code (locked to prevent race condition
                 # where two concurrent auths could both pass is_valid())
@@ -1247,9 +1312,9 @@ class VJServer:
                     await websocket.send(
                         json.dumps({"type": "clock_sync_request", "server_time": t1})
                     )
-                    sync_deadline = asyncio.get_event_loop().time() + 5.0
+                    sync_deadline = asyncio.get_running_loop().time() + 5.0
                     while True:
-                        remaining = sync_deadline - asyncio.get_event_loop().time()
+                        remaining = sync_deadline - asyncio.get_running_loop().time()
                         if remaining <= 0:
                             logger.warning(
                                 f"[DJ CLOCK SYNC] {dj_name}: timeout waiting for sync response"
@@ -1317,56 +1382,7 @@ class VJServer:
                         if frame_type == "dj_audio_frame":
                             await self._handle_dj_frame(dj, frame_data)
                         elif frame_type == "dj_heartbeat":
-                            now = time.time()
-                            dj.last_heartbeat = now
-                            reported_latency_ms = frame_data.get("latency_ms")
-                            heartbeat_ts = frame_data.get("ts")
-                            rtt_ms = None
-                            if isinstance(reported_latency_ms, (int, float)) and math.isfinite(
-                                reported_latency_ms
-                            ):
-                                # Prefer client-measured RTT from heartbeat_ack; avoids long-session
-                                # drift from wall-clock skew between DJ and server.
-                                rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
-                            elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(
-                                heartbeat_ts
-                            ):
-                                # Fallback: estimate from DJ send timestamp corrected by clock offset.
-                                corrected_ts = (
-                                    float(heartbeat_ts) - dj.clock_offset
-                                    if dj.clock_sync_done
-                                    else float(heartbeat_ts)
-                                )
-                                rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
-                            if rtt_ms is not None:
-                                if dj.network_rtt_ms > 0:
-                                    dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
-                                else:
-                                    dj.network_rtt_ms = rtt_ms
-                                dj.latency_ms = dj.network_rtt_ms
-                                dj._rtt_samples.append(rtt_ms)
-                            if dj.direct_mode:
-                                dj.mc_connected = frame_data.get("mc_connected", False)
-                            await websocket.send(
-                                json.dumps(
-                                    {
-                                        "type": "heartbeat_ack",
-                                        "server_time": now,
-                                        "echo_ts": heartbeat_ts,
-                                    }
-                                )
-                            )
-                            # Periodic clock resync (every 30s)
-                            if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
-                                try:
-                                    await websocket.send(
-                                        json.dumps(
-                                            {"type": "clock_sync_request", "server_time": now}
-                                        )
-                                    )
-                                    dj._last_clock_resync = now
-                                except Exception:
-                                    pass
+                            await self._process_dj_heartbeat(dj, websocket, frame_data)
                         elif frame_type == "clock_sync_response":
                             self._apply_clock_resync(dj, frame_data)
                         elif frame_type == "voice_audio":
@@ -1390,9 +1406,9 @@ class VJServer:
 
             elif msg_type == "dj_auth":
                 # Traditional credential-based authentication
-                dj_id = data.get("dj_id", "")
+                dj_id = _sanitize_name(data.get("dj_id", ""), max_length=64, default="")
                 dj_key = data.get("dj_key", "")
-                dj_name = data.get("dj_name", dj_id)
+                dj_name = _sanitize_name(data.get("dj_name", dj_id), default=dj_id or "DJ")
 
                 # Slur filter on DJ name
                 try:
@@ -1411,7 +1427,9 @@ class VJServer:
                         await websocket.close(4005, "Content policy violation")
                         return
                 except ImportError:
-                    pass  # better-profanity not installed — skip filter
+                    logger.warning(
+                        "better-profanity not installed — DJ name content filter disabled"
+                    )
 
                 # Verify credentials
                 if self.require_auth:
@@ -1566,53 +1584,7 @@ class VJServer:
                         await self._handle_dj_frame(dj, data)
 
                     elif msg_type == "dj_heartbeat":
-                        now = time.time()
-                        dj.last_heartbeat = now
-                        reported_latency_ms = data.get("latency_ms")
-                        heartbeat_ts = data.get("ts")
-                        rtt_ms = None
-                        if isinstance(reported_latency_ms, (int, float)) and math.isfinite(
-                            reported_latency_ms
-                        ):
-                            # Prefer client-measured RTT from heartbeat_ack; avoids long-session
-                            # drift from wall-clock skew between DJ and server.
-                            rtt_ms = max(0.0, min(float(reported_latency_ms), 60_000.0))
-                        elif isinstance(heartbeat_ts, (int, float)) and math.isfinite(heartbeat_ts):
-                            # Fallback: estimate from DJ send timestamp corrected by clock offset.
-                            corrected_ts = (
-                                float(heartbeat_ts) - dj.clock_offset
-                                if dj.clock_sync_done
-                                else float(heartbeat_ts)
-                            )
-                            rtt_ms = max(0.0, min((now - corrected_ts) * 1000.0, 60_000.0))
-                        if rtt_ms is not None:
-                            if dj.network_rtt_ms > 0:
-                                dj.network_rtt_ms = dj.network_rtt_ms * 0.8 + rtt_ms * 0.2
-                            else:
-                                dj.network_rtt_ms = rtt_ms
-                            dj.latency_ms = dj.network_rtt_ms
-                            dj._rtt_samples.append(rtt_ms)
-                        # Track Minecraft connection status for direct mode DJs
-                        if dj.direct_mode:
-                            dj.mc_connected = data.get("mc_connected", False)
-                        await websocket.send(
-                            json.dumps(
-                                {
-                                    "type": "heartbeat_ack",
-                                    "server_time": now,
-                                    "echo_ts": heartbeat_ts,
-                                }
-                            )
-                        )
-                        # Periodic clock resync (every 30s)
-                        if dj.clock_sync_done and now - dj._last_clock_resync >= 30.0:
-                            try:
-                                await websocket.send(
-                                    json.dumps({"type": "clock_sync_request", "server_time": now})
-                                )
-                                dj._last_clock_resync = now
-                            except Exception:
-                                pass
+                        await self._process_dj_heartbeat(dj, websocket, data)
 
                     elif msg_type == "clock_sync_response":
                         self._apply_clock_resync(dj, data)
@@ -3573,22 +3545,23 @@ class VJServer:
 
     async def _init_coordinator(self):
         """Register with the coordinator if configured."""
-        url = os.environ.get("COORDINATOR_URL")
-        api_key = os.environ.get("COORDINATOR_API_KEY")
+        cfg = ServerConfig.from_env()
+        url = cfg.coordinator_url
+        api_key = cfg.coordinator_api_key
         if not url or not api_key:
             logger.info(
                 "Coordinator integration disabled (set COORDINATOR_URL and COORDINATOR_API_KEY to enable)"
             )
             return
 
-        ws_url = os.environ.get("COORDINATOR_WS_URL")
+        ws_url = cfg.coordinator_ws_url
         if not ws_url:
             ws_url = f"ws://localhost:{self.dj_port}"
             logger.warning(
                 "COORDINATOR_WS_URL not set, using %s (DJs may not be able to reach this)", ws_url
             )
 
-        server_name = os.environ.get("COORDINATOR_SERVER_NAME", "VJ Server")
+        server_name = cfg.coordinator_server_name
 
         self._coordinator = CoordinatorClient(url, api_key)
         try:
@@ -4237,12 +4210,14 @@ class VJServer:
                                         f"[PATTERN RELOAD] Failed to reload pattern '{pattern_key}' in zone '{zn}': {e}"
                                     )
 
-                    # Broadcast updated pattern list to browsers
+                    # Refresh cached pattern list and broadcast to browsers
+                    refresh_pattern_cache()
                     await self._broadcast_pattern_list()
 
                 if new_patterns:
                     for pattern_key in new_patterns:
                         logger.info(f"[PATTERN RELOAD] New pattern discovered: '{pattern_key}.lua'")
+                    refresh_pattern_cache()
                     await self._broadcast_pattern_list()
 
                 if deleted_patterns:
@@ -4262,6 +4237,7 @@ class VJServer:
 
                         await self._broadcast_pattern_change()
 
+                    refresh_pattern_cache()
                     await self._broadcast_pattern_list()
 
             except asyncio.CancelledError:
