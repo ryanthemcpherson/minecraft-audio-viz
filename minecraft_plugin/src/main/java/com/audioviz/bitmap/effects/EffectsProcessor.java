@@ -43,6 +43,22 @@ public class EffectsProcessor {
     private boolean beatFlashEnabled = false;
     private double beatFlashIntensity = 0;
 
+    // ========== RGB Split (Chromatic Aberration) ==========
+    private boolean rgbSplitEnabled = false;
+    private int rgbSplitOffset = 2;          // Pixel offset per channel
+    private double rgbSplitBeatDecay = 0;    // Extra split on beat
+
+    // ========== Bit Crush (Quantization) ==========
+    private boolean bitCrushEnabled = false;
+    private int bitCrushColorLevels = 8;     // Color quantization (2-256)
+    private int bitCrushPixelSize = 1;       // Spatial downsampling
+
+    // ========== Edge Flash (Border Pulse) ==========
+    private boolean edgeFlashEnabled = false;
+    private double edgeFlashIntensity = 0;
+    private int edgeFlashColor = 0xFFFFFFFF;
+    private int edgeFlashWidth = 2;
+
     /**
      * Process a rendered frame buffer with all active effects.
      * Modifies the buffer in-place.
@@ -54,7 +70,15 @@ public class EffectsProcessor {
             if (beatFlashEnabled) {
                 beatFlashIntensity = 0.3;
             }
+            if (rgbSplitEnabled) {
+                rgbSplitBeatDecay = 1.0;
+            }
+            if (edgeFlashEnabled) {
+                edgeFlashIntensity = audio.getBeatIntensity();
+            }
         }
+        rgbSplitBeatDecay *= 0.85;
+        edgeFlashIntensity *= 0.8;
 
         // 1. Freeze frame: replace buffer with frozen snapshot
         if (freezeEnabled && frozenFrame != null) {
@@ -84,12 +108,30 @@ public class EffectsProcessor {
             beatFlashIntensity *= 0.85;
         }
 
-        // 5. Color wash overlay
+        // 5. RGB split (chromatic aberration)
+        if (rgbSplitEnabled) {
+            int totalOffset = rgbSplitOffset + (int) (rgbSplitBeatDecay * 3);
+            if (totalOffset > 0) {
+                applyRgbSplit(buffer, totalOffset);
+            }
+        }
+
+        // 6. Bit crush (color + spatial quantization)
+        if (bitCrushEnabled) {
+            applyBitCrush(buffer, bitCrushColorLevels, bitCrushPixelSize);
+        }
+
+        // 7. Color wash overlay
         if (washOpacity > 0.01) {
             applyWash(buffer, washColor, washOpacity);
         }
 
-        // 6. Global brightness (last — affects everything)
+        // 8. Edge flash (border pulse on beat)
+        if (edgeFlashEnabled && edgeFlashIntensity > 0.02) {
+            applyEdgeFlash(buffer, edgeFlashColor, edgeFlashIntensity, edgeFlashWidth);
+        }
+
+        // 9. Global brightness (last — affects everything)
         if (brightness < 0.99) {
             applyBrightness(buffer, brightness);
         }
@@ -169,6 +211,26 @@ public class EffectsProcessor {
 
     public void setBeatFlashEnabled(boolean enabled) { this.beatFlashEnabled = enabled; }
 
+    // ========== RGB Split Controls ==========
+
+    public void setRgbSplitEnabled(boolean enabled) { this.rgbSplitEnabled = enabled; }
+    public boolean isRgbSplitEnabled() { return rgbSplitEnabled; }
+    public void setRgbSplitOffset(int pixels) { this.rgbSplitOffset = Math.max(0, Math.min(10, pixels)); }
+
+    // ========== Bit Crush Controls ==========
+
+    public void setBitCrushEnabled(boolean enabled) { this.bitCrushEnabled = enabled; }
+    public boolean isBitCrushEnabled() { return bitCrushEnabled; }
+    public void setBitCrushColorLevels(int levels) { this.bitCrushColorLevels = Math.max(2, Math.min(256, levels)); }
+    public void setBitCrushPixelSize(int size) { this.bitCrushPixelSize = Math.max(1, Math.min(8, size)); }
+
+    // ========== Edge Flash Controls ==========
+
+    public void setEdgeFlashEnabled(boolean enabled) { this.edgeFlashEnabled = enabled; }
+    public boolean isEdgeFlashEnabled() { return edgeFlashEnabled; }
+    public void setEdgeFlashColor(int argb) { this.edgeFlashColor = argb; }
+    public void setEdgeFlashWidth(int pixels) { this.edgeFlashWidth = Math.max(1, Math.min(10, pixels)); }
+
     // ========== Effect Implementations ==========
 
     private static void applyFlash(BitmapFrameBuffer buffer, int flashColor, double intensity) {
@@ -184,6 +246,96 @@ public class EffectsProcessor {
         int[] pixels = buffer.getRawPixels();
         for (int i = 0; i < pixels.length; i++) {
             pixels[i] = BitmapFrameBuffer.lerpColor(pixels[i], washColor, t);
+        }
+    }
+
+    /**
+     * RGB Split: offset red and blue channels horizontally for chromatic aberration.
+     */
+    private static void applyRgbSplit(BitmapFrameBuffer buffer, int offset) {
+        int w = buffer.getWidth();
+        int h = buffer.getHeight();
+        int[] pixels = buffer.getRawPixels();
+        // Snapshot so reads don't see writes
+        int[] snapshot = pixels.clone();
+
+        for (int y = 0; y < h; y++) {
+            int row = y * w;
+            for (int x = 0; x < w; x++) {
+                int center = snapshot[row + x];
+                // Red from left, blue from right
+                int redSrcX = Math.max(0, Math.min(w - 1, x - offset));
+                int blueSrcX = Math.max(0, Math.min(w - 1, x + offset));
+                int redSrc = snapshot[row + redSrcX];
+                int blueSrc = snapshot[row + blueSrcX];
+
+                int a = (center >> 24) & 0xFF;
+                int r = (redSrc >> 16) & 0xFF;
+                int g = (center >> 8) & 0xFF;
+                int b = blueSrc & 0xFF;
+                pixels[row + x] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+
+    /**
+     * Bit Crush: quantize colors and optionally downsample spatially.
+     */
+    private static void applyBitCrush(BitmapFrameBuffer buffer, int colorLevels, int pixelSize) {
+        int w = buffer.getWidth();
+        int h = buffer.getHeight();
+        int[] pixels = buffer.getRawPixels();
+
+        double step = 255.0 / (colorLevels - 1);
+
+        // Spatial downsampling: copy block-leader color to all pixels in block
+        if (pixelSize > 1) {
+            for (int by = 0; by < h; by += pixelSize) {
+                for (int bx = 0; bx < w; bx += pixelSize) {
+                    int leader = pixels[by * w + bx];
+                    for (int dy = 0; dy < pixelSize && by + dy < h; dy++) {
+                        for (int dx = 0; dx < pixelSize && bx + dx < w; dx++) {
+                            pixels[(by + dy) * w + (bx + dx)] = leader;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Color quantization
+        for (int i = 0; i < pixels.length; i++) {
+            int c = pixels[i];
+            int a = (c >> 24) & 0xFF;
+            int r = (int) (Math.round(((c >> 16) & 0xFF) / step) * step);
+            int g = (int) (Math.round(((c >> 8) & 0xFF) / step) * step);
+            int b = (int) (Math.round((c & 0xFF) / step) * step);
+            pixels[i] = (a << 24)
+                | (Math.min(255, r) << 16)
+                | (Math.min(255, g) << 8)
+                | Math.min(255, b);
+        }
+    }
+
+    /**
+     * Edge Flash: pulse border pixels with a color on beat.
+     */
+    private static void applyEdgeFlash(BitmapFrameBuffer buffer, int flashColor,
+                                        double intensity, int borderWidth) {
+        int w = buffer.getWidth();
+        int h = buffer.getHeight();
+        int[] pixels = buffer.getRawPixels();
+        float maxT = (float) Math.min(1.0, intensity);
+
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                // Distance from nearest edge
+                int distFromEdge = Math.min(Math.min(x, w - 1 - x), Math.min(y, h - 1 - y));
+                if (distFromEdge < borderWidth) {
+                    float t = maxT * (1.0f - (float) distFromEdge / borderWidth);
+                    int idx = y * w + x;
+                    pixels[idx] = BitmapFrameBuffer.lerpColor(pixels[idx], flashColor, t);
+                }
+            }
         }
     }
 
@@ -216,5 +368,12 @@ public class EffectsProcessor {
         washOpacity = 0;
         beatFlashEnabled = false;
         beatFlashIntensity = 0;
+        rgbSplitEnabled = false;
+        rgbSplitBeatDecay = 0;
+        bitCrushEnabled = false;
+        bitCrushColorLevels = 8;
+        bitCrushPixelSize = 1;
+        edgeFlashEnabled = false;
+        edgeFlashIntensity = 0;
     }
 }
