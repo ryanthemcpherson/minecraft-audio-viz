@@ -13,6 +13,7 @@ import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Transformation;
+import net.kyori.adventure.text.Component;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
@@ -527,6 +528,67 @@ public class EntityPoolManager {
             Bukkit.getScheduler().runTask(plugin, apply);
         }
         return true;
+    }
+
+    /**
+     * Batch update for the adaptive bitmap renderer.
+     * Applies geometry, background, and text updates in a single scheduler task
+     * to minimize main-thread scheduling overhead.
+     */
+    public void batchUpdateAdaptive(
+            String zoneName,
+            String[] geoIds, Transformation[] geoTransforms, int geoCount,
+            String[] bgIds, int[] bgArgb, int bgCount,
+            String[] txtIds, Component[] txtComponents, int txtCount,
+            String[] hideIds, int hideCount) {
+
+        Map<String, Entity> pool = entityPools.get(zoneName.toLowerCase());
+        if (pool == null) return;
+
+        Runnable apply = () -> {
+            // Geometry updates
+            for (int i = 0; i < geoCount; i++) {
+                Entity entity = pool.get(geoIds[i]);
+                if (entity instanceof TextDisplay display) {
+                    display.setTransformation(geoTransforms[i]);
+                    display.setInterpolationDelay(0);
+                }
+            }
+
+            // Background color updates
+            for (int i = 0; i < bgCount; i++) {
+                Entity entity = pool.get(bgIds[i]);
+                if (entity instanceof TextDisplay display) {
+                    int argb = bgArgb[i];
+                    display.setBackgroundColor(Color.fromARGB(
+                        (argb >> 24) & 0xFF, (argb >> 16) & 0xFF,
+                        (argb >> 8) & 0xFF, argb & 0xFF));
+                }
+            }
+
+            // Text updates (half-block color or space for uniform)
+            for (int i = 0; i < txtCount; i++) {
+                Entity entity = pool.get(txtIds[i]);
+                if (entity instanceof TextDisplay display) {
+                    display.text(txtComponents[i]);
+                }
+            }
+
+            // Hide unused entities
+            for (int i = 0; i < hideCount; i++) {
+                Entity entity = pool.get(hideIds[i]);
+                if (entity instanceof TextDisplay display) {
+                    display.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+                    display.text(Component.empty());
+                }
+            }
+        };
+
+        if (Bukkit.isPrimaryThread()) {
+            apply.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, apply);
+        }
     }
 
     /**
