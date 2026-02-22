@@ -112,6 +112,7 @@ class ConnectCodeResponse(BaseModel):
     token: str
     show_name: str
     dj_count: int
+    dj_session_id: str
 
 
 # ---------------------------------------------------------------------------
