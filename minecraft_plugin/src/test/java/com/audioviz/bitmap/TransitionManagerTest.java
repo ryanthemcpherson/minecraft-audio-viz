@@ -44,9 +44,9 @@ class TransitionManagerTest {
     @DisplayName("Built-in Transitions Registry")
     class Registry {
         @Test
-        void hasEightBuiltInTransitions() {
+        void hasNineBuiltInTransitions() {
             List<String> ids = tm.getTransitionIds();
-            assertEquals(8, ids.size(), "Should have 8 built-in transitions");
+            assertEquals(9, ids.size(), "Should have 9 built-in transitions");
         }
 
         @Test
