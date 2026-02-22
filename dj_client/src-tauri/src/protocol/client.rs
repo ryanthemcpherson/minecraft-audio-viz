@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{connect_async_with_config, tungstenite::protocol::WebSocketConfig, tungstenite::Message};
 
 /// Client errors
 #[derive(Error, Debug)]
@@ -188,11 +188,17 @@ impl DjClient {
 
         log::info!("Connecting to VJ server at {}", url);
 
-        // Connect with timeout
-        let ws_stream = tokio::time::timeout(Duration::from_secs(10), connect_async(&url))
-            .await
-            .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))?
-            .map_err(|e| ClientError::ConnectionFailed(e.to_string()))?;
+        // Connect with message size limits to prevent memory exhaustion
+        let mut ws_config = WebSocketConfig::default();
+        ws_config.max_message_size = Some(1_048_576); // 1 MB
+        ws_config.max_frame_size = Some(1_048_576);   // 1 MB
+        let ws_stream = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect_async_with_config(&url, Some(ws_config), false),
+        )
+        .await
+        .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))?
+        .map_err(|e| ClientError::ConnectionFailed(e.to_string()))?;
 
         let (ws_stream, _) = ws_stream;
         let (mut write, mut read) = ws_stream.split();
@@ -356,8 +362,20 @@ impl DjClient {
             while let Some(msg) = read.next().await {
                 match msg {
                     Ok(Message::Text(ref text)) => {
-                        if let Ok(server_msg) = serde_json::from_str::<ServerMessage>(text) {
-                            handle_server_message(&state_reader, &tx_reader, server_msg).await;
+                        match serde_json::from_str::<ServerMessage>(text) {
+                            Ok(server_msg) => {
+                                handle_server_message(&state_reader, &tx_reader, server_msg).await;
+                            }
+                            Err(e) => {
+                                // Extract message type for logging without full payload
+                                let msg_type = serde_json::from_str::<serde_json::Value>(text)
+                                    .ok()
+                                    .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from));
+                                match msg_type {
+                                    Some(t) => log::debug!("Ignoring unhandled server message type '{}': {}", t, e),
+                                    None => log::warn!("Received malformed JSON from server: {}", e),
+                                }
+                            }
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -456,6 +474,24 @@ impl DjClient {
     /// Returns None if not connected.
     pub fn get_tx_clone(&self) -> Option<mpsc::Sender<Message>> {
         self.tx.clone()
+    }
+
+    /// Try to send a message without blocking. Returns true if sent, false if
+    /// the channel is full (the message is dropped). Use this for
+    /// high-frequency sends like audio frames where dropping is preferable
+    /// to back-pressure stalling the caller.
+    pub fn try_send(tx: &mpsc::Sender<Message>, msg: Message) -> bool {
+        match tx.try_send(msg) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                log::debug!("WebSocket send channel full, dropping message");
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                log::error!("WebSocket send channel closed");
+                false
+            }
+        }
     }
 
     /// Take the pending preset name (if any) that was received from the server.

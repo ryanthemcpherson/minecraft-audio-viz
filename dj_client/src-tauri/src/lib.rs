@@ -324,12 +324,21 @@ async fn run_bridge(
                         );
 
                         if let Ok(json) = serde_json::to_string(&msg) {
-                            if tx.send(Message::Text(json.into())).await.is_err() {
-                                log::error!("Failed to send audio frame - channel closed");
-                                let mut app_state = state_arc.lock();
-                                app_state.status.connected = false;
-                                app_state.status.error = Some("Connection lost".to_string());
-                                break;
+                            match tx.try_send(Message::Text(json.into())) {
+                                Ok(()) => {}
+                                Err(mpsc::error::TrySendError::Full(_)) => {
+                                    // Channel full — drop this frame rather than
+                                    // stalling the bridge loop. The consumer will
+                                    // catch up on the next tick.
+                                    log::debug!("Audio frame dropped (send channel full)");
+                                }
+                                Err(mpsc::error::TrySendError::Closed(_)) => {
+                                    log::error!("Failed to send audio frame - channel closed");
+                                    let mut app_state = state_arc.lock();
+                                    app_state.status.connected = false;
+                                    app_state.status.error = Some("Connection lost".to_string());
+                                    break;
+                                }
                             }
                         }
 
@@ -350,9 +359,16 @@ async fn run_bridge(
                                 for (data, seq, codec) in frames.into_iter().take(3) {
                                     let voice_msg = protocol::VoiceAudioMessage::new(data, seq, codec);
                                     if let Ok(json) = serde_json::to_string(&voice_msg) {
-                                        if tx.send(Message::Text(json.into())).await.is_err() {
-                                            log::error!("Failed to send voice frame - channel closed");
-                                            break;
+                                        match tx.try_send(Message::Text(json.into())) {
+                                            Ok(()) => {}
+                                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                                log::debug!("Voice frame dropped (send channel full)");
+                                                break;
+                                            }
+                                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                                log::error!("Failed to send voice frame - channel closed");
+                                                break;
+                                            }
                                         }
                                     }
                                 }
