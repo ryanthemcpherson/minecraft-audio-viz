@@ -19,6 +19,8 @@ import java.util.List;
  *   ██  ██ ██ ██ ██ ██
  *  BAS LOW MID HIG AIR
  */
+// Superseded by Lua pattern engine (patterns/*.lua). No message type routes to this class.
+@Deprecated
 public class EQBars extends VisualizationPattern {
 
     // Band names for reference (5 bands for ultra-low-latency)
