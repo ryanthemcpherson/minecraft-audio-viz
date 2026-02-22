@@ -4,11 +4,12 @@ Connects to Minecraft plugin via WebSocket to control visualizations.
 """
 
 import asyncio
-import json
 import logging
 import time
 from typing import Any, Callable, Optional
 
+import msgspec
+import msgspec.json as mjson
 import websockets
 from websockets.client import WebSocketClientProtocol
 
@@ -72,7 +73,7 @@ class VizClient:
 
             # Wait for welcome message with timeout
             response = await asyncio.wait_for(self.ws.recv(), timeout=self.connect_timeout)
-            data = json.loads(response)
+            data = mjson.decode(response)
             logger.info(f"Connected to AudioViz: {data.get('message', 'OK')}")
 
             # Reset reconnection counter on successful connection
@@ -126,7 +127,7 @@ class VizClient:
                 # Send heartbeat ping
                 try:
                     if self.ws:
-                        await self.ws.send(json.dumps({"type": "ping"}))
+                        await self.ws.send(mjson.encode({"type": "ping"}))
                 except Exception as e:
                     logger.warning(f"Heartbeat ping failed: {e}")
                     self._connected = False
@@ -142,13 +143,13 @@ class VizClient:
             while self._connected and self.ws:
                 try:
                     message = await self.ws.recv()
-                    data = json.loads(message)
+                    data = mjson.decode(message)
                     msg_type = data.get("type")
 
                     # Handle ping messages - respond with pong
                     if msg_type == "ping":
                         try:
-                            await self.ws.send(json.dumps({"type": "pong"}))
+                            await self.ws.send(mjson.encode({"type": "pong"}))
                         except Exception as e:
                             logger.warning(f"Failed to send pong: {e}")
                         continue
@@ -249,7 +250,7 @@ class VizClient:
                     if self.auto_reconnect:
                         asyncio.create_task(self.reconnect())
                     break
-                except json.JSONDecodeError:
+                except msgspec.DecodeError:
                     logger.warning("Received invalid JSON message")
                 except Exception as e:
                     if self._connected:
@@ -344,7 +345,7 @@ class VizClient:
             return None
 
         try:
-            await self.ws.send(json.dumps(message))
+            await self.ws.send(mjson.encode(message))
 
             # If receive loop is running, get response from queue
             if self._use_receive_loop:
@@ -359,7 +360,7 @@ class VizClient:
             else:
                 # Fallback for when receive loop isn't running
                 response = await self.ws.recv()
-                return json.loads(response)
+                return mjson.decode(response)
 
         except websockets.exceptions.ConnectionClosed as e:
             logger.error(f"Connection closed: {e}")
@@ -443,7 +444,7 @@ class VizClient:
                 logger.info(f"Sending audio data: bands={message['bands'][:2]}...")
 
         try:
-            await self.ws.send(json.dumps(message))
+            await self.ws.send(mjson.encode(message))
         except websockets.exceptions.ConnectionClosed:
             # Connection lost - mark as disconnected for caller to handle
             self._connected = False
@@ -514,7 +515,7 @@ class VizClient:
             return
         try:
             await self.ws.send(
-                json.dumps(
+                mjson.encode(
                     {
                         "type": "voice_audio",
                         "data": pcm_base64,
@@ -636,7 +637,7 @@ class VizClient:
         b64 = base64.b64encode(raw).decode("ascii")
         try:
             await self.ws.send(
-                json.dumps(
+                mjson.encode(
                     {
                         "type": "bitmap_frame",
                         "zone": zone_name,
