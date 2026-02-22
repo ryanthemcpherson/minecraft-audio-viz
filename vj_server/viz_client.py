@@ -63,29 +63,53 @@ class VizClient:
         self._audio_logged: bool = False
         self._last_fast_error: float = 0.0
 
+    def _encode(self, data: dict) -> str:
+        """Encode dict to JSON string for WebSocket text frames.
+
+        msgspec.json.encode() returns bytes, which websockets sends as binary
+        frames.  Java's org.java_websocket only handles text frames in
+        onMessage(String), so binary frames are silently dropped.  This helper
+        ensures we always send text frames.
+        """
+        return mjson.encode(data).decode()
+
     async def connect(self) -> bool:
         """Connect to the AudioViz WebSocket server."""
         try:
-            self.ws = await asyncio.wait_for(
-                websockets.connect(self.uri), timeout=self.connect_timeout
-            )
+            # Use open_timeout instead of asyncio.wait_for — the latter wraps
+            # the awaitable in a Task which breaks websockets 14+'s internal
+            # reader setup, causing recv() to block forever.
+            self.ws = await websockets.connect(self.uri, open_timeout=self.connect_timeout)
             self._connected = True
-
-            # Wait for welcome message with timeout
-            response = await asyncio.wait_for(self.ws.recv(), timeout=self.connect_timeout)
-            data = mjson.decode(response)
-            logger.info(f"Connected to AudioViz: {data.get('message', 'OK')}")
 
             # Reset reconnection counter on successful connection
             self._reconnect_attempts = 0
             # Track successful liveness baseline even before heartbeat starts.
             self._last_pong = time.time()
 
-            # Start background tasks only if heartbeat is enabled
+            # Start background tasks BEFORE reading welcome message.
+            # In websockets 14+, only one recv() coroutine can run at a time.
+            # If we call recv() here and then start the receive loop, the
+            # receive loop's recv() fails with "already running". Instead,
+            # let the receive loop be the sole recv() consumer.
             if self._enable_heartbeat:
                 self._use_receive_loop = True
                 self._receive_task = asyncio.create_task(self._receive_loop())
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+                # Read welcome message from the receive loop's queue
+                try:
+                    welcome = await asyncio.wait_for(
+                        self._pending_responses.get(), timeout=self.connect_timeout
+                    )
+                    logger.info(f"Connected to AudioViz: {welcome.get('message', 'OK')}")
+                except asyncio.TimeoutError:
+                    logger.warning("No welcome message received, but connection is up")
+            else:
+                # Without heartbeat, read welcome directly (no receive loop conflict)
+                response = await self.ws.recv()
+                data = mjson.decode(response)
+                logger.info(f"Connected to AudioViz: {data.get('message', 'OK')}")
 
             return True
 
@@ -127,7 +151,7 @@ class VizClient:
                 # Send heartbeat ping
                 try:
                     if self.ws:
-                        await self.ws.send(mjson.encode({"type": "ping"}))
+                        await self.ws.send(self._encode({"type": "ping"}))
                 except Exception as e:
                     logger.warning(f"Heartbeat ping failed: {e}")
                     self._connected = False
@@ -149,7 +173,7 @@ class VizClient:
                     # Handle ping messages - respond with pong
                     if msg_type == "ping":
                         try:
-                            await self.ws.send(mjson.encode({"type": "pong"}))
+                            await self.ws.send(self._encode({"type": "pong"}))
                         except Exception as e:
                             logger.warning(f"Failed to send pong: {e}")
                         continue
@@ -345,7 +369,7 @@ class VizClient:
             return None
 
         try:
-            await self.ws.send(mjson.encode(message))
+            await self.ws.send(self._encode(message))
 
             # If receive loop is running, get response from queue
             if self._use_receive_loop:
@@ -444,7 +468,7 @@ class VizClient:
                 logger.info(f"Sending audio data: bands={message['bands'][:2]}...")
 
         try:
-            await self.ws.send(mjson.encode(message))
+            await self.ws.send(self._encode(message))
         except websockets.exceptions.ConnectionClosed:
             # Connection lost - mark as disconnected for caller to handle
             self._connected = False
@@ -515,7 +539,7 @@ class VizClient:
             return
         try:
             await self.ws.send(
-                mjson.encode(
+                self._encode(
                     {
                         "type": "voice_audio",
                         "data": pcm_base64,
@@ -637,7 +661,7 @@ class VizClient:
         b64 = base64.b64encode(raw).decode("ascii")
         try:
             await self.ws.send(
-                mjson.encode(
+                self._encode(
                     {
                         "type": "bitmap_frame",
                         "zone": zone_name,

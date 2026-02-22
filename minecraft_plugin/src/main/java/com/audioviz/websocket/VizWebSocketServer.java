@@ -69,8 +69,11 @@ public class VizWebSocketServer extends WebSocketServer {
         // (prevents "Address already in use" from zombie/lingering sockets)
         setReuseAddr(true);
 
-        // Set connection timeout
-        setConnectionLostTimeout(30);
+        // Disable library-level connection-lost detection (protocol PING/PONG).
+        // We use our own JSON heartbeat system instead (startHeartbeat).
+        // websockets 16.x (Python) doesn't respond to java-websocket's protocol
+        // pings, causing spurious 35s disconnects.
+        setConnectionLostTimeout(0);
 
         // Start the message queue processor
         messageQueue.start();

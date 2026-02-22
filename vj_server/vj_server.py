@@ -3541,7 +3541,7 @@ class VJServer:
                             try:
                                 if msg_type in FIRE_AND_FORGET:
                                     # Send without waiting for response — instant for the UI
-                                    await self.viz_client.ws.send(mjson.encode(data))
+                                    await self.viz_client.ws.send(self.viz_client._encode(data))
                                     await websocket.send(mjson.encode({"type": "ok"}))
                                     logger.debug(f"Fire-and-forget {msg_type} to Minecraft")
                                 else:
