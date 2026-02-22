@@ -1827,15 +1827,45 @@ class AdminApp {
             posSpan.className = 'dj-position';
             posSpan.textContent = `#${index + 1}`;
 
+            // Avatar
+            let avatarEl;
+            if (dj.avatar_url && /^https?:\/\//.test(dj.avatar_url)) {
+                avatarEl = document.createElement('img');
+                avatarEl.className = 'dj-avatar';
+                avatarEl.src = dj.avatar_url;
+                avatarEl.alt = '';
+                avatarEl.loading = 'lazy';
+            } else {
+                avatarEl = document.createElement('div');
+                avatarEl.className = 'dj-avatar dj-avatar-initials';
+                avatarEl.textContent = (dj.dj_name || '?').charAt(0).toUpperCase();
+            }
+
             // Name and stats
             const infoDiv = document.createElement('div');
             infoDiv.className = 'dj-info';
 
+            // Name + palette wrapper
+            const namePaletteDiv = document.createElement('div');
+            namePaletteDiv.className = 'dj-name-palette';
+
             const nameSpan = document.createElement('span');
             nameSpan.className = 'dj-name';
             nameSpan.textContent = dj.dj_name;
+            namePaletteDiv.appendChild(nameSpan);
 
-            infoDiv.appendChild(nameSpan);
+            // Color palette swatches (max 5)
+            if (Array.isArray(dj.color_palette)) {
+                const colors = dj.color_palette.slice(0, 5);
+                colors.forEach(color => {
+                    const swatch = document.createElement('span');
+                    swatch.className = 'palette-swatch';
+                    swatch.style.background = color;
+                    namePaletteDiv.appendChild(swatch);
+                });
+            }
+
+            infoDiv.appendChild(namePaletteDiv);
 
             // Stats row (BPM, latency, FPS)
             if (dj.bpm || dj.latency_ms !== undefined || dj.fps !== undefined) {
@@ -1949,6 +1979,7 @@ class AdminApp {
             queueControls.appendChild(kickBtn);
 
             djEl.appendChild(posSpan);
+            djEl.appendChild(avatarEl);
             djEl.appendChild(infoDiv);
             djEl.appendChild(actionsDiv);
             djEl.appendChild(queueControls);
