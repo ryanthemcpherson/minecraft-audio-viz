@@ -208,7 +208,7 @@ export class LuaPatternInstance {
     // Lua patterns manage their own time via dt parameter to calculate()
   }
 
-  calculateEntities(audio: AudioState): EntityData[] {
+  calculateEntities(audio: AudioState, dt: number = 0.016): EntityData[] {
     if (!this._ready || !this.L) return [];
 
     const L = this.L;
@@ -293,8 +293,8 @@ export class LuaPatternInstance {
       lua.lua_pushnumber(L, this.config.maxScale);
       lua.lua_settable(L, -3);
 
-      // Push dt
-      lua.lua_pushnumber(L, 0.016);
+      // Push dt (actual delta time from animation loop)
+      lua.lua_pushnumber(L, dt);
 
       // Call calculate(audio, config, dt)
       const status = lua.lua_pcall(L, 3, 1, 0);

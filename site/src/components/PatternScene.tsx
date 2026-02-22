@@ -43,20 +43,22 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
     prevPositions.current = new Float32Array(maxCount * 3);
   }, [maxCount]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
 
     const time = clock.getElapsedTime();
+    // Clamp delta to avoid huge jumps when tab is backgrounded
+    const dt = Math.min(delta, 0.1);
 
     // Generate simulated audio for this card
     const audio = generateAudioState(time, phaseOffset);
 
     // Update pattern internal time
-    pattern.update(0.016);
+    pattern.update(dt);
 
     // Calculate entity positions from the pattern
-    const entities: EntityData[] = pattern.calculateEntities(audio);
+    const entities: EntityData[] = pattern.calculateEntities(audio, dt);
 
     // Map entities to 3D positions — 0-1 range to world space
     const scale3d = 6;

@@ -89,6 +89,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!accessToken) return;
 
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
     const refreshMs = Math.max(
       (expiresIn * 1000) - REFRESH_MARGIN_MS,
       60_000 // at least 1 minute
@@ -107,7 +109,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         .catch((err) => {
           console.warn("[MCAV] Token refresh failed, retrying in 5s:", err);
           // Retry once after 5s before giving up
-          setTimeout(() => {
+          retryTimer = setTimeout(() => {
             const retryToken = getStoredRefreshToken();
             if (!retryToken) return;
             refreshToken(retryToken)
@@ -123,7 +125,10 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         });
     }, refreshMs);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
   }, [accessToken, expiresIn]);
 
   const setAuth = useCallback(
