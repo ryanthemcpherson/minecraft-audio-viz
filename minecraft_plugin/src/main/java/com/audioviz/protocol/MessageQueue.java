@@ -69,6 +69,17 @@ public class MessageQueue {
     // Cleared each tick. Uses Float.floatToRawIntBits as key for exact float matching.
     private final HashMap<Integer, float[]> trigCache = new HashMap<>();
 
+    // PERFORMANCE: Scratch JOML objects reused per entity in extractEntityUpdates.
+    // Transformation constructor copies these internally, so mutating between calls is safe.
+    // This avoids 3 object allocations per entity per tick (60k allocs/sec at 1000 entities).
+    private final Vector3f scratchTranslation = new Vector3f();
+    private final Vector3f scratchScale = new Vector3f();
+    private final AxisAngle4f scratchLeftRotation = new AxisAngle4f();
+
+    // Per-tick scratch maps — reused across ticks to avoid HashMap allocation every 50ms.
+    private final Map<String, List<EntityUpdate>> updatesByZone = new HashMap<>();
+    private final Map<String, JsonObject> latestBatchByZone = new HashMap<>();
+
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
         this.messageHandler = messageHandler;
@@ -155,13 +166,10 @@ public class MessageQueue {
      * Called on main thread every tick.
      */
     private void processTick() {
-        // Clear per-tick trig cache
+        // Clear per-tick caches (reuse maps to avoid allocation every tick)
         trigCache.clear();
-
-        // Collect entity updates per zone (supports multi-zone messages)
-        Map<String, List<EntityUpdate>> updatesByZone = new HashMap<>();
-        // Coalesce high-frequency frame messages: keep only newest batch_update per zone.
-        Map<String, JsonObject> latestBatchByZone = new HashMap<>();
+        updatesByZone.values().forEach(List::clear);
+        latestBatchByZone.clear();
 
         // Process all queued messages
         JsonObject msg;
@@ -236,7 +244,9 @@ public class MessageQueue {
         if (zone == null) return;
 
         // Pre-size to avoid ArrayList resizing (entities.size() is O(1) for JsonArray)
-        ((ArrayList<EntityUpdate>) updates).ensureCapacity(updates.size() + entities.size());
+        if (updates instanceof ArrayList<EntityUpdate> arrayList) {
+            arrayList.ensureCapacity(updates.size() + entities.size());
+        }
 
         for (JsonElement elem : entities) {
             JsonObject entity = elem.getAsJsonObject();
@@ -296,11 +306,14 @@ public class MessageQueue {
                 pivotZ = 0.5f - halfScale * (cosR - sinR);
             }
 
-            // Create transformation - share static IDENTITY_ROTATION for right rotation
+            // Create transformation using scratch JOML objects (Transformation copies internally).
+            scratchTranslation.set(pivotX, pivotY, pivotZ);
+            scratchLeftRotation.set(rotRad, 0, 1, 0);
+            scratchScale.set(scale, scale, scale);
             Transformation transform = new Transformation(
-                new Vector3f(pivotX, pivotY, pivotZ),
-                new AxisAngle4f(rotRad, 0, 1, 0),
-                new Vector3f(scale, scale, scale),
+                scratchTranslation,
+                scratchLeftRotation,
+                scratchScale,
                 IDENTITY_ROTATION
             );
 
@@ -387,7 +400,7 @@ public class MessageQueue {
             JsonArray bandsJson = msg.getAsJsonArray("bands");
             int bandCount = Math.min(bandsJson.size(), 10); // Cap array size
             double[] bands = new double[bandCount];
-            for (int i = 0; i < bands.length; i++) {
+            for (int i = 0; i < bandCount; i++) {
                 bands[i] = InputSanitizer.sanitizeBandValue(bandsJson.get(i).getAsDouble());
             }
             double amplitude = InputSanitizer.sanitizeAmplitude(
@@ -415,8 +428,12 @@ public class MessageQueue {
      */
     public String getStats() {
         long dropped = messagesDropped.get();
-        return String.format("Messages: %d, Batches: %d, Queue: %d%s",
-                messagesProcessed.get(), batchesSent.get(), messageQueue.size(),
-                dropped > 0 ? ", Dropped: " + dropped : "");
+        String stats = "Messages: " + messagesProcessed.get() +
+                ", Batches: " + batchesSent.get() +
+                ", Queue: " + messageQueue.size();
+        if (dropped > 0) {
+            stats += ", Dropped: " + dropped;
+        }
+        return stats;
     }
 }

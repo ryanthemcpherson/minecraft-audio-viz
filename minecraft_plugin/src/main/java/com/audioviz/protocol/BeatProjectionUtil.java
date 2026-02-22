@@ -25,23 +25,7 @@ public final class BeatProjectionUtil {
     /**
      * Result of a beat projection calculation.
      */
-    public static final class BeatProjection {
-        private final boolean isBeat;
-        private final double beatIntensity;
-
-        public BeatProjection(boolean isBeat, double beatIntensity) {
-            this.isBeat = isBeat;
-            this.beatIntensity = beatIntensity;
-        }
-
-        public boolean isBeat() {
-            return isBeat;
-        }
-
-        public double beatIntensity() {
-            return beatIntensity;
-        }
-    }
+    public record BeatProjection(boolean isBeat, double beatIntensity) {}
 
     /**
      * Project whether a beat should be triggered, using explicit beat data
