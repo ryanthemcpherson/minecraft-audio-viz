@@ -1013,24 +1013,16 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Second instance launched (e.g. by deep link) — focus the existing window
+            // Second instance launched — focus the existing window
             log::info!("Single-instance: second launch with args: {:?}", args);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            // Forward any deep link URLs from the second instance to the frontend
-            for arg in &args {
-                if arg.starts_with("mcav://") {
-                    log::info!("Single-instance: forwarding deep link to frontend: {}", arg);
-                    let _ = app.emit("deep-link-received", arg.clone());
-                }
-            }
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_deep_link::init())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
         .invoke_handler(tauri::generate_handler![
             list_audio_sources,
@@ -1127,26 +1119,6 @@ pub fn run() {
                             });
                         }
                     });
-                }
-            }
-
-            // Deep-link: show window when a deep link arrives
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let handle = app.handle().clone();
-                app.deep_link().on_open_url(move |event| {
-                    log::info!("Deep link received: {:?}", event.urls());
-                    // Show and focus the main window
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                });
-
-                // Register protocol in debug builds (release/install handles this via OS)
-                #[cfg(debug_assertions)]
-                if let Err(e) = app.deep_link().register("mcav") {
-                    log::warn!("Failed to register deep link protocol: {}", e);
                 }
             }
 
