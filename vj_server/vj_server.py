@@ -5577,11 +5577,10 @@ class VJServer:
                     dt=loop_dt,
                 )
 
-                # Always send to Minecraft via the VJ server's full pattern engine.
-                # The server handles multi-zone patterns and transitions correctly;
-                # the DJ client's direct publish is a low-latency supplement for the
-                # DJ's own zone but the server remains the authoritative source.
-                should_send_to_mc = True
+                # Send to Minecraft when there's a DJ providing audio data.
+                # Skip when idle (no DJ) to avoid burning CPU on Lua pattern
+                # calculations with zero audio — resumes instantly on DJ connect.
+                should_send_to_mc = dj is not None
 
                 # Clean up expired effects
                 now = time.time()
