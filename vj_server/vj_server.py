@@ -1523,13 +1523,17 @@ class VJServer:
                 # Handle incoming frames (same pattern as credentialed DJs)
                 async for message in websocket:
                     try:
+                        # Fast path: audio frames are ~95% of DJ traffic.
+                        # Substring check + typed decode avoids a generic decode.
+                        if isinstance(message, str) and '"dj_audio_frame"' in message:
+                            frame = _frame_decoder.decode(message)
+                            await self._handle_dj_frame(dj, frame)
+                            continue
+
                         frame_data = mjson.decode(message)
                         frame_type = frame_data.get("type")
 
-                        if frame_type == "dj_audio_frame":
-                            frame = _frame_decoder.decode(message)
-                            await self._handle_dj_frame(dj, frame)
-                        elif frame_type == "dj_heartbeat":
+                        if frame_type == "dj_heartbeat":
                             await self._process_dj_heartbeat(dj, websocket, frame_data)
                         elif frame_type == "clock_sync_response":
                             self._apply_clock_resync(dj, frame_data)
@@ -1741,14 +1745,17 @@ class VJServer:
             # Handle incoming frames
             async for message in websocket:
                 try:
+                    # Fast path: audio frames are ~95% of DJ traffic.
+                    # Substring check + typed decode avoids a generic decode.
+                    if isinstance(message, str) and '"dj_audio_frame"' in message:
+                        frame = _frame_decoder.decode(message)
+                        await self._handle_dj_frame(dj, frame)
+                        continue
+
                     data = mjson.decode(message)
                     msg_type = data.get("type")
 
-                    if msg_type == "dj_audio_frame":
-                        frame = _frame_decoder.decode(message)
-                        await self._handle_dj_frame(dj, frame)
-
-                    elif msg_type == "dj_heartbeat":
+                    if msg_type == "dj_heartbeat":
                         await self._process_dj_heartbeat(dj, websocket, data)
 
                     elif msg_type == "clock_sync_response":
@@ -1839,7 +1846,7 @@ class VJServer:
 
                 await self._broadcast_dj_roster()
 
-    async def _handle_dj_frame(self, dj: DJConnection, data: dict):
+    async def _handle_dj_frame(self, dj: DJConnection, data: "DjAudioFrame"):
         """Process an audio frame from a DJ."""
         # Rate limit: drop excess frames (allows bursts up to 120fps, sustain ~60fps)
         if not dj.check_rate_limit():
