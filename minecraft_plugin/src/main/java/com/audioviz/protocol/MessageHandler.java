@@ -1765,7 +1765,24 @@ public class MessageHandler {
             return createError("Missing pixel data: provide 'pixels' (base64) or 'pixel_array' (JSON)");
         }
 
-        renderer.applyRawFrame(zoneName, pixels);
+        // Parse optional per-pixel brightness
+        int[] brightnessArray = null;
+        if (message.has("brightness")) {
+            try {
+                String b64Brightness = message.get("brightness").getAsString();
+                byte[] brightnessBytes = java.util.Base64.getDecoder().decode(b64Brightness);
+                if (brightnessBytes.length == pixelCount) {
+                    brightnessArray = new int[pixelCount];
+                    for (int i = 0; i < pixelCount; i++) {
+                        brightnessArray[i] = Math.max(0, Math.min(15, brightnessBytes[i] & 0xFF));
+                    }
+                }
+            } catch (Exception e) {
+                // Ignore malformed brightness, continue with null
+            }
+        }
+
+        renderer.applyRawFrame(zoneName, pixels, brightnessArray);
 
         // Tick ambient lights based on frame luminance
         AmbientLightManager ambientMgr = plugin.getAmbientLightManager();
