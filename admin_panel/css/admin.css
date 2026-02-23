@@ -297,12 +297,28 @@ body {
     font-size: var(--font-size-xs);
 }
 
+.zone-chip-mode {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 0 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+    line-height: 1.4;
+    flex-shrink: 0;
+}
+
 .zone-chip-pattern {
     font-size: var(--font-size-2xs);
     color: var(--text-muted);
     max-width: 80px;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.zone-chip.selected .zone-chip-mode {
+    background: rgba(0, 212, 255, 0.15);
+    color: rgba(0, 212, 255, 0.8);
 }
 
 .zone-chip.selected .zone-chip-pattern {
