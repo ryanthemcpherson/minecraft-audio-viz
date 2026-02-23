@@ -280,8 +280,7 @@ kbd {
 }
 
 .input:focus,
-.select:focus,
-.code-input:focus {
+.select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(67, 197, 255, 0.2);
 }
@@ -364,42 +363,12 @@ kbd {
   color: var(--accent);
 }
 
-.connect-code {
-  display: flex;
-  flex-direction: column;
-}
-
-.code-inputs {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-.code-group {
-  display: flex;
-  gap: 6px;
-}
-
-.code-input {
-  width: 42px;
-  height: 50px;
-  border-radius: 12px;
-  border: 1px solid rgba(137, 189, 238, 0.3);
-  background: var(--input-bg);
-  color: var(--text-primary);
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 1.1rem;
-  font-weight: 600;
+.connect-code-input {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.25rem;
+  letter-spacing: 0.15em;
   text-align: center;
   text-transform: uppercase;
-  outline: none;
-}
-
-.code-separator {
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 1.4rem;
 }
 
 .frequency-meter {
@@ -1157,12 +1126,6 @@ kbd {
   .meter-bar {
     grid-template-columns: 44px 1fr 42px;
     gap: 8px;
-  }
-
-  .code-input {
-    width: 38px;
-    height: 46px;
-    font-size: 1rem;
   }
 
   .update-actions {
