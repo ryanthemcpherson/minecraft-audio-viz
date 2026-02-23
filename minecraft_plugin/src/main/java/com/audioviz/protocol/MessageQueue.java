@@ -73,6 +73,7 @@ public class MessageQueue {
     // Reusable per-tick maps — cleared each tick instead of re-allocated.
     private final HashMap<String, List<EntityUpdate>> updatesByZone = new HashMap<>(4);
     private final HashMap<String, JsonObject> latestBatchByZone = new HashMap<>(4);
+    private final HashMap<String, JsonObject> latestBitmapFrameByZone = new HashMap<>(4);
 
     // Shared lambda for computeIfAbsent to avoid per-call lambda allocation
     private static final java.util.function.Function<String, List<EntityUpdate>> NEW_UPDATE_LIST = k -> new ArrayList<>();
@@ -174,6 +175,7 @@ public class MessageQueue {
         trigCache.clear();
         updatesByZone.values().forEach(List::clear);
         latestBatchByZone.clear();
+        latestBitmapFrameByZone.clear();
 
         // Process all queued messages
         JsonObject msg;
@@ -187,6 +189,13 @@ public class MessageQueue {
                 // Keep only the latest frame for each zone to avoid replaying stale updates.
                 String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
                 JsonObject replaced = latestBatchByZone.put(zoneName, msg);
+                if (replaced != null) {
+                    messagesDropped.incrementAndGet();
+                }
+            } else if ("bitmap_frame".equals(type)) {
+                // Bitmap frames are also high-frequency; keep only the latest per zone.
+                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
+                JsonObject replaced = latestBitmapFrameByZone.put(zoneName, msg);
                 if (replaced != null) {
                     messagesDropped.incrementAndGet();
                 }
@@ -207,6 +216,15 @@ public class MessageQueue {
             List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(zoneName, NEW_UPDATE_LIST);
             extractEntityUpdates(batch, zoneName, zoneUpdates);
             processAudioInfo(batch, zoneName);
+        }
+
+        // Process only the freshest bitmap_frame per zone this tick.
+        for (JsonObject frame : latestBitmapFrameByZone.values()) {
+            try {
+                messageHandler.handleMessage("bitmap_frame", frame);
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING, "Error handling message type: bitmap_frame", e);
+            }
         }
 
         // Also drain the entity update queue (these are from direct enqueue calls)

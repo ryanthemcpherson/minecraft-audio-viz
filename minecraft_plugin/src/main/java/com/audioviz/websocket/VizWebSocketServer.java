@@ -184,6 +184,8 @@ public class VizWebSocketServer extends WebSocketServer {
         int limit = Math.min(message.length(), 60);
         return containsWithin(message, "\"type\":\"batch_update\"", limit) ||
                containsWithin(message, "\"type\": \"batch_update\"", limit) ||
+               containsWithin(message, "\"type\":\"bitmap_frame\"", limit) ||
+               containsWithin(message, "\"type\": \"bitmap_frame\"", limit) ||
                containsWithin(message, "\"type\":\"audio_state\"", limit) ||
                containsWithin(message, "\"type\": \"audio_state\"", limit) ||
                containsWithin(message, "\"type\":\"voice_audio\"", limit) ||
