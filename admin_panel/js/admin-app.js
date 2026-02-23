@@ -4070,29 +4070,12 @@ class AdminApp {
             pointLight.position.set(0, 5, 0);
             this._previewScene.add(pointLight);
 
-            // Block texture manager and Minecraft environment
-            if (typeof BlockTextureManager !== 'undefined' && typeof MinecraftEnvironment !== 'undefined') {
+            // Procedural environment disabled — clean background only
+            // Block texture manager kept for zone block rendering
+            if (typeof BlockTextureManager !== 'undefined') {
                 this._textureManager = new BlockTextureManager();
                 this._textureManager.preload();
-                this._mcEnvironment = new MinecraftEnvironment(this._previewScene, this._textureManager);
-                this._mcEnvironment.build();
-            } else {
-                // Fallback: flat ground plane
-                const groundGeometry = new THREE.PlaneGeometry(30, 30);
-                const groundMaterial = new THREE.MeshStandardMaterial({
-                    color: 0x12121a,
-                    roughness: 0.9
-                });
-                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-                ground.rotation.x = -Math.PI / 2;
-                ground.receiveShadow = true;
-                this._previewScene.add(ground);
             }
-
-            // Grid helper (only for single-zone fallback, hidden in stage mode)
-            this._previewGridHelper = new THREE.GridHelper(30, 30, 0x1a1a25, 0x1a1a25);
-            this._previewGridHelper.position.y = 0.02;
-            this._previewScene.add(this._previewGridHelper);
 
             // Pre-create static band-color materials for reuse
             this._bandColorMaterials = this._previewConfig.colors.map(color =>
@@ -4395,13 +4378,6 @@ class AdminApp {
                 });
             }
 
-            // Switch environment to stage mode — hide procedural env, grid, and ground
-            if (this._mcEnvironment) {
-                this._mcEnvironment.setVisible(false);
-            }
-            if (this._previewGridHelper) {
-                this._previewGridHelper.visible = false;
-            }
             // Frame camera to stage
             this._frameStage();
 
@@ -4419,13 +4395,7 @@ class AdminApp {
             this._previewStageMode = false;
             // Hide scan button in single-zone mode
             if (scanBtn) scanBtn.style.display = 'none';
-            // Restore single-zone environment and grid
-            if (this._mcEnvironment) {
-                this._mcEnvironment.setVisible(true);
-            }
-            if (this._previewGridHelper) {
-                this._previewGridHelper.visible = true;
-            }
+            // Clean up stage ground if switching back to single-zone
             if (this._stageGround) {
                 this._previewScene.remove(this._stageGround);
                 this._stageGround.geometry.dispose();
@@ -4517,9 +4487,6 @@ class AdminApp {
                 this._previewShowGrid = e.target.checked;
                 if (this._previewBlockIndicators) {
                     this._previewBlockIndicators.setVisible(this._previewShowGrid);
-                }
-                if (this._mcEnvironment && !this._previewStageMode) {
-                    this._mcEnvironment.setVisible(this._previewShowGrid);
                 }
             });
         }
