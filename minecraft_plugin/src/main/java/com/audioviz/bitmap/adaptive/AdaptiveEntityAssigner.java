@@ -69,7 +69,15 @@ public class AdaptiveEntityAssigner {
             // Track uniform state transitions to manage text vs space
             boolean wasUniform = wasActive && lastTopARGB[i] == lastBottomARGB[i];
             boolean isUniform = rect.isUniform();
-            boolean needsTextUpdate = bottomDirty || (wasUniform != isUniform);
+            // Text updates are only required when:
+            // - Slot is newly active (must initialize text content), or
+            // - Uniform/non-uniform mode changes (space <-> half-block), or
+            // - Bottom color changes while non-uniform.
+            //
+            // Uniform color changes do NOT need text updates (text remains a space).
+            boolean needsTextUpdate = !wasActive
+                || (wasUniform != isUniform)
+                || (!isUniform && bottomDirty);
 
             if (geoDirty) {
                 geoUpdates.add(new GeometryUpdate(entityId, i, x, y, scaleX, scaleY));
