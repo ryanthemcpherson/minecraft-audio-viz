@@ -3,13 +3,11 @@
 
 :root {
   --bg-0: var(--mcav-bg-primary);
-  --bg-1: var(--mcav-bg-secondary);
-  --bg-2: #101f33;
-  --panel: rgba(10, 24, 39, 0.78);
-  --panel-border: rgba(98, 188, 255, 0.28);
-  --surface: rgba(14, 30, 48, 0.92);
-  --surface-soft: rgba(18, 39, 62, 0.8);
-  --input-bg: rgba(7, 18, 30, 0.8);
+  --panel: #0f1118;
+  --panel-border: rgba(255, 255, 255, 0.06);
+  --surface: #0f1118;
+  --surface-soft: #0a0d12;
+  --input-bg: rgba(0, 0, 0, 0.3);
   --text-primary: var(--mcav-text-primary);
   --text-secondary: var(--mcav-text-secondary);
   --text-muted: #6d87a1;
@@ -19,14 +17,13 @@
   --success: #2fe098;
   --warning: #ffd166;
   --danger: #ff6767;
-  --border: var(--mcav-border-subtle);
   --font-sans: var(--mcav-font-sans);
   --font-mono: var(--mcav-font-mono);
-  --radius-lg: 20px;
-  --radius-md: 13px;
-  --radius-sm: 10px;
-  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.35);
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 *,
@@ -45,10 +42,7 @@ body {
   margin: 0;
   color: var(--text-primary);
   font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
-  background:
-    radial-gradient(circle at 10% 15%, rgba(67, 197, 255, 0.2), transparent 35%),
-    radial-gradient(circle at 90% 10%, rgba(30, 224, 200, 0.15), transparent 38%),
-    linear-gradient(160deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+  background: var(--bg-0);
 }
 
 .app {
@@ -283,7 +277,7 @@ kbd {
   line-height: 1.4;
   color: var(--text-primary);
   background: var(--input-bg);
-  border: 1px solid rgba(98, 188, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 5px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
@@ -292,7 +286,7 @@ kbd {
 .input,
 .select {
   width: 100%;
-  border: 1px solid rgba(130, 189, 245, 0.26);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-sm);
   background: var(--input-bg);
   color: var(--text-primary);
@@ -379,9 +373,9 @@ kbd {
   height: 30px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(137, 189, 238, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 9px;
-  background: rgba(6, 20, 33, 0.75);
+  background: var(--surface-soft);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.16s ease;
@@ -448,9 +442,9 @@ kbd {
 .meter-track {
   height: 18px;
   border-radius: 20px;
-  background: rgba(3, 12, 20, 0.85);
+  background: rgba(0, 0, 0, 0.3);
   overflow: hidden;
-  border: 1px solid rgba(130, 189, 245, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   transition: border-color 0.15s ease;
 }
 
@@ -474,14 +468,13 @@ kbd {
 /* Status Panel */
 .status-panel {
   border-radius: var(--radius-md);
-  border: 1px solid rgba(137, 189, 238, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 14px;
   background: var(--surface);
 }
 
 .status-panel.active {
-  border-color: rgba(47, 224, 152, 0.55);
-  box-shadow: 0 0 0 2px rgba(47, 224, 152, 0.15);
+  border-color: rgba(47, 224, 152, 0.3);
 }
 
 .status-indicator {
@@ -592,7 +585,7 @@ kbd {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 2px solid rgba(154, 181, 207, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.12);
   transition: all 0.1s linear;
 }
 
@@ -649,8 +642,8 @@ kbd {
 }
 
 .btn-quick-connect {
-  background: rgba(8, 25, 40, 0.84);
-  border: 1px solid rgba(130, 189, 245, 0.3);
+  background: var(--surface-soft);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--text-secondary);
 }
 
@@ -746,8 +739,8 @@ kbd {
   padding: 8px 12px;
   font-size: 0.84rem;
   border-radius: var(--radius-sm);
-  background: rgba(8, 25, 40, 0.84);
-  border: 1px solid rgba(130, 189, 245, 0.25);
+  background: var(--surface-soft);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -775,8 +768,7 @@ kbd {
 .welcome-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 11, 18, 0.92);
-  backdrop-filter: blur(12px);
+  background: rgba(5, 11, 18, 0.95);
   display: grid;
   place-items: center;
   padding: 20px;
@@ -796,7 +788,7 @@ kbd {
 .welcome-modal {
   max-width: 560px;
   width: 100%;
-  background: linear-gradient(145deg, rgba(14, 34, 54, 0.95), rgba(7, 22, 37, 0.95));
+  background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-lg);
   padding: 28px;
@@ -817,7 +809,7 @@ kbd {
 
 .welcome-modal h2 {
   margin: 0 0 8px;
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   color: var(--text-primary);
   text-align: center;
 }
@@ -825,7 +817,7 @@ kbd {
 .welcome-subtitle {
   margin: 0 0 28px;
   color: var(--text-secondary);
-  font-size: 1.05rem;
+  font-size: 0.92rem;
   text-align: center;
 }
 
@@ -857,7 +849,7 @@ kbd {
 
 .step-content h3 {
   margin: 0 0 4px;
-  font-size: 1.05rem;
+  font-size: 0.92rem;
   color: var(--text-primary);
 }
 
@@ -893,7 +885,7 @@ kbd {
   text-align: center;
   background: var(--surface-soft);
   border-radius: var(--radius-sm);
-  border: 1px dashed rgba(137, 189, 238, 0.3);
+  border: 1px dashed rgba(255, 255, 255, 0.06);
 }
 
 .empty-state p {
@@ -913,7 +905,7 @@ kbd {
   }
 
   .welcome-modal h2 {
-    font-size: 1.4rem;
+    font-size: 1.2rem;
   }
 
   .welcome-actions {
@@ -1009,7 +1001,7 @@ kbd {
 .auth-modal {
   max-width: 420px;
   width: 100%;
-  background: linear-gradient(145deg, rgba(14, 34, 54, 0.95), rgba(7, 22, 37, 0.95));
+  background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-lg);
   padding: 24px;
@@ -1022,7 +1014,7 @@ kbd {
   gap: 2px;
   margin-bottom: 20px;
   border-radius: 10px;
-  background: rgba(3, 12, 20, 0.6);
+  background: rgba(0, 0, 0, 0.3);
   padding: 3px;
 }
 
@@ -1068,7 +1060,7 @@ kbd {
   content: '';
   flex: 1;
   height: 1px;
-  background: rgba(130, 189, 245, 0.15);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .btn-discord {
@@ -1149,7 +1141,7 @@ kbd {
 
 .auth-heading {
   margin: 0 0 6px;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   color: var(--text-primary);
 }
 
@@ -1228,9 +1220,9 @@ kbd {
   align-items: center;
   gap: 8px;
   padding: 3px 12px 3px 3px;
-  border: 1px solid rgba(130, 189, 245, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 999px;
-  background: rgba(8, 25, 40, 0.84);
+  background: var(--surface-soft);
   color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -1287,7 +1279,7 @@ kbd {
   gap: 2px;
   margin-bottom: 10px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(130, 189, 245, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .profile-dropdown-name {
