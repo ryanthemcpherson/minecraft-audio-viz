@@ -96,14 +96,15 @@ export function useAuth(): UseAuthReturn {
 
   const signInWithDiscord = useCallback(async () => {
     setError(null);
+    setIsLoading(true);
     try {
       const { authorize_url, poll_token } = await api.getDiscordAuthorizeUrl(true);
       await open(authorize_url);
       if (!poll_token) {
         setError('Server did not return poll token');
+        setIsLoading(false);
         return;
       }
-      setIsLoading(true);
       const maxAttempts = 150; // 5 minutes at 2s intervals
       for (let i = 0; i < maxAttempts; i++) {
         await new Promise(r => setTimeout(r, 2000));
@@ -126,14 +127,15 @@ export function useAuth(): UseAuthReturn {
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
+    setIsLoading(true);
     try {
       const { authorize_url, poll_token } = await api.getGoogleAuthorizeUrl(true);
       await open(authorize_url);
       if (!poll_token) {
         setError('Server did not return poll token');
+        setIsLoading(false);
         return;
       }
-      setIsLoading(true);
       const maxAttempts = 150; // 5 minutes at 2s intervals
       for (let i = 0; i < maxAttempts; i++) {
         await new Promise(r => setTimeout(r, 2000));
