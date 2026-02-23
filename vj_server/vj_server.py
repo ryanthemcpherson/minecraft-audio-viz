@@ -2900,13 +2900,17 @@ class VJServer:
                                 self._pattern_name, self._pattern_config
                             )
                             # Re-init Minecraft pool (cleanup first to remove old entities)
-                            if self.viz_client and self.viz_client.connected:
+                            # Skip for bitmap-initialized zones — they use TextDisplay grids
+                            zs_ec = self._get_zone_state(self.zone)
+                            if (
+                                not zs_ec.bitmap_initialized
+                                and self.viz_client
+                                and self.viz_client.connected
+                            ):
                                 try:
-                                    # Cleanup old entities before reinitializing with new count
                                     await self.viz_client.cleanup_zone(self.zone)
-                                    zone_bt = self._get_zone_state(self.zone).block_type
                                     await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, zone_bt
+                                        self.zone, self.entity_count, zs_ec.block_type
                                     )
                                 except Exception as e:
                                     logger.warning(f"Failed to update Minecraft pool: {e}")
@@ -2919,12 +2923,16 @@ class VJServer:
                         new_zone = data.get("zone", "main")
                         if new_zone != self.zone:
                             self.zone = new_zone
-                            # Re-init Minecraft pool in new zone
-                            if self.viz_client and self.viz_client.connected:
+                            # Re-init Minecraft pool in new zone (skip bitmap zones)
+                            zs_zc = self._get_zone_state(self.zone)
+                            if (
+                                not zs_zc.bitmap_initialized
+                                and self.viz_client
+                                and self.viz_client.connected
+                            ):
                                 try:
-                                    zone_bt = self._get_zone_state(self.zone).block_type
                                     await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, zone_bt
+                                        self.zone, self.entity_count, zs_zc.block_type
                                     )
                                 except Exception as e:
                                     logger.warning(f"Failed to init Minecraft pool: {e}")
@@ -4676,6 +4684,7 @@ class VJServer:
 
             if (
                 old_count != zone_state.entity_count
+                and not zone_state.bitmap_initialized
                 and self.viz_client
                 and self.viz_client.connected
             ):
@@ -4704,6 +4713,7 @@ class VJServer:
 
             if (
                 old_count != zone_state.entity_count
+                and not zone_state.bitmap_initialized
                 and self.viz_client
                 and self.viz_client.connected
             ):
@@ -4768,7 +4778,11 @@ class VJServer:
                 if zone_state.transition_pending_resize is not None:
                     pending = zone_state.transition_pending_resize
                     zone_state.transition_pending_resize = None
-                    if self.viz_client and self.viz_client.connected:
+                    if (
+                        not zone_state.bitmap_initialized
+                        and self.viz_client
+                        and self.viz_client.connected
+                    ):
                         asyncio.ensure_future(
                             self.viz_client.init_pool(
                                 zone_name or self.zone, pending, zone_state.block_type
@@ -4839,10 +4853,14 @@ class VJServer:
                 if self._transition_pending_resize is not None:
                     pending = self._transition_pending_resize
                     self._transition_pending_resize = None
-                    if self.viz_client and self.viz_client.connected:
-                        zone_bt = self._get_zone_state(self.zone).block_type
+                    zs_legacy = self._get_zone_state(self.zone)
+                    if (
+                        not zs_legacy.bitmap_initialized
+                        and self.viz_client
+                        and self.viz_client.connected
+                    ):
                         asyncio.ensure_future(
-                            self.viz_client.init_pool(self.zone, pending, zone_bt)
+                            self.viz_client.init_pool(self.zone, pending, zs_legacy.block_type)
                         )
                 entities = self._current_pattern.calculate_entities(audio_state)
                 logger.info(
