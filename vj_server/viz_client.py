@@ -266,6 +266,7 @@ class VizClient:
                         "bitmap_transition_started",
                         "bitmap_composition_zones",
                         "bitmap_teardown",
+                        "zone_status_report",
                         "error",
                         "connected",
                     ):
@@ -617,6 +618,17 @@ class VizClient:
         """
         response = await self.send({"type": "scan_stage_blocks", "stage": stage})
         if response and response.get("type") == "stage_blocks":
+            return response
+        return None
+
+    async def query_zone_status(self) -> Optional[dict]:
+        """Query Minecraft plugin for actual per-zone state (entity counts, bitmap status).
+
+        Returns:
+            Response dict with per-zone status, or None on failure.
+        """
+        response = await self.send({"type": "query_zone_status"})
+        if response and response.get("type") == "zone_status_report":
             return response
         return None
 

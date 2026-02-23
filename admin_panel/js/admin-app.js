@@ -1467,6 +1467,10 @@ class AdminApp {
             case 'link_status':
                 this._handleLinkStatus(data);
                 break;
+
+            case 'parity_check_result':
+                this._handleParityCheckResult(data);
+                break;
         }
     }
 
@@ -1685,6 +1689,53 @@ class AdminApp {
             stage: this.state.selectedStage
         });
         this._showToast('Scanning stage blocks...', 'info');
+    }
+
+    _requestParityCheck() {
+        if (!this.ws || !this.ws.isConnected) {
+            this._showToast('Not connected', 'error');
+            return;
+        }
+        if (!this.state.minecraftConnected) {
+            this._showToast('Minecraft not connected', 'error');
+            return;
+        }
+        this.ws.send({ type: 'request_parity_check' });
+        this._showToast('Running parity check...', 'info');
+    }
+
+    _handleParityCheckResult(data) {
+        if (data.error) {
+            this._showToast(`Parity check failed: ${data.error}`, 'error');
+            return;
+        }
+
+        const zones = data.zones || {};
+        const zoneNames = Object.keys(zones);
+        if (zoneNames.length === 0) {
+            this._showToast('Parity check: no zones found', 'warning');
+            return;
+        }
+
+        if (data.ok) {
+            this._showToast(`Parity check: all ${zoneNames.length} zones OK`, 'success');
+            return;
+        }
+
+        // Build summary of mismatches
+        const issues = [];
+        for (const [name, info] of Object.entries(zones)) {
+            if (info.ok) continue;
+            const mismatches = (info.mismatches || []).join('; ');
+            const repaired = (info.repaired || []).join('; ');
+            let line = `${name}: ${mismatches}`;
+            if (repaired) line += ` [repaired: ${repaired}]`;
+            issues.push(line);
+        }
+
+        const okCount = zoneNames.filter(z => zones[z].ok).length;
+        const msg = `Parity: ${okCount}/${zoneNames.length} OK\n${issues.join('\n')}`;
+        this._showToast(msg, issues.some(l => l.includes('failed')) ? 'error' : 'warning', 8000);
     }
 
     _updateZoneSelector() {
@@ -4524,6 +4575,12 @@ class AdminApp {
         const scanBtn = document.getElementById('preview-scan-stage');
         if (scanBtn) {
             scanBtn.addEventListener('click', () => this._scanStageBlocks());
+        }
+
+        // Parity check button
+        const parityBtn = document.getElementById('parity-check-btn');
+        if (parityBtn) {
+            parityBtn.addEventListener('click', () => this._requestParityCheck());
         }
 
         // Particles enabled checkbox
