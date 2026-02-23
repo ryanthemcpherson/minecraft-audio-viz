@@ -124,6 +124,11 @@ Examples:
         help="Visual delay mode: manual, auto, discord, svc (default: manual or $VISUAL_DELAY_MODE)",
     )
     parser.add_argument(
+        "--no-spectrograph",
+        action="store_true",
+        help="Disable terminal spectrograph display",
+    )
+    parser.add_argument(
         "--enable-link",
         action="store_true",
         default=os.environ.get("ENABLE_LINK", "").lower() in ("1", "true", "yes"),
@@ -211,6 +216,7 @@ Examples:
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,
+        show_spectrograph=sys.stdout.isatty() and not args.no_spectrograph,
         metrics_port=None if args.no_metrics else args.metrics_port,
         visual_delay_ms=args.visual_delay_ms,
         visual_delay_mode=args.visual_delay_mode,
