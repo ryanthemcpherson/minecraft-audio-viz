@@ -309,9 +309,10 @@ public class BitmapRendererBackend implements RendererBackend {
             float scaleX = geo.scaleX();
             float scaleY = geo.scaleY();
 
-            // TheCymaera scaling: space bg is ~1/8 wide, ~1/4 tall
-            // With half-block (▄), the character itself is ~1/4 tall, bg is ~1/4 tall
-            // scaleX/scaleY are in world-space units (pixelScale * cellCount)
+            // Base glyph metrics are roughly: width~1/8 block, height~1/4 block.
+            // For half-block mode, one cell encodes TWO vertical pixels, so Y must be
+            // scaled as two pixel heights per cell (8x), not one (4x), or output looks
+            // vertically squashed/rectangular.
             geoTransforms[i] = new Transformation(
                 new Vector3f(
                     (-0.1f + 0.5f) * scaleX,  // X recenter: 0.4 * scaleX
@@ -319,7 +320,7 @@ public class BitmapRendererBackend implements RendererBackend {
                     0f
                 ),
                 new AxisAngle4f(0, 0, 0, 1),
-                new Vector3f(scaleX * 8.0f, scaleY * 4.0f, 1f),
+                new Vector3f(scaleX * 8.0f, scaleY * 8.0f, 1f),
                 new AxisAngle4f(0, 0, 0, 1)
             );
 
