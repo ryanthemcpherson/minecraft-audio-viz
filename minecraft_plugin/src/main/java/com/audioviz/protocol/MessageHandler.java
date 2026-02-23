@@ -154,6 +154,8 @@ public class MessageHandler {
             case "voice_audio" -> handleVoiceAudio(message);
             case "voice_config" -> handleVoiceConfig(message);
             case "get_voice_status" -> handleGetVoiceStatus();
+            // Parity check
+            case "query_zone_status" -> handleQueryZoneStatus();
             default -> createError("Unknown message type: " + type);
         };
     }
@@ -2098,6 +2100,46 @@ public class MessageHandler {
             return status;
         }
         return voiceChat.getStatus();
+    }
+
+    // ========== Zone Parity Check ==========
+
+    private JsonObject handleQueryZoneStatus() {
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "zone_status_report");
+
+        JsonObject zonesObj = new JsonObject();
+
+        EntityPoolManager poolManager = plugin.getEntityPoolManager();
+        BitmapRendererBackend bitmapRenderer = plugin.getBitmapRenderer();
+        BitmapPatternManager bitmapPatternMgr = plugin.getBitmapPatternManager();
+
+        for (VisualizationZone zone : plugin.getZoneManager().getAllZones()) {
+            String name = zone.getName();
+            JsonObject zoneInfo = new JsonObject();
+
+            zoneInfo.addProperty("entity_count", poolManager.getEntityCount(name));
+            boolean bitmapActive = bitmapRenderer.isBitmapZone(name);
+            zoneInfo.addProperty("bitmap_active", bitmapActive);
+
+            if (bitmapActive) {
+                var gridConfig = bitmapRenderer.getGridConfig(name);
+                zoneInfo.addProperty("bitmap_width", gridConfig.width());
+                zoneInfo.addProperty("bitmap_height", gridConfig.height());
+                String patternId = bitmapPatternMgr.getActivePatternId(name);
+                if (patternId != null) {
+                    zoneInfo.addProperty("bitmap_pattern", patternId);
+                }
+            } else {
+                zoneInfo.addProperty("bitmap_width", 0);
+                zoneInfo.addProperty("bitmap_height", 0);
+            }
+
+            zonesObj.add(name, zoneInfo);
+        }
+
+        response.add("zones", zonesObj);
+        return response;
     }
 
     // ========== Bitmap Transition Handlers ==========
