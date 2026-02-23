@@ -25,16 +25,26 @@ export default function FrequencyMeter({ audioRef }: FrequencyMeterProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Scale canvas for high-DPI displays
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = 400;
+    const cssH = 160;
+    canvas.width = cssW * dpr;
+    canvas.height = cssH * dpr;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    ctx.scale(dpr, dpr);
+
     const draw = () => {
       const { bands, isBeat, bpm } = audioRef.current;
-      const w = canvas.width;
-      const h = canvas.height;
+      const w = cssW;
+      const h = cssH;
       const barHeight = Math.floor((h - 28) / 5);
       const barGap = 2;
       const labelWidth = 40;
       const valueWidth = 44;
 
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       for (let i = 0; i < 5; i++) {
         const target = bands[i] ?? 0;
@@ -94,8 +104,6 @@ export default function FrequencyMeter({ audioRef }: FrequencyMeterProps) {
     <canvas
       ref={canvasRef}
       className="frequency-canvas"
-      width={400}
-      height={160}
     />
   );
 }
