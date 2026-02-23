@@ -4099,6 +4099,8 @@ class AdminApp {
             // Initialize block indicators
             if (typeof BlockIndicatorSystem !== 'undefined') {
                 this._previewBlockIndicators = new BlockIndicatorSystem(this._previewScene, 8);
+                // Match default _previewShowGrid = false
+                this._previewBlockIndicators.setVisible(false);
             }
 
             // Initialize bitmap LED wall preview
@@ -4212,11 +4214,30 @@ class AdminApp {
             maxZ = Math.max(maxZ, oz + sz);
         });
 
-        this._previewStageCenter = {
-            x: (minX + maxX) / 2,
-            y: (minY + maxY) / 2,
-            z: (minZ + maxZ) / 2
-        };
+        // Center on the "main" zone if one exists, otherwise use overall centroid
+        const mainZone = zones.find(z => {
+            const role = (z.stage_role || z.name || '').toLowerCase();
+            return role.includes('main') || role.includes('center');
+        });
+        if (mainZone) {
+            const mox = mainZone.origin?.x || 0;
+            const moy = mainZone.origin?.y || 0;
+            const moz = mainZone.origin?.z || 0;
+            const msx = mainZone.size?.x || 10;
+            const msy = mainZone.size?.y || 10;
+            const msz = mainZone.size?.z || 10;
+            this._previewStageCenter = {
+                x: mox + msx / 2,
+                y: moy + msy / 2,
+                z: moz + msz / 2
+            };
+        } else {
+            this._previewStageCenter = {
+                x: (minX + maxX) / 2,
+                y: (minY + maxY) / 2,
+                z: (minZ + maxZ) / 2
+            };
+        }
         this._previewStageBounds = { minX, minY, minZ, maxX, maxY, maxZ };
     }
 
@@ -4360,6 +4381,10 @@ class AdminApp {
 
         if (hasMultipleZones) {
             this._previewStageMode = true;
+            // Hide single-zone floor grid in stage mode
+            if (this._previewBlockIndicators) {
+                this._previewBlockIndicators.setVisible(false);
+            }
             // Pre-create zone groups
             zones.forEach(z => this._ensurePreviewZoneGroup(z.name));
 
@@ -4393,6 +4418,10 @@ class AdminApp {
             }
         } else {
             this._previewStageMode = false;
+            // Restore floor grid visibility to match checkbox
+            if (this._previewBlockIndicators) {
+                this._previewBlockIndicators.setVisible(this._previewShowGrid);
+            }
             // Hide scan button in single-zone mode
             if (scanBtn) scanBtn.style.display = 'none';
             // Clean up stage ground if switching back to single-zone
