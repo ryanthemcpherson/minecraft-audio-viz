@@ -6019,7 +6019,7 @@ async def main():
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=args.require_auth,
-        show_spectrograph=not args.no_spectrograph,
+        show_spectrograph=sys.stdout.isatty() and not args.no_spectrograph,
     )
 
     # Signal handling
