@@ -83,7 +83,7 @@ class AdaptiveEntityAssignerTest {
     }
 
     @Test
-    @DisplayName("only bg changes when top color changes but geometry stays same")
+    @DisplayName("only bg changes when uniform color changes")
     void bgOnlyChange() {
         var assigner = new AdaptiveEntityAssigner(100);
 
@@ -92,11 +92,7 @@ class AdaptiveEntityAssignerTest {
 
         assertEquals(0, diff.geometryUpdates().size());
         assertEquals(1, diff.backgroundUpdates().size());
-        // Still uniform, just different color — bottom also changed (BLACK→RED)
-        // bottomDirty=true, wasUniform=true, isUniform=true, needsTextUpdate=true
-        // Since isUniform, emits sentinel -1 text update
-        assertEquals(1, diff.textUpdates().size());
-        assertEquals(-1, diff.textUpdates().get(0).argb());
+        assertEquals(0, diff.textUpdates().size());
     }
 
     @Test
