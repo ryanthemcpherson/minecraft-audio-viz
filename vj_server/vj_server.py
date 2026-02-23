@@ -781,6 +781,13 @@ class VJServer:
         self._link_peers: int = 0
         self._link_tempo: float = 0.0
         self._link_beat_phase: float = 0.0
+
+        # Bloom / ambient-light state (controlled by admin panel)
+        self._bloom_enabled: bool = True
+        self._bloom_strength: float = 0.4
+        self._bloom_threshold: float = 0.5
+        self._ambient_lights_enabled: bool = True
+
         if self._link_enabled:
             try:
                 self._link = aalink.Link(120.0)
@@ -2656,6 +2663,10 @@ class VJServer:
                         for did, prof in self._dj_banner_profiles.items()
                     },
                     "bitmap_zones": self._get_bitmap_zones_dict(),
+                    "bloom_enabled": self._bloom_enabled,
+                    "bloom_strength": self._bloom_strength,
+                    "bloom_threshold": self._bloom_threshold,
+                    "ambient_lights_enabled": self._ambient_lights_enabled,
                 }
             )
         )
@@ -2730,6 +2741,10 @@ class VJServer:
                                         for did, prof in self._dj_banner_profiles.items()
                                     },
                                     "bitmap_zones": self._get_bitmap_zones_dict(),
+                                    "bloom_enabled": self._bloom_enabled,
+                                    "bloom_strength": self._bloom_strength,
+                                    "bloom_threshold": self._bloom_threshold,
+                                    "ambient_lights_enabled": self._ambient_lights_enabled,
                                 }
                             )
                         )
@@ -3515,6 +3530,42 @@ class VJServer:
                                     {"type": "error", "message": f"Failed to list scenes: {str(e)}"}
                                 )
                             )
+
+                    elif msg_type == "set_bloom":
+                        self._bloom_enabled = data.get("enabled", self._bloom_enabled)
+                        if "strength" in data:
+                            self._bloom_strength = max(0.0, min(1.0, float(data["strength"])))
+                        if "threshold" in data:
+                            self._bloom_threshold = max(0.0, min(1.0, float(data["threshold"])))
+                        await self._broadcast_to_browsers(
+                            _json_str(
+                                {
+                                    "type": "bloom_state",
+                                    "enabled": self._bloom_enabled,
+                                    "strength": self._bloom_strength,
+                                    "threshold": self._bloom_threshold,
+                                }
+                            )
+                        )
+
+                    elif msg_type == "set_ambient_lights":
+                        self._ambient_lights_enabled = data.get(
+                            "enabled", self._ambient_lights_enabled
+                        )
+                        # Forward to MC plugin
+                        if self.viz_client and self.viz_client.connected:
+                            try:
+                                await self.viz_client.ws.send(self.viz_client._encode(data))
+                            except Exception:
+                                pass
+                        await self._broadcast_to_browsers(
+                            _json_str(
+                                {
+                                    "type": "ambient_lights_state",
+                                    "enabled": self._ambient_lights_enabled,
+                                }
+                            )
+                        )
 
                     # Forward zone/rendering messages directly to Minecraft
                     elif msg_type in FORWARD_TO_MINECRAFT:
