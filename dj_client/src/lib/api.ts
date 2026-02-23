@@ -17,7 +17,7 @@ import {
 } from './token-store';
 
 // Re-export for consumers
-export { initTokenStore, hasTokens, clearTokens };
+export { initTokenStore, hasTokens, clearTokens, isTokenExpiringSoon };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,6 +82,12 @@ export interface AuthResponse {
 export interface DiscordAuthorizeResponse {
   authorize_url: string;
   state: string;
+  poll_token?: string;
+}
+
+export interface PollResponse {
+  status: 'pending' | 'complete' | 'expired';
+  exchange_code?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +318,10 @@ export async function getGoogleAuthorizeUrl(
   return apiFetch<DiscordAuthorizeResponse>(
     `/auth/google?desktop=${desktop}`,
   );
+}
+
+export async function pollDesktopAuth(pollToken: string): Promise<PollResponse> {
+  return apiFetch<PollResponse>(`/auth/desktop-poll/${pollToken}`);
 }
 
 export async function forgotPassword(
