@@ -3796,21 +3796,54 @@ class VJServer:
             logger.info(f"Browser client disconnected. Total: {len(self._broadcast_clients)}")
 
     async def _broadcast_dj_roster(self):
-        """Broadcast DJ roster to all browser clients."""
-        message = _json_str(
+        """Broadcast DJ roster to all browser clients and connected DJs."""
+        roster = self._get_dj_roster()
+        active_dj = self._active_dj_id
+
+        # Browser clients get full roster
+        browser_msg = _json_str(
             {
                 "type": "dj_roster",
-                "roster": self._get_dj_roster(),
-                "active_dj": self._active_dj_id,
+                "roster": roster,
+                "active_dj": active_dj,
             }
         )
         dead_clients = set()
         for client in list(self._broadcast_clients):
             try:
-                await client.send(message)
+                await client.send(browser_msg)
             except Exception:
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
+
+        # DJs get a lightweight roster (no admin-level stats)
+        for dj_id, dj in dict(self._djs).items():
+            try:
+                dj_roster = [
+                    {
+                        "dj_id": r["dj_id"],
+                        "dj_name": r["dj_name"],
+                        "is_active": r["is_active"],
+                        "avatar_url": r.get("avatar_url"),
+                        "queue_position": r["queue_position"],
+                    }
+                    for r in roster
+                ]
+                await dj.websocket.send(
+                    _json_str(
+                        {
+                            "type": "dj_roster",
+                            "djs": dj_roster,
+                            "active_dj_id": active_dj,
+                            "your_position": next(
+                                (r["queue_position"] for r in roster if r["dj_id"] == dj_id), 999
+                            ),
+                            "rotation_interval_sec": getattr(self, "_rotation_interval_sec", 0),
+                        }
+                    )
+                )
+            except Exception:
+                pass
 
     async def _broadcast_to_browsers(self, message: str):
         """Broadcast a pre-serialized JSON message to all browser clients."""

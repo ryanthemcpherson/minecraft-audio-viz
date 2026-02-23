@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { open } from '@tauri-apps/plugin-shell';
 import * as api from '../lib/api';
 import type { UserProfileResponse } from '../lib/api';
@@ -47,33 +46,20 @@ export function useAuth(): UseAuthReturn {
     });
   }, []);
 
-  // Listen for deep-link callback (Discord OAuth desktop flow)
+  // Periodic token refresh
   useEffect(() => {
-    const unlisten = onOpenUrl(async (urls) => {
-      for (const rawUrl of urls) {
+    if (!isSignedIn) return;
+    const interval = setInterval(async () => {
+      if (api.isTokenExpiringSoon()) {
         try {
-          const parsed = new URL(rawUrl);
-          const exchangeCode = parsed.searchParams.get('exchange_code');
-          if (!exchangeCode) continue;
-
-          setIsLoading(true);
-          setError(null);
-          await api.exchangeDesktopCode(exchangeCode);
-          const profile = await api.getProfile();
-          setUser(profile);
-          break;
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e));
-        } finally {
-          setIsLoading(false);
+          await api.refreshTokens();
+        } catch {
+          // Silent — will retry next interval
         }
       }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn()).catch(() => {});
-    };
-  }, []);
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [isSignedIn]);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
@@ -111,20 +97,60 @@ export function useAuth(): UseAuthReturn {
   const signInWithDiscord = useCallback(async () => {
     setError(null);
     try {
-      const { authorize_url } = await api.getDiscordAuthorizeUrl(true);
+      const { authorize_url, poll_token } = await api.getDiscordAuthorizeUrl(true);
       await open(authorize_url);
+      if (!poll_token) {
+        setError('Server did not return poll token');
+        return;
+      }
+      setIsLoading(true);
+      const maxAttempts = 150; // 5 minutes at 2s intervals
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const result = await api.pollDesktopAuth(poll_token);
+        if (result.status === 'complete' && result.exchange_code) {
+          await api.exchangeDesktopCode(result.exchange_code);
+          const profile = await api.getProfile();
+          setUser(profile);
+          return;
+        }
+        if (result.status === 'expired') break;
+      }
+      setError('Sign-in timed out. Please try again.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
     try {
-      const { authorize_url } = await api.getGoogleAuthorizeUrl(true);
+      const { authorize_url, poll_token } = await api.getGoogleAuthorizeUrl(true);
       await open(authorize_url);
+      if (!poll_token) {
+        setError('Server did not return poll token');
+        return;
+      }
+      setIsLoading(true);
+      const maxAttempts = 150; // 5 minutes at 2s intervals
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const result = await api.pollDesktopAuth(poll_token);
+        if (result.status === 'complete' && result.exchange_code) {
+          await api.exchangeDesktopCode(result.exchange_code);
+          const profile = await api.getProfile();
+          setUser(profile);
+          return;
+        }
+        if (result.status === 'expired') break;
+      }
+      setError('Sign-in timed out. Please try again.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 

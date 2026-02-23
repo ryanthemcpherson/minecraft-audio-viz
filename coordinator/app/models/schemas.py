@@ -249,6 +249,7 @@ class DeleteAccountRequest(BaseModel):
 class OAuthAuthorizeResponse(BaseModel):
     authorize_url: str
     state: str
+    poll_token: str | None = None
 
 
 # Backwards-compat alias
