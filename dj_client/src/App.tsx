@@ -52,9 +52,6 @@ interface CaptureMode {
   name?: string;
 }
 
-const MCAV_LOGO_DATA_URI =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAKCAYAAABrGwT5AAAA3ElEQVR4AWyRvQ3CMBCFLx4jBQ0FyhppaNiAggFgAApKCgaAASjYgIYma0QUNBQZA3PfiTOOlUgv9+79OJYSZOJpmiaWmIhJKufhtm2lRO77QVbGyMOYqjGECXJf94gZIBgs73CyMPzx3MhldZTdfC193yPZDiFf13W0LyNQnH32FoSjbe8HRiqxc6CJ+kplil6Cqye+U9Ib2iFwPGBlv5aXCC4XV2E/v27k7EZe9HxQUnVdZ6by0aSF5hMOyA/DUNmX1bQDEAGBEugO8or/f9alcngon+79pg6RLwAAAP//ucby7wAAAAZJREFUAwBHiZkQ43EK0gAAAABJRU5ErkJggg==';
-
 function App() {
   // Auth state
   const auth = useAuth();
@@ -83,14 +80,12 @@ function App() {
 
   // Voice streaming state
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>({
+  const [_voiceStatus, setVoiceStatus] = useState<VoiceStatus>({
     available: false,
     streaming: false,
     channel_type: 'static',
     connected_players: 0,
   });
-  const [voiceChannelType, setVoiceChannelType] = useState('static');
-  const [voiceDistance, setVoiceDistance] = useState(100);
 
   // Status
   const [status, setStatus] = useState<ConnectionStatus>({
@@ -106,11 +101,11 @@ function App() {
   });
   const [isConnecting, setIsConnecting] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [_isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
-  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
-  const [updateError, setUpdateError] = useState<string | null>(null);
-  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [_updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [_updateError, setUpdateError] = useState<string | null>(null);
+  const [_updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [dismissUpdateBanner, setDismissUpdateBanner] = useState(false);
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
 
@@ -119,12 +114,11 @@ function App() {
 
   // Test audio state
   const [isTestingAudio, setIsTestingAudio] = useState(false);
-  const [testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [_testBands, setTestBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const testIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keyboard shortcuts state
-  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  // (showShortcutsHelp removed — keyboard shortcuts still work, visual panel removed)
 
   // Keyboard shortcuts handler
   useEffect(() => {
@@ -179,6 +173,7 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [status.connected, showWelcomeOverlay, showAuthModal, isTestingAudio, selectedSource]);
+
 
   // Auto-close auth modal when signed in
   useEffect(() => {
@@ -540,24 +535,6 @@ function App() {
     }
   };
 
-  const handleVoiceChannelType = async (type_: string) => {
-    setVoiceChannelType(type_);
-    try {
-      await invoke('set_voice_config', { channelType: type_, distance: voiceDistance });
-    } catch (e) {
-      console.error('Voice config error:', e);
-    }
-  };
-
-  const handleVoiceDistance = async (distance: number) => {
-    setVoiceDistance(distance);
-    try {
-      await invoke('set_voice_config', { channelType: voiceChannelType, distance });
-    } catch (e) {
-      console.error('Voice config error:', e);
-    }
-  };
-
   const handleStartTest = async () => {
     if (!selectedSource) return;
 
@@ -668,57 +645,15 @@ function App() {
         </div>
       )}
 
-      <header className="app-header">
-        <div className="brand">
-          <img className="brand-logo" src={MCAV_LOGO_DATA_URI} alt="MCAV logo" />
-          <div className="brand-copy">
-            <p className="brand-kicker">MCAV</p>
-            <h1>DJ Client</h1>
-          </div>
-        </div>
-        <div className="header-actions">
-          {auth.isSignedIn && auth.user ? (
-            <ProfileChip user={auth.user} onSignOut={auth.signOut} />
-          ) : (
-            <button
-              className="btn-signin"
-              onClick={() => setShowAuthModal(true)}
-              type="button"
-            >
-              Sign In
-            </button>
-          )}
-          <button
-            className="help-link"
-            onClick={() => setShowShortcutsHelp(prev => !prev)}
-            title="Keyboard Shortcuts"
-            type="button"
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <rect x="3" y="6" width="14" height="9" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-              <rect x="5" y="8" width="2" height="2" fill="currentColor"/>
-              <rect x="8" y="8" width="2" height="2" fill="currentColor"/>
-              <rect x="11" y="8" width="2" height="2" fill="currentColor"/>
-              <rect x="5" y="11" width="2" height="2" fill="currentColor"/>
-              <rect x="8" y="11" width="5" height="2" fill="currentColor"/>
-              <rect x="14" y="11" width="2" height="2" fill="currentColor"/>
-            </svg>
+      {(availableUpdate && !dismissUpdateBanner) && (
+        <div className="update-banner">
+          <span>Update {availableUpdate.version} available</span>
+          <button className="btn btn-link" onClick={installAvailableUpdate} disabled={isInstallingUpdate}>
+            {isInstallingUpdate ? 'Installing...' : 'Update'}
           </button>
-          <a
-            className="help-link"
-            href="https://github.com/ryanthemcpherson/minecraft-audio-viz#quick-start"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Help & Documentation"
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M10 14v-1m0-4c0-.55.2-1.02.59-1.41C10.98 7.2 11.45 7 12 7c.55 0 1.02.2 1.41.59.39.39.59.86.59 1.41 0 .28-.07.54-.2.78-.14.24-.32.45-.55.63l-.77.6c-.24.19-.43.4-.57.63-.14.24-.21.5-.21.78" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </a>
-          <BeatIndicator active={isBeat && status.connected} />
+          <button className="btn-dismiss" onClick={() => setDismissUpdateBanner(true)}>&times;</button>
         </div>
-      </header>
+      )}
 
       {auth.isSignedIn && auth.user && !auth.user.email_verified && (
         <div className="email-verify-banner">
@@ -733,341 +668,136 @@ function App() {
         </div>
       )}
 
-      {showShortcutsHelp && (
-        <div className="shortcuts-help">
-          <h3>Keyboard Shortcuts</h3>
-          <div className="shortcuts-list">
-            <div className="shortcut-row">
-              <span className="shortcut-label">Disconnect</span>
-              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + D</kbd>
-            </div>
-            <div className="shortcut-row">
-              <span className="shortcut-label">Refresh audio sources</span>
-              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + R</kbd>
-            </div>
-            <div className="shortcut-row">
-              <span className="shortcut-label">Toggle test audio</span>
-              <kbd>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl'} + T</kbd>
-            </div>
-            <div className="shortcut-row">
-              <span className="shortcut-label">Close overlay / Stop test</span>
-              <kbd>Esc</kbd>
+      {!status.connected ? (
+        <div className="dashboard disconnected">
+          <div className="top-bar">
+            <input
+              type="text"
+              className="input dj-name-input"
+              value={djName}
+              onChange={e => setDjName(e.target.value)}
+              placeholder="DJ Name"
+              maxLength={32}
+            />
+            <div className="top-bar-right">
+              {auth.isSignedIn && auth.user ? (
+                <ProfileChip user={auth.user} onSignOut={auth.signOut} />
+              ) : (
+                <button className="btn-signin" onClick={() => setShowAuthModal(true)} type="button">
+                  Sign In
+                </button>
+              )}
             </div>
           </div>
-        </div>
-      )}
 
-      <main className="app-main">
-        {(availableUpdate && !dismissUpdateBanner) || isCheckingUpdate || updateMessage || updateError ? (
-          <section className="section update-section">
-            <div className="update-header">
-              <h2>App Updates</h2>
-              <button
-                className="btn btn-link"
-                onClick={() => checkForUpdates(true)}
-                type="button"
-                disabled={isCheckingUpdate || isInstallingUpdate}
-              >
-                {isCheckingUpdate ? 'Checking...' : 'Check now'}
-              </button>
+          <div className="connect-form">
+            <div className="connect-row">
+              <div className="field-group">
+                <label className="field-label">Code</label>
+                <ConnectCode value={connectCode} onChange={setConnectCode} />
+              </div>
+              <div className="field-group">
+                <label className="field-label">Audio</label>
+                <AudioSourceSelect
+                  sources={audioSources}
+                  value={selectedSource}
+                  onChange={setSelectedSource}
+                  onRefresh={loadAudioSources}
+                />
+              </div>
             </div>
 
-            {availableUpdate && !dismissUpdateBanner ? (
-              <>
-                <p className="update-text">
-                  Version {availableUpdate.version} is ready to install.
-                </p>
-                {updateProgress !== null ? (
-                  <p className="update-text">Download progress: {updateProgress}%</p>
-                ) : null}
-                <div className="update-actions">
-                  <button
-                    className="btn btn-connect"
-                    onClick={installAvailableUpdate}
-                    disabled={isInstallingUpdate || isCheckingUpdate}
-                    type="button"
-                  >
-                    {isInstallingUpdate ? 'Installing...' : 'Update now'}
-                  </button>
-                  <button
-                    className="btn btn-quick-connect"
-                    onClick={() => setDismissUpdateBanner(true)}
-                    disabled={isInstallingUpdate}
-                    type="button"
-                  >
-                    Later
-                  </button>
-                </div>
-              </>
-            ) : null}
+            <label className="checkbox-label">
+              <input type="checkbox" checked={directConnect} onChange={e => setDirectConnect(e.target.checked)} />
+              Direct connect (self-hosted)
+            </label>
 
-            {updateMessage ? <p className="update-text">{updateMessage}</p> : null}
-            {updateError ? <div className="error-message">{updateError}</div> : null}
-          </section>
-        ) : null}
-
-        {!status.connected ? (
-          <>
-            <section className="section hero-section">
-              <p>Enter your DJ name, paste your connect code, pick audio, then connect.</p>
-            </section>
-
-            <section className="section">
-              {auth.isSignedIn && auth.user && (
-                <div className="profile-card">
-                  {(auth.user.dj_profile?.avatar_url ?? auth.user.avatar_url) ? (
-                    <img className="profile-card-avatar" src={(auth.user.dj_profile?.avatar_url ?? auth.user.avatar_url)!} alt="" />
-                  ) : (
-                    <span className="profile-card-avatar-initials">
-                      {(auth.user.dj_profile?.dj_name ?? auth.user.display_name).split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
-                    </span>
-                  )}
-                  <div className="profile-card-inner">
-                    <span className="profile-card-name">{auth.user.dj_profile?.dj_name ?? auth.user.display_name}</span>
-                    <span className="profile-card-sub">Signed in as {auth.user.display_name}</span>
-                  </div>
-                </div>
-              )}
-              <label className="input-label">
-                Step 1 - DJ Name
+            {directConnect && (
+              <div className="direct-connect-row">
                 <input
                   type="text"
-                  value={djName}
-                  onChange={e => setDjName(e.target.value)}
-                  placeholder="DJ Name"
-                  className="input"
-                  maxLength={32}
+                  className="input input-sm"
+                  value={serverHost}
+                  onChange={e => setServerHost(e.target.value)}
+                  placeholder="Host"
                 />
-              </label>
-            </section>
-
-            <section className="section">
-              <div className="label-with-help">
-                <span className="input-label">Step 2 - Connect Code</span>
-                <span className="help-text">Get this from your VJ operator or server admin</span>
-              </div>
-              <ConnectCode
-                value={connectCode}
-                onChange={setConnectCode}
-              />
-              <label className="direct-connect-toggle">
                 <input
-                  type="checkbox"
-                  checked={directConnect}
-                  onChange={e => setDirectConnect(e.target.checked)}
+                  type="number"
+                  className="input input-sm input-port"
+                  value={serverPort}
+                  onChange={e => setServerPort(parseInt(e.target.value, 10) || 9000)}
+                  placeholder="Port"
                 />
-                <span>Direct connect (self-hosted server)</span>
-              </label>
-              {directConnect && (
-                <div className="direct-connect-fields">
-                  <input
-                    type="text"
-                    value={serverHost}
-                    onChange={e => setServerHost(e.target.value)}
-                    placeholder="Server host"
-                    className="input input-sm"
-                  />
-                  <input
-                    type="number"
-                    value={serverPort}
-                    onChange={e => setServerPort(parseInt(e.target.value, 10) || 9000)}
-                    placeholder="Port"
-                    className="input input-sm input-port"
-                  />
-                </div>
-              )}
-            </section>
-
-            <section className="section">
-              <div className="label-with-help">
-                <span className="input-label">Step 3 - Audio Source</span>
-                <span className="help-text">System: all PC audio, Application: specific app, Input Device: microphone/line-in</span>
-              </div>
-              {audioSources.length === 0 ? (
-                <div className="empty-state">
-                  <p>No audio sources found. Make sure your audio devices are connected and enabled.</p>
-                  <button className="btn btn-link" onClick={loadAudioSources} type="button">
-                    Refresh
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="audio-source-row">
-                    <AudioSourceSelect
-                      sources={audioSources}
-                      value={selectedSource}
-                      onChange={setSelectedSource}
-                      onRefresh={loadAudioSources}
-                    />
-                    <button
-                      className={`btn btn-test ${isTestingAudio ? 'testing' : ''}`}
-                      onClick={isTestingAudio ? handleStopTest : handleStartTest}
-                      disabled={!selectedSource}
-                      type="button"
-                    >
-                      {isTestingAudio ? 'Stop Test' : 'Test'}
-                    </button>
-                  </div>
-                  {isTestingAudio && (
-                    <div className="test-meter">
-                      {testBands.map((level, i) => (
-                        <div key={i} className="test-bar">
-                          <div
-                            className="test-fill"
-                            style={{
-                              width: `${Math.min(100, level * 100)}%`,
-                              background: `hsl(${180 + i * 40}, 70%, 50%)`,
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </section>
-
-            {status.error && (
-              <div className="error-message">
-                {status.error}
               </div>
             )}
 
+            {status.error && <div className="error-message">{status.error}</div>}
+
             <button
-              className="btn btn-connect"
+              className="btn btn-connect full-width"
               onClick={handleConnect}
               disabled={isConnecting || connectCode.length !== 8 || !djName.trim()}
             >
               {isConnecting ? 'Connecting...' : 'Connect'}
             </button>
-          </>
-        ) : (
-          <>
-            {showName && (
-              <section className="section show-name-section">
-                <span className="input-label">{showName}</span>
-              </section>
-            )}
+          </div>
+        </div>
+      ) : (
+        <div className="dashboard connected">
+          <div className="top-bar">
+            <span className="dj-label">{djName}</span>
+            {showName && <span className="show-label">{showName}</span>}
+            <div className="top-bar-right">
+              {auth.isSignedIn && auth.user ? (
+                <ProfileChip user={auth.user} onSignOut={auth.signOut} />
+              ) : null}
+              <BeatIndicator active={isBeat && status.connected} />
+            </div>
+          </div>
 
-            <section className="section audio-source-connected">
-              <AudioSourceSelect
-                sources={audioSources}
-                value={selectedSource}
-                onChange={handleSourceChange}
-                onRefresh={loadAudioSources}
-              />
-              {captureMode && captureMode.mode === 'system_loopback' && captureMode.fallback_reason && (
-                <div className="capture-mode-warning">
-                  Per-app capture failed: {captureMode.fallback_reason}
-                </div>
-              )}
-              {captureMode && captureMode.mode === 'process_loopback' && (
-                <div className="capture-mode-info">
-                  Capturing: {captureMode.name} (PID {captureMode.pid})
-                </div>
-              )}
-            </section>
-
-            <section className="section">
+          <div className="main-grid">
+            <div className="col-left">
               <FrequencyMeter bands={bands} isBeat={isBeat} beatIntensity={beatIntensity} bpm={bpm} />
-            </section>
-
-            <section className="section preset-section">
-              <span className="input-label input-label--spaced">Audio Preset</span>
-              <div className="preset-buttons">
+              <div className="preset-row">
                 {PRESETS.map(name => (
                   <button
                     key={name}
-                    className={`btn btn-preset ${activePreset === name ? 'active' : ''}`}
+                    className={`preset-chip ${activePreset === name ? 'active' : ''}`}
                     onClick={() => handlePresetChange(name)}
                     type="button"
-                  >
-                    {name}
-                  </button>
+                  >{name}</button>
                 ))}
               </div>
-            </section>
+            </div>
 
-            <section className="section">
+            <div className="col-right">
               <StatusPanel status={status} />
-            </section>
+            </div>
+          </div>
 
-            <section className="section voice-section">
-              <div className="voice-header">
-                <div className="voice-title">
-                  <span className="input-label input-label--inline">Voice Streaming</span>
-                  {voiceStatus.streaming && (
-                    <span className="voice-live-badge">STREAMING</span>
-                  )}
-                </div>
-                <button
-                  className={`btn voice-toggle ${voiceEnabled ? 'voice-on' : 'voice-off'}`}
-                  onClick={handleToggleVoice}
-                  type="button"
-                >
-                  {voiceEnabled ? 'Stop' : 'Stream Audio'}
-                </button>
-              </div>
-
-              {voiceEnabled && (
-                <div className="voice-controls">
-                  <div className="voice-row">
-                    <span className="status-label">Channel:</span>
-                    <div className="voice-channel-buttons">
-                      <button
-                        className={`btn btn-channel ${voiceChannelType === 'static' ? 'active' : ''}`}
-                        onClick={() => handleVoiceChannelType('static')}
-                        type="button"
-                      >
-                        Static
-                      </button>
-                      <button
-                        className={`btn btn-channel ${voiceChannelType === 'locational' ? 'active' : ''}`}
-                        onClick={() => handleVoiceChannelType('locational')}
-                        type="button"
-                      >
-                        Locational
-                      </button>
-                    </div>
-                  </div>
-
-                  {voiceChannelType === 'locational' && (
-                    <div className="voice-row">
-                      <span className="status-label">Distance:</span>
-                      <div className="voice-distance">
-                        <input
-                          type="range"
-                          min={10}
-                          max={500}
-                          step={10}
-                          value={voiceDistance}
-                          onChange={e => handleVoiceDistance(Number(e.target.value))}
-                          className="voice-slider"
-                        />
-                        <span className="status-value">{voiceDistance}m</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {voiceStatus.connected_players > 0 && (
-                    <div className="voice-row">
-                      <span className="status-label">Players:</span>
-                      <span className="status-value">{voiceStatus.connected_players}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-
+          <div className="bottom-bar">
+            <AudioSourceSelect
+              sources={audioSources}
+              value={selectedSource}
+              onChange={handleSourceChange}
+              onRefresh={loadAudioSources}
+            />
+            {captureMode && captureMode.mode === 'process_loopback' && (
+              <span className="capture-info">{captureMode.name}</span>
+            )}
             <button
-              className="btn btn-disconnect"
-              onClick={handleDisconnect}
+              className={`btn voice-toggle ${voiceEnabled ? 'voice-on' : 'voice-off'}`}
+              onClick={handleToggleVoice}
+              type="button"
             >
+              {voiceEnabled ? 'Voice Off' : 'Voice'}
+            </button>
+            <button className="btn btn-disconnect" onClick={handleDisconnect}>
               Disconnect
             </button>
-          </>
-        )}
-      </main>
+          </div>
+        </div>
+      )}
 
       {showAuthModal && (
         <AuthModal auth={auth} onClose={() => setShowAuthModal(false)} />
