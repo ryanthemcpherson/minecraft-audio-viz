@@ -63,7 +63,7 @@ function App() {
 
   // Connection state
   const [djName, setDjName] = useState('');
-  const [connectCode, setConnectCode] = useState(['', '', '', '', '', '', '', '']);
+  const [connectCode, setConnectCode] = useState('');
   const [showName, setShowName] = useState<string | null>(null);
   const [directConnect, setDirectConnect] = useState(() => localStorage.getItem('mcav.directConnect') === 'true');
   const [serverHost, setServerHost] = useState(() => localStorage.getItem('mcav.serverHost') || '192.168.1.204');
@@ -414,7 +414,7 @@ function App() {
   };
 
   const handleConnect = async () => {
-    const code = connectCode.join('');
+    const code = connectCode;
     if (code.length !== 8 || !djName.trim()) {
       return;
     }
@@ -849,7 +849,6 @@ function App() {
               <ConnectCode
                 value={connectCode}
                 onChange={setConnectCode}
-                label=""
               />
               <label className="direct-connect-toggle">
                 <input
@@ -937,7 +936,7 @@ function App() {
             <button
               className="btn btn-connect"
               onClick={handleConnect}
-              disabled={isConnecting || connectCode.join('').length !== 8 || !djName.trim()}
+              disabled={isConnecting || connectCode.length !== 8 || !djName.trim()}
             >
               {isConnecting ? 'Connecting...' : 'Connect'}
             </button>
