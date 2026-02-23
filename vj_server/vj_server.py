@@ -81,6 +81,30 @@ _USE_ASYNC_LUA = os.environ.get("MCAV_ASYNC_LUA", "1") != "0"
 # Input validation helpers (security hardening)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# msgspec Structs for hot-path decode
+# ---------------------------------------------------------------------------
+
+
+class DjAudioFrame(msgspec.Struct):
+    """Typed struct for dj_audio_frame messages (60fps hot path)."""
+
+    type: str
+    bands: List[float] = []
+    peak: float = 0.0
+    beat: bool = False
+    bpm: float = 120.0
+    beat_i: float = 0.0
+    i_bass: float = 0.0
+    i_kick: bool = False
+    seq: int = 0
+    ts: Optional[float] = None
+    tempo_conf: float = 0.0
+    beat_phase: float = 0.0
+
+
+_frame_decoder = msgspec.json.Decoder(DjAudioFrame)
+
 # Regex for stripping non-printable characters (keeps printable ASCII + common Unicode)
 _NONPRINTABLE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
@@ -116,10 +140,11 @@ def _clamp_finite(val, lo: float, hi: float, default: float) -> float:
     return max(lo, min(hi, val))
 
 
-def _sanitize_audio_frame(data: dict) -> dict:
+def _sanitize_audio_frame(data: DjAudioFrame) -> dict:
     """Validate and clamp an incoming DJ audio frame.
 
-    Enforces the constraints from dj-audio-frame.schema.json:
+    Accepts a DjAudioFrame struct (type-validated on decode) and applies
+    value clamping per dj-audio-frame.schema.json:
     - bands: exactly 5 floats in [0.0, 1.0]
     - peak, beat_i, i_bass: floats >= 0 (capped at 5.0)
     - bpm: float in [0.0, 300.0]
@@ -128,8 +153,8 @@ def _sanitize_audio_frame(data: dict) -> dict:
     - seq: int >= 0
     - beat, i_kick: booleans
     """
-    # Bands: must be list of exactly 5 floats in [0, 1]
-    raw_bands = data.get("bands", None)
+    # Bands: clamp to exactly 5 floats in [0, 1]
+    raw_bands = data.bands
     if isinstance(raw_bands, list):
         bands = [_clamp_finite(b, 0.0, 1.0, 0.0) for b in raw_bands[:5]]
         while len(bands) < 5:
@@ -139,16 +164,16 @@ def _sanitize_audio_frame(data: dict) -> dict:
 
     return {
         "bands": bands,
-        "peak": _clamp_finite(data.get("peak"), 0.0, 5.0, 0.0),
-        "beat": bool(data.get("beat", False)),
-        "beat_i": _clamp_finite(data.get("beat_i"), 0.0, 5.0, 0.0),
-        "bpm": _clamp_finite(data.get("bpm"), 0.0, 300.0, 120.0),
-        "tempo_conf": _clamp_finite(data.get("tempo_conf"), 0.0, 1.0, 0.0),
-        "beat_phase": _clamp_finite(data.get("beat_phase"), 0.0, 1.0, 0.0),
-        "seq": max(0, int(data.get("seq", 0))) if isinstance(data.get("seq"), (int, float)) else 0,
-        "i_bass": _clamp_finite(data.get("i_bass"), 0.0, 5.0, 0.0),
-        "i_kick": bool(data.get("i_kick", False)),
-        "ts": data.get("ts"),  # validated separately in latency calc
+        "peak": _clamp_finite(data.peak, 0.0, 5.0, 0.0),
+        "beat": bool(data.beat),
+        "beat_i": _clamp_finite(data.beat_i, 0.0, 5.0, 0.0),
+        "bpm": _clamp_finite(data.bpm, 0.0, 300.0, 120.0),
+        "tempo_conf": _clamp_finite(data.tempo_conf, 0.0, 1.0, 0.0),
+        "beat_phase": _clamp_finite(data.beat_phase, 0.0, 1.0, 0.0),
+        "seq": max(0, data.seq),
+        "i_bass": _clamp_finite(data.i_bass, 0.0, 5.0, 0.0),
+        "i_kick": bool(data.i_kick),
+        "ts": data.ts,  # validated separately in latency calc
     }
 
 
@@ -1502,7 +1527,8 @@ class VJServer:
                         frame_type = frame_data.get("type")
 
                         if frame_type == "dj_audio_frame":
-                            await self._handle_dj_frame(dj, frame_data)
+                            frame = _frame_decoder.decode(message)
+                            await self._handle_dj_frame(dj, frame)
                         elif frame_type == "dj_heartbeat":
                             await self._process_dj_heartbeat(dj, websocket, frame_data)
                         elif frame_type == "clock_sync_response":
@@ -1719,7 +1745,8 @@ class VJServer:
                     msg_type = data.get("type")
 
                     if msg_type == "dj_audio_frame":
-                        await self._handle_dj_frame(dj, data)
+                        frame = _frame_decoder.decode(message)
+                        await self._handle_dj_frame(dj, frame)
 
                     elif msg_type == "dj_heartbeat":
                         await self._process_dj_heartbeat(dj, websocket, data)
