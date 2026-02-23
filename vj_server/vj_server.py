@@ -3486,6 +3486,10 @@ class VJServer:
                                 )
                             )
 
+                    elif msg_type == "request_parity_check":
+                        parity_result = await self._run_parity_check()
+                        await self._broadcast_to_browsers(_json_str(parity_result))
+
                     elif msg_type == "subscribe_voice":
                         self._voice_subscribers.add(websocket)
                         logger.info(
@@ -4384,6 +4388,142 @@ class VJServer:
                 logger.warning(f"Bitmap auto-init: timeout for zone '{zn}'")
             except Exception as e:
                 logger.warning(f"Bitmap auto-init: failed for zone '{zn}': {e}")
+
+    async def _run_parity_check(self) -> dict:
+        """Query Minecraft zone status and compare against VJ server state.
+
+        Automatically repairs any mismatches found.  Returns a parity_check_result
+        message suitable for broadcasting to admin browsers.
+        """
+        result: dict = {"type": "parity_check_result", "ok": True, "zones": {}}
+
+        if not self.viz_client or not self.viz_client.connected:
+            result["ok"] = False
+            result["error"] = "Minecraft not connected"
+            return result
+
+        # Increase timeout for the query (zone iteration can be slow)
+        saved_timeout = self.viz_client.connect_timeout
+        self.viz_client.connect_timeout = 15.0
+        try:
+            mc_report = await self.viz_client.query_zone_status()
+        finally:
+            self.viz_client.connect_timeout = saved_timeout
+
+        if not mc_report or "zones" not in mc_report:
+            result["ok"] = False
+            result["error"] = "Failed to query Minecraft zone status"
+            return result
+
+        mc_zones: dict = mc_report["zones"]
+
+        # Compare each zone the VJ server knows about
+        for zone_name, zs in self._zone_patterns.items():
+            expected = {
+                "entity_count": zs.entity_count,
+                "render_mode": zs.render_mode,
+                "pattern": zs.pattern_name,
+            }
+            if zs.render_mode == "bitmap":
+                expected["bitmap_initialized"] = zs.bitmap_initialized
+                expected["bitmap_width"] = zs.bitmap_width
+                expected["bitmap_height"] = zs.bitmap_height
+
+            actual_mc = mc_zones.get(zone_name)
+            if actual_mc is None:
+                result["zones"][zone_name] = {
+                    "ok": False,
+                    "mismatches": ["zone missing in Minecraft"],
+                    "expected": expected,
+                    "actual": None,
+                    "repaired": [],
+                }
+                result["ok"] = False
+                continue
+
+            actual = {
+                "entity_count": actual_mc.get("entity_count", 0),
+                "bitmap_active": actual_mc.get("bitmap_active", False),
+                "bitmap_width": actual_mc.get("bitmap_width", 0),
+                "bitmap_height": actual_mc.get("bitmap_height", 0),
+                "bitmap_pattern": actual_mc.get("bitmap_pattern"),
+            }
+
+            mismatches: list[str] = []
+            repairs: list[str] = []
+
+            # Check render mode alignment
+            expected_bitmap = zs.render_mode == "bitmap"
+            actual_bitmap = actual["bitmap_active"]
+
+            if expected_bitmap and not actual_bitmap:
+                mismatches.append("render_mode: expected bitmap, actual block (no bitmap grid)")
+                # Repair: re-init bitmap
+                try:
+                    await self._switch_zone_to_bitmap(zone_name, zs, zs.pattern_name)
+                    repairs.append("re-initialized bitmap grid")
+                except Exception as e:
+                    repairs.append(f"bitmap repair failed: {e}")
+
+            elif not expected_bitmap and actual_bitmap:
+                mismatches.append("render_mode: expected block, actual bitmap")
+                # Repair: switch back to block mode
+                try:
+                    await self._switch_zone_to_block(zone_name, zs, zs.pattern_name)
+                    repairs.append("switched back to block mode")
+                except Exception as e:
+                    repairs.append(f"block repair failed: {e}")
+
+            elif not expected_bitmap:
+                # Block mode — check entity count
+                mc_count = actual["entity_count"]
+                if mc_count != zs.entity_count and zs.entity_count > 0:
+                    mismatches.append(
+                        f"entity_count: expected {zs.entity_count}, actual {mc_count}"
+                    )
+                    # Repair: re-init pool
+                    try:
+                        if self.viz_client and self.viz_client.connected:
+                            await self.viz_client.init_pool(
+                                zone_name, zs.entity_count, zs.block_type
+                            )
+                            repairs.append(f"re-initialized pool with {zs.entity_count} entities")
+                    except Exception as e:
+                        repairs.append(f"pool repair failed: {e}")
+
+            zone_ok = len(mismatches) == 0
+            if not zone_ok:
+                result["ok"] = False
+
+            result["zones"][zone_name] = {
+                "ok": zone_ok,
+                "expected": expected,
+                "actual": actual,
+            }
+            if mismatches:
+                result["zones"][zone_name]["mismatches"] = mismatches
+            if repairs:
+                result["zones"][zone_name]["repaired"] = repairs
+
+        # Also flag zones that exist in MC but not in VJ server
+        for mc_zone in mc_zones:
+            if mc_zone not in self._zone_patterns:
+                result["zones"][mc_zone] = {
+                    "ok": False,
+                    "mismatches": ["zone exists in Minecraft but not tracked by VJ server"],
+                    "expected": None,
+                    "actual": {
+                        "entity_count": mc_zones[mc_zone].get("entity_count", 0),
+                        "bitmap_active": mc_zones[mc_zone].get("bitmap_active", False),
+                    },
+                }
+                result["ok"] = False
+
+        zone_count = len(result["zones"])
+        ok_count = sum(1 for z in result["zones"].values() if z.get("ok"))
+        logger.info(f"Parity check: {ok_count}/{zone_count} zones OK")
+
+        return result
 
     async def _switch_zone_to_bitmap(self, zone_name: str, zs: ZonePatternState, pattern_name: str):
         """Switch a zone from block mode to bitmap mode (or change bitmap pattern)."""
