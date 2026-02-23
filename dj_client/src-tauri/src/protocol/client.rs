@@ -117,6 +117,8 @@ pub struct ConnectionState {
     pub pending_band_sensitivity: Option<[f32; 5]>,
     /// Config change received from server (consumed by bridge task)
     pub pending_config_change: Option<(u32, String)>,
+    /// DJ roster update received from server (consumed by bridge task)
+    pub pending_dj_roster: Option<serde_json::Value>,
 }
 
 impl Default for ConnectionState {
@@ -144,6 +146,7 @@ impl Default for ConnectionState {
             pending_pattern_change: None,
             pending_band_sensitivity: None,
             pending_config_change: None,
+            pending_dj_roster: None,
         }
     }
 }
@@ -523,6 +526,11 @@ impl DjClient {
     pub fn take_pending_config_change(&self) -> Option<(u32, String)> {
         self.state.lock().pending_config_change.take()
     }
+
+    /// Take pending DJ roster (if any) that was received from the server.
+    pub fn take_pending_dj_roster(&self) -> Option<serde_json::Value> {
+        self.state.lock().pending_dj_roster.take()
+    }
 }
 
 /// Handle incoming server messages
@@ -688,6 +696,12 @@ async fn handle_server_message(
             s.voice_streaming = vs.streaming;
             s.voice_channel_type = vs.channel_type;
             s.voice_connected_players = vs.connected_players;
+        }
+        ServerMessage::DjRoster(roster) => {
+            log::info!("DJ roster update: {} DJs", roster.djs.len());
+            if let Ok(value) = serde_json::to_value(&roster) {
+                state.lock().pending_dj_roster = Some(value);
+            }
         }
     }
 }
