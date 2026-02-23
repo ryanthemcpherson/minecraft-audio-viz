@@ -325,18 +325,18 @@ async def discord_callback(
         )
         session.add(row)
         await session.commit()
-        scheme = settings.desktop_deep_link_scheme
-        redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
         html = (
             "<html><head>"
-            "<style>body{background:#08090d;color:#f5f5f5;font-family:Inter,sans-serif;"
+            "<style>body{background:#08090d;color:#f5f5f5;font-family:'Inter',system-ui,sans-serif;"
             "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
-            ".card{text-align:center;padding:2rem}"
-            "a{color:#00CCFF}</style>"
+            ".card{text-align:center;padding:2rem;max-width:400px}"
+            "h2{margin:0 0 .5rem;font-size:1.4rem}"
+            "p{color:#a1a1aa;margin:.5rem 0;line-height:1.5}"
+            ".check{font-size:2.5rem;margin-bottom:.5rem}</style>"
             "</head><body><div class='card'>"
+            "<div class='check'>&#10003;</div>"
             "<h2>Login successful</h2>"
             "<p>You can close this tab and return to the MCAV DJ Client.</p>"
-            f"<p><a href='{redirect_url}'>Click here if the app didn't open automatically</a></p>"
             "</div></body></html>"
         )
         return HTMLResponse(content=html)
@@ -449,18 +449,18 @@ async def google_callback(
         )
         session.add(row)
         await session.commit()
-        scheme = settings.desktop_deep_link_scheme
-        redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
         html = (
             "<html><head>"
-            "<style>body{background:#08090d;color:#f5f5f5;font-family:Inter,sans-serif;"
+            "<style>body{background:#08090d;color:#f5f5f5;font-family:'Inter',system-ui,sans-serif;"
             "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
-            ".card{text-align:center;padding:2rem}"
-            "a{color:#00CCFF}</style>"
+            ".card{text-align:center;padding:2rem;max-width:400px}"
+            "h2{margin:0 0 .5rem;font-size:1.4rem}"
+            "p{color:#a1a1aa;margin:.5rem 0;line-height:1.5}"
+            ".check{font-size:2.5rem;margin-bottom:.5rem}</style>"
             "</head><body><div class='card'>"
+            "<div class='check'>&#10003;</div>"
             "<h2>Login successful</h2>"
             "<p>You can close this tab and return to the MCAV DJ Client.</p>"
-            f"<p><a href='{redirect_url}'>Click here if the app didn't open automatically</a></p>"
             "</div></body></html>"
         )
         return HTMLResponse(content=html)
