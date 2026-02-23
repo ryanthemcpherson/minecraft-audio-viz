@@ -121,8 +121,8 @@ function init() {
     const previewSection = document.querySelector('.preview-section');
     const aspect = previewSection ? previewSection.clientWidth / previewSection.clientHeight : window.innerWidth / window.innerHeight;
     camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 200);
-    camera.position.set(25, 20, 25);
-    camera.lookAt(0, 2, 0);
+    camera.position.set(0, 12, 30);
+    camera.lookAt(0, 5, 0);
 
     // Renderer
     const canvas = document.getElementById('visualizer');
@@ -184,12 +184,7 @@ function init() {
         })
     );
 
-    // Procedural environment as fallback (shown until scanned blocks arrive)
-    if (typeof BlockTextureManager !== 'undefined' && typeof MinecraftEnvironment !== 'undefined') {
-        const texMgr = textureManager || new BlockTextureManager();
-        mcEnvironment = new MinecraftEnvironment(scene, texMgr);
-        mcEnvironment.build();
-    }
+    // Procedural environment disabled — clean background only
 
     // Create visualization blocks
     createBlocks();
@@ -205,10 +200,7 @@ function init() {
         particleEntityRenderer.setVisible(false);  // Hidden by default (block mode)
     }
 
-    // Initialize block indicators
-    if (typeof BlockIndicatorSystem !== 'undefined') {
-        blockIndicators = new BlockIndicatorSystem(scene, 8);
-    }
+    // Block indicators removed — floor tiles no longer shown
 
     // Initialize bitmap LED wall preview
     if (typeof BitmapPreview !== 'undefined') {
@@ -830,10 +822,7 @@ function updateAudioState(data) {
     // Update block positions
     updateBlockTargets();
 
-    // Update block indicators
-    if (blockIndicators && showBlockGrid) {
-        blockIndicators.updateFromAudio(audioState.bands, audioState.isBeat, audioState.beatIntensity);
-    }
+    // Block indicators removed
 
     // Spawn particles on beat (BPM now updated from server above)
     if (audioState.isBeat) {
@@ -1269,7 +1258,7 @@ function animate() {
         spherical.setFromVector3(camera.position);
         spherical.theta += 0.002;
         camera.position.setFromSpherical(spherical);
-        camera.lookAt(0, 3, 0);
+        camera.lookAt(0, 5, 0);
     }
 
     renderer.render(scene, camera);
@@ -1291,8 +1280,8 @@ function onResize() {
 }
 
 function resetCamera() {
-    camera.position.set(25, 20, 25);
-    camera.lookAt(0, 2, 0);
+    camera.position.set(0, 12, 30);
+    camera.lookAt(0, 5, 0);
 }
 
 function updatePatternList(patterns, currentPattern) {
@@ -1427,6 +1416,16 @@ function handleZonesResponse(zones) {
         if (zone.name) ensureZoneGroup(zone.name);
     });
 
+    // Reposition camera to frame the main zone
+    const mainZone = zones.find(z => (z.name || '').toLowerCase().includes('main'));
+    if (mainZone) {
+        const sy = mainZone.size?.y || 10;
+        const sx = mainZone.size?.x || 10;
+        const viewDist = Math.max(sx, sy) * 1.8;
+        camera.position.set(0, sy * 0.6, viewDist);
+        camera.lookAt(0, sy * 0.4, 0);
+    }
+
     // Activate bitmap preview for all zones (visible only in LED Wall mode)
     if (bitmapPreview) {
         zones.forEach(zone => {
@@ -1493,7 +1492,16 @@ function handleBitmapInitialized(data) {
         data.pattern || 'bmp_plasma',
         zg
     );
-    applyBitmapZoneVisibility();
+
+    // Auto-switch to bitmap view mode when bitmap zones are initialized
+    if (viewMode !== 'bitmap') {
+        viewMode = 'bitmap';
+        const radio = document.querySelector('input[name="view-mode"][value="bitmap"]');
+        if (radio) radio.checked = true;
+        applyViewMode();
+    } else {
+        applyBitmapZoneVisibility();
+    }
     console.log(`[Bitmap] Initialized ${data.width}x${data.height} for zone '${data.zone}'`);
 }
 
@@ -1547,28 +1555,31 @@ function computeStageCenter(zones) {
         return;
     }
 
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    // Prefer the "main" zone for centering; fall back to bounding box of all zones
+    const mainZone = zones.find(z => (z.name || '').toLowerCase().includes('main'));
+    const targetZones = mainZone ? [mainZone] : zones;
 
-    zones.forEach(zone => {
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxZ = -Infinity;
+
+    targetZones.forEach(zone => {
         const ox = zone.origin?.x || 0;
         const oy = zone.origin?.y || 0;
         const oz = zone.origin?.z || 0;
         const sx = zone.size?.x || 10;
-        const sy = zone.size?.y || 10;
         const sz = zone.size?.z || 10;
 
         minX = Math.min(minX, ox);
         minY = Math.min(minY, oy);
         minZ = Math.min(minZ, oz);
         maxX = Math.max(maxX, ox + sx);
-        maxY = Math.max(maxY, oy + sy);
         maxZ = Math.max(maxZ, oz + sz);
     });
 
+    // Center on X/Z, but use the bottom Y so zone blocks sit on the floor
     stageCenter = {
         x: (minX + maxX) / 2,
-        y: (minY + maxY) / 2,
+        y: minY,
         z: (minZ + maxZ) / 2
     };
 }
