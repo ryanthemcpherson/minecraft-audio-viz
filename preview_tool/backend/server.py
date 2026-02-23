@@ -32,6 +32,8 @@ logger = logging.getLogger('preview_server')
 
 # Connected browser clients
 clients: Set = set()
+json_decode_drop_count = 0
+_last_json_drop_log = 0.0
 
 # Current visualization state (5 bands for ultra-low-latency)
 current_state = {
@@ -43,11 +45,36 @@ current_state = {
 }
 
 
+def _record_json_decode_drop(source: str):
+    """Track malformed JSON messages with low-frequency logging."""
+    global json_decode_drop_count, _last_json_drop_log
+    json_decode_drop_count += 1
+    now = time.time()
+    if now - _last_json_drop_log >= 30:
+        logger.warning(
+            "Dropped malformed JSON (%s). count=%d",
+            source,
+            json_decode_drop_count,
+        )
+        _last_json_drop_log = now
+
+
 async def broadcast(message: dict):
     """Broadcast message to all connected clients."""
     if clients:
         msg = json.dumps(message)
-        await asyncio.gather(*[client.send(msg) for client in clients], return_exceptions=True)
+        snapshot = list(clients)
+        results = await asyncio.gather(
+            *[client.send(msg) for client in snapshot],
+            return_exceptions=True,
+        )
+        for client, result in zip(snapshot, results):
+            if isinstance(result, Exception):
+                clients.discard(client)
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
 
 async def handle_client(websocket):
@@ -66,7 +93,7 @@ async def handle_client(websocket):
                 if data.get("type") == "ping":
                     await websocket.send(json.dumps({"type": "pong"}))
             except json.JSONDecodeError:
-                pass
+                _record_json_decode_drop("browser_client")
 
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -132,7 +159,7 @@ async def connect_to_capture(host: str, port: int):
                             current_state["frame"] += 1
                             await broadcast({"type": "audio", **current_state})
                     except json.JSONDecodeError:
-                        pass
+                        _record_json_decode_drop("capture_agent")
 
         except Exception as e:
             logger.warning(f"Connection failed: {e}. Retrying in 2s...")
@@ -181,7 +208,7 @@ def run_http_server(port: int, directory: str):
     # Start server from project root
     os.chdir(str(project_root))
 
-    with socketserver.TCPServer(("", port), MultiDirectoryHandler) as httpd:
+    with socketserver.ThreadingTCPServer(("", port), MultiDirectoryHandler) as httpd:
         logger.info(f"HTTP server at http://localhost:{port}")
         logger.info(f"  Preview: http://localhost:{port}/")
         logger.info(f"  Admin:   http://localhost:{port}/admin/")
