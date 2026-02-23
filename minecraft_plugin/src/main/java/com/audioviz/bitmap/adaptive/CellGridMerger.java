@@ -118,4 +118,28 @@ public final class CellGridMerger {
 
         return result;
     }
+
+    /**
+     * Build one 1x1 rectangle per cell with no cross-cell merging.
+     * Useful when visual fidelity/stability is preferred over entity-count reduction.
+     *
+     * @param pixels      row-major ARGB pixel array
+     * @param pixelWidth  logical pixel width
+     * @param pixelHeight logical pixel height
+     * @return list of 1x1 rects in deterministic row-major order
+     */
+    public static List<MergedRect> asCellRects(int[] pixels, int pixelWidth, int pixelHeight) {
+        int cellWidth = pixelWidth;
+        int cellHeight = cellGridHeight(pixelHeight);
+        HalfBlockCell[] cells = buildCellGrid(pixels, pixelWidth, pixelHeight);
+        List<MergedRect> result = new ArrayList<>(cells.length);
+
+        for (int cy = 0; cy < cellHeight; cy++) {
+            for (int cx = 0; cx < cellWidth; cx++) {
+                HalfBlockCell cell = cells[cy * cellWidth + cx];
+                result.add(new MergedRect(cx, cy, 1, 1, cell.topARGB(), cell.bottomARGB()));
+            }
+        }
+        return result;
+    }
 }
