@@ -24,6 +24,7 @@ import com.audioviz.effects.BeatEffectConfig;
 import com.audioviz.effects.BeatEventManager;
 import com.audioviz.effects.BeatType;
 import com.audioviz.entities.EntityPoolManager;
+import com.audioviz.lighting.AmbientLightManager;
 import com.audioviz.entities.EntityUpdate;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.patterns.AudioState;
@@ -1685,6 +1686,16 @@ public class MessageHandler {
         response.addProperty("pattern", patternMgr.getActivePatternId(zoneName));
         response.addProperty("pixel_count", actualWidth * actualHeight);
         response.addProperty("active", true);
+
+        // Auto-init ambient lights for this zone
+        AmbientLightManager ambientMgr = plugin.getAmbientLightManager();
+        if (ambientMgr != null && !ambientMgr.hasZone(zoneName)) {
+            var ambientZone = plugin.getZoneManager().getZone(zoneName);
+            if (ambientZone != null) {
+                ambientMgr.initializeZone(ambientZone);
+            }
+        }
+
         return response;
     }
 
@@ -1755,6 +1766,13 @@ public class MessageHandler {
         }
 
         renderer.applyRawFrame(zoneName, pixels);
+
+        // Tick ambient lights based on frame luminance
+        AmbientLightManager ambientMgr = plugin.getAmbientLightManager();
+        if (ambientMgr != null && ambientMgr.hasZone(zoneName)) {
+            float intensity = averagePixelLuminance(pixels);
+            ambientMgr.tick(zoneName, intensity, false);
+        }
 
         // Silent OK for high-frequency message
         JsonObject response = new JsonObject();
@@ -2497,5 +2515,17 @@ public class MessageHandler {
         error.addProperty("type", "error");
         error.addProperty("message", message);
         return error;
+    }
+
+    private float averagePixelLuminance(int[] argbPixels) {
+        if (argbPixels == null || argbPixels.length == 0) return 0f;
+        long sum = 0;
+        for (int argb : argbPixels) {
+            int r = (argb >> 16) & 0xFF;
+            int g = (argb >> 8) & 0xFF;
+            int b = argb & 0xFF;
+            sum += (int)(0.2126 * r + 0.7152 * g + 0.0722 * b);
+        }
+        return (float)(sum / argbPixels.length) / 255.0f;
     }
 }

@@ -10,6 +10,7 @@ import com.audioviz.commands.AudioVizCommand;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
 import com.audioviz.entities.EntityPoolManager;
+import com.audioviz.lighting.AmbientLightManager;
 import com.audioviz.entities.EntityUpdateStats;
 import com.audioviz.gui.ChatInputManager;
 import com.audioviz.gui.MenuManager;
@@ -54,6 +55,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private BitmapRendererBackend bitmapRenderer;
     private BitmapPatternManager bitmapPatternManager;
     private CompositionManager compositionManager;
+    private AmbientLightManager ambientLightManager;
 
     @Override
     public void onEnable() {
@@ -65,6 +67,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Initialize core managers
         this.zoneManager = new ZoneManager(this);
         this.entityPoolManager = new EntityPoolManager(this);
+        this.ambientLightManager = new AmbientLightManager(getLogger());
         this.entityUpdateStats = new EntityUpdateStats();
 
         // Initialize GUI and effects managers
@@ -229,6 +232,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             decoratorManager.stop();
         }
 
+        // Teardown ambient lights
+        if (ambientLightManager != null) ambientLightManager.teardownAll();
+
         // Shutdown bitmap pattern manager
         if (bitmapPatternManager != null) {
             bitmapPatternManager.shutdown();
@@ -381,6 +387,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public CompositionManager getCompositionManager() {
         return compositionManager;
+    }
+
+    public AmbientLightManager getAmbientLightManager() {
+        return ambientLightManager;
     }
 
     /**

@@ -431,6 +431,7 @@ public class BitmapRendererBackend implements RendererBackend {
 
     @Override
     public void teardown(String zoneName) {
+        plugin.getAmbientLightManager().teardownZone(zoneName);
         gridConfigs.remove(zoneName.toLowerCase());
         assigners.remove(zoneName.toLowerCase());
         poolManager.cleanupZone(zoneName);
