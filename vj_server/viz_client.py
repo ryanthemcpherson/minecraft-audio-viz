@@ -66,6 +66,11 @@ class VizClient:
         # Logging flags for batch_update_fast
         self._audio_logged: bool = False
         self._last_fast_error: float = 0.0
+        self._last_fire_and_forget_log: float = 0.0
+        self._fire_and_forget_errors: dict[str, int] = {
+            "voice_audio": 0,
+            "bitmap_frame": 0,
+        }
 
     def _encode(self, data: dict) -> str:
         """Encode dict to JSON string for WebSocket text frames.
@@ -76,6 +81,20 @@ class VizClient:
         ensures we always send text frames.
         """
         return mjson.encode(data).decode()
+
+    def _record_fire_and_forget_error(self, channel: str, error: Exception):
+        """Track fire-and-forget send failures with low-rate logs."""
+        self._fire_and_forget_errors[channel] = self._fire_and_forget_errors.get(channel, 0) + 1
+        now = time.time()
+        if self._last_fire_and_forget_log == 0.0 or (now - self._last_fire_and_forget_log) > 10:
+            logger.warning(
+                "Fire-and-forget send failures: voice_audio=%d bitmap_frame=%d (latest %s error: %s)",
+                self._fire_and_forget_errors.get("voice_audio", 0),
+                self._fire_and_forget_errors.get("bitmap_frame", 0),
+                channel,
+                error,
+            )
+            self._last_fire_and_forget_log = now
 
     async def connect(self) -> bool:
         """Connect to the AudioViz WebSocket server."""
@@ -564,8 +583,8 @@ class VizClient:
                     }
                 )
             )
-        except Exception:
-            pass  # Fire and forget, don't spam logs
+        except Exception as e:
+            self._record_fire_and_forget_error("voice_audio", e)
 
     async def send_voice_config(self, config: dict) -> Optional[dict]:
         """Send voice configuration and return voice_status response.
@@ -694,8 +713,8 @@ class VizClient:
             msg["brightness"] = base64.b64encode(bytes(brightness)).decode("ascii")
         try:
             await self.ws.send(self._encode(msg))
-        except Exception:
-            pass  # Fire and forget
+        except Exception as e:
+            self._record_fire_and_forget_error("bitmap_frame", e)
 
     async def set_bitmap_pattern(self, zone_name: str, pattern_id: str) -> Optional[dict]:
         """Switch the active bitmap pattern for a zone.

@@ -25,6 +25,9 @@ export class WebSocketService extends EventTarget {
         // Message queue for when disconnected (with max size to prevent memory bloat)
         this.messageQueue = [];
         this.maxQueueSize = 500;
+        this._lastQueueWarnAt = 0;
+        this._queueWarnIntervalMs = 2000;
+        this._queuedDrops = 0;
     }
 
     /**
@@ -103,9 +106,18 @@ export class WebSocketService extends EventTarget {
             if (this.messageQueue.length >= this.maxQueueSize) {
                 // Remove oldest messages to make room
                 this.messageQueue.shift();
+                this._queuedDrops++;
             }
             this.messageQueue.push(message);
-            console.warn('[WS] Not connected, message queued (' + this.messageQueue.length + '/' + this.maxQueueSize + ')');
+            const now = Date.now();
+            if (now - this._lastQueueWarnAt >= this._queueWarnIntervalMs) {
+                console.warn(
+                    '[WS] Not connected, message queued (' +
+                    this.messageQueue.length + '/' + this.maxQueueSize +
+                    ', dropped=' + this._queuedDrops + ')'
+                );
+                this._lastQueueWarnAt = now;
+            }
             return false;
         }
     }
