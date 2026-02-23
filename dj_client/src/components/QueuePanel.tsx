@@ -1,3 +1,5 @@
+import React from 'react';
+
 interface RosterDJ {
   dj_id: string;
   dj_name: string;
@@ -15,7 +17,7 @@ interface QueuePanelProps {
   } | null;
 }
 
-export default function QueuePanel({ roster }: QueuePanelProps) {
+function QueuePanel({ roster }: QueuePanelProps) {
   if (!roster || roster.djs.length === 0) {
     return (
       <div className="queue-panel">
@@ -45,3 +47,5 @@ export default function QueuePanel({ roster }: QueuePanelProps) {
     </div>
   );
 }
+
+export default React.memo(QueuePanel);
