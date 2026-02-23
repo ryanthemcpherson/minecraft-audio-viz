@@ -1108,6 +1108,7 @@ class AdminApp {
                 // Handle per-zone pattern state
                 if (data.zone_patterns) {
                     this.state.zonePatterns = data.zone_patterns;
+                    this._syncBitmapStateFromZonePatterns();
                     this._renderZoneChips();
                     this._updatePatternHighlightForZones();
                     this._updateBitmapZoneSelector();
@@ -1500,7 +1501,8 @@ class AdminApp {
             patterns.forEach(p => { patternMap[p.id] = p; });
             zones.forEach(z => {
                 if (!z.entity_count || z.entity_count === 0) {
-                    const pat = zonePatterns[z.name] || this.state.currentPattern;
+                    const zp = zonePatterns[z.name];
+                    const pat = (zp && typeof zp === 'object' ? zp.pattern : zp) || this.state.currentPattern;
                     const info = pat && patternMap[pat];
                     if (info && info.recommended_entities) {
                         z.entity_count = info.recommended_entities;
@@ -2099,6 +2101,7 @@ class AdminApp {
             if (newJson !== this._lastZonePatternsJson) {
                 this._lastZonePatternsJson = newJson;
                 this.state.zonePatterns = data.zone_patterns;
+                this._syncBitmapStateFromZonePatterns();
                 this._renderZoneChips();
                 this._updatePatternHighlightForZones();
             }
@@ -2243,13 +2246,15 @@ class AdminApp {
 
             // Update allZones entity counts to match each zone's pattern
             (this.state.allZones || []).forEach(zone => {
-                const pat = data.zone_patterns[zone.name];
-                const info = pat && patternMap[pat];
+                const zp = data.zone_patterns[zone.name];
+                const patId = zp && typeof zp === 'object' ? zp.pattern : zp;
+                const info = patId && patternMap[patId];
                 if (info && info.recommended_entities) {
                     zone.entity_count = info.recommended_entities;
                 }
             });
 
+            this._syncBitmapStateFromZonePatterns();
             this._renderStageZoneList();
             this._renderZoneChips();
         }
@@ -2267,6 +2272,19 @@ class AdminApp {
             this._updatePatternHighlightForZones();
         } else {
             this._highlightActivePattern(data.pattern);
+        }
+
+        // Sync bitmap section highlight for selected zones in bitmap mode
+        if (data.zone_patterns) {
+            const selected = Array.from(this.state.selectedZones);
+            if (selected.length > 0) {
+                const zpEntry = data.zone_patterns[selected[0]];
+                const patId = zpEntry && typeof zpEntry === 'object' ? zpEntry.pattern : zpEntry;
+                if (patId && patId.startsWith('bmp_')) {
+                    this.state.bitmap.activePattern = patId;
+                    this._highlightBitmapPattern(patId);
+                }
+            }
         }
 
         // Show transition status if transitioning
@@ -2635,6 +2653,51 @@ class AdminApp {
         this.ws.send(msg);
     }
 
+    // --- Zone Patterns Helpers ---
+
+    /** Extract pattern ID from zone_patterns entry (handles string or {pattern, render_mode} object). */
+    _getZonePatternId(zoneName) {
+        const entry = this.state.zonePatterns[zoneName];
+        if (!entry) return null;
+        return typeof entry === 'object' ? entry.pattern : entry;
+    }
+
+    /** Get render mode for a zone from zone_patterns. */
+    _getZoneRenderMode(zoneName) {
+        const entry = this.state.zonePatterns[zoneName];
+        if (entry && typeof entry === 'object') return entry.render_mode || 'block';
+        return 'block';
+    }
+
+    /** Sync bitmap initializedZones and 3D preview from zone_patterns render_mode. */
+    _syncBitmapStateFromZonePatterns() {
+        const zp = this.state.zonePatterns;
+        if (!zp) return;
+        for (const [zoneName, info] of Object.entries(zp)) {
+            const rm = typeof info === 'object' ? info.render_mode : null;
+            if (rm === 'bitmap') {
+                this.state.bitmap.initializedZones.add(zoneName);
+                // Activate 3D bitmap preview for this zone
+                if (this._bitmapPreview) {
+                    const zg = this._previewZoneGroups[zoneName];
+                    if (zg) {
+                        const bw = this.state.bitmap.width || 16;
+                        const bh = this.state.bitmap.height || 12;
+                        const patId = typeof info === 'object' ? info.pattern : info;
+                        this._bitmapPreview.activate(zoneName, bw, bh, patId || 'bmp_spectrum', zg);
+                        this._bitmapPreview.setZoneVisible(zoneName, true);
+                    }
+                }
+            } else {
+                this.state.bitmap.initializedZones.delete(zoneName);
+                // Deactivate bitmap preview, show block entities
+                if (this._bitmapPreview) {
+                    this._bitmapPreview.deactivate(zoneName);
+                }
+            }
+        }
+    }
+
     // --- Zone Chip Bar ---
 
     _renderZoneChips() {
@@ -2675,9 +2738,20 @@ class AdminApp {
             nameSpan.textContent = this._formatZoneDisplayName(zone.name, zone.stage);
             chip.appendChild(nameSpan);
 
+            const zp = this.state.zonePatterns[zone.name];
+            const patId = zp && typeof zp === 'object' ? zp.pattern : zp;
+            const renderMode = zp && typeof zp === 'object' ? zp.render_mode : 'block';
+
+            // Render mode badge
+            const modeBadge = document.createElement('span');
+            modeBadge.className = 'zone-chip-mode';
+            modeBadge.textContent = renderMode === 'bitmap' ? 'B' : '3D';
+            modeBadge.title = renderMode === 'bitmap' ? 'Bitmap mode' : 'Block entity mode';
+            chip.appendChild(modeBadge);
+
             const patternSpan = document.createElement('span');
             patternSpan.className = 'zone-chip-pattern';
-            patternSpan.textContent = this.state.zonePatterns[zone.name] || '--';
+            patternSpan.textContent = patId || '--';
             chip.appendChild(patternSpan);
 
             chip.addEventListener('click', (e) => {
@@ -2696,6 +2770,10 @@ class AdminApp {
                     this.state.zone.name = zone.name;
                     if (this.elements.zoneSelect) {
                         this.elements.zoneSelect.value = zone.name;
+                    }
+                    // Sync bitmap zone selector with chip selection
+                    if (this.elements.bitmapZone) {
+                        this.elements.bitmapZone.value = zone.name;
                     }
                     this._setZoneControlsLoading(true);
                     this._requestZoneStatus();
@@ -2759,8 +2837,9 @@ class AdminApp {
         // Get unique patterns used by selected zones
         const patternsInUse = new Set();
         selected.forEach(zn => {
-            const p = this.state.zonePatterns[zn];
-            if (p) patternsInUse.add(p);
+            const zp = this.state.zonePatterns[zn];
+            const patId = zp && typeof zp === 'object' ? zp.pattern : zp;
+            if (patId) patternsInUse.add(patId);
         });
 
         const allSame = patternsInUse.size === 1;
@@ -4708,6 +4787,9 @@ class AdminApp {
         for (const [zoneName, entities] of Object.entries(zoneEntities)) {
             if (!Array.isArray(entities)) continue;
 
+            // Skip bitmap zones — they render via BitmapPreview, not block entities
+            if (this._getZoneRenderMode(zoneName) === 'bitmap') continue;
+
             const zoneGroup = this._ensurePreviewZoneGroup(zoneName);
             if (!zoneGroup) continue;
 
@@ -5801,7 +5883,8 @@ class AdminApp {
         zoneNames.forEach(name => {
             const opt = document.createElement('option');
             opt.value = name;
-            opt.textContent = name;
+            const rm = this._getZoneRenderMode(name);
+            opt.textContent = rm === 'bitmap' ? `${name} [B]` : name;
             select.appendChild(opt);
         });
 

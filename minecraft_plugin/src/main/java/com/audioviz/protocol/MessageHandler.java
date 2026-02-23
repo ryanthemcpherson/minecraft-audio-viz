@@ -124,6 +124,7 @@ public class MessageHandler {
             case "banner_config" -> handleBannerConfig(message);
             // Bitmap rendering
             case "init_bitmap" -> handleInitBitmap(message);
+            case "teardown_bitmap" -> handleTeardownBitmap(message);
             case "bitmap_frame" -> handleBitmapFrame(message);
             case "set_bitmap_pattern" -> handleSetBitmapPattern(message);
             case "get_bitmap_patterns" -> handleGetBitmapPatterns();
@@ -1696,6 +1697,41 @@ public class MessageHandler {
             }
         }
 
+        return response;
+    }
+
+    /**
+     * Teardown a bitmap (LED wall) display in a zone.
+     * Deactivates the bitmap pattern manager and despawns all TextDisplay entities.
+     * Expected format:
+     * {
+     *   "type": "teardown_bitmap",
+     *   "zone": "zone_name"
+     * }
+     */
+    private JsonObject handleTeardownBitmap(JsonObject message) {
+        if (!message.has("zone")) {
+            return createError("Missing required field: zone");
+        }
+        String zoneName = message.get("zone").getAsString();
+        if (!isValidZoneName(zoneName)) {
+            return createError("Invalid zone name");
+        }
+
+        // Deactivate pattern manager for this zone
+        plugin.getBitmapPatternManager().deactivateZone(zoneName);
+
+        // Teardown bitmap renderer (despawns TextDisplay entities)
+        plugin.getBitmapRenderer().teardown(zoneName);
+
+        // Revert zone backend to DISPLAY_ENTITIES
+        plugin.getRendererRegistry().setZoneBackends(zoneName,
+            com.audioviz.render.RendererBackendType.DISPLAY_ENTITIES,
+            com.audioviz.render.RendererBackendType.DISPLAY_ENTITIES);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "bitmap_teardown");
+        response.addProperty("zone", zoneName);
         return response;
     }
 
