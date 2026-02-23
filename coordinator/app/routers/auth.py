@@ -242,6 +242,11 @@ async def discord_authorize(
         redirect_uri=settings.discord_redirect_uri,
         state=state,
     )
+    if desktop:
+        state_payload = pyjwt.decode(state, settings.user_jwt_secret, algorithms=["HS256"])
+        return OAuthAuthorizeResponse(
+            authorize_url=url, state=state, poll_token=state_payload["nonce"]
+        )
     return OAuthAuthorizeResponse(authorize_url=url, state=state)
 
 
@@ -305,14 +310,16 @@ async def discord_callback(
 
     auth_resp = _auth_response(result, user)
 
-    # Desktop deep-link flow: store auth response behind a one-time exchange code
-    # and redirect to the desktop app via custom URL scheme.
+    # Desktop deep-link flow: store auth response behind a one-time exchange code.
+    # The client can either catch the deep link OR poll for completion via nonce.
     if state_payload.get("desktop"):
         await _cleanup_expired_exchange_codes(session)
         exchange_code = secrets.token_urlsafe(32)
+        nonce = state_payload.get("nonce")
         row = DesktopExchangeCode(
             code=exchange_code,
             user_id=user.id,
+            nonce=nonce,
             payload=_json.dumps(auth_resp.model_dump(mode="json")),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EXCHANGE_CODE_TTL),
         )
@@ -321,10 +328,16 @@ async def discord_callback(
         scheme = settings.desktop_deep_link_scheme
         redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
         html = (
-            f"<html><head><meta http-equiv='refresh' content='0;url={redirect_url}'>"
-            f"</head><body><p>Redirecting to MCAV DJ Client...</p>"
-            f"<p><a href='{redirect_url}'>Click here if not redirected</a></p>"
-            f"</body></html>"
+            "<html><head>"
+            "<style>body{background:#08090d;color:#f5f5f5;font-family:Inter,sans-serif;"
+            "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
+            ".card{text-align:center;padding:2rem}"
+            "a{color:#00CCFF}</style>"
+            "</head><body><div class='card'>"
+            "<h2>Login successful</h2>"
+            "<p>You can close this tab and return to the MCAV DJ Client.</p>"
+            f"<p><a href='{redirect_url}'>Click here if the app didn't open automatically</a></p>"
+            "</div></body></html>"
         )
         return HTMLResponse(content=html)
 
@@ -354,6 +367,11 @@ async def google_authorize(
         redirect_uri=settings.google_redirect_uri,
         state=state,
     )
+    if desktop:
+        state_payload = pyjwt.decode(state, settings.user_jwt_secret, algorithms=["HS256"])
+        return OAuthAuthorizeResponse(
+            authorize_url=url, state=state, poll_token=state_payload["nonce"]
+        )
     return OAuthAuthorizeResponse(authorize_url=url, state=state)
 
 
@@ -421,9 +439,11 @@ async def google_callback(
     if state_payload.get("desktop"):
         await _cleanup_expired_exchange_codes(session)
         exchange_code = secrets.token_urlsafe(32)
+        nonce = state_payload.get("nonce")
         row = DesktopExchangeCode(
             code=exchange_code,
             user_id=user.id,
+            nonce=nonce,
             payload=_json.dumps(auth_resp.model_dump(mode="json")),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EXCHANGE_CODE_TTL),
         )
@@ -432,10 +452,16 @@ async def google_callback(
         scheme = settings.desktop_deep_link_scheme
         redirect_url = f"{scheme}://auth/callback?exchange_code={exchange_code}"
         html = (
-            f"<html><head><meta http-equiv='refresh' content='0;url={redirect_url}'>"
-            f"</head><body><p>Redirecting to MCAV DJ Client...</p>"
-            f"<p><a href='{redirect_url}'>Click here if not redirected</a></p>"
-            f"</body></html>"
+            "<html><head>"
+            "<style>body{background:#08090d;color:#f5f5f5;font-family:Inter,sans-serif;"
+            "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
+            ".card{text-align:center;padding:2rem}"
+            "a{color:#00CCFF}</style>"
+            "</head><body><div class='card'>"
+            "<h2>Login successful</h2>"
+            "<p>You can close this tab and return to the MCAV DJ Client.</p>"
+            f"<p><a href='{redirect_url}'>Click here if the app didn't open automatically</a></p>"
+            "</div></body></html>"
         )
         return HTMLResponse(content=html)
 
@@ -483,6 +509,36 @@ async def exchange_desktop_code(
 
     data = _json.loads(row.payload)
     return AuthResponse(**data)
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/desktop-poll/{poll_token}
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/desktop-poll/{poll_token}",
+    summary="Poll for desktop OAuth completion",
+)
+async def desktop_poll(
+    poll_token: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Poll for desktop OAuth completion. Returns exchange_code when ready."""
+    stmt = select(DesktopExchangeCode).where(
+        DesktopExchangeCode.nonce == poll_token,
+        DesktopExchangeCode.used.is_(False),
+    )
+    row = (await session.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        return {"status": "pending"}
+    now = datetime.now(timezone.utc)
+    expires = (
+        row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    )
+    if expires < now:
+        return {"status": "expired"}
+    return {"status": "complete", "exchange_code": row.code}
 
 
 # ---------------------------------------------------------------------------

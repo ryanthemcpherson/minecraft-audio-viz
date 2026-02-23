@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "MCAV DJ Client",
-        "width": 560,
-        "height": 820,
-        "minWidth": 520,
-        "minHeight": 760,
+        "width": 700,
+        "height": 520,
+        "minWidth": 600,
+        "minHeight": 400,
         "resizable": true,
         "center": true,
         "decorations": true
@@ -57,11 +57,6 @@
     }
   },
   "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": ["mcav"]
-      }
-    },
     "shell": {
       "open": true
     },
