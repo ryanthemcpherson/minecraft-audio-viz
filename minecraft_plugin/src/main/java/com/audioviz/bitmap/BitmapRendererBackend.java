@@ -196,6 +196,8 @@ public class BitmapRendererBackend implements RendererBackend {
                     entity.setInterpolationDelay(0);
                     entity.setTeleportDuration(0);
                     entity.setSeeThrough(false);
+                    entity.setShadowed(false);
+                    entity.setTextOpacity((byte) 0xFF);
                     entity.setDefaultBackground(false);
                     entity.setLineWidth(200); // Wide enough that text doesn't wrap
                     entity.setPersistent(false);
@@ -335,35 +337,34 @@ public class BitmapRendererBackend implements RendererBackend {
             geoLocations[i] = loc;
         }
 
-        // --- Background: direct ARGB ---
-        int bgCount = bgUpdates.size();
+        // --- Background + optional brightness ---
+        // If per-pixel brightness is provided, push bg+brightness for all assigned slots
+        // to avoid stale brightness state when adaptive slot assignment reshuffles rects.
+        int assignCount = Math.min(rects.size(), config.entityCount());
+        int bgCount = (brightness != null) ? assignCount : bgUpdates.size();
         String[] bgIds = new String[bgCount];
         int[] bgArgb = new int[bgCount];
+        int[] bgBrightness = (brightness != null) ? new int[bgCount] : null;
 
-        for (int i = 0; i < bgCount; i++) {
-            AdaptiveEntityAssigner.BackgroundUpdate bg = bgUpdates.get(i);
-            bgIds[i] = bg.entityId();
-            bgArgb[i] = bg.argb();
-        }
-
-        // --- Brightness: map per-pixel brightness to per-entity brightness ---
-        int[] bgBrightness = null;
         if (brightness != null) {
-            bgBrightness = new int[bgCount];
             for (int i = 0; i < bgCount; i++) {
-                int slot = bgUpdates.get(i).slot();
-                if (slot < rects.size()) {
-                    MergedRect rect = rects.get(slot);
-                    // Cell (x, y) → top pixel index = (y * 2) * logicalWidth + x
-                    int pixIdx = rect.y() * 2 * logicalWidth + rect.x();
-                    if (pixIdx >= 0 && pixIdx < brightness.length) {
-                        bgBrightness[i] = brightness[pixIdx];
-                    } else {
-                        bgBrightness[i] = 15;
-                    }
+                MergedRect rect = rects.get(i);
+                bgIds[i] = "bmp_" + i;
+                bgArgb[i] = rect.topARGB();
+
+                // Cell (x, y) -> top pixel index = (y * 2) * logicalWidth + x
+                int pixIdx = rect.y() * 2 * logicalWidth + rect.x();
+                if (pixIdx >= 0 && pixIdx < brightness.length) {
+                    bgBrightness[i] = brightness[pixIdx];
                 } else {
                     bgBrightness[i] = 15;
                 }
+            }
+        } else {
+            for (int i = 0; i < bgCount; i++) {
+                AdaptiveEntityAssigner.BackgroundUpdate bg = bgUpdates.get(i);
+                bgIds[i] = bg.entityId();
+                bgArgb[i] = bg.argb();
             }
         }
 
