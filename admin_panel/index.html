@@ -39,7 +39,7 @@
                     <button class="zone-quick-btn" data-select="all" title="Select all zones">All</button>
                     <button class="zone-quick-btn" data-select="none" title="Clear selection">None</button>
                 </div>
-                <!-- Hidden zone select kept for backward compat with Zone Settings tab -->
+                <!-- Zone select used by JS for state tracking -->
                 <select id="zone-select" class="hidden">
                     <option value="main">main</option>
                 </select>
@@ -499,6 +499,25 @@
                                     <label for="bitmap-wash-opacity">Wash Opacity</label>
                                     <input type="range" id="bitmap-wash-opacity" class="slider" min="0" max="100" value="0">
                                     <span class="control-value" id="val-bitmap-wash-opacity">0%</span>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Bloom</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="bitmap-bloom" checked aria-label="Bloom">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="control-row">
+                                    <label for="bitmap-bloom-strength">Bloom Strength</label>
+                                    <input type="range" id="bitmap-bloom-strength" class="slider" min="0" max="100" value="40">
+                                    <span class="control-value" id="val-bitmap-bloom-strength">40%</span>
+                                </div>
+                                <div class="control-row toggle-row">
+                                    <label>Ambient Lights</label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="bitmap-ambient-lights" checked aria-label="Ambient Lights">
+                                        <span class="toggle-slider"></span>
+                                    </label>
                                 </div>
                             </div>
                             <div class="effect-grid" style="margin-top: var(--spacing-sm);">
