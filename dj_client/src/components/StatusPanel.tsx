@@ -1,3 +1,5 @@
+import React from 'react';
+
 interface ConnectionStatus {
   connected: boolean;
   is_active: boolean;
@@ -77,4 +79,4 @@ function StatusPanel({ status }: StatusPanelProps) {
   );
 }
 
-export default StatusPanel;
+export default React.memo(StatusPanel);
