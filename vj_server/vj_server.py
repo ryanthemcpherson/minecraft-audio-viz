@@ -2677,9 +2677,9 @@ class VJServer:
                     "band_materials_source": self._band_materials_source,
                     "visual_delay_ms": self._visual_delay_ms,
                     "visual_delay_mode": self._visual_delay_mode,
-                    "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
-                    "beat_predictor_bpm": self._beat_predictor.tempo_bpm,
-                    "beat_predictor_locked": self._beat_predictor.is_phase_locked,
+                    "beat_predictor_confidence": float(self._beat_predictor.tempo_confidence),
+                    "beat_predictor_bpm": float(self._beat_predictor.tempo_bpm),
+                    "beat_predictor_locked": bool(self._beat_predictor.is_phase_locked),
                     "banner_profiles": {
                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                         for did, prof in self._dj_banner_profiles.items()
@@ -2755,9 +2755,13 @@ class VJServer:
                                     "band_materials_source": self._band_materials_source,
                                     "visual_delay_ms": self._visual_delay_ms,
                                     "visual_delay_mode": self._visual_delay_mode,
-                                    "beat_predictor_confidence": self._beat_predictor.tempo_confidence,
-                                    "beat_predictor_bpm": self._beat_predictor.tempo_bpm,
-                                    "beat_predictor_locked": self._beat_predictor.is_phase_locked,
+                                    "beat_predictor_confidence": float(
+                                        self._beat_predictor.tempo_confidence
+                                    ),
+                                    "beat_predictor_bpm": float(self._beat_predictor.tempo_bpm),
+                                    "beat_predictor_locked": bool(
+                                        self._beat_predictor.is_phase_locked
+                                    ),
                                     "banner_profiles": {
                                         did: {k: v for k, v in prof.items() if k != "image_pixels"}
                                         for did, prof in self._dj_banner_profiles.items()
