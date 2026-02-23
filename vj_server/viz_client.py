@@ -633,7 +633,9 @@ class VizClient:
             return response
         return None
 
-    async def send_bitmap_frame(self, zone_name: str, pixels: list[int]) -> bool:
+    async def send_bitmap_frame(
+        self, zone_name: str, pixels: list[int], brightness: list[int] | None = None
+    ) -> bool:
         """Push a raw ARGB pixel array to a bitmap zone.
 
         This is the low-level frame push for custom VJ server rendering.
@@ -645,20 +647,26 @@ class VizClient:
         Args:
             zone_name: Target bitmap zone.
             pixels: List of ARGB integers, length must match width*height.
+            brightness: Optional per-pixel brightness (0-15), one value per pixel.
 
         Returns:
             True if accepted by the plugin.
         """
-        response = await self.send(
-            {
-                "type": "bitmap_frame",
-                "zone": zone_name,
-                "pixel_array": pixels,
-            }
-        )
+        msg = {
+            "type": "bitmap_frame",
+            "zone": zone_name,
+            "pixel_array": pixels,
+        }
+        if brightness is not None:
+            import base64
+
+            msg["brightness"] = base64.b64encode(bytes(brightness)).decode("ascii")
+        response = await self.send(msg)
         return response is not None and response.get("type") == "ok"
 
-    async def send_bitmap_frame_fast(self, zone_name: str, pixels: list[int]) -> None:
+    async def send_bitmap_frame_fast(
+        self, zone_name: str, pixels: list[int], brightness: list[int] | None = None
+    ) -> None:
         """Push a bitmap frame using base64 encoding (fire-and-forget, lower latency).
 
         Encodes the pixel array as little-endian base64 for compact transport.
@@ -667,6 +675,7 @@ class VizClient:
         Args:
             zone_name: Target bitmap zone.
             pixels: List of ARGB integers.
+            brightness: Optional per-pixel brightness (0-15), one value per pixel.
         """
         if not self.ws or not self._connected:
             return
@@ -675,16 +684,15 @@ class VizClient:
 
         raw = struct.pack(f"<{len(pixels)}I", *pixels)
         b64 = base64.b64encode(raw).decode("ascii")
+        msg = {
+            "type": "bitmap_frame",
+            "zone": zone_name,
+            "pixels": b64,
+        }
+        if brightness is not None:
+            msg["brightness"] = base64.b64encode(bytes(brightness)).decode("ascii")
         try:
-            await self.ws.send(
-                self._encode(
-                    {
-                        "type": "bitmap_frame",
-                        "zone": zone_name,
-                        "pixels": b64,
-                    }
-                )
-            )
+            await self.ws.send(self._encode(msg))
         except Exception:
             pass  # Fire and forget
 

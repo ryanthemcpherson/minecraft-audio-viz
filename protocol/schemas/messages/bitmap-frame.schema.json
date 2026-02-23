@@ -27,6 +27,10 @@
         "type": "integer"
       },
       "description": "JSON array of 32-bit ARGB integers (debug-friendly path)"
+    },
+    "brightness": {
+      "type": "string",
+      "description": "Per-pixel brightness (0-15). Base64-encoded byte array, one byte per pixel. If absent, all pixels use brightness 15."
     }
   },
   "required": ["type", "zone"],
