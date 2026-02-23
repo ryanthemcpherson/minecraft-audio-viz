@@ -224,6 +224,7 @@ FORWARD_TO_MINECRAFT = {
     "banner_config",
     # Bitmap LED wall messages
     "init_bitmap",
+    "teardown_bitmap",
     "get_bitmap_status",
     "set_bitmap_pattern",
     "get_bitmap_patterns",
@@ -453,6 +454,7 @@ class ZonePatternState:
     bitmap_initialized: bool = False
     bitmap_width: int = 0
     bitmap_height: int = 0
+    render_mode: str = "block"  # "block" (Display Entities) or "bitmap" (LED wall)
 
 
 @dataclass
@@ -716,6 +718,7 @@ class VJServer:
         # Pattern system
         self._pattern_config = PatternConfig(entity_count=entity_count)
         self._zone_patterns: Dict[str, ZonePatternState] = {}
+        self._bitmap_pattern_cache: list[dict] = []  # Cached bitmap patterns from MC plugin
         self._default_transition_duration = 1.0  # Default crossfade duration for new zones
 
         # Initialize default zone pattern state
@@ -928,9 +931,12 @@ class VJServer:
     def _last_entities(self, value):
         self._get_zone_state(self.zone).last_entities = value
 
-    def _get_zone_patterns_dict(self) -> Dict[str, str]:
-        """Get a dict mapping zone_name -> pattern_name for all zones."""
-        return {zn: zs.pattern_name for zn, zs in self._zone_patterns.items()}
+    def _get_zone_patterns_dict(self) -> Dict[str, dict]:
+        """Get a dict mapping zone_name -> {pattern, render_mode} for all zones."""
+        return {
+            zn: {"pattern": zs.pattern_name, "render_mode": zs.render_mode}
+            for zn, zs in self._zone_patterns.items()
+        }
 
     def _get_bitmap_zones_dict(self) -> Dict[str, dict]:
         """Get bitmap init state for all zones (for vj_state sync)."""
@@ -943,6 +949,20 @@ class VJServer:
             for zn, zs in self._zone_patterns.items()
             if zs.bitmap_initialized
         }
+
+    def _get_all_patterns_list(self) -> list:
+        """Get merged list of Lua patterns + bitmap patterns for the admin panel."""
+        all_patterns = list_patterns()
+        for p in self._bitmap_pattern_cache:
+            all_patterns.append(
+                {
+                    "id": p.get("id", ""),
+                    "name": p.get("name", p.get("id", "")),
+                    "description": p.get("description", ""),
+                    "category": "Bitmap",
+                }
+            )
+        return all_patterns
 
     @property
     def active_dj(self) -> Optional[DJConnection]:
@@ -2503,7 +2523,9 @@ class VJServer:
         # Restore per-zone patterns if present
         saved_zone_patterns = scene_data.get("zone_patterns")
         if saved_zone_patterns and isinstance(saved_zone_patterns, dict):
-            for zn, pname in saved_zone_patterns.items():
+            for zn, entry in saved_zone_patterns.items():
+                # Handle both old (string) and new ({pattern, render_mode}) formats
+                pname = entry["pattern"] if isinstance(entry, dict) else entry
                 if _lua_pattern_exists(pname):
                     zs = self._get_zone_state(zn)
                     await self._set_pattern_for_zone(zs, zn, pname)
@@ -2641,7 +2663,7 @@ class VJServer:
             _json_str(
                 {
                     "type": "vj_state",
-                    "patterns": list_patterns(),
+                    "patterns": self._get_all_patterns_list(),
                     "current_pattern": self._pattern_name,
                     "entity_count": self.entity_count,
                     "zone": self.zone,
@@ -2719,7 +2741,7 @@ class VJServer:
                             _json_str(
                                 {
                                     "type": "vj_state",
-                                    "patterns": list_patterns(),
+                                    "patterns": self._get_all_patterns_list(),
                                     "current_pattern": self._pattern_name,
                                     "entity_count": self.entity_count,
                                     "zone": self.zone,
@@ -2751,13 +2773,12 @@ class VJServer:
 
                     elif msg_type == "set_pattern":
                         pattern_name = data.get("pattern", "spectrum")
-                        if _lua_pattern_exists(pattern_name):
+                        is_bitmap = pattern_name.startswith("bmp_")
+                        if is_bitmap or _lua_pattern_exists(pattern_name):
                             target_zones = data.get("zones", None)
                             if target_zones is None:
-                                # No zones specified: apply to all known zones (backward compat)
                                 zones_to_update = list(self._zone_patterns.keys()) or [self.zone]
                             else:
-                                # Only allow zones that are already registered
                                 zones_to_update = [
                                     zn for zn in target_zones if zn in self._zone_patterns
                                 ]
@@ -2766,7 +2787,10 @@ class VJServer:
                             old_count = self.entity_count
                             for zn in zones_to_update:
                                 zs = self._get_zone_state(zn)
-                                await self._set_pattern_for_zone(zs, zn, pattern_name)
+                                if is_bitmap:
+                                    await self._switch_zone_to_bitmap(zn, zs, pattern_name)
+                                else:
+                                    await self._switch_zone_to_block(zn, zs, pattern_name)
                             await self._broadcast_pattern_change()
                             if old_count != self.entity_count:
                                 await self._broadcast_config_sync_to_djs()
@@ -3629,6 +3653,35 @@ class VJServer:
                                     if response:
                                         await websocket.send(_json_str(response))
                                         logger.debug(f"Forwarded {msg_type} to Minecraft")
+                                        # Sync local state when init_bitmap succeeds
+                                        if (
+                                            msg_type == "init_bitmap"
+                                            and response.get("type") == "bitmap_initialized"
+                                        ):
+                                            zn = data.get("zone", self.zone)
+                                            zs = self._get_zone_state(zn)
+                                            zs.bitmap_initialized = True
+                                            zs.render_mode = "bitmap"
+                                            zs.bitmap_width = response.get("width", 0)
+                                            zs.bitmap_height = response.get("height", 0)
+                                            zs.pattern_name = data.get("pattern", zs.pattern_name)
+                                            logger.info(
+                                                f"Synced bitmap state for zone '{zn}' via browser init_bitmap"
+                                            )
+                                        # Sync local state when teardown_bitmap succeeds
+                                        if (
+                                            msg_type == "teardown_bitmap"
+                                            and response.get("type") == "bitmap_teardown"
+                                        ):
+                                            zn = data.get("zone", self.zone)
+                                            zs = self._get_zone_state(zn)
+                                            zs.bitmap_initialized = False
+                                            zs.bitmap_width = 0
+                                            zs.bitmap_height = 0
+                                            zs.render_mode = "block"
+                                            logger.info(
+                                                f"Synced block state for zone '{zn}' via browser teardown_bitmap"
+                                            )
                             except Exception as e:
                                 logger.warning(f"Failed to forward {msg_type} to Minecraft: {e}")
                                 await websocket.send(
@@ -3949,7 +4002,7 @@ class VJServer:
             {
                 "type": "pattern_changed",
                 "pattern": self._pattern_name,
-                "patterns": list_patterns(),
+                "patterns": self._get_all_patterns_list(),
                 "transitioning": self._transitioning,
                 "transition_duration": self._transition_duration if self._transitioning else 0,
                 "zone_patterns": self._get_zone_patterns_dict(),
@@ -4226,6 +4279,69 @@ class VJServer:
             except Exception as e:
                 logger.warning(f"Bitmap auto-init: failed for zone '{zn}': {e}")
 
+    async def _switch_zone_to_bitmap(self, zone_name: str, zs: ZonePatternState, pattern_name: str):
+        """Switch a zone from block mode to bitmap mode (or change bitmap pattern)."""
+        if zs.render_mode != "bitmap":
+            # Cleanup block entities first
+            if self.viz_client and self.viz_client.connected:
+                try:
+                    await self.viz_client.cleanup_zone(zone_name)
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup block entities for '{zone_name}': {e}")
+
+            # Init bitmap grid
+            if self.viz_client and self.viz_client.connected:
+                try:
+                    resp = await asyncio.wait_for(
+                        self.viz_client.init_bitmap(zone_name, pattern=pattern_name),
+                        timeout=10.0,
+                    )
+                    if resp and resp.get("type") == "bitmap_initialized":
+                        zs.bitmap_initialized = True
+                        zs.bitmap_width = resp.get("width", 0)
+                        zs.bitmap_height = resp.get("height", 0)
+                        zs.render_mode = "bitmap"
+                        zs.pattern_name = pattern_name
+                        await self._broadcast_to_browsers(_json_str(resp))
+                        logger.info(
+                            f"Zone '{zone_name}' switched to bitmap: "
+                            f"{zs.bitmap_width}x{zs.bitmap_height} pattern={pattern_name}"
+                        )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Bitmap init timeout for zone '{zone_name}'")
+                except Exception as e:
+                    logger.warning(f"Bitmap init failed for zone '{zone_name}': {e}")
+        else:
+            # Already bitmap — just switch pattern
+            if self.viz_client and self.viz_client.connected:
+                try:
+                    await self.viz_client.set_bitmap_pattern(zone_name, pattern_name)
+                except Exception as e:
+                    logger.warning(f"Failed to set bitmap pattern for '{zone_name}': {e}")
+            zs.pattern_name = pattern_name
+
+    async def _switch_zone_to_block(self, zone_name: str, zs: ZonePatternState, pattern_name: str):
+        """Switch a zone from bitmap mode to block mode (or change block pattern)."""
+        if zs.render_mode == "bitmap":
+            # Teardown bitmap grid
+            if self.viz_client and self.viz_client.connected:
+                try:
+                    await self.viz_client.teardown_bitmap(zone_name)
+                except Exception as e:
+                    logger.warning(f"Failed to teardown bitmap for '{zone_name}': {e}")
+            zs.bitmap_initialized = False
+            zs.bitmap_width = 0
+            zs.bitmap_height = 0
+            zs.render_mode = "block"
+            # Init block entity pool
+            if self.viz_client and self.viz_client.connected:
+                try:
+                    await self.viz_client.init_pool(zone_name, zs.entity_count, zs.block_type)
+                except Exception as e:
+                    logger.warning(f"Failed to init block pool for '{zone_name}': {e}")
+        # Set Lua pattern (handles crossfade etc)
+        await self._set_pattern_for_zone(zs, zone_name, pattern_name)
+
     async def connect_minecraft(self) -> bool:
         """Connect to Minecraft server with timeout."""
         # Clean up existing client before creating new one
@@ -4277,8 +4393,47 @@ class VJServer:
         for zn in zone_names:
             self._get_zone_state(zn)
 
-        # Auto-initialize bitmap grids for all zones
-        await self._auto_init_bitmap_zones(zone_names)
+        # Re-init each zone based on its current render_mode.
+        # New zones default to block mode (Display Entities).
+        # Zones already in bitmap mode get re-initialized as bitmap.
+        for zn in zone_names:
+            zs = self._get_zone_state(zn)
+            if zs.render_mode == "bitmap":
+                pattern = zs.pattern_name if zs.pattern_name.startswith("bmp_") else "bmp_spectrum"
+                try:
+                    response = await asyncio.wait_for(
+                        self.viz_client.init_bitmap(zn, pattern=pattern),
+                        timeout=10.0,
+                    )
+                    if response and response.get("type") == "bitmap_initialized":
+                        zs.bitmap_initialized = True
+                        zs.bitmap_width = response.get("width", 0)
+                        zs.bitmap_height = response.get("height", 0)
+                        logger.info(
+                            f"Bitmap re-init: zone '{zn}' → "
+                            f"{zs.bitmap_width}x{zs.bitmap_height} pattern={pattern}"
+                        )
+                        await self._broadcast_to_browsers(_json_str(response))
+                except asyncio.TimeoutError:
+                    logger.warning(f"Bitmap re-init: timeout for zone '{zn}'")
+                except Exception as e:
+                    logger.warning(f"Bitmap re-init: failed for zone '{zn}': {e}")
+            else:
+                # Block mode: init entity pool
+                try:
+                    await self.viz_client.init_pool(zn, zs.entity_count, zs.block_type)
+                except Exception as e:
+                    logger.warning(f"Block pool init failed for zone '{zn}': {e}")
+
+        # Cache bitmap patterns from MC plugin for unified pattern list
+        try:
+            self._bitmap_pattern_cache = await asyncio.wait_for(
+                self.viz_client.get_bitmap_patterns(), timeout=5.0
+            )
+            logger.info(f"Cached {len(self._bitmap_pattern_cache)} bitmap patterns from MC")
+        except Exception as e:
+            logger.warning(f"Failed to cache bitmap patterns: {e}")
+            self._bitmap_pattern_cache = []
 
         return True
 
@@ -4575,7 +4730,7 @@ class VJServer:
         message = _json_str(
             {
                 "type": "patterns",
-                "patterns": list_patterns(),
+                "patterns": self._get_all_patterns_list(),
                 "current_pattern": self._pattern_name,
             }
         )
@@ -5100,6 +5255,24 @@ class VJServer:
         if zone_state is None:
             return
 
+        # Bitmap zones: send lightweight audio update only (patterns run on MC side)
+        if zone_state.render_mode == "bitmap":
+            try:
+                safe_bands = [max(0.0, min(1.0, b)) for b in bands[:5]]
+                audio = {
+                    "bands": safe_bands,
+                    "amplitude": max(0.0, min(5.0, peak)),
+                    "is_beat": bool(is_beat),
+                    "beat_intensity": max(0.0, min(5.0, beat_intensity)),
+                    "bpm": max(0.0, min(300.0, bpm)),
+                    "tempo_confidence": max(0.0, min(1.0, tempo_confidence)),
+                    "beat_phase": max(0.0, min(1.0, beat_phase)),
+                }
+                await self.viz_client.batch_update_fast(zone_name, [], [], audio)
+            except Exception as e:
+                logger.error(f"Bitmap audio update error for zone '{zone_name}': {e}")
+            return
+
         try:
             entity_count = len(entities)
             zone_state.minecraft_pool_size = max(zone_state.minecraft_pool_size, entity_count)
@@ -5382,6 +5555,9 @@ class VJServer:
                     # Collect zones that need Lua calculation
                     calc_tasks = {}
                     for zone_name, zone_state in self._zone_patterns.items():
+                        if zone_state.render_mode == "bitmap":
+                            zone_entities[zone_name] = []  # Bitmap zones render on MC side
+                            continue
                         if self._freeze and zone_state.last_entities:
                             zone_entities[zone_name] = zone_state.last_entities
                         elif self._blackout:

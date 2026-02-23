@@ -246,6 +246,7 @@ class VizClient:
                         "bitmap_composition_updated",
                         "bitmap_transition_started",
                         "bitmap_composition_zones",
+                        "bitmap_teardown",
                         "error",
                         "connected",
                     ):
@@ -728,6 +729,23 @@ class VizClient:
         if response and response.get("type") == "bitmap_patterns":
             return response.get("patterns", [])
         return []
+
+    async def teardown_bitmap(self, zone_name: str) -> bool:
+        """Teardown a bitmap (LED wall) display in a zone.
+
+        Deactivates the bitmap pattern and despawns all TextDisplay entities.
+
+        Args:
+            zone_name: Zone to teardown bitmap in.
+
+        Returns:
+            True if teardown succeeded.
+        """
+        response = await self.send({"type": "teardown_bitmap", "zone": zone_name})
+        if response and response.get("type") == "bitmap_teardown":
+            logger.info(f"Bitmap teardown: {zone_name}")
+            return True
+        return False
 
     async def get_bitmap_status(self, zone_name: str) -> Optional[dict]:
         """Get bitmap rendering status for a zone.
