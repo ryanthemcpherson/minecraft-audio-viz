@@ -6,6 +6,7 @@ import ConnectCode from './components/ConnectCode';
 import AudioSourceSelect from './components/AudioSourceSelect';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
+import QueuePanel from './components/QueuePanel';
 import BeatIndicator from './components/BeatIndicator';
 import AuthModal from './components/AuthModal';
 import ProfileChip from './components/ProfileChip';
@@ -50,6 +51,21 @@ interface CaptureMode {
   fallback_reason?: string;
   pid?: number;
   name?: string;
+}
+
+interface RosterDJ {
+  dj_id: string;
+  dj_name: string;
+  is_active: boolean;
+  avatar_url: string | null;
+  queue_position: number;
+}
+
+interface RosterUpdate {
+  djs: RosterDJ[];
+  active_dj_id: string | null;
+  your_position: number;
+  rotation_interval_sec: number;
 }
 
 function App() {
@@ -109,6 +125,9 @@ function App() {
 
   // Capture mode state
   const [captureMode, setCaptureMode] = useState<CaptureMode | null>(null);
+
+  // DJ roster state
+  const [roster, setRoster] = useState<RosterUpdate | null>(null);
 
   // Test audio state
   const [isTestingAudio, setIsTestingAudio] = useState(false);
@@ -295,6 +314,12 @@ function App() {
     unlisteners.push(
       listen<CaptureMode>('capture-mode', (event) => {
         setCaptureMode(event.payload);
+      })
+    );
+
+    unlisteners.push(
+      listen<RosterUpdate>('dj-roster', (event) => {
+        setRoster(event.payload);
       })
     );
 
@@ -509,6 +534,7 @@ function App() {
       audioRef.current = { bands: [0, 0, 0, 0, 0], isBeat: false, bpm: 0, beatIntensity: 0 };
       setIsBeatForUI(false);
       setCaptureMode(null);
+      setRoster(null);
       setVoiceEnabled(false);
       setVoiceStatus({ available: false, streaming: false, channel_type: 'static', connected_players: 0 });
     } catch (e) {
@@ -772,6 +798,7 @@ function App() {
 
             <div className="col-right">
               <StatusPanel status={status} />
+              <QueuePanel roster={roster} />
             </div>
           </div>
 

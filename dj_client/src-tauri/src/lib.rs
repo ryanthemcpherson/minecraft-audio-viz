@@ -379,7 +379,7 @@ async fn run_bridge(
                     }
 
                     // 3. Update connection state from DjClient (brief lock, no events)
-                    let (status_snapshot, voice_snapshot, preset_changed) = {
+                    let (status_snapshot, voice_snapshot, preset_changed, roster_update) = {
                         let mut app_state = state_arc.lock();
                         // Report mc_connected=false so VJ server always relays to MC
                         if let Some(ref client) = app_state.client {
@@ -445,6 +445,10 @@ async fn run_bridge(
                             }
                         }
 
+                        // Consume pending DJ roster
+                        let roster = app_state.client.as_ref()
+                            .and_then(|c| c.take_pending_dj_roster());
+
                         if let Some(ref client) = app_state.client {
                             let latest = client.get_state();
                             app_state.status.is_active = latest.is_active;
@@ -468,12 +472,17 @@ async fn run_bridge(
                         }
 
                         // Clone data for events — lock is released after this block
-                        (app_state.status.clone(), app_state.voice_status.clone(), preset_event)
+                        (app_state.status.clone(), app_state.voice_status.clone(), preset_event, roster)
                     };
                     // state_arc lock dropped — emit events without holding any lock
 
                     if let Some(ref preset_name) = preset_changed {
                         let _ = app_handle.emit("preset-changed", preset_name);
+                    }
+
+                    // Emit DJ roster if available
+                    if let Some(ref roster) = roster_update {
+                        let _ = app_handle.emit("dj-roster", roster);
                     }
 
                     // Audio levels: emit at ~30fps, but always emit immediately on beat
