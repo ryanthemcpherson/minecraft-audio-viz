@@ -11,7 +11,7 @@ from typing import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.database import get_session
 from app.main import create_app
 from app.middleware.rate_limit import get_auth_limiter, get_connect_limiter, get_write_limiter
@@ -53,6 +53,10 @@ def settings() -> Settings:
         user_jwt_secret="test-user-jwt-secret",  # nosec B106
         user_jwt_expiry_minutes=60,
         refresh_token_expiry_days=30,
+        discord_client_id="test-discord-id",
+        discord_redirect_uri="http://localhost:3000/auth/callback",
+        google_client_id="test-google-id",
+        google_redirect_uri="http://localhost:3000/auth/callback",
     )
 
 
@@ -93,6 +97,7 @@ async def client(settings: Settings, db_session: AsyncSession) -> AsyncIterator[
         yield db_session
 
     app.dependency_overrides[get_session] = _override_get_session
+    app.dependency_overrides[get_settings] = lambda: settings
 
     # Reset rate limiters between tests so they don't bleed across test cases
     get_connect_limiter().reset()
