@@ -5738,6 +5738,9 @@ class VJServer:
                     if sleep_for < -0.25:
                         next_frame_at = time.perf_counter()
                     sleep_for = 0.0
+                # Enforce minimum sleep to prevent busy-spinning when idle
+                if sleep_for < 0.001:
+                    sleep_for = 0.001
 
                 sleep_start = time.perf_counter()
                 await asyncio.sleep(sleep_for)
