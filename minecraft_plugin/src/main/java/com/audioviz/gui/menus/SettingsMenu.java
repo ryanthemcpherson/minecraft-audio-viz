@@ -94,8 +94,8 @@ public class SettingsMenu implements Menu {
                 "&7Ticks between updates",
                 "&7Current: &f" + updateInterval + " tick(s)",
                 "",
-                "&7Lower = smoother but more CPU",
-                "&7Higher = choppier but lighter",
+                "&cReserved setting (not currently wired)",
+                "&7Saved to config only",
                 "",
                 "&eLeft-click: +1 tick",
                 "&eRight-click: -1 tick"
@@ -111,8 +111,8 @@ public class SettingsMenu implements Menu {
                 "&7Entities processed per tick",
                 "&7Current: &f" + batchSize,
                 "",
-                "&7Higher = faster updates",
-                "&7Lower = smoother server",
+                "&cReserved setting (not currently wired)",
+                "&7Saved to config only",
                 "",
                 "&eLeft-click: +10",
                 "&eRight-click: -10"
@@ -125,8 +125,8 @@ public class SettingsMenu implements Menu {
         inventory.setItem(SLOT_VIEW_CULLING, ItemBuilder.toggle(
             "&eView Distance Culling",
             viewCulling,
-            "&7Skip updates for entities",
-            "&7no player can see"
+            "&cReserved setting (not currently wired)",
+            "&7Saved to config only"
         ));
 
         // Cull distance
@@ -137,6 +137,9 @@ public class SettingsMenu implements Menu {
                 "&7Distance for culling",
                 "&7Current: &f" + cullDistance + " chunks",
                 "&7(" + (cullDistance * 16) + " blocks)",
+                "",
+                "&cReserved setting (not currently wired)",
+                "&7Saved to config only",
                 "",
                 "&eLeft-click: +1 chunk",
                 "&eRight-click: -1 chunk"
