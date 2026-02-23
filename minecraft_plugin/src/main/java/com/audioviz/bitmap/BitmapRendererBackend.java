@@ -233,6 +233,17 @@ public class BitmapRendererBackend implements RendererBackend {
      * @param frame    the frame buffer to render
      */
     public void applyFrame(String zoneName, BitmapFrameBuffer frame) {
+        applyFrame(zoneName, frame, null);
+    }
+
+    /**
+     * Apply a frame buffer with optional per-pixel brightness.
+     *
+     * @param zoneName   the zone to update
+     * @param frame      the frame buffer to render
+     * @param brightness optional per-pixel brightness (0-15), indexed by pixel row*width+col; null = default (15)
+     */
+    public void applyFrame(String zoneName, BitmapFrameBuffer frame, int[] brightness) {
         String zoneKey = zoneName.toLowerCase();
         BitmapGridConfig config = gridConfigs.get(zoneKey);
         if (config == null) return;
@@ -335,6 +346,27 @@ public class BitmapRendererBackend implements RendererBackend {
             bgArgb[i] = bg.argb();
         }
 
+        // --- Brightness: map per-pixel brightness to per-entity brightness ---
+        int[] bgBrightness = null;
+        if (brightness != null) {
+            bgBrightness = new int[bgCount];
+            for (int i = 0; i < bgCount; i++) {
+                int slot = bgUpdates.get(i).slot();
+                if (slot < rects.size()) {
+                    MergedRect rect = rects.get(slot);
+                    // Cell (x, y) → top pixel index = (y * 2) * logicalWidth + x
+                    int pixIdx = rect.y() * 2 * logicalWidth + rect.x();
+                    if (pixIdx >= 0 && pixIdx < brightness.length) {
+                        bgBrightness[i] = brightness[pixIdx];
+                    } else {
+                        bgBrightness[i] = 15;
+                    }
+                } else {
+                    bgBrightness[i] = 15;
+                }
+            }
+        }
+
         // --- Text: Component with half-block color, or space for uniform ---
         int txtCount = txtUpdates.size();
         String[] txtIds = new String[txtCount];
@@ -367,7 +399,7 @@ public class BitmapRendererBackend implements RendererBackend {
         // 5. Batch update (includes teleport for geometry changes)
         poolManager.batchUpdateAdaptive(zoneName,
             geoIds, geoTransforms, geoLocations, geoCount,
-            bgIds, bgArgb, bgCount,
+            bgIds, bgArgb, bgBrightness, bgCount,
             txtIds, txtComponents, txtCount,
             hideIds, hideCount);
 
@@ -381,6 +413,15 @@ public class BitmapRendererBackend implements RendererBackend {
      * Apply a raw ARGB pixel array directly (from WebSocket bitmap_frame message).
      */
     public void applyRawFrame(String zoneName, int[] argbPixels) {
+        applyRawFrame(zoneName, argbPixels, null);
+    }
+
+    /**
+     * Apply a raw ARGB pixel array with optional per-pixel brightness.
+     *
+     * @param brightness optional int[] of brightness values (0-15), parallel to argbPixels; null = default (15)
+     */
+    public void applyRawFrame(String zoneName, int[] argbPixels, int[] brightness) {
         String zoneKey = zoneName.toLowerCase();
         BitmapGridConfig config = gridConfigs.get(zoneKey);
         if (config == null) return;
@@ -388,7 +429,7 @@ public class BitmapRendererBackend implements RendererBackend {
         BitmapFrameBuffer temp = new BitmapFrameBuffer(config.width(), config.height());
         int count = Math.min(argbPixels.length, config.width() * config.height());
         System.arraycopy(argbPixels, 0, temp.getRawPixels(), 0, count);
-        applyFrame(zoneName, temp);
+        applyFrame(zoneName, temp, brightness);
     }
 
     @Override

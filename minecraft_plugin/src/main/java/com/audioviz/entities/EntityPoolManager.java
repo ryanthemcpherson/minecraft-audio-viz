@@ -531,9 +531,7 @@ public class EntityPoolManager {
     }
 
     /**
-     * Batch update for the adaptive bitmap renderer.
-     * Applies geometry, background, and text updates in a single scheduler task
-     * to minimize main-thread scheduling overhead.
+     * Batch update for the adaptive bitmap renderer (no teleport, no brightness).
      */
     public void batchUpdateAdaptive(
             String zoneName,
@@ -542,21 +540,35 @@ public class EntityPoolManager {
             String[] txtIds, Component[] txtComponents, int txtCount,
             String[] hideIds, int hideCount) {
         batchUpdateAdaptive(zoneName, geoIds, geoTransforms, null, geoCount,
-                bgIds, bgArgb, bgCount, txtIds, txtComponents, txtCount, hideIds, hideCount);
+                bgIds, bgArgb, null, bgCount, txtIds, txtComponents, txtCount, hideIds, hideCount);
     }
 
     /**
-     * Batch update for the adaptive bitmap renderer with entity teleportation.
-     * Applies geometry (transformation + teleport), background, and text updates
-     * in a single scheduler task to minimize main-thread scheduling overhead.
-     *
-     * @param geoLocations optional Location array for teleporting geometry-updated entities
-     *                     (parallel to geoIds); null entries are skipped
+     * Batch update for the adaptive bitmap renderer with teleport but no brightness.
      */
     public void batchUpdateAdaptive(
             String zoneName,
             String[] geoIds, Transformation[] geoTransforms, Location[] geoLocations, int geoCount,
             String[] bgIds, int[] bgArgb, int bgCount,
+            String[] txtIds, Component[] txtComponents, int txtCount,
+            String[] hideIds, int hideCount) {
+        batchUpdateAdaptive(zoneName, geoIds, geoTransforms, geoLocations, geoCount,
+                bgIds, bgArgb, null, bgCount, txtIds, txtComponents, txtCount, hideIds, hideCount);
+    }
+
+    /**
+     * Batch update for the adaptive bitmap renderer with entity teleportation and brightness.
+     * Applies geometry (transformation + teleport), background color + brightness, and text
+     * updates in a single scheduler task to minimize main-thread scheduling overhead.
+     *
+     * @param geoLocations optional Location array for teleporting geometry-updated entities
+     *                     (parallel to geoIds); null entries are skipped
+     * @param bgBrightness optional int[] of brightness values (0-15) parallel to bgIds; null = no change
+     */
+    public void batchUpdateAdaptive(
+            String zoneName,
+            String[] geoIds, Transformation[] geoTransforms, Location[] geoLocations, int geoCount,
+            String[] bgIds, int[] bgArgb, int[] bgBrightness, int bgCount,
             String[] txtIds, Component[] txtComponents, int txtCount,
             String[] hideIds, int hideCount) {
 
@@ -576,7 +588,7 @@ public class EntityPoolManager {
                 }
             }
 
-            // Background color updates
+            // Background color + optional brightness updates
             for (int i = 0; i < bgCount; i++) {
                 Entity entity = pool.get(bgIds[i]);
                 if (entity instanceof TextDisplay display) {
@@ -584,6 +596,10 @@ public class EntityPoolManager {
                     display.setBackgroundColor(Color.fromARGB(
                         (argb >> 24) & 0xFF, (argb >> 16) & 0xFF,
                         (argb >> 8) & 0xFF, argb & 0xFF));
+                    if (bgBrightness != null && i < bgBrightness.length) {
+                        int b = Math.max(0, Math.min(15, bgBrightness[i]));
+                        display.setBrightness(BRIGHTNESS_CACHE[b]);
+                    }
                 }
             }
 
