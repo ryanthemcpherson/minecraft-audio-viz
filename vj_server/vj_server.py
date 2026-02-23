@@ -4388,14 +4388,18 @@ class VJServer:
     async def _switch_zone_to_bitmap(self, zone_name: str, zs: ZonePatternState, pattern_name: str):
         """Switch a zone from block mode to bitmap mode (or change bitmap pattern)."""
         if zs.render_mode != "bitmap":
-            # Cleanup block entities first
+            # Update server state immediately so browsers see the change
+            zs.render_mode = "bitmap"
+            zs.pattern_name = pattern_name
+
+            # Cleanup block entities on Minecraft side (best-effort)
             if self.viz_client and self.viz_client.connected:
                 try:
                     await self.viz_client.cleanup_zone(zone_name)
                 except Exception as e:
                     logger.warning(f"Failed to cleanup block entities for '{zone_name}': {e}")
 
-            # Init bitmap grid
+            # Init bitmap grid on Minecraft side (best-effort)
             if self.viz_client and self.viz_client.connected:
                 try:
                     resp = await asyncio.wait_for(
@@ -4406,8 +4410,6 @@ class VJServer:
                         zs.bitmap_initialized = True
                         zs.bitmap_width = resp.get("width", 0)
                         zs.bitmap_height = resp.get("height", 0)
-                        zs.render_mode = "bitmap"
-                        zs.pattern_name = pattern_name
                         await self._broadcast_to_browsers(_json_str(resp))
                         logger.info(
                             f"Zone '{zone_name}' switched to bitmap: "
@@ -4419,12 +4421,12 @@ class VJServer:
                     logger.warning(f"Bitmap init failed for zone '{zone_name}': {e}")
         else:
             # Already bitmap — just switch pattern
+            zs.pattern_name = pattern_name
             if self.viz_client and self.viz_client.connected:
                 try:
                     await self.viz_client.set_bitmap_pattern(zone_name, pattern_name)
                 except Exception as e:
                     logger.warning(f"Failed to set bitmap pattern for '{zone_name}': {e}")
-            zs.pattern_name = pattern_name
 
     async def _switch_zone_to_block(self, zone_name: str, zs: ZonePatternState, pattern_name: str):
         """Switch a zone from bitmap mode to block mode (or change block pattern)."""
