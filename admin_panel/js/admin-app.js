@@ -396,6 +396,9 @@ class AdminApp {
         this.elements.bitmapBeatFlash = document.getElementById('bitmap-beat-flash');
         this.elements.bitmapWashColor = document.getElementById('bitmap-wash-color');
         this.elements.bitmapWashOpacity = document.getElementById('bitmap-wash-opacity');
+        this.elements.bitmapBloom = document.getElementById('bitmap-bloom');
+        this.elements.bitmapBloomStrength = document.getElementById('bitmap-bloom-strength');
+        this.elements.bitmapAmbientLights = document.getElementById('bitmap-ambient-lights');
         this.elements.bitmapLayerPattern = document.getElementById('bitmap-layer-pattern');
         this.elements.bitmapLayerBlend = document.getElementById('bitmap-layer-blend');
         this.elements.bitmapLayerOpacity = document.getElementById('bitmap-layer-opacity');
@@ -1149,6 +1152,18 @@ class AdminApp {
                         }
                     }
                 }
+                // Sync bloom/ambient state from server
+                if (data.bloom_enabled !== undefined && this.elements.bitmapBloom) {
+                    this.elements.bitmapBloom.checked = data.bloom_enabled;
+                }
+                if (data.bloom_strength !== undefined && this.elements.bitmapBloomStrength) {
+                    this.elements.bitmapBloomStrength.value = Math.round(data.bloom_strength * 100);
+                    const display = document.getElementById('val-bitmap-bloom-strength');
+                    if (display) display.textContent = `${Math.round(data.bloom_strength * 100)}%`;
+                }
+                if (data.ambient_lights_enabled !== undefined && this.elements.bitmapAmbientLights) {
+                    this.elements.bitmapAmbientLights.checked = data.ambient_lights_enabled;
+                }
                 // Handle band materials state
                 if (data.band_materials) {
                     this._syncBandMaterials(data.band_materials);
@@ -1381,6 +1396,23 @@ class AdminApp {
 
             case 'bitmap_status':
                 this._updateBitmapStatus(data);
+                break;
+
+            case 'bloom_state':
+                if (this.elements.bitmapBloom) {
+                    this.elements.bitmapBloom.checked = data.enabled;
+                }
+                if (data.strength !== undefined && this.elements.bitmapBloomStrength) {
+                    this.elements.bitmapBloomStrength.value = Math.round(data.strength * 100);
+                    const display = document.getElementById('val-bitmap-bloom-strength');
+                    if (display) display.textContent = `${Math.round(data.strength * 100)}%`;
+                }
+                break;
+
+            case 'ambient_lights_state':
+                if (this.elements.bitmapAmbientLights) {
+                    this.elements.bitmapAmbientLights.checked = data.enabled;
+                }
                 break;
 
             case 'error':
@@ -5177,6 +5209,43 @@ class AdminApp {
                     action: 'beat_flash',
                     zone: el.bitmapZone?.value || 'main',
                     enabled: el.bitmapBeatFlash.checked
+                });
+            });
+        }
+
+        // Bloom toggle
+        if (el.bitmapBloom) {
+            el.bitmapBloom.addEventListener('change', () => {
+                this.ws.send({
+                    type: 'set_bloom',
+                    enabled: el.bitmapBloom.checked
+                });
+            });
+        }
+
+        // Bloom strength slider (debounced)
+        if (el.bitmapBloomStrength) {
+            const sendBloomStrength = debounce((val) => {
+                this.ws.send({
+                    type: 'set_bloom',
+                    strength: val / 100
+                });
+            }, 50);
+
+            el.bitmapBloomStrength.addEventListener('input', () => {
+                const val = parseInt(el.bitmapBloomStrength.value);
+                const display = document.getElementById('val-bitmap-bloom-strength');
+                if (display) display.textContent = `${val}%`;
+                sendBloomStrength(val);
+            });
+        }
+
+        // Ambient lights toggle
+        if (el.bitmapAmbientLights) {
+            el.bitmapAmbientLights.addEventListener('change', () => {
+                this.ws.send({
+                    type: 'set_ambient_lights',
+                    enabled: el.bitmapAmbientLights.checked
                 });
             });
         }
