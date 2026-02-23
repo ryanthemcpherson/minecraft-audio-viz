@@ -69,10 +69,8 @@ function App() {
   // Audio state
   const [audioSources, setAudioSources] = useState<AudioSource[]>([]);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
-  const [bands, setBands] = useState<number[]>([0, 0, 0, 0, 0]);
-  const [isBeat, setIsBeat] = useState(false);
-  const [bpm, setBpm] = useState(0);
-  const [beatIntensity, setBeatIntensity] = useState(0);
+  const audioRef = useRef({ bands: [0, 0, 0, 0, 0], isBeat: false, bpm: 0, beatIntensity: 0 });
+  const [isBeatForUI, setIsBeatForUI] = useState(false);
 
   // Audio preset state
   const [activePreset, setActivePreset] = useState(() => localStorage.getItem('mcav.preset') || 'auto');
@@ -271,10 +269,14 @@ function App() {
 
     unlisteners.push(
       listen<AudioLevels>('audio-levels', (event) => {
-        setBands(event.payload.bands);
-        setIsBeat(event.payload.is_beat);
-        setBpm(event.payload.bpm);
-        setBeatIntensity(event.payload.beat_intensity);
+        // Only update React state for beat indicator (~2-4 times/sec)
+        if (event.payload.is_beat !== audioRef.current.isBeat) {
+          setIsBeatForUI(event.payload.is_beat);
+        }
+        audioRef.current.bands = event.payload.bands;
+        audioRef.current.isBeat = event.payload.is_beat;
+        audioRef.current.bpm = event.payload.bpm;
+        audioRef.current.beatIntensity = event.payload.beat_intensity;
       })
     );
 
@@ -504,10 +506,8 @@ function App() {
         error: null,
       });
       setShowName(null);
-      setBands([0, 0, 0, 0, 0]);
-      setIsBeat(false);
-      setBpm(0);
-      setBeatIntensity(0);
+      audioRef.current = { bands: [0, 0, 0, 0, 0], isBeat: false, bpm: 0, beatIntensity: 0 };
+      setIsBeatForUI(false);
       setCaptureMode(null);
       setVoiceEnabled(false);
       setVoiceStatus({ available: false, streaming: false, channel_type: 'static', connected_players: 0 });
@@ -751,13 +751,13 @@ function App() {
               {auth.isSignedIn && auth.user ? (
                 <ProfileChip user={auth.user} onSignOut={auth.signOut} />
               ) : null}
-              <BeatIndicator active={isBeat && status.connected} />
+              <BeatIndicator active={isBeatForUI && status.connected} />
             </div>
           </div>
 
           <div className="main-grid">
             <div className="col-left">
-              <FrequencyMeter bands={bands} isBeat={isBeat} beatIntensity={beatIntensity} bpm={bpm} />
+              <FrequencyMeter audioRef={audioRef} />
               <div className="preset-row">
                 {PRESETS.map(name => (
                   <button
