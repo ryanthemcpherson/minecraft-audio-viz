@@ -616,6 +616,7 @@ public class EntityPoolManager {
                 Entity entity = pool.get(hideIds[i]);
                 if (entity instanceof TextDisplay display) {
                     display.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+                    display.setBrightness(BRIGHTNESS_CACHE[15]);
                     display.text(Component.empty());
                 }
             }
