@@ -139,6 +139,7 @@ class VizStateBroadcast(msgspec.Struct):
     visual_delay_mode: str = "manual"
     zone_status: Optional[ZoneStatus] = None
     zone_patterns: Optional[dict] = None
+    zone_entities: Optional[dict] = None
     perf: Optional[dict] = None
 
 
@@ -4280,6 +4281,7 @@ class VJServer:
         instant_kick: bool = False,
         tempo_confidence: float = 0.0,
         beat_phase: float = 0.0,
+        zone_entities: Optional[Dict[str, List[dict]]] = None,
     ):
         """Broadcast visualization state to browser clients."""
         if not self._broadcast_clients:
@@ -4340,10 +4342,8 @@ class VJServer:
                 beat_phase=round(beat_phase, 3),
             ),
             zone_patterns=self._get_zone_patterns_dict(),
+            zone_entities=zone_entities,
             perf=self._latest_perf_snapshot,
-            # NOTE: zone_entities intentionally omitted from default broadcast.
-            # Full per-zone entity data is large and should only be sent when
-            # explicitly requested by a client, not on every frame.
         )
         message = mjson.encode(state).decode()
 
@@ -5748,6 +5748,7 @@ class VJServer:
                     instant_kick,
                     tempo_confidence,
                     beat_phase,
+                    zone_entities=zone_entities if len(zone_entities) > 1 else None,
                 )
                 broadcast_ms = (time.perf_counter() - broadcast_start) * 1000.0
 
