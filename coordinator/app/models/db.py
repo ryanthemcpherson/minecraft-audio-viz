@@ -162,6 +162,7 @@ class DesktopExchangeCode(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    nonce: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
     payload: Mapped[str] = mapped_column(String(4000), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

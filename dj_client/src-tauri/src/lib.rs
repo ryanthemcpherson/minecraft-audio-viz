@@ -379,7 +379,7 @@ async fn run_bridge(
                     }
 
                     // 3. Update connection state from DjClient (brief lock, no events)
-                    let (status_snapshot, voice_snapshot, preset_changed) = {
+                    let (status_snapshot, voice_snapshot, preset_changed, roster_update) = {
                         let mut app_state = state_arc.lock();
                         // Report mc_connected=false so VJ server always relays to MC
                         if let Some(ref client) = app_state.client {
@@ -445,6 +445,10 @@ async fn run_bridge(
                             }
                         }
 
+                        // Consume pending DJ roster
+                        let roster = app_state.client.as_ref()
+                            .and_then(|c| c.take_pending_dj_roster());
+
                         if let Some(ref client) = app_state.client {
                             let latest = client.get_state();
                             app_state.status.is_active = latest.is_active;
@@ -468,12 +472,17 @@ async fn run_bridge(
                         }
 
                         // Clone data for events — lock is released after this block
-                        (app_state.status.clone(), app_state.voice_status.clone(), preset_event)
+                        (app_state.status.clone(), app_state.voice_status.clone(), preset_event, roster)
                     };
                     // state_arc lock dropped — emit events without holding any lock
 
                     if let Some(ref preset_name) = preset_changed {
                         let _ = app_handle.emit("preset-changed", preset_name);
+                    }
+
+                    // Emit DJ roster if available
+                    if let Some(ref roster) = roster_update {
+                        let _ = app_handle.emit("dj-roster", roster);
                     }
 
                     // Audio levels: emit at ~30fps, but always emit immediately on beat
@@ -1013,24 +1022,16 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Second instance launched (e.g. by deep link) — focus the existing window
+            // Second instance launched — focus the existing window
             log::info!("Single-instance: second launch with args: {:?}", args);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            // Forward any deep link URLs from the second instance to the frontend
-            for arg in &args {
-                if arg.starts_with("mcav://") {
-                    log::info!("Single-instance: forwarding deep link to frontend: {}", arg);
-                    let _ = app.emit("deep-link-received", arg.clone());
-                }
-            }
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_deep_link::init())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
         .invoke_handler(tauri::generate_handler![
             list_audio_sources,
@@ -1127,26 +1128,6 @@ pub fn run() {
                             });
                         }
                     });
-                }
-            }
-
-            // Deep-link: show window when a deep link arrives
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let handle = app.handle().clone();
-                app.deep_link().on_open_url(move |event| {
-                    log::info!("Deep link received: {:?}", event.urls());
-                    // Show and focus the main window
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                });
-
-                // Register protocol in debug builds (release/install handles this via OS)
-                #[cfg(debug_assertions)]
-                if let Err(e) = app.deep_link().register("mcav") {
-                    log::warn!("Failed to register deep link protocol: {}", e);
                 }
             }
 

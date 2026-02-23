@@ -273,6 +273,9 @@ pub enum ServerMessage {
 
     #[serde(rename = "audio_setting_sync")]
     AudioSettingSync(AudioSettingSyncMessage),
+
+    #[serde(rename = "dj_roster")]
+    DjRoster(DjRosterMessage),
 }
 
 /// Auth success response
@@ -400,6 +403,30 @@ pub struct VoiceStatusMessage {
     pub channel_type: Option<String>,
     #[serde(default)]
     pub connected_players: Option<u32>,
+}
+
+/// DJ roster update from server
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DjRosterMessage {
+    #[serde(default)]
+    pub djs: Vec<DjRosterEntry>,
+    pub active_dj_id: Option<String>,
+    #[serde(default)]
+    pub your_position: u32,
+    #[serde(default)]
+    pub rotation_interval_sec: u32,
+}
+
+/// Single DJ entry in the roster
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DjRosterEntry {
+    pub dj_id: String,
+    pub dj_name: String,
+    #[serde(default)]
+    pub is_active: bool,
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub queue_position: u32,
 }
 
 #[cfg(test)]
