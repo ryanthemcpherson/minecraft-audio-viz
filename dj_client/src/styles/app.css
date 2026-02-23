@@ -106,6 +106,7 @@ body {
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .col-right {
@@ -113,6 +114,7 @@ body {
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .bottom-bar {
@@ -396,8 +398,7 @@ kbd {
 
 /* Frequency Meter (Canvas) */
 .frequency-canvas {
-  width: 100%;
-  height: auto;
+  max-width: 100%;
   border-radius: 6px;
 }
 
