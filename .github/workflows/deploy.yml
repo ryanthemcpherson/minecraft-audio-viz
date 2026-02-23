@@ -148,6 +148,19 @@ jobs:
           source .venv/bin/activate
           cd coordinator && pytest tests/ -v --tb=short
 
+      # --- Restart VJ server (picks up new code) ---
+      - name: Restart VJ server
+        run: |
+          echo "=== Restarting VJ server ==="
+          sudo systemctl restart audioviz-vj.service
+          sleep 3
+          if systemctl is-active --quiet audioviz-vj.service; then
+            echo "SUCCESS: audioviz-vj.service is running"
+          else
+            echo "WARNING: audioviz-vj.service failed to start"
+            sudo journalctl -u audioviz-vj.service --no-pager -n 20
+          fi
+
       # --- Restart Minecraft server ---
       - name: Restart Minecraft server
         run: |
