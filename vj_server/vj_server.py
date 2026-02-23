@@ -105,6 +105,43 @@ class DjAudioFrame(msgspec.Struct):
 
 _frame_decoder = msgspec.json.Decoder(DjAudioFrame)
 
+
+class ZoneStatus(msgspec.Struct):
+    """Zone timing/tempo info embedded in state broadcasts."""
+
+    bpm_estimate: float = 0.0
+    tempo_confidence: float = 0.0
+    beat_phase: float = 0.0
+
+
+class VizStateBroadcast(msgspec.Struct):
+    """Typed struct for the 60fps browser state broadcast message."""
+
+    type: str = "state"
+    entities: list = []
+    bands: list = []
+    amplitude: float = 0.0
+    amplitude_raw: float = 0.0
+    is_beat: bool = False
+    beat_intensity: float = 0.0
+    instant_bass: float = 0.0
+    instant_kick: bool = False
+    frame: int = 0
+    pattern: str = ""
+    active_dj: Optional[dict] = None
+    latency_ms: float = 0.0
+    ping_ms: float = 0.0
+    pipeline_latency_ms: float = 0.0
+    fps: float = 0.0
+    jitter_ms: float = 0.0
+    sync_confidence: float = 0.0
+    visual_delay_ms: float = 0.0
+    visual_delay_mode: str = "manual"
+    zone_status: Optional[ZoneStatus] = None
+    zone_patterns: Optional[dict] = None
+    perf: Optional[dict] = None
+
+
 # Regex for stripping non-printable characters (keeps printable ASCII + common Unicode)
 _NONPRINTABLE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
@@ -4244,40 +4281,38 @@ class VJServer:
         if self._active_dj_id and self._active_dj_id in self._djs:
             active_dj_profile = self._dj_profile_dict(self._djs[self._active_dj_id])
 
-        message = _json_str(
-            {
-                "type": "state",
-                "entities": entities,
-                "bands": bands,
-                "amplitude": norm_amplitude,
-                "amplitude_raw": raw_amplitude,
-                "is_beat": is_beat,
-                "beat_intensity": beat_intensity,
-                "instant_bass": instant_bass,  # Bass lane energy (instant, ~1ms latency)
-                "instant_kick": instant_kick,  # Bass lane kick detection (instant)
-                "frame": self._frame_count,
-                "pattern": self._pattern_name,
-                "active_dj": active_dj_profile,
-                "latency_ms": round(latency_ms, 1),
-                "ping_ms": round(ping_ms, 1),
-                "pipeline_latency_ms": round(pipeline_latency_ms, 1),
-                "fps": round(fps, 1),
-                "jitter_ms": round(jitter_ms, 1),
-                "sync_confidence": round(sync_confidence, 0),
-                "visual_delay_ms": round(visual_delay_ms, 0),
-                "visual_delay_mode": self._visual_delay_mode,
-                "zone_status": {
-                    "bpm_estimate": round(bpm, 1),
-                    "tempo_confidence": round(tempo_confidence, 3),
-                    "beat_phase": round(beat_phase, 3),
-                },
-                "zone_patterns": self._get_zone_patterns_dict(),
-                "perf": self._latest_perf_snapshot,
-                # NOTE: zone_entities intentionally omitted from default broadcast.
-                # Full per-zone entity data is large and should only be sent when
-                # explicitly requested by a client, not on every frame.
-            }
+        state = VizStateBroadcast(
+            entities=entities,
+            bands=bands,
+            amplitude=norm_amplitude,
+            amplitude_raw=raw_amplitude,
+            is_beat=is_beat,
+            beat_intensity=beat_intensity,
+            instant_bass=instant_bass,
+            instant_kick=instant_kick,
+            frame=self._frame_count,
+            pattern=self._pattern_name,
+            active_dj=active_dj_profile,
+            latency_ms=round(latency_ms, 1),
+            ping_ms=round(ping_ms, 1),
+            pipeline_latency_ms=round(pipeline_latency_ms, 1),
+            fps=round(fps, 1),
+            jitter_ms=round(jitter_ms, 1),
+            sync_confidence=round(sync_confidence, 0),
+            visual_delay_ms=round(visual_delay_ms, 0),
+            visual_delay_mode=self._visual_delay_mode,
+            zone_status=ZoneStatus(
+                bpm_estimate=round(bpm, 1),
+                tempo_confidence=round(tempo_confidence, 3),
+                beat_phase=round(beat_phase, 3),
+            ),
+            zone_patterns=self._get_zone_patterns_dict(),
+            perf=self._latest_perf_snapshot,
+            # NOTE: zone_entities intentionally omitted from default broadcast.
+            # Full per-zone entity data is large and should only be sent when
+            # explicitly requested by a client, not on every frame.
         )
+        message = mjson.encode(state).decode()
 
         # Send to all clients concurrently with a short timeout to prevent
         # slow/dead clients from blocking the event loop (which causes latency spikes)
