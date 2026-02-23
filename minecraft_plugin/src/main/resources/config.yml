@@ -27,6 +27,10 @@ bitmap:
   # Higher = more pixels, better fidelity, more entities
   pixels_per_block: 5
 
+  # Adaptive merge combines uniform regions into stretched rectangles.
+  # Set false for stable pixel-grid fidelity (recommended for DJ visuals).
+  adaptive_merge: false
+
 # Performance settings
 performance:
   # Maximum entities per zone (block displays for Lua patterns)

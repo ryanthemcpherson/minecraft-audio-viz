@@ -64,7 +64,7 @@ public class BitmapRendererBackend implements RendererBackend {
     private final Map<String, AdaptiveEntityAssigner> assigners = new ConcurrentHashMap<>();
 
     /** Default interpolation ticks for smooth color blending. */
-    private static final int DEFAULT_INTERPOLATION_TICKS = 3;
+    private static final int DEFAULT_INTERPOLATION_TICKS = 0;
 
     /** Maximum bitmap dimensions (prevents entity explosion). */
     private static final int MAX_BITMAP_WIDTH = 128;
@@ -261,8 +261,12 @@ public class BitmapRendererBackend implements RendererBackend {
         int logicalHeight = config.logicalHeight();
         float pixelScale = config.pixelScale();
 
-        // 1. Merge: pixels → cell grid → greedy rectangles
-        List<MergedRect> rects = CellGridMerger.merge(pixels, logicalWidth, logicalHeight);
+        // 1. Build rect list: either adaptive merged rectangles or 1x1 cell rects.
+        // Default is non-merged for visual stability/fidelity.
+        boolean adaptiveMerge = plugin.getConfig().getBoolean("bitmap.adaptive_merge", false);
+        List<MergedRect> rects = adaptiveMerge
+            ? CellGridMerger.merge(pixels, logicalWidth, logicalHeight)
+            : CellGridMerger.asCellRects(pixels, logicalWidth, logicalHeight);
 
         // 2. Assign: rects → pool slots with dirty tracking
         AdaptiveEntityAssigner.FrameDiff diff = assigner.assign(rects, pixelScale);
