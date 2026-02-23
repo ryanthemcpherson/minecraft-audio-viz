@@ -394,75 +394,11 @@ kbd {
   text-transform: uppercase;
 }
 
-/* Frequency Meter */
-.frequency-meter {
-  display: flex;
-  flex-direction: column;
-}
-
-.meter-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.bpm-display {
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--accent-warm);
-  letter-spacing: 0.04em;
-  transition: text-shadow 0.1s ease;
-}
-
-.bpm-pulse {
-  text-shadow: 0 0 10px rgba(255, 159, 67, 0.7);
-}
-
-.meter-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 11px;
-}
-
-.meter-bar {
-  display: grid;
-  grid-template-columns: 52px 1fr 50px;
-  align-items: center;
-  gap: 10px;
-}
-
-.meter-label {
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.meter-track {
-  height: 18px;
-  border-radius: 20px;
-  background: rgba(0, 0, 0, 0.3);
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: border-color 0.15s ease;
-}
-
-.meter-beat .meter-bar:first-child .meter-track {
-  border-color: rgba(255, 145, 0, 0.5);
-}
-
-.meter-fill {
-  height: 100%;
-  border-radius: inherit;
-  transition: width 0.07s linear, box-shadow 0.1s ease;
-}
-
-.meter-value {
-  color: var(--text-secondary);
-  text-align: right;
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 0.78rem;
+/* Frequency Meter (Canvas) */
+.frequency-canvas {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
 }
 
 /* Status Panel */
@@ -895,11 +831,6 @@ kbd {
 }
 
 @media (max-width: 720px) {
-  .meter-bar {
-    grid-template-columns: 44px 1fr 42px;
-    gap: 8px;
-  }
-
   .welcome-modal {
     padding: 24px 18px;
   }
