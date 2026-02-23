@@ -4784,7 +4784,11 @@ class AdminApp {
             if (!Array.isArray(entities)) continue;
 
             // Skip bitmap zones — they render via BitmapPreview, not block entities
-            if (this._getZoneRenderMode(zoneName) === 'bitmap') continue;
+            if (this._getZoneRenderMode(zoneName) === 'bitmap') {
+                const zg = this._previewZoneGroups[zoneName];
+                if (zg) zg.blocks.forEach(b => { b.visible = false; });
+                continue;
+            }
 
             const zoneGroup = this._ensurePreviewZoneGroup(zoneName);
             if (!zoneGroup) continue;
