@@ -71,7 +71,7 @@ async def handle_http_request(
 
 async def _handle_health(writer: asyncio.StreamWriter, server: "VJServer") -> None:
     """Handle /health endpoint - returns JSON status."""
-    import json
+    import msgspec.json as mjson
 
     uptime = time.time() - server._start_time
     active_dj = server._get_active_dj()
@@ -86,7 +86,7 @@ async def _handle_health(writer: asyncio.StreamWriter, server: "VJServer") -> No
         "minecraft_connected": (server.viz_client is not None and server.viz_client.connected),
     }
 
-    body = json.dumps(health_data, indent=2)
+    body = mjson.encode(health_data).decode()
     response = (
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: application/json\r\n"
