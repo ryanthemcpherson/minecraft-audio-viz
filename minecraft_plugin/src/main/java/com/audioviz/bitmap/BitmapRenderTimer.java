@@ -5,13 +5,17 @@ package com.audioviz.bitmap;
  *
  * <p>Records render durations and skipped frames. Provides snapshot-and-reset
  * for periodic logging without allocating on the hot path.
+ *
+ * <p>Thread safety: {@code recordRender} is called from the render thread,
+ * {@code recordSkip} from the main thread. Fields are volatile for visibility;
+ * {@code snapshotAndReset} is synchronized for consistent multi-field reads.
  */
 public class BitmapRenderTimer {
 
-    private long totalRenderNanos;
-    private long maxRenderNanos;
-    private int frameCount;
-    private int skipCount;
+    private volatile long totalRenderNanos;
+    private volatile long maxRenderNanos;
+    private volatile int frameCount;
+    private volatile int skipCount;
 
     public void recordRender(long nanos) {
         totalRenderNanos += nanos;
@@ -36,7 +40,7 @@ public class BitmapRenderTimer {
     /**
      * Snapshot current stats and reset counters.
      */
-    public Stats snapshotAndReset() {
+    public synchronized Stats snapshotAndReset() {
         Stats stats = new Stats(frameCount, skipCount, totalRenderNanos,
                                 maxRenderNanos, getAvgRenderNanos());
         totalRenderNanos = 0;

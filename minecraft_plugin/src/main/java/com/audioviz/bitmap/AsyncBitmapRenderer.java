@@ -23,7 +23,7 @@ public class AsyncBitmapRenderer {
 
     private final ExecutorService renderThread;
     private final Map<String, ZoneRenderState> zones = new ConcurrentHashMap<>();
-    private Logger logger;
+    private final Logger logger;
 
     public AsyncBitmapRenderer() {
         this(null);
