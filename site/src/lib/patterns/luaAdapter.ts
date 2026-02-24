@@ -49,9 +49,12 @@ function bindGlobals(): void {
 export function ensureFengari(): Promise<void> {
   if (fengariReady) return Promise.resolve();
   if (loadPromise) return loadPromise;
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return Promise.resolve();
+  }
 
   // Already loaded by another script tag (e.g. test harness)
-  if (typeof window !== "undefined" && (window as any).__fengari) {
+  if ((window as any).__fengari) {
     bindGlobals();
     return Promise.resolve();
   }
