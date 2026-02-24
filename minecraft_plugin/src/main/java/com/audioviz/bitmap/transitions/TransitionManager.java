@@ -5,6 +5,7 @@ import com.audioviz.bitmap.BitmapPattern;
 import com.audioviz.patterns.AudioState;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Manages pattern transitions with double-buffering.
@@ -25,7 +26,7 @@ public class TransitionManager {
     private int defaultDurationTicks = 20;
 
     /** Per-zone transition state. */
-    private final Map<String, TransitionState> activeTransitions = new HashMap<>();
+    private final Map<String, TransitionState> activeTransitions = new ConcurrentHashMap<>();
 
     public TransitionManager() {
         registerBuiltIn();

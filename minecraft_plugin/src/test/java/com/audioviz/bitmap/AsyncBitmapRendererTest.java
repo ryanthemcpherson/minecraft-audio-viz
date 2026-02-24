@@ -117,6 +117,32 @@ class AsyncBitmapRendererTest {
         assertFalse(renderer.isRendering("test"));
     }
 
+    static class ThrowingPattern extends BitmapPattern {
+        ThrowingPattern() { super("throw", "Throw", "test"); }
+        @Override
+        public void render(BitmapFrameBuffer buffer, AudioState audio, double time) {
+            throw new RuntimeException("render failed");
+        }
+    }
+
+    @Test
+    void recoverAfterRenderException() throws Exception {
+        renderer = new AsyncBitmapRenderer();
+        renderer.registerZone("test", 4, 4);
+        AudioState audio = AudioState.silent();
+
+        renderer.submitRender("test", new ThrowingPattern(), audio, 1.0);
+        Thread.sleep(200);
+
+        assertNull(renderer.consumeCompletedFrame("test"), "No frame after error");
+        assertFalse(renderer.isRendering("test"), "Rendering flag cleared");
+
+        // Subsequent render should work
+        assertTrue(renderer.submitRender("test", new SolidPattern(0xFFFF0000), audio, 2.0));
+        Thread.sleep(200);
+        assertNotNull(renderer.consumeCompletedFrame("test"), "Recovered after error");
+    }
+
     @Test
     void renderTimerIsPopulated() throws Exception {
         renderer = new AsyncBitmapRenderer();
