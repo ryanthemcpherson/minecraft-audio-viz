@@ -19,14 +19,14 @@
     "next": "^16.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "three": "^0.182.0"
+    "three": "^0.183.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "^0.182.0",
+    "@types/three": "^0.183.1",
     "esbuild": "^0.27.3",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
