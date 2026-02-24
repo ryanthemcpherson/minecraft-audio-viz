@@ -33,7 +33,7 @@ function isDesktopOAuthState(state: string): boolean {
  *   /auth/callback page, which redirects the browser to the coordinator.
  *   The coordinator returns HTML with a mcav:// deep-link back to the app.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
 
   if (pathname === "/auth/callback") {

@@ -44,7 +44,7 @@ class PendingPattern implements PatternInstance {
 
     if (isFengariReady()) {
       this._inner = new LuaPatternInstance(libSource, patternSource, config);
-    } else {
+    } else if (typeof window !== "undefined") {
       ensureFengari().then(() => {
         if (!this._inner) {
           this._inner = new LuaPatternInstance(this._libSource, this._patternSource, config);
