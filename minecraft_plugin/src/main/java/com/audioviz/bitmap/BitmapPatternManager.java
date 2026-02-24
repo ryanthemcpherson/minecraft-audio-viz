@@ -35,6 +35,7 @@ public class BitmapPatternManager {
 
     private final AudioVizPlugin plugin;
     private final BitmapRendererBackend renderer;
+    private final AsyncBitmapRenderer asyncRenderer;
 
     /** All registered bitmap patterns, keyed by pattern ID. */
     private final Map<String, BitmapPattern> patternRegistry = new LinkedHashMap<>();
@@ -67,6 +68,7 @@ public class BitmapPatternManager {
         this.renderer = renderer;
         this.gameStateModulator = new GameStateModulator(plugin);
         registerBuiltInPatterns();
+        this.asyncRenderer = new AsyncBitmapRenderer(plugin.getLogger());
     }
 
     /**
@@ -204,6 +206,7 @@ public class BitmapPatternManager {
 
         BitmapFrameBuffer buffer = new BitmapFrameBuffer(width, height);
         zoneStates.put(zoneName.toLowerCase(), new ZoneState(pattern, buffer));
+        asyncRenderer.registerZone(zoneName, width, height);
 
         plugin.getLogger().info("Bitmap zone '" + zoneName + "' activated with pattern '"
             + pattern.getId() + "' (" + width + "x" + height + ")");
@@ -246,7 +249,8 @@ public class BitmapPatternManager {
                 state.buffer.getWidth(), state.buffer.getHeight());
             state.pendingPattern = newPattern;
         } else {
-            // Instant cut
+            // Instant cut — drain in-flight async render first
+            asyncRenderer.drainZone(zoneName);
             state.pattern.reset();
             state.pattern = newPattern;
             newPattern.reset();
@@ -265,6 +269,7 @@ public class BitmapPatternManager {
         String key = zoneName.toLowerCase();
         transitionManager.cancel(key);
         ZoneState state = zoneStates.remove(key);
+        asyncRenderer.removeZone(zoneName);
         if (state != null) {
             state.pattern.reset();
         }
@@ -306,7 +311,7 @@ public class BitmapPatternManager {
         double dt = (now - lastTickMs) / 1000.0;
         lastTickMs = now;
 
-        // Refresh game state (throttled internally to every ~1s)
+        // Refresh game state on main thread (throttled internally to every ~1s)
         gameStateModulator.refreshWorldState();
 
         for (Map.Entry<String, ZoneState> entry : zoneStates.entrySet()) {
@@ -314,38 +319,41 @@ public class BitmapPatternManager {
             ZoneState state = entry.getValue();
 
             try {
-                long renderStart = System.nanoTime();
+                // Submit async render (skipped if previous render still in-flight)
+                asyncRenderer.submitRender(
+                    zoneName, state.pattern,
+                    transitionManager, zoneName,
+                    audio, time);
 
-                // Step 1: Pattern rendering (with transition support)
-                if (transitionManager.isTransitioning(zoneName)) {
-                    boolean stillActive = transitionManager.tick(
-                        zoneName, state.buffer, audio, time);
-                    if (!stillActive && state.pendingPattern != null) {
+                // Consume completed frame (null if async render hasn't finished)
+                int[] completedPixels = asyncRenderer.consumeCompletedFrame(zoneName);
+                if (completedPixels != null) {
+                    // Handle transition completion
+                    if (state.pendingPattern != null
+                            && !transitionManager.isTransitioning(zoneName)) {
                         state.pattern = state.pendingPattern;
                         state.pendingPattern = null;
                     }
-                } else {
-                    state.buffer.clear();
-                    state.pattern.render(state.buffer, audio, time);
+
+                    // Load rendered pixels into main-thread buffer
+                    System.arraycopy(completedPixels, 0,
+                        state.buffer.getRawPixels(), 0,
+                        Math.min(completedPixels.length, state.buffer.getPixelCount()));
+
+                    // Post-processing on main thread (lightweight)
+                    gameStateModulator.modulate(state.buffer, dt);
+                    effectsProcessor.process(state.buffer, audio, time);
+
+                    // Push to entities (main thread required)
+                    renderer.applyFrame(zoneName, state.buffer);
                 }
-
-                long renderNanos = System.nanoTime() - renderStart;
-                state.timer.recordRender(renderNanos);
-
-                // Step 2: Game state modulation (time of day, weather tinting)
-                gameStateModulator.modulate(state.buffer, dt);
-
-                // Step 3: Post-processing effects (strobe, freeze, palette, brightness)
-                effectsProcessor.process(state.buffer, audio, time);
-
-                // Step 4: Push to renderer backend (dirty-checked)
-                renderer.applyFrame(zoneName, state.buffer);
             } catch (Exception e) {
                 plugin.getLogger().warning("Error in bitmap zone '" + zoneName
                     + "' pattern '" + state.pattern.getId() + "': " + e.getMessage());
             }
         }
 
+        // Periodic diagnostics
         diagnosticTickCounter++;
         if (diagnosticTickCounter >= 100) {
             diagnosticTickCounter = 0;
@@ -355,12 +363,16 @@ public class BitmapPatternManager {
 
     private void logRenderDiagnostics() {
         for (Map.Entry<String, ZoneState> entry : zoneStates.entrySet()) {
-            BitmapRenderTimer.Stats stats = entry.getValue().timer.snapshotAndReset();
+            String zoneName = entry.getKey();
+            BitmapRenderTimer timer = asyncRenderer.getTimer(zoneName);
+            if (timer == null) continue;
+
+            BitmapRenderTimer.Stats stats = timer.snapshotAndReset();
             if (stats.frameCount() == 0 && stats.skipCount() == 0) continue;
 
             String msg = String.format(
                 "Bitmap '%s' [%s]: %d frames, %d skipped | avg=%.1fms max=%.1fms",
-                entry.getKey(),
+                zoneName,
                 entry.getValue().pattern.getId(),
                 stats.frameCount(), stats.skipCount(),
                 stats.avgMs(), stats.maxMs());
@@ -383,6 +395,7 @@ public class BitmapPatternManager {
         }
         transitionManager.cancelAll();
         effectsProcessor.reset();
+        asyncRenderer.shutdown();
         for (ZoneState state : zoneStates.values()) {
             state.pattern.reset();
         }
@@ -401,9 +414,8 @@ public class BitmapPatternManager {
 
     private static class ZoneState {
         BitmapPattern pattern;
-        BitmapPattern pendingPattern; // Non-null during transitions
+        BitmapPattern pendingPattern;
         final BitmapFrameBuffer buffer;
-        final BitmapRenderTimer timer = new BitmapRenderTimer();
 
         ZoneState(BitmapPattern pattern, BitmapFrameBuffer buffer) {
             this.pattern = pattern;
