@@ -17,7 +17,7 @@ public class BitmapFractalZoom extends BitmapPattern {
     private double centerY = 0.0;
     private double beatPulse = 0;
 
-    private static final int MAX_ITER = 40;
+    private static final int MAX_ITER = 24;
 
     public BitmapFractalZoom() {
         super("bmp_fractal", "Bitmap Fractal Zoom",
@@ -46,19 +46,22 @@ public class BitmapFractalZoom extends BitmapPattern {
             centerY = Math.cos(time * 0.13) * 0.3;
         }
 
-        // Julia set c parameter modulated by audio
+        // Precompute time-dependent values outside pixel loops
         double cRe = -0.7 + Math.sin(time * 0.15) * 0.15 + mid * 0.05;
         double cIm = 0.27 + Math.cos(time * 0.12) * 0.1 + bass * 0.03;
-
         double scale = 3.0 / zoom;
         double hueShift = time * 20;
+        double halfW = w / 2.0;
+        double halfH = h / 2.0;
+        double invW = scale / w;
+        double invH = scale / h;
+        double log2 = Math.log(2);
 
         for (int py = 0; py < h; py++) {
-            double y0 = centerY + (py - h / 2.0) / h * scale;
+            double y0 = centerY + (py - halfH) * invH;
             for (int px = 0; px < w; px++) {
-                double x0 = centerX + (px - w / 2.0) / w * scale;
+                double x0 = centerX + (px - halfW) * invW;
 
-                // Julia iteration
                 double zr = x0, zi = y0;
                 int iter = 0;
                 while (iter < MAX_ITER && zr * zr + zi * zi < 4.0) {
@@ -68,12 +71,9 @@ public class BitmapFractalZoom extends BitmapPattern {
                     iter++;
                 }
 
-                if (iter == MAX_ITER) {
-                    // Interior of set — leave transparent
-                } else {
-                    // Smooth coloring
-                    double mag = Math.max(1.0001, Math.sqrt(zr * zr + zi * zi));
-                    double smoothIter = iter + 1 - Math.log(Math.log(mag)) / Math.log(2);
+                if (iter < MAX_ITER) {
+                    double mag = Math.sqrt(zr * zr + zi * zi);
+                    double smoothIter = iter + 1 - Math.log(Math.log(Math.max(1.0001, mag))) / log2;
                     float hue = (float) ((smoothIter * 8 + hueShift) % 360);
                     float sat = 0.8f + (float) (amplitude * 0.2);
                     float bri = (float) Math.min(1.0, 0.5 + amplitude * 0.3 + beatPulse * 0.2);
