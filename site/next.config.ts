@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: process.cwd(),
+  },
   async rewrites() {
     const coordinatorUrl =
       process.env.COORDINATOR_API_URL || "https://api.mcav.live";
