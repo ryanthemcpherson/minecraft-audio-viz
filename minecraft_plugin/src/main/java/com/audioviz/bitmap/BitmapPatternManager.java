@@ -45,6 +45,7 @@ public class BitmapPatternManager {
     /** Time tracking for pattern animation. */
     private final long startTimeMs = System.currentTimeMillis();
     private long lastTickMs = System.currentTimeMillis();
+    private int diagnosticTickCounter = 0;
 
     /** Transition engine (shared across zones). */
     private final TransitionManager transitionManager = new TransitionManager();
@@ -313,6 +314,8 @@ public class BitmapPatternManager {
             ZoneState state = entry.getValue();
 
             try {
+                long renderStart = System.nanoTime();
+
                 // Step 1: Pattern rendering (with transition support)
                 if (transitionManager.isTransitioning(zoneName)) {
                     boolean stillActive = transitionManager.tick(
@@ -326,6 +329,9 @@ public class BitmapPatternManager {
                     state.pattern.render(state.buffer, audio, time);
                 }
 
+                long renderNanos = System.nanoTime() - renderStart;
+                state.timer.recordRender(renderNanos);
+
                 // Step 2: Game state modulation (time of day, weather tinting)
                 gameStateModulator.modulate(state.buffer, dt);
 
@@ -337,6 +343,32 @@ public class BitmapPatternManager {
             } catch (Exception e) {
                 plugin.getLogger().warning("Error in bitmap zone '" + zoneName
                     + "' pattern '" + state.pattern.getId() + "': " + e.getMessage());
+            }
+        }
+
+        diagnosticTickCounter++;
+        if (diagnosticTickCounter >= 100) {
+            diagnosticTickCounter = 0;
+            logRenderDiagnostics();
+        }
+    }
+
+    private void logRenderDiagnostics() {
+        for (Map.Entry<String, ZoneState> entry : zoneStates.entrySet()) {
+            BitmapRenderTimer.Stats stats = entry.getValue().timer.snapshotAndReset();
+            if (stats.frameCount() == 0 && stats.skipCount() == 0) continue;
+
+            String msg = String.format(
+                "Bitmap '%s' [%s]: %d frames, %d skipped | avg=%.1fms max=%.1fms",
+                entry.getKey(),
+                entry.getValue().pattern.getId(),
+                stats.frameCount(), stats.skipCount(),
+                stats.avgMs(), stats.maxMs());
+
+            if (stats.maxMs() > 25.0) {
+                plugin.getLogger().warning(msg + " [SLOW - exceeds 25ms budget]");
+            } else {
+                plugin.getLogger().info(msg);
             }
         }
     }
@@ -371,6 +403,7 @@ public class BitmapPatternManager {
         BitmapPattern pattern;
         BitmapPattern pendingPattern; // Non-null during transitions
         final BitmapFrameBuffer buffer;
+        final BitmapRenderTimer timer = new BitmapRenderTimer();
 
         ZoneState(BitmapPattern pattern, BitmapFrameBuffer buffer) {
             this.pattern = pattern;
