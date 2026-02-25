@@ -191,6 +191,7 @@ def _sanitize_audio_frame(data: DjAudioFrame | dict) -> dict:
     - seq: int >= 0
     - beat, i_kick: booleans
     """
+
     def _get(key: str, default):
         if isinstance(data, dict):
             return data.get(key, default)
@@ -4605,7 +4606,9 @@ class VJServer:
             return False
 
         try:
-            stages_resp = await asyncio.wait_for(self.viz_client.send({"type": "get_stages"}), timeout=5.0)
+            stages_resp = await asyncio.wait_for(
+                self.viz_client.send({"type": "get_stages"}), timeout=5.0
+            )
         except Exception as e:
             logger.warning(f"Failed to fetch stages for reconnect rehydrate: {e}")
             return False
@@ -4635,7 +4638,9 @@ class VJServer:
             if not zone_name:
                 continue
 
-            config = zone_entry.get("config", {}) if isinstance(zone_entry.get("config"), dict) else {}
+            config = (
+                zone_entry.get("config", {}) if isinstance(zone_entry.get("config"), dict) else {}
+            )
             pattern_name = config.get("pattern", "spectrum")
             render_mode = config.get("render_mode")
             if render_mode not in ("block", "bitmap"):
