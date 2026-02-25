@@ -133,7 +133,7 @@ class TestMe:
                 "iat": now,
                 "exp": now + 3600,
             },
-            "test-user-jwt-secret",
+            "test-user-jwt-secret-for-tests-32+chars",
             algorithm="HS256",
         )
 
