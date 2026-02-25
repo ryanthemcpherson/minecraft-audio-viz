@@ -7,7 +7,11 @@ require no external infrastructure.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import AsyncIterator
+
+# Prevent noisy warning from default insecure secret when app.main imports create_app().
+os.environ.setdefault("MCAV_USER_JWT_SECRET", "test-user-jwt-env-secret-for-pytest-32+chars")
 
 import pytest
 import pytest_asyncio
@@ -50,7 +54,7 @@ def settings() -> Settings:
         rate_limit_register_per_hour=5,
         rate_limit_auth_per_minute=100,  # relaxed for tests
         cors_origins="http://localhost:3000",
-        user_jwt_secret="test-user-jwt-secret",  # nosec B106
+        user_jwt_secret="test-user-jwt-secret-for-tests-32+chars",  # nosec B106
         user_jwt_expiry_minutes=60,
         refresh_token_expiry_days=30,
         discord_client_id="test-discord-id",

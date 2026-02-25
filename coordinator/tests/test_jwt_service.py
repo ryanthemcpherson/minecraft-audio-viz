@@ -22,7 +22,7 @@ def server_id() -> uuid.UUID:
 
 @pytest.fixture()
 def jwt_secret() -> str:
-    return "test-secret-value-for-unit-tests"
+    return "test-secret-value-for-unit-tests-min-32-chars"
 
 
 @pytest.fixture()
@@ -135,7 +135,11 @@ class TestVerifyToken:
             jwt_secret=jwt_secret,
         )
         with pytest.raises(pyjwt.InvalidSignatureError):
-            verify_token(token, jwt_secret="wrong-secret", server_id=server_id)  # nosec B106
+            verify_token(
+                token,
+                jwt_secret="wrong-secret-value-for-unit-tests-32+",  # nosec B106
+                server_id=server_id,
+            )
 
     def test_wrong_server_id_raises(
         self,

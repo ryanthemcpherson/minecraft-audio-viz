@@ -15,7 +15,8 @@ from app.services.user_jwt import (
     verify_user_token,
 )
 
-SECRET = "test-secret-key"  # nosec B105
+SECRET = "test-secret-key-for-user-jwt-min-32-chars"  # nosec B105
+WRONG_SECRET = "wrong-secret-key-for-user-jwt-min-32"  # nosec B105
 
 
 class TestCreateUserToken:
@@ -50,7 +51,7 @@ class TestVerifyUserToken:
     def test_wrong_secret_raises(self) -> None:
         token = create_user_token(user_id=uuid.uuid4(), jwt_secret=SECRET)
         with pytest.raises(pyjwt.InvalidTokenError):
-            verify_user_token(token, jwt_secret="wrong-secret")  # nosec B106
+            verify_user_token(token, jwt_secret=WRONG_SECRET)
 
     def test_expired_token_raises(self) -> None:
         token = create_user_token(user_id=uuid.uuid4(), jwt_secret=SECRET, expiry_minutes=-1)
