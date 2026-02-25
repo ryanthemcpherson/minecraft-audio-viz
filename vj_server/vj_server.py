@@ -178,11 +178,11 @@ def _clamp_finite(val, lo: float, hi: float, default: float) -> float:
     return max(lo, min(hi, val))
 
 
-def _sanitize_audio_frame(data: DjAudioFrame) -> dict:
+def _sanitize_audio_frame(data: DjAudioFrame | dict) -> dict:
     """Validate and clamp an incoming DJ audio frame.
 
-    Accepts a DjAudioFrame struct (type-validated on decode) and applies
-    value clamping per dj-audio-frame.schema.json:
+    Accepts either a DjAudioFrame struct (hot path) or a dict (tests/legacy
+    defensive paths), then applies value clamping per dj-audio-frame.schema.json:
     - bands: exactly 5 floats in [0.0, 1.0]
     - peak, beat_i, i_bass: floats >= 0 (capped at 5.0)
     - bpm: float in [0.0, 300.0]
@@ -191,8 +191,13 @@ def _sanitize_audio_frame(data: DjAudioFrame) -> dict:
     - seq: int >= 0
     - beat, i_kick: booleans
     """
+    def _get(key: str, default):
+        if isinstance(data, dict):
+            return data.get(key, default)
+        return getattr(data, key, default)
+
     # Bands: clamp to exactly 5 floats in [0, 1]
-    raw_bands = data.bands
+    raw_bands = _get("bands", [])
     if isinstance(raw_bands, list):
         bands = [_clamp_finite(b, 0.0, 1.0, 0.0) for b in raw_bands[:5]]
         while len(bands) < 5:
@@ -202,16 +207,16 @@ def _sanitize_audio_frame(data: DjAudioFrame) -> dict:
 
     return {
         "bands": bands,
-        "peak": _clamp_finite(data.peak, 0.0, 5.0, 0.0),
-        "beat": bool(data.beat),
-        "beat_i": _clamp_finite(data.beat_i, 0.0, 5.0, 0.0),
-        "bpm": _clamp_finite(data.bpm, 0.0, 300.0, 120.0),
-        "tempo_conf": _clamp_finite(data.tempo_conf, 0.0, 1.0, 0.0),
-        "beat_phase": _clamp_finite(data.beat_phase, 0.0, 1.0, 0.0),
-        "seq": max(0, data.seq),
-        "i_bass": _clamp_finite(data.i_bass, 0.0, 5.0, 0.0),
-        "i_kick": bool(data.i_kick),
-        "ts": data.ts,  # validated separately in latency calc
+        "peak": _clamp_finite(_get("peak", 0.0), 0.0, 5.0, 0.0),
+        "beat": bool(_get("beat", False)),
+        "beat_i": _clamp_finite(_get("beat_i", 0.0), 0.0, 5.0, 0.0),
+        "bpm": _clamp_finite(_get("bpm", 120.0), 0.0, 300.0, 120.0),
+        "tempo_conf": _clamp_finite(_get("tempo_conf", 0.0), 0.0, 1.0, 0.0),
+        "beat_phase": _clamp_finite(_get("beat_phase", 0.0), 0.0, 1.0, 0.0),
+        "seq": max(0, int(_clamp_finite(_get("seq", 0), 0.0, 1_000_000_000.0, 0.0))),
+        "i_bass": _clamp_finite(_get("i_bass", 0.0), 0.0, 5.0, 0.0),
+        "i_kick": bool(_get("i_kick", False)),
+        "ts": _get("ts", None),  # validated separately in latency calc
     }
 
 
@@ -4590,6 +4595,110 @@ class VJServer:
         # Set Lua pattern (handles crossfade etc)
         await self._set_pattern_for_zone(zs, zone_name, pattern_name)
 
+    async def _rehydrate_zone_states_from_active_stage(self) -> bool:
+        """Pull active stage config from Minecraft and apply it to local zone state.
+
+        This ensures reconnect/startup uses the same zone patterns/entity counts that
+        the control center and plugin stage system consider active.
+        """
+        if not self.viz_client or not self.viz_client.connected:
+            return False
+
+        try:
+            stages_resp = await asyncio.wait_for(self.viz_client.send({"type": "get_stages"}), timeout=5.0)
+        except Exception as e:
+            logger.warning(f"Failed to fetch stages for reconnect rehydrate: {e}")
+            return False
+
+        if not stages_resp or stages_resp.get("type") != "stages":
+            return False
+
+        active_stage = None
+        for stage in stages_resp.get("stages", []):
+            if isinstance(stage, dict) and stage.get("active"):
+                active_stage = stage
+                break
+
+        if not active_stage:
+            logger.info("No active stage reported by Minecraft; keeping current zone state")
+            return False
+
+        zones = active_stage.get("zones", {})
+        if not isinstance(zones, dict) or not zones:
+            return False
+
+        applied = 0
+        for zone_entry in zones.values():
+            if not isinstance(zone_entry, dict):
+                continue
+            zone_name = zone_entry.get("zone_name")
+            if not zone_name:
+                continue
+
+            config = zone_entry.get("config", {}) if isinstance(zone_entry.get("config"), dict) else {}
+            pattern_name = config.get("pattern", "spectrum")
+            render_mode = config.get("render_mode")
+            if render_mode not in ("block", "bitmap"):
+                render_mode = "bitmap" if str(pattern_name).startswith("bmp_") else "block"
+
+            explicit_count = config.get("entity_count", zone_entry.get("entity_count"))
+            try:
+                explicit_count = int(explicit_count)
+            except Exception:
+                explicit_count = None
+            if explicit_count is not None and explicit_count < 1:
+                explicit_count = None
+
+            block_type = config.get("block_type")
+
+            zs = self._get_zone_state(zone_name)
+            if block_type:
+                zs.block_type = str(block_type)
+
+            if render_mode == "bitmap":
+                if not str(pattern_name).startswith("bmp_"):
+                    pattern_name = "bmp_spectrum"
+                zs.render_mode = "bitmap"
+                zs.pattern_name = str(pattern_name)
+                zs.transitioning = False
+                zs.transition_pending_resize = None
+                zs.bitmap_initialized = False
+                zs.bitmap_width = 0
+                zs.bitmap_height = 0
+                if explicit_count is not None:
+                    zs.entity_count = explicit_count
+                    zs.config.entity_count = explicit_count
+            else:
+                if not _lua_pattern_exists(str(pattern_name)):
+                    pattern_name = "spectrum"
+                zs.render_mode = "block"
+                zs.bitmap_initialized = False
+                zs.bitmap_width = 0
+                zs.bitmap_height = 0
+                target_count = (
+                    explicit_count
+                    if explicit_count is not None
+                    else get_recommended_entity_count(str(pattern_name), zs.entity_count)
+                )
+                zs.entity_count = target_count
+                zs.config.entity_count = target_count
+                zs.pattern_name = str(pattern_name)
+                zs.pattern = get_pattern(str(pattern_name), zs.config)
+                zs.transitioning = False
+                zs.transition_pending_resize = None
+
+            if zone_name == self.zone:
+                self.entity_count = zs.entity_count
+                self._pattern_config.entity_count = zs.entity_count
+            applied += 1
+
+        logger.info(
+            "Rehydrated %d zone(s) from active stage '%s'",
+            applied,
+            active_stage.get("name", "unknown"),
+        )
+        return applied > 0
+
     async def connect_minecraft(self) -> bool:
         """Connect to Minecraft server with timeout."""
         # Clean up existing client before creating new one
@@ -4640,6 +4749,10 @@ class VJServer:
         # Initialize per-zone pattern states for all discovered zones
         for zn in zone_names:
             self._get_zone_state(zn)
+
+        # Pull active stage config so reconnect/startup preserves expected
+        # pattern + entity-count state before pools/bitmaps are initialized.
+        await self._rehydrate_zone_states_from_active_stage()
 
         # Re-init each zone based on its current render_mode.
         # New zones default to block mode (Display Entities).
@@ -5054,17 +5167,25 @@ class VJServer:
         return modified
 
     async def _set_pattern_for_zone(
-        self, zone_state: ZonePatternState, zone_name: str, pattern_name: str
+        self,
+        zone_state: ZonePatternState,
+        zone_name: str,
+        pattern_name: str,
+        explicit_entity_count: Optional[int] = None,
     ):
         """Set pattern on a specific zone with crossfade support."""
         if not _lua_pattern_exists(pattern_name):
             return
 
         old_count = zone_state.entity_count
-        recommended = get_recommended_entity_count(pattern_name, old_count)
-        if recommended != zone_state.entity_count:
-            zone_state.entity_count = recommended
-            zone_state.config.entity_count = recommended
+        target_count = (
+            max(1, int(explicit_entity_count))
+            if explicit_entity_count is not None
+            else get_recommended_entity_count(pattern_name, old_count)
+        )
+        if target_count != zone_state.entity_count:
+            zone_state.entity_count = target_count
+            zone_state.config.entity_count = target_count
 
         if zone_state.transition_duration > 0 and pattern_name != zone_state.pattern_name:
             zone_state.old_pattern = zone_state.pattern
@@ -5148,9 +5269,34 @@ class VJServer:
                 continue
 
             zs = self._get_zone_state(zone_name)
-            await self._set_pattern_for_zone(zs, zone_name, pattern_name)
+            if zone_info.get("block_type"):
+                zs.block_type = str(zone_info.get("block_type"))
+            explicit_count = zone_info.get("entity_count")
+            try:
+                explicit_count = int(explicit_count) if explicit_count is not None else None
+            except Exception:
+                explicit_count = None
+            if explicit_count is not None and explicit_count < 1:
+                explicit_count = None
+
+            render_mode = zone_info.get("render_mode")
+            if render_mode not in ("block", "bitmap"):
+                render_mode = "bitmap" if str(pattern_name).startswith("bmp_") else "block"
+
+            if render_mode == "bitmap":
+                if explicit_count is not None:
+                    zs.entity_count = explicit_count
+                    zs.config.entity_count = explicit_count
+                await self._switch_zone_to_bitmap(zone_name, zs, str(pattern_name))
+            else:
+                await self._set_pattern_for_zone(
+                    zs,
+                    zone_name,
+                    str(pattern_name),
+                    explicit_entity_count=explicit_count,
+                )
             logger.info(
-                f"Stage zone '{zone_name}': pattern={pattern_name}, entities={zs.entity_count}"
+                f"Stage zone '{zone_name}': pattern={pattern_name}, mode={render_mode}, entities={zs.entity_count}"
             )
 
     async def _calculate_entities_for_zone(
