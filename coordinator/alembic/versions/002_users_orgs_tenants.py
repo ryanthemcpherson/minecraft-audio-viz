@@ -96,14 +96,32 @@ def upgrade() -> None:
     )
 
     # -- add org_id FK to vj_servers -------------------------------------------
-    op.add_column(
-        "vj_servers",
-        sa.Column("org_id", sa.Uuid, sa.ForeignKey("organizations.id"), nullable=True),
-    )
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        # SQLite cannot add a FK constraint with plain ALTER TABLE; use batch mode.
+        with op.batch_alter_table("vj_servers", recreate="always") as batch_op:
+            batch_op.add_column(sa.Column("org_id", sa.Uuid, nullable=True))
+            batch_op.create_foreign_key(
+                "fk_vj_servers_org_id_organizations",
+                "organizations",
+                ["org_id"],
+                ["id"],
+            )
+    else:
+        op.add_column(
+            "vj_servers",
+            sa.Column("org_id", sa.Uuid, sa.ForeignKey("organizations.id"), nullable=True),
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("vj_servers", "org_id")
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table("vj_servers", recreate="always") as batch_op:
+            batch_op.drop_constraint("fk_vj_servers_org_id_organizations", type_="foreignkey")
+            batch_op.drop_column("org_id")
+    else:
+        op.drop_column("vj_servers", "org_id")
     op.drop_table("refresh_tokens")
     op.drop_table("org_members")
     op.drop_table("organizations")
