@@ -182,7 +182,60 @@ jobs:
 
       - name: Run coordinator tests
         working-directory: coordinator
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short -p no:cacheprovider
+
+  # ---------------------------------------------------------------------------
+  # VJ server: Python tests
+  # ---------------------------------------------------------------------------
+  vj-server-test:
+    name: VJ Server Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install VJ dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "vj_server/[full]"
+
+      - name: Run VJ server tests
+        run: pytest vj_server/tests -v --tb=short -p no:cacheprovider
+
+  # ---------------------------------------------------------------------------
+  # DJ Client: Rust tests + web build
+  # ---------------------------------------------------------------------------
+  dj-client-test:
+    name: DJ Client Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dj_client/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install DJ client dependencies
+        working-directory: dj_client
+        run: npm ci
+
+      - name: Run DJ client tests
+        working-directory: dj_client
+        run: npm test -- --watch=false
+
+      - name: Build DJ client frontend
+        working-directory: dj_client
+        run: npm run build
 
   # ---------------------------------------------------------------------------
   # Java: OWASP Dependency-Check
@@ -419,7 +472,7 @@ jobs:
   ci-passed:
     name: CI Passed
     if: always()
-    needs: [python-lint, java-build, site-build, coordinator-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
+    needs: [python-lint, java-build, site-build, coordinator-test, vj-server-test, dj-client-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
     runs-on: ubuntu-latest
     steps:
       - name: Check required results
@@ -428,7 +481,9 @@ jobs:
           if [[ "${{ needs.python-lint.result }}" == "failure" ||
                 "${{ needs.java-build.result }}" == "failure" ||
                 "${{ needs.site-build.result }}" == "failure" ||
-                "${{ needs.coordinator-test.result }}" == "failure" ]]; then
+                "${{ needs.coordinator-test.result }}" == "failure" ||
+                "${{ needs.vj-server-test.result }}" == "failure" ||
+                "${{ needs.dj-client-test.result }}" == "failure" ]]; then
             echo "One or more required CI jobs failed."
             exit 1
           fi
