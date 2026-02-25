@@ -91,7 +91,9 @@ async def test_rehydrate_applies_bitmap_mode_from_active_stage() -> None:
 @pytest.mark.asyncio
 async def test_rehydrate_no_active_stage_is_noop() -> None:
     server = VJServer(require_auth=False, show_spectrograph=False)
-    server.viz_client = _FakeVizClient({"type": "stages", "stages": [{"name": "x", "active": False}]})
+    server.viz_client = _FakeVizClient(
+        {"type": "stages", "stages": [{"name": "x", "active": False}]}
+    )
 
     applied = await server._rehydrate_zone_states_from_active_stage()
 
