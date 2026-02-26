@@ -17,6 +17,8 @@ public class MapDisplayManager {
     private final int tilesZ;
     private final MapFrameBuffer[][] tiles;
     private final int[] mapIds; // Minecraft map IDs, allocated on spawn
+    /** Pre-allocated sub-region buffers per tile to avoid GC pressure in writeFrame(). */
+    private final int[][] tileBuffers;
 
     public MapDisplayManager(int displayWidth, int displayHeight) {
         this.displayWidth = displayWidth;
@@ -25,6 +27,7 @@ public class MapDisplayManager {
         this.tilesZ = (displayHeight + MapFrameBuffer.SIZE - 1) / MapFrameBuffer.SIZE;
         this.tiles = new MapFrameBuffer[tilesZ][tilesX];
         this.mapIds = new int[tilesX * tilesZ];
+        this.tileBuffers = new int[tilesZ * tilesX][MapFrameBuffer.SIZE * MapFrameBuffer.SIZE];
         for (int z = 0; z < tilesZ; z++) {
             for (int x = 0; x < tilesX; x++) {
                 tiles[z][x] = new MapFrameBuffer();
@@ -40,15 +43,17 @@ public class MapDisplayManager {
         for (int tz = 0; tz < tilesZ; tz++) {
             for (int tx = 0; tx < tilesX; tx++) {
                 int tileOffsetX = tx * MapFrameBuffer.SIZE;
-                int tileOffsetZ = tz * MapFrameBuffer.SIZE;
+                // tz=0 is the bottom of the wall, but pixel row 0 is the top of
+                // the image. Flip so bottom tiles get bottom pixel rows.
+                int tileOffsetZ = (tilesZ - 1 - tz) * MapFrameBuffer.SIZE;
 
                 int regionW = Math.min(MapFrameBuffer.SIZE, width - tileOffsetX);
                 int regionH = Math.min(MapFrameBuffer.SIZE, height - tileOffsetZ);
 
                 if (regionW <= 0 || regionH <= 0) continue;
 
-                // Extract the sub-region from the source ARGB array
-                int[] subRegion = new int[regionW * regionH];
+                // Reuse pre-allocated buffer instead of allocating per frame
+                int[] subRegion = tileBuffers[tz * tilesX + tx];
                 for (int row = 0; row < regionH; row++) {
                     System.arraycopy(argb, (tileOffsetZ + row) * width + tileOffsetX,
                                      subRegion, row * regionW, regionW);
@@ -59,12 +64,12 @@ public class MapDisplayManager {
         }
     }
 
-    /** Send dirty updates for all tiles to players. */
+    /** Send full-frame updates for all tiles to players. */
     public void sendUpdates(Collection<ServerPlayerEntity> players) {
         for (int tz = 0; tz < tilesZ; tz++) {
             for (int tx = 0; tx < tilesX; tx++) {
                 int mapId = mapIds[tz * tilesX + tx];
-                MapPacketSender.sendDirtyUpdate(mapId, tiles[tz][tx], players);
+                MapPacketSender.sendUpdate(mapId, tiles[tz][tx], players);
             }
         }
     }

@@ -74,13 +74,13 @@ class MapFrameBufferTest {
         buf.setPixel(0, 1, (byte) 30);
         buf.setPixel(1, 1, (byte) 40);
 
-        // Column-major: data[x * height + z] as required by MapState.UpdateData
+        // Row-major: data[x + z * width] as used by MapState.UpdateData.setColorsTo()
         byte[] data = buf.extractDirtyData();
         assertEquals(4, data.length); // 2x2
-        assertEquals(10, data[0]); // x=0, z=0
-        assertEquals(30, data[1]); // x=0, z=1
-        assertEquals(20, data[2]); // x=1, z=0
-        assertEquals(40, data[3]); // x=1, z=1
+        assertEquals(10, data[0]); // z=0, x=0
+        assertEquals(20, data[1]); // z=0, x=1
+        assertEquals(30, data[2]); // z=1, x=0
+        assertEquals(40, data[3]); // z=1, x=1
     }
 
     @Test

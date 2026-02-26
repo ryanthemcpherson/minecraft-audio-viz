@@ -19,9 +19,9 @@ public class BitmapFrameBuffer {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("Dimensions must be positive: " + width + "x" + height);
         }
-        if ((long) width * height > 16_384) {
+        if ((long) width * height > 1_048_576) { // up to 1024x1024 (8x8 map tiles)
             throw new IllegalArgumentException("Bitmap too large: " + width + "x" + height +
-                " = " + (width * height) + " pixels (max 16384)");
+                " = " + (width * height) + " pixels (max 1048576)");
         }
         this.width = width;
         this.height = height;

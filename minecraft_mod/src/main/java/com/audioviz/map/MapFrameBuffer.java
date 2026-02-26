@@ -68,17 +68,17 @@ public class MapFrameBuffer {
 
     /**
      * Extract the dirty region's pixel data for the map packet.
-     * Returns column-major order: data[x * height + z] as required
-     * by MapState.UpdateData.
+     * Returns row-major order: data[x + z * width] matching
+     * MapState.UpdateData.setColorsTo() indexing.
      */
     public byte[] extractDirtyData() {
         if (!dirty) return new byte[0];
         int w = dirtyMaxX - dirtyMinX + 1;
         int h = dirtyMaxZ - dirtyMinZ + 1;
         byte[] data = new byte[w * h];
-        for (int x = 0; x < w; x++) {
-            for (int z = 0; z < h; z++) {
-                data[x * h + z] = pixels[(dirtyMinZ + z) * SIZE + (dirtyMinX + x)];
+        for (int z = 0; z < h; z++) {
+            for (int x = 0; x < w; x++) {
+                data[x + z * w] = pixels[(dirtyMinZ + z) * SIZE + (dirtyMinX + x)];
             }
         }
         return data;
@@ -90,6 +90,17 @@ public class MapFrameBuffer {
         dirtyMinZ = Integer.MAX_VALUE;
         dirtyMaxX = Integer.MIN_VALUE;
         dirtyMaxZ = Integer.MIN_VALUE;
+    }
+
+    /**
+     * Extract the full 128×128 frame for MapState.UpdateData.
+     * UpdateData.setColorsTo indexes as colors[x + z * width] — same row-major
+     * layout as our buffer (pixels[z * SIZE + x]), so direct copy works.
+     */
+    public byte[] extractFullFrame() {
+        byte[] data = new byte[SIZE * SIZE];
+        System.arraycopy(pixels, 0, data, 0, SIZE * SIZE);
+        return data;
     }
 
     public byte[] getRawPixels() {

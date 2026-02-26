@@ -7,9 +7,6 @@ import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageZoneRole;
 import com.audioviz.zones.VisualizationZone;
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Vector3f;
 
@@ -141,14 +138,6 @@ public class FloorTileDecorator extends StageDecorator {
     }
 
     private static BlockState resolveBlockState(String name) {
-        String normalized = name.toLowerCase().replace(' ', '_');
-        if (!normalized.contains(":")) {
-            normalized = "minecraft:" + normalized;
-        }
-        var block = Registries.BLOCK.get(Identifier.of(normalized));
-        if (block == Blocks.AIR && !"minecraft:air".equals(normalized)) {
-            return Blocks.PURPLE_CONCRETE.getDefaultState();
-        }
-        return block.getDefaultState();
+        return com.audioviz.render.MaterialResolver.resolve(name);
     }
 }

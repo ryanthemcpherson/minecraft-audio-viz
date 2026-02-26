@@ -18,28 +18,46 @@ import java.util.List;
 public class VirtualEntityPool {
     private final ElementHolder holder;
     private final List<BlockDisplayElement> elements;
-    private BlockState defaultBlock = Blocks.WHITE_CONCRETE.getDefaultState();
+    private BlockState defaultBlock;
 
-    public VirtualEntityPool(int initialSize) {
+    /** Interpolation duration in ticks (2 ticks = 100ms — smooth but responsive). */
+    private static final int INTERPOLATION_TICKS = 2;
+
+    public VirtualEntityPool(int initialSize, BlockState defaultBlock) {
         this.holder = new ElementHolder();
+        this.defaultBlock = defaultBlock;
         this.elements = new ArrayList<>(initialSize);
         for (int i = 0; i < initialSize; i++) {
             addElement();
         }
     }
 
+    public VirtualEntityPool(int initialSize) {
+        this(initialSize, Blocks.WHITE_CONCRETE.getDefaultState());
+    }
+
+    /** Update the default block state and apply it to all existing elements. */
+    public void setDefaultBlock(BlockState blockState) {
+        this.defaultBlock = blockState;
+        for (BlockDisplayElement el : elements) {
+            el.setBlockState(blockState);
+        }
+    }
+
     private BlockDisplayElement addElement() {
         BlockDisplayElement el = new BlockDisplayElement(defaultBlock);
-        el.setScale(new Vector3f(0.2f, 0.2f, 0.2f));
+        el.setInterpolationDuration(INTERPOLATION_TICKS);
         holder.addElement(el);
         elements.add(el);
         return el;
     }
 
     public void resize(int newSize) {
+        // Grow: new elements start at scale 0 (invisible) via addElement()
         while (elements.size() < newSize) {
             addElement();
         }
+        // Shrink: remove excess elements from the holder
         while (elements.size() > newSize) {
             BlockDisplayElement removed = elements.remove(elements.size() - 1);
             holder.removeElement(removed);
@@ -68,6 +86,13 @@ public class VirtualEntityPool {
             if (idx < 0 || idx >= elements.size()) continue;
             BlockDisplayElement el = elements.get(idx);
 
+            if (update.visible() != null && !update.visible()) {
+                // Hide: set scale to zero
+                el.setScale(new Vector3f(0f, 0f, 0f));
+                el.startInterpolationIfDirty();
+                continue;
+            }
+
             if (update.position() != null) {
                 el.setTranslation(new Vector3f(
                     (float) update.position().x,
@@ -80,8 +105,22 @@ public class VirtualEntityPool {
             if (update.blockState() != null) {
                 el.setBlockState(update.blockState());
             }
+            el.startInterpolationIfDirty();
         }
     }
 
-    public record EntityUpdate(int index, Vec3d position, Vector3f scale, BlockState blockState) {}
+    /**
+     * Hide all entities by setting scale to zero. Used on pattern swap
+     * to prevent stale entities lingering at old positions.
+     */
+    public void hideAll() {
+        Vector3f zero = new Vector3f(0f, 0f, 0f);
+        for (BlockDisplayElement el : elements) {
+            el.setScale(zero);
+            el.startInterpolationIfDirty();
+        }
+    }
+
+    public record EntityUpdate(int index, Vec3d position, Vector3f scale,
+                                BlockState blockState, Boolean visible) {}
 }

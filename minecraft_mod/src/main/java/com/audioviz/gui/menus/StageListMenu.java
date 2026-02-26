@@ -143,7 +143,7 @@ public class StageListMenu extends AudioVizGui {
         return new GuiElementBuilder(active ? Items.LIME_WOOL : Items.RED_WOOL)
             .setName(Text.literal(stage.getName()).formatted(active ? Formatting.GREEN : Formatting.RED))
             .addLoreLine(Text.literal("Template: " + stage.getTemplateName()).formatted(Formatting.GRAY))
-            .addLoreLine(Text.literal("Zones: " + stage.getRoleToZone().size()).formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("Zones: " + stage.getRoleToZone().size() + "/" + com.audioviz.stages.StageZoneRole.values().length).formatted(Formatting.GRAY))
             .addLoreLine(Text.literal("Status: " + (active ? "Active" : "Inactive"))
                 .formatted(active ? Formatting.GREEN : Formatting.RED))
             .addLoreLine(Text.empty())

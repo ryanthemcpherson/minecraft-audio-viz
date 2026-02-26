@@ -38,8 +38,8 @@ public class StageTemplateMenu extends AudioVizGui {
         // Small stage
         setSlot(slot(1, 1), new GuiElementBuilder(Items.OAK_SIGN)
             .setName(Text.literal("Small Stage").formatted(Formatting.GREEN))
-            .addLoreLine(Text.literal("8 zones, compact layout").formatted(Formatting.GRAY))
-            .addLoreLine(Text.literal("Good for small servers").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("2 zones: Main Stage + Audience").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("Compact 60% scale, good for small servers").formatted(Formatting.GRAY))
             .addLoreLine(Text.empty())
             .addLoreLine(Text.literal("Click to create").formatted(Formatting.YELLOW))
             .setCallback((i, t, a) -> { playClickSound(); promptCreate("small"); }));
@@ -47,7 +47,7 @@ public class StageTemplateMenu extends AudioVizGui {
         // Medium stage
         setSlot(slot(1, 3), new GuiElementBuilder(Items.OAK_HANGING_SIGN)
             .setName(Text.literal("Medium Stage").formatted(Formatting.AQUA))
-            .addLoreLine(Text.literal("8 zones, standard layout").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("5 zones: Stage, Wings, Audience, Skybox").formatted(Formatting.GRAY))
             .addLoreLine(Text.literal("Recommended for most setups").formatted(Formatting.GRAY))
             .addLoreLine(Text.empty())
             .addLoreLine(Text.literal("Click to create").formatted(Formatting.YELLOW))
@@ -57,8 +57,8 @@ public class StageTemplateMenu extends AudioVizGui {
         // Large stage
         setSlot(slot(1, 5), new GuiElementBuilder(Items.BEACON)
             .setName(Text.literal("Large Stage").formatted(Formatting.LIGHT_PURPLE))
-            .addLoreLine(Text.literal("8 zones, expanded layout").formatted(Formatting.GRAY))
-            .addLoreLine(Text.literal("For large venues, high entity count").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("All 8 zones, 150% scale").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("Full venue with backstage & balcony").formatted(Formatting.GRAY))
             .addLoreLine(Text.empty())
             .addLoreLine(Text.literal("Click to create").formatted(Formatting.YELLOW))
             .setCallback((i, t, a) -> { playClickSound(); promptCreate("large"); }));
@@ -66,7 +66,7 @@ public class StageTemplateMenu extends AudioVizGui {
         // Custom
         setSlot(slot(1, 7), new GuiElementBuilder(Items.COMMAND_BLOCK)
             .setName(Text.literal("Custom").formatted(Formatting.GOLD))
-            .addLoreLine(Text.literal("8 zones, default sizes").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("All 8 zones, default sizes").formatted(Formatting.GRAY))
             .addLoreLine(Text.literal("Fully customize after creation").formatted(Formatting.GRAY))
             .addLoreLine(Text.empty())
             .addLoreLine(Text.literal("Click to create").formatted(Formatting.YELLOW))

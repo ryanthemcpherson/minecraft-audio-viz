@@ -145,11 +145,15 @@ public class StageVJMenu extends AudioVizGui {
                 rebuild();
             }));
 
-        // Render mode toggle (TODO: wire to per-zone renderer backend selection)
+        // Render mode toggle: switch between map (bitmap) and entity backends
         setSlot(slot(3, 8), new GuiElementBuilder(Items.FILLED_MAP)
-            .setName(Text.literal("Mode: bitmap").formatted(Formatting.LIGHT_PURPLE))
-            .addLoreLine(Text.literal("Render backend (bitmap/entity)").formatted(Formatting.GRAY))
-            .addLoreLine(Text.literal("Coming soon").formatted(Formatting.DARK_GRAY)));
+            .setName(Text.literal("Toggle: Map \u2194 Entity").formatted(Formatting.LIGHT_PURPLE))
+            .addLoreLine(Text.literal("Switch render backend for selected zones").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("Map = high-res, Entity = LED wall").formatted(Formatting.GRAY))
+            .setCallback((i, t, a) -> {
+                playClickSound();
+                toggleRenderBackend(stage);
+            }));
 
         // Row 4: Effect triggers
         for (int i = 0; i < EFFECT_NAMES.length; i++) {
@@ -191,6 +195,45 @@ public class StageVJMenu extends AudioVizGui {
         fillBackground();
     }
 
+    private void toggleRenderBackend(Stage stage) {
+        for (StageZoneRole role : selectedZones) {
+            String zoneName = stage.getZoneName(role);
+            if (zoneName == null) continue;
+
+            StageZoneConfig config = stage.getOrCreateConfig(role);
+            boolean isEntity = "entity".equalsIgnoreCase(config.getRenderMode());
+            String newMode = isEntity ? "map" : "entity";
+            config.setRenderMode(newMode);
+
+            // Re-initialize the appropriate renderer for this zone
+            var vizZone = mod.getZoneManager().getZone(zoneName);
+            if (vizZone != null && vizZone.getWorld() != null) {
+                var bpm = mod.getBitmapPatternManager();
+                int width = bpm != null && bpm.getFrameBuffer(zoneName) != null
+                    ? bpm.getFrameBuffer(zoneName).getWidth() : 16;
+                int height = bpm != null && bpm.getFrameBuffer(zoneName) != null
+                    ? bpm.getFrameBuffer(zoneName).getHeight() : 16;
+
+                net.minecraft.util.math.Direction facing =
+                    com.audioviz.protocol.MessageHandler.directionFromRotation(vizZone.getRotation());
+
+                if ("entity".equals(newMode)) {
+                    mod.getMapRenderer().destroyDisplay(zoneName);
+                    mod.getBitmapToEntityBridge().initializeWall(zoneName, vizZone, width, height,
+                        vizZone.getWorld(), facing);
+                } else {
+                    mod.getBitmapToEntityBridge().destroyWall(zoneName);
+                    mod.getMapRenderer().initializeDisplay(zoneName, vizZone, width, height,
+                        vizZone.getWorld(), facing);
+                }
+            }
+        }
+        mod.getStageManager().saveStages();
+        getPlayer().sendMessage(Text.literal("Toggled render mode for " +
+            selectedZones.size() + " zones").formatted(Formatting.LIGHT_PURPLE));
+        rebuild();
+    }
+
     private void applyIntensity(Stage stage) {
         float multiplier = intensity / 4.0f; // range 0.25 to 1.75
         for (StageZoneRole role : selectedZones) {
@@ -214,17 +257,30 @@ public class StageVJMenu extends AudioVizGui {
     }
 
     private void triggerEffect(String effect) {
-        var effects = mod.getBitmapPatternManager() != null
-            ? mod.getBitmapPatternManager().getEffectsProcessor() : null;
+        var bpm = mod.getBitmapPatternManager();
+        var effects = bpm != null ? bpm.getEffectsProcessor() : null;
         if (effects == null) return;
+
+        Stage stage = mod.getStageManager().getStage(stageName);
+        if (stage == null) return;
 
         switch (effect) {
             case "blackout" -> effects.blackout(effects.getBrightness() != 0.0);
             case "freeze" -> {
-                if (effects.isFrozen()) effects.unfreeze();
-                else {
-                    var buf = mod.getBitmapPatternManager().getFrameBuffer("main");
-                    if (buf != null) effects.freeze(buf);
+                if (effects.isFrozen()) {
+                    effects.unfreeze();
+                } else {
+                    // Freeze using the first selected zone's frame buffer
+                    for (StageZoneRole role : selectedZones) {
+                        String zoneName = stage.getZoneName(role);
+                        if (zoneName != null) {
+                            var buf = bpm.getFrameBuffer(zoneName);
+                            if (buf != null) {
+                                effects.freeze(buf);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             case "flash" -> effects.setBeatFlashEnabled(true);

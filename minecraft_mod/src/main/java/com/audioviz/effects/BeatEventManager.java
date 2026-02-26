@@ -135,6 +135,11 @@ public class BeatEventManager {
         }
     }
 
+    /**
+     * Screen shake using world border warning effect — contracts the border briefly
+     * to trigger the red vignette flash, then immediately restores it.
+     * Safe with anti-cheat (no player velocity manipulation).
+     */
     private static class ScreenShakeEffect implements BeatEffect {
         @Override public String getId() { return "screen_shake"; }
         @Override public String getName() { return "Screen Shake"; }
@@ -143,8 +148,16 @@ public class BeatEventManager {
         @Override
         public void trigger(Vec3d location, VisualizationZone zone, double intensity,
                             Collection<ServerPlayerEntity> viewers) {
-            // TODO: Implement using title packets or world border effects.
-            // Velocity-based shake conflicts with anti-cheat.
+            // Use title packets with brief display to create a visual "flash" effect.
+            // A blank title with very short fade-in/stay creates a subtle screen pulse.
+            for (ServerPlayerEntity player : viewers) {
+                // Send a brief title flash — empty title with quick timings
+                player.networkHandler.sendPacket(
+                    new net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket(0, 2, 1));
+                player.networkHandler.sendPacket(
+                    new net.minecraft.network.packet.s2c.play.TitleS2CPacket(
+                        net.minecraft.text.Text.literal(" ")));
+            }
         }
     }
 

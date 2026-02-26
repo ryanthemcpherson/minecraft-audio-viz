@@ -122,7 +122,7 @@ public class SpotlightDecorator extends StageDecorator {
             Vec3d beamPos = zone.localToWorld(normalizedX, 0, normalizedZ);
 
             float radians = (float) Math.toRadians(sweepAngle);
-            Quaternionf leftRot = new Quaternionf(new AxisAngle4f(radians, 0, 0, 1));
+            Quaternionf leftRot = new Quaternionf(new AxisAngle4f(radians, 0, 1, 0));
 
             updates.add(DecoratorUpdate.builder("block_" + i)
                 .position(beamPos)

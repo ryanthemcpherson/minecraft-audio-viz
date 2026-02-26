@@ -82,61 +82,59 @@ public class BitmapPatternManager {
     // ========== Pattern Registry ==========
 
     private void registerBuiltInPatterns() {
-        // Core audio-reactive patterns
+        // --- Active patterns: visually impressive, audio-reactive, high-res ready ---
+
+        // Core audio-reactive
         register(new BitmapSpectrumBars());
         register(new BitmapSpectrogram());
         register(new BitmapPlasma());
-        register(new BitmapWaveform());
-        register(new BitmapVUMeter());
+        register(new BitmapCircularSpectrum());
 
-        // Tier 1: Festival staples — high impact, low complexity
+        // Festival staples
         register(new BitmapFire());
         register(new BitmapMatrixRain());
         register(new BitmapStarfield());
         register(new BitmapConcentricRings());
-        register(new BitmapRadialBurst());
-        register(new BitmapColorWash());
         register(new BitmapAurora());
         register(new BitmapTunnelZoom());
-        register(new BitmapCheckerboardFlash());
-        register(new BitmapParticleRain());
 
-        // Tier 2: Advanced effects — moderate complexity
-        register(new BitmapGridWarp());
+        // Advanced effects
         register(new BitmapKaleidoscope());
-        register(new BitmapMoire());
-        register(new BitmapLightning());
-        register(new BitmapPixelSort());
-        register(new BitmapRipple());
-        register(new BitmapCircularSpectrum());
-        register(new BitmapScanLines());
-        register(new BitmapWavePropagation());
-
-        // Tier 3: Complex simulations — high visual fidelity
-        register(new BitmapFractalZoom());
-        register(new BitmapInkDrop());
-        register(new BitmapDataMosh());
-        register(new BitmapTerrain());
         register(new BitmapGalaxy());
-        register(new BitmapHexGrid());
-        register(new BitmapFireflies());
-        register(new BitmapDigitalNoise());
+        register(new BitmapLightning());
         register(new BitmapRotatingGeometry());
 
-        // Text patterns
-        register(new MarqueePattern());
-        register(new TrackDisplayPattern());
-        register(new CountdownPattern());
-        register(new ChatWallPattern());
+        // --- Disabled: need rework for high-res or are situational ---
+        // register(new BitmapWaveform());
+        // register(new BitmapVUMeter());
+        // register(new BitmapRadialBurst());
+        // register(new BitmapColorWash());
+        // register(new BitmapCheckerboardFlash());
+        // register(new BitmapParticleRain());
+        // register(new BitmapGridWarp());
+        // register(new BitmapMoire());
+        // register(new BitmapPixelSort());
+        // register(new BitmapRipple());
+        // register(new BitmapScanLines());
+        // register(new BitmapWavePropagation());
+        // register(new BitmapFractalZoom());
+        // register(new BitmapInkDrop());
+        // register(new BitmapDataMosh());
+        // register(new BitmapTerrain());
+        // register(new BitmapHexGrid());
+        // register(new BitmapFireflies());
+        // register(new BitmapDigitalNoise());
 
-        // Game integration patterns
-        register(new CrowdCamPattern(server));
-        register(new MinimapPattern(server));
-        register(new FireworkPattern());
-
-        // Media patterns
-        register(new ImagePattern());
-        register(new DJLogoPattern());
+        // --- Disabled: require external data / special setup ---
+        // register(new MarqueePattern());
+        // register(new TrackDisplayPattern());
+        // register(new CountdownPattern());
+        // register(new ChatWallPattern());
+        // register(new CrowdCamPattern(server));
+        // register(new MinimapPattern(server));
+        // register(new FireworkPattern());
+        // register(new ImagePattern());
+        // register(new DJLogoPattern());
     }
 
     public void register(BitmapPattern pattern) {
@@ -223,10 +221,15 @@ public class BitmapPatternManager {
     public void deactivateZone(String zoneName) {
         String key = zoneName.toLowerCase();
         transitionManager.cancel(key);
+        asyncRenderer.drainZone(zoneName);
         ZoneState state = zoneStates.remove(key);
         asyncRenderer.removeZone(zoneName);
         if (state != null) {
             state.pattern.reset();
+            if (state.pendingPattern != null) {
+                state.pendingPattern.reset();
+                state.pendingPattern = null;
+            }
         }
     }
 
@@ -249,7 +252,7 @@ public class BitmapPatternManager {
 
         long now = System.currentTimeMillis();
         double time = (now - startTimeMs) / 1000.0;
-        double dt = (now - lastTickMs) / 1000.0;
+        double dt = Math.min((now - lastTickMs) / 1000.0, 0.1); // clamp to 100ms max
         lastTickMs = now;
 
         gameStateModulator.refreshWorldState();

@@ -3,6 +3,7 @@ package com.audioviz.render;
 import com.audioviz.virtual.VirtualEntityPool;
 import com.audioviz.zones.VisualizationZone;
 import eu.pb4.polymer.virtualentity.api.attachment.ChunkAttachment;
+import net.minecraft.block.BlockState;
 import net.minecraft.server.world.ServerWorld;
 
 import java.util.Collections;
@@ -20,12 +21,33 @@ public class VirtualEntityRendererBackend {
 
     public void initializePool(String zoneName, VisualizationZone zone,
                                 int entityCount, ServerWorld world) {
-        VirtualEntityPool pool = new VirtualEntityPool(entityCount);
+        initializePool(zoneName, zone, entityCount, world, null);
+    }
+
+    public void initializePool(String zoneName, VisualizationZone zone,
+                                int entityCount, ServerWorld world,
+                                BlockState defaultBlock) {
+        String key = zoneName.toLowerCase();
+
+        // If pool already exists for this zone, resize in place to avoid
+        // a destroy/recreate flash.
+        VirtualEntityPool existing = pools.get(key);
+        if (existing != null) {
+            existing.resize(entityCount);
+            if (defaultBlock != null) {
+                existing.setDefaultBlock(defaultBlock);
+            }
+            return;
+        }
+
+        VirtualEntityPool pool = defaultBlock != null
+            ? new VirtualEntityPool(entityCount, defaultBlock)
+            : new VirtualEntityPool(entityCount);
 
         // Attach to world at zone origin — auto sends spawn/destroy as players load chunks
         ChunkAttachment.of(pool.getHolder(), world, zone.getOriginVec3d());
 
-        pools.put(zoneName.toLowerCase(), pool);
+        pools.put(key, pool);
     }
 
     /**
@@ -43,6 +65,15 @@ public class VirtualEntityRendererBackend {
         VirtualEntityPool pool = pools.get(zoneName.toLowerCase());
         if (pool == null) return;
         pool.getHolder().tick();
+    }
+
+    /**
+     * Hide all entities in a pool (scale to zero). Used on pattern swap
+     * so stale entities don't linger at old positions.
+     */
+    public void hideAll(String zoneName) {
+        VirtualEntityPool pool = pools.get(zoneName.toLowerCase());
+        if (pool != null) pool.hideAll();
     }
 
     public void destroyPool(String zoneName) {

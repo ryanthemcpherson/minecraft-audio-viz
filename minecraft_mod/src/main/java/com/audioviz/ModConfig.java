@@ -26,12 +26,30 @@ public class ModConfig {
 
     public static ModConfig load(Path configDir) throws IOException {
         Path file = configDir.resolve("audioviz.json");
+        ModConfig config;
         if (Files.exists(file)) {
-            return GSON.fromJson(Files.readString(file), ModConfig.class);
+            config = GSON.fromJson(Files.readString(file), ModConfig.class);
+            if (config == null) config = new ModConfig();
+            config.validate();
+        } else {
+            config = new ModConfig();
         }
-        ModConfig config = new ModConfig();
         config.save(configDir);
         return config;
+    }
+
+    private void validate() {
+        websocketPort = clamp(websocketPort, 1024, 65535);
+        djPort = clamp(djPort, 1024, 65535);
+        maxEntitiesPerZone = clamp(maxEntitiesPerZone, 1, 10000);
+        maxPixelsPerZone = clamp(maxPixelsPerZone, 1, 10000);
+        bitmapPixelsPerBlock = clamp(bitmapPixelsPerBlock, 1, 16);
+        mapUpdateIntervalTicks = clamp(mapUpdateIntervalTicks, 1, 100);
+        if (defaultRendererBackend == null) defaultRendererBackend = "MAP";
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     public void save(Path configDir) throws IOException {
