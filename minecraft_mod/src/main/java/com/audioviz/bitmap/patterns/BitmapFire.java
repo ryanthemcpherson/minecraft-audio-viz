@@ -9,9 +9,13 @@ import java.util.Random;
 /**
  * Classic fire effect using bottom-up heat propagation.
  *
- * <p>Heat seeds are placed at the bottom row (intensity scales with bass).
- * Each tick propagates heat upward with random cooling. Color maps from
- * black → red → orange → yellow → white. Beat triggers a burst of extra heat.
+ * <p>Heat seeds are placed at the bottom rows (intensity scales with bass).
+ * Each tick propagates heat upward multiple steps (scaled to display height)
+ * with random cooling. Color maps from black → red → orange → yellow → white.
+ * Beat triggers a burst of extra heat.
+ *
+ * <p>Designed for high-res (768x768+) — propagation steps scale with height
+ * so fire fills a consistent portion of the display regardless of resolution.
  */
 public class BitmapFire extends BitmapPattern {
 
@@ -19,6 +23,7 @@ public class BitmapFire extends BitmapPattern {
     private boolean initialized = false;
     private final Random rng = new Random(42);
     private double beatPulse = 0;
+    private double beatGlow = 0;
 
     // Fire palette: black → dark red → red → orange → yellow → white
     private static final int[] FIRE_PALETTE = buildFirePalette();
@@ -43,39 +48,53 @@ public class BitmapFire extends BitmapPattern {
 
         if (audio.isBeat()) {
             beatPulse = 1.0;
+            beatGlow = 1.0;
         } else {
             beatPulse *= 0.75;
+            beatGlow *= 0.92;
         }
 
-        // Seed bottom row with heat based on audio
-        double heatIntensity = 0.4 + bass * 0.5 + beatPulse * 0.3;
-        for (int x = 0; x < w; x++) {
-            double seed = rng.nextDouble() * heatIntensity;
-            // Beat burst: extra heat across entire bottom
-            if (beatPulse > 0.3) {
-                seed += beatPulse * 0.5 * rng.nextDouble();
-            }
-            heatMap[x][h - 1] = Math.min(1.0, seed);
-            // Also seed second-to-bottom for thicker base
-            if (h > 1) {
-                heatMap[x][h - 2] = Math.min(1.0, heatMap[x][h - 2] + seed * 0.5);
-            }
-        }
+        // Scale propagation steps to height so fire fills ~40-60% of display
+        // At 128px: 1 step. At 768px: ~6 steps per tick.
+        int propSteps = Math.max(1, h / 128);
 
-        // Propagate heat upward: average neighbors below with cooling
-        double coolingFactor = 0.06 - amplitude * 0.02; // Less cooling when louder
-        coolingFactor = Math.max(0.02, coolingFactor);
-
-        for (int y = 0; y < h - 1; y++) {
+        for (int step = 0; step < propSteps; step++) {
+            // Seed bottom rows with heat based on audio
+            double heatIntensity = 0.5 + bass * 0.4 + beatPulse * 0.4;
+            int seedRows = Math.max(2, h / 64); // thicker base on large displays
             for (int x = 0; x < w; x++) {
-                double below = heatMap[x][y + 1];
-                double left = (x > 0) ? heatMap[x - 1][y + 1] : below;
-                double right = (x < w - 1) ? heatMap[x + 1][y + 1] : below;
-                double belowBelow = (y + 2 < h) ? heatMap[x][y + 2] : below;
+                for (int row = 0; row < seedRows; row++) {
+                    int y = h - 1 - row;
+                    double falloff = 1.0 - (double) row / seedRows;
+                    double seed = rng.nextDouble() * heatIntensity * falloff;
+                    if (beatPulse > 0.3) {
+                        seed += beatPulse * 0.4 * rng.nextDouble() * falloff;
+                    }
+                    heatMap[x][y] = Math.min(1.0, heatMap[x][y] + seed);
+                }
+            }
 
-                double heat = (below + left + right + belowBelow) / 4.0;
-                heat -= coolingFactor + rng.nextDouble() * 0.03;
-                heatMap[x][y] = Math.max(0, heat);
+            // Propagate heat upward with cooling
+            double coolingFactor = 0.04 - amplitude * 0.015;
+            coolingFactor = Math.max(0.015, coolingFactor);
+            // Less cooling per step when doing multiple steps
+            double stepCooling = coolingFactor / Math.sqrt(propSteps);
+
+            for (int y = 0; y < h - 1; y++) {
+                for (int x = 0; x < w; x++) {
+                    double below = heatMap[x][y + 1];
+                    double left = (x > 0) ? heatMap[x - 1][y + 1] : below;
+                    double right = (x < w - 1) ? heatMap[x + 1][y + 1] : below;
+                    double belowBelow = (y + 2 < h) ? heatMap[x][y + 2] : below;
+
+                    // Wider sampling for smoother look on high-res
+                    double left2 = (x > 1) ? heatMap[x - 2][y + 1] : left;
+                    double right2 = (x < w - 2) ? heatMap[x + 2][y + 1] : right;
+
+                    double heat = (below * 3 + left + right + belowBelow + left2 * 0.5 + right2 * 0.5) / 7.0;
+                    heat -= stepCooling + rng.nextDouble() * 0.015;
+                    heatMap[x][y] = Math.max(0, heat);
+                }
             }
         }
 
@@ -83,6 +102,10 @@ public class BitmapFire extends BitmapPattern {
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 double heat = Math.min(1.0, heatMap[x][y]);
+                // Add subtle beat glow to existing flames
+                if (beatGlow > 0.1 && heat > 0.05) {
+                    heat = Math.min(1.0, heat + beatGlow * 0.15);
+                }
                 int paletteIdx = (int) (heat * (FIRE_PALETTE.length - 1));
                 buffer.setPixel(x, y, FIRE_PALETTE[paletteIdx]);
             }
@@ -94,30 +117,36 @@ public class BitmapFire extends BitmapPattern {
         for (int i = 0; i < 256; i++) {
             double t = i / 255.0;
             int r, g, b;
-            if (t < 0.33) {
-                // Black to dark red
-                double lt = t / 0.33;
-                r = (int) (lt * 200);
+            if (t < 0.25) {
+                // Black to dark red (deep embers)
+                double lt = t / 0.25;
+                r = (int) (lt * 180);
                 g = 0;
-                b = 0;
-            } else if (t < 0.6) {
-                // Dark red to orange
-                double lt = (t - 0.33) / 0.27;
-                r = 200 + (int) (lt * 55);
-                g = (int) (lt * 160);
-                b = 0;
-            } else if (t < 0.85) {
-                // Orange to yellow
-                double lt = (t - 0.6) / 0.25;
+                b = (int) (lt * 15); // tiny blue tinge in deep heat
+            } else if (t < 0.5) {
+                // Dark red to bright red-orange
+                double lt = (t - 0.25) / 0.25;
+                r = 180 + (int) (lt * 75);
+                g = (int) (lt * 100);
+                b = (int) ((1 - lt) * 15);
+            } else if (t < 0.7) {
+                // Red-orange to orange-yellow
+                double lt = (t - 0.5) / 0.2;
                 r = 255;
-                g = 160 + (int) (lt * 95);
-                b = (int) (lt * 30);
-            } else {
-                // Yellow to white
-                double lt = (t - 0.85) / 0.15;
+                g = 100 + (int) (lt * 155);
+                b = 0;
+            } else if (t < 0.88) {
+                // Yellow
+                double lt = (t - 0.7) / 0.18;
                 r = 255;
                 g = 255;
-                b = 30 + (int) (lt * 225);
+                b = (int) (lt * 60);
+            } else {
+                // Yellow to bright white
+                double lt = (t - 0.88) / 0.12;
+                r = 255;
+                g = 255;
+                b = 60 + (int) (lt * 195);
             }
             palette[i] = BitmapFrameBuffer.packARGB(255,
                 Math.min(255, r), Math.min(255, g), Math.min(255, b));
@@ -130,6 +159,7 @@ public class BitmapFire extends BitmapPattern {
         heatMap = null;
         initialized = false;
         beatPulse = 0;
+        beatGlow = 0;
     }
 
     @Override

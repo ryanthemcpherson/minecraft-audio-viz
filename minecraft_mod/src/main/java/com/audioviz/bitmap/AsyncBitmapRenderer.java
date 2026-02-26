@@ -100,13 +100,23 @@ public class AsyncBitmapRenderer {
         return state != null && state.rendering.get();
     }
 
+    /**
+     * Wait for any in-flight render to complete for the given zone.
+     * Uses a short sleep to avoid burning CPU on the server thread.
+     * Timeout: 200ms (renders should complete in under 50ms).
+     */
     public void drainZone(String zoneName) {
         ZoneRenderState state = zones.get(zoneName.toLowerCase());
         if (state == null) return;
 
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(200);
         while (state.rendering.get() && System.nanoTime() < deadline) {
-            Thread.onSpinWait();
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
@@ -117,6 +127,13 @@ public class AsyncBitmapRenderer {
 
     public void shutdown() {
         renderThread.shutdownNow();
+        try {
+            if (!renderThread.awaitTermination(3, TimeUnit.SECONDS)) {
+                LOGGER.warn("Bitmap render thread did not terminate within 3s");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         zones.clear();
     }
 

@@ -38,6 +38,10 @@ dependencies {
     testImplementation "org.mockito:mockito-core:5.14.0"
 }
 
+loom {
+    accessWidenerPath = file("src/main/resources/audioviz.accesswidener")
+}
+
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21

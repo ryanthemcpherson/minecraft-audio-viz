@@ -9,6 +9,7 @@ import com.audioviz.decorators.DJInfo;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageManager;
+import com.audioviz.stages.StageZoneRole;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.zones.VisualizationZone;
 import com.google.gson.JsonArray;
@@ -23,8 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * Handles WebSocket protocol messages and dispatches to appropriate handlers.
- * Ported from Paper plugin — handlers that touch Paper API are stubbed
- * and will be wired up as each subsystem is ported.
+ * Ported from Paper plugin — all core handlers are fully wired to Fabric subsystems.
  */
 public class MessageHandler {
 
@@ -175,14 +175,21 @@ public class MessageHandler {
     private JsonObject handleInitPool(JsonObject message) {
         String zone = message.has("zone") ? message.get("zone").getAsString() : null;
         if (zone == null || !isValidZoneName(zone)) return createError("Invalid zone name");
-        int entityCount = message.has("entity_count") ? message.get("entity_count").getAsInt() : 64;
+        int entityCount = message.has("entity_count") ? message.get("entity_count").getAsInt()
+                       : message.has("count") ? message.get("count").getAsInt() : 64;
         if (entityCount < 1 || entityCount > 10000) return createError("Invalid entity_count (1-10000)");
 
         var vizZone = mod.getZoneManager().getZone(zone);
         if (vizZone == null) return createError("Zone not found: " + zone);
+        if (vizZone.getWorld() == null) return createError("Zone world not loaded: " + zone);
 
-        mod.getVirtualRenderer().initializePool(zone, vizZone, entityCount, vizZone.getWorld());
-        LOGGER.info("Initialized entity pool '{}' with {} entities", zone, entityCount);
+        String material = message.has("material") ? message.get("material").getAsString() : null;
+        net.minecraft.block.BlockState blockState = material != null
+            ? com.audioviz.render.MaterialResolver.resolve(material) : null;
+
+        mod.getVirtualRenderer().initializePool(zone, vizZone, entityCount, vizZone.getWorld(), blockState);
+        LOGGER.info("Initialized entity pool '{}' with {} entities (material={})", zone, entityCount,
+            material != null ? material : "default");
 
         JsonObject response = new JsonObject();
         response.addProperty("type", "pool_initialized");
@@ -192,6 +199,11 @@ public class MessageHandler {
     }
 
     private JsonObject handleBatchUpdate(JsonObject message) {
+        // Extract embedded audio state from batch_update (VJ server sends it here, not as separate message)
+        if (message.has("bands")) {
+            handleAudioState(message);
+        }
+
         if (batchUpdateHandler != null) {
             return batchUpdateHandler.handle(message);
         }
@@ -203,10 +215,9 @@ public class MessageHandler {
         if (zone == null) return null;
         boolean visible = !message.has("visible") || message.get("visible").getAsBoolean();
 
-        // For virtual entities, resize pool to 0 to hide, restore on show
-        // For map displays, visibility is inherent (item frames are always visible)
+        // Hide all entities by scaling to zero (preserves pool for fast show/hide)
         if (!visible && mod.getVirtualRenderer().hasPool(zone)) {
-            mod.getVirtualRenderer().destroyPool(zone);
+            mod.getVirtualRenderer().hideAll(zone);
             LOGGER.debug("Hidden virtual entity pool for zone '{}'", zone);
         }
         return null;
@@ -214,15 +225,24 @@ public class MessageHandler {
 
     private JsonObject handleCleanupZone(JsonObject message) {
         String zone = message.has("zone") ? message.get("zone").getAsString() : null;
-        if (zone == null) return null;
+        if (zone == null) return createError("Missing zone");
 
-        mod.getMapRenderer().destroyDisplay(zone);
-        mod.getVirtualRenderer().destroyPool(zone);
-        BitmapPatternManager bpm = mod.getBitmapPatternManager();
-        if (bpm != null) bpm.deactivateZone(zone);
+        try {
+            mod.getMapRenderer().destroyDisplay(zone);
+            mod.getBitmapToEntityBridge().destroyWall(zone);
+            mod.getVirtualRenderer().destroyPool(zone);
+            BitmapPatternManager bpm = mod.getBitmapPatternManager();
+            if (bpm != null) bpm.deactivateZone(zone);
 
-        LOGGER.info("Cleaned up zone '{}'", zone);
-        return null;
+            LOGGER.info("Cleaned up zone '{}'", zone);
+            JsonObject response = new JsonObject();
+            response.addProperty("type", "zone_cleaned");
+            response.addProperty("zone", zone);
+            return response;
+        } catch (Exception e) {
+            LOGGER.error("Failed to cleanup zone '{}': {}", zone, e.getMessage(), e);
+            return createError("Cleanup failed: " + e.getMessage());
+        }
     }
 
     private JsonObject handleSetZoneConfig(JsonObject message) {
@@ -292,35 +312,74 @@ public class MessageHandler {
         String zone = message.has("zone") ? message.get("zone").getAsString() : null;
         if (zone == null || !isValidZoneName(zone)) return createError("Invalid zone name");
         String patternId = message.has("pattern") ? message.get("pattern").getAsString() : "bmp_spectrum";
-        int width = message.has("width") ? message.get("width").getAsInt() : 128;
-        int height = message.has("height") ? message.get("height").getAsInt() : 128;
+        // Backend: "map" (default, high-res map tiles) or "entity" (block display LED wall)
+        String backend = message.has("backend") ? message.get("backend").getAsString() : "map";
 
-        BitmapPatternManager bpm = mod.getBitmapPatternManager();
-        if (bpm == null) return createError("Bitmap pattern manager not initialized");
-        bpm.activateZone(zone, patternId, width, height);
+        int rawW = message.has("width") ? message.get("width").getAsInt() : 128;
+        int rawH = message.has("height") ? message.get("height").getAsInt() : 128;
 
-        // Initialize map display so the renderer has somewhere to draw
-        if (!mod.getMapRenderer().hasDisplay(zone)) {
-            var vizZone = mod.getZoneManager().getZone(zone);
-            if (vizZone != null && vizZone.getWorld() != null) {
-                mod.getMapRenderer().initializeDisplay(zone, vizZone, width, height,
-                    vizZone.getWorld(), Direction.NORTH);
-                LOGGER.info("Initialized map display for bitmap zone '{}' ({}x{})", zone, width, height);
-            }
+        int width, height;
+        if ("entity".equals(backend)) {
+            width = Math.max(1, rawW);
+            height = Math.max(1, rawH);
+        } else {
+            width = Math.max(128, ((rawW + 127) / 128) * 128);
+            height = Math.max(128, ((rawH + 127) / 128) * 128);
         }
 
-        JsonObject response = new JsonObject();
-        response.addProperty("type", "bitmap_init_ok");
-        response.addProperty("zone", zone);
-        return response;
+        try {
+            BitmapPatternManager bpm = mod.getBitmapPatternManager();
+            if (bpm == null) return createError("Bitmap pattern manager not initialized");
+            bpm.activateZone(zone, patternId, width, height);
+
+            var vizZone = mod.getZoneManager().getZone(zone);
+            if (vizZone != null && vizZone.getWorld() != null) {
+                Direction facing = directionFromRotation(vizZone.getRotation());
+                if ("entity".equals(backend)) {
+                    mod.getMapRenderer().destroyDisplay(zone);
+                    mod.getBitmapToEntityBridge().initializeWall(zone, vizZone, width, height,
+                        vizZone.getWorld(), facing);
+                    LOGGER.info("Initialized entity wall for bitmap zone '{}' ({}x{}, facing {})",
+                        zone, width, height, facing);
+                } else {
+                    mod.getBitmapToEntityBridge().destroyWall(zone);
+                    mod.getMapRenderer().initializeDisplay(zone, vizZone, width, height,
+                        vizZone.getWorld(), facing);
+                    LOGGER.info("Initialized map display for bitmap zone '{}' ({}x{}, facing {})",
+                        zone, width, height, facing);
+                }
+            }
+
+            JsonObject response = new JsonObject();
+            response.addProperty("type", "bitmap_initialized");
+            response.addProperty("zone", zone);
+            response.addProperty("width", width);
+            response.addProperty("height", height);
+            response.addProperty("pattern", patternId);
+            response.addProperty("backend", backend);
+            return response;
+        } catch (Exception e) {
+            LOGGER.error("Failed to initialize bitmap zone '{}': {}", zone, e.getMessage(), e);
+            return createError("Init bitmap failed: " + e.getMessage());
+        }
     }
 
     private JsonObject handleTeardownBitmap(JsonObject message) {
         String zone = message.has("zone") ? message.get("zone").getAsString() : null;
-        if (zone == null) return null;
-        BitmapPatternManager bpm = mod.getBitmapPatternManager();
-        if (bpm != null) bpm.deactivateZone(zone);
-        return null;
+        if (zone == null) return createError("Missing zone");
+        try {
+            BitmapPatternManager bpm = mod.getBitmapPatternManager();
+            if (bpm != null) bpm.deactivateZone(zone);
+            mod.getMapRenderer().destroyDisplay(zone);
+            mod.getBitmapToEntityBridge().destroyWall(zone);
+            JsonObject response = new JsonObject();
+            response.addProperty("type", "bitmap_teardown");
+            response.addProperty("zone", zone);
+            return response;
+        } catch (Exception e) {
+            LOGGER.error("Failed to teardown bitmap zone '{}': {}", zone, e.getMessage(), e);
+            return createError("Teardown failed: " + e.getMessage());
+        }
     }
 
     private JsonObject handleBitmapFrame(JsonObject message) {
@@ -338,15 +397,20 @@ public class MessageHandler {
         BitmapPatternManager bpm = mod.getBitmapPatternManager();
         if (bpm == null) return createError("Bitmap pattern manager not initialized");
 
-        String transition = message.has("transition") ? message.get("transition").getAsString() : null;
-        int duration = message.has("duration") ? message.get("duration").getAsInt() : 0;
-        bpm.setPattern(zone, patternId, transition, duration);
+        try {
+            String transition = message.has("transition") ? message.get("transition").getAsString() : null;
+            int duration = message.has("duration") ? message.get("duration").getAsInt() : 0;
+            bpm.setPattern(zone, patternId, transition, duration);
 
-        JsonObject response = new JsonObject();
-        response.addProperty("type", "pattern_set_ok");
-        response.addProperty("zone", zone);
-        response.addProperty("pattern", patternId);
-        return response;
+            JsonObject response = new JsonObject();
+            response.addProperty("type", "pattern_set_ok");
+            response.addProperty("zone", zone);
+            response.addProperty("pattern", patternId);
+            return response;
+        } catch (Exception e) {
+            LOGGER.error("Failed to set bitmap pattern '{}' on zone '{}': {}", patternId, zone, e.getMessage(), e);
+            return createError("Failed to set pattern: " + e.getMessage());
+        }
     }
 
     private JsonObject handleGetBitmapPatterns() {
@@ -411,7 +475,8 @@ public class MessageHandler {
                 s.addProperty("name", stage.getName());
                 s.addProperty("template", stage.getTemplateName());
                 s.addProperty("active", stage.isActive());
-                s.addProperty("zones", stage.getRoleToZone().size());
+                s.addProperty("zone_count", stage.getRoleToZone().size());
+                s.addProperty("total_roles", StageZoneRole.values().length);
                 stagesArr.add(s);
             }
         }
@@ -535,6 +600,15 @@ public class MessageHandler {
 
     private static double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    /** Convert a zone rotation (degrees) to the nearest cardinal direction for display facing. */
+    public static Direction directionFromRotation(float rotation) {
+        float r = ((rotation % 360) + 360) % 360;
+        if (r >= 315 || r < 45) return Direction.NORTH;
+        if (r < 135) return Direction.EAST;
+        if (r < 225) return Direction.SOUTH;
+        return Direction.WEST;
     }
 
     // --- Accessors ---

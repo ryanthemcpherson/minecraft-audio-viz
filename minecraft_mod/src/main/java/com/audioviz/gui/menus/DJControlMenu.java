@@ -80,8 +80,15 @@ public class DJControlMenu extends AudioVizGui {
                     if (frozenOn) {
                         effects.unfreeze();
                     } else if (mod.getBitmapPatternManager() != null) {
-                        var buf = mod.getBitmapPatternManager().getFrameBuffer("main");
-                        if (buf != null) effects.freeze(buf);
+                        // Find the first active zone's frame buffer
+                        var bpm = mod.getBitmapPatternManager();
+                        for (String zoneName : mod.getMapRenderer().getActiveZones()) {
+                            var buf = bpm.getFrameBuffer(zoneName);
+                            if (buf != null) {
+                                effects.freeze(buf);
+                                break;
+                            }
+                        }
                     }
                 }
                 rebuild();

@@ -11,6 +11,7 @@
     "server": ["com.audioviz.AudioVizMod"],
     "voicechat": ["com.audioviz.voice.VoicechatIntegration"]
   },
+  "accessWidener": "audioviz.accesswidener",
   "depends": {
     "fabricloader": ">=0.18.0",
     "minecraft": ">=1.21.11",

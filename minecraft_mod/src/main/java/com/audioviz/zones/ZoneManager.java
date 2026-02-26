@@ -150,7 +150,10 @@ public class ZoneManager {
             JsonObject zoneData = new JsonObject();
             zoneData.addProperty("name", zone.getName());
             zoneData.addProperty("id", zone.getId().toString());
-            zoneData.addProperty("world", zone.getWorld().getRegistryKey().getValue().toString());
+            String worldId = zone.getWorld() != null
+                ? zone.getWorld().getRegistryKey().getValue().toString()
+                : "minecraft:overworld";
+            zoneData.addProperty("world", worldId);
             zoneData.addProperty("origin_x", zone.getOrigin().getX());
             zoneData.addProperty("origin_y", zone.getOrigin().getY());
             zoneData.addProperty("origin_z", zone.getOrigin().getZ());

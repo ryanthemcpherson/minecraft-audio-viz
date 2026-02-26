@@ -13,11 +13,11 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Map-based bitmap renderer backend.
  * Receives ARGB frame data and routes it through MapDisplayManager → MapPacketSender.
- * Replaces TextDisplay entity rendering with map items on invisible item frames.
+ * Uses invisible glow item frames to hold maps — no physical blocks needed.
  */
 public class MapRendererBackend {
     private final Map<String, MapDisplayManager> displays = new ConcurrentHashMap<>();
-    private final Map<String, List<MapItemFrameSpawner.SpawnedTile>> spawnedTiles = new ConcurrentHashMap<>();
+    private final Map<String, MapItemFrameSpawner.SpawnedGrid> grids = new ConcurrentHashMap<>();
 
     /**
      * Initialize a map display for a zone.
@@ -25,19 +25,24 @@ public class MapRendererBackend {
     public void initializeDisplay(String zoneName, VisualizationZone zone,
                                    int pixelWidth, int pixelHeight,
                                    ServerWorld world, Direction facing) {
+        String key = zoneName.toLowerCase();
+
+        // Destroy existing display if any
+        destroyDisplay(zoneName);
+
         MapDisplayManager display = new MapDisplayManager(pixelWidth, pixelHeight);
 
-        var tiles = MapItemFrameSpawner.spawnGrid(
+        var grid = MapItemFrameSpawner.spawnGrid(
             world, zone.getOrigin(), facing,
             display.getTileCountX(), display.getTileCountZ()
         );
 
-        for (var tile : tiles) {
+        for (var tile : grid.tiles()) {
             display.setMapId(tile.tileX(), tile.tileZ(), tile.mapId());
         }
 
-        displays.put(zoneName.toLowerCase(), display);
-        spawnedTiles.put(zoneName.toLowerCase(), tiles);
+        displays.put(key, display);
+        grids.put(key, grid);
     }
 
     /**
@@ -56,11 +61,17 @@ public class MapRendererBackend {
         display.sendUpdates(players);
     }
 
-    /** Cleanup: remove item frames when zone is deleted. */
+    /** No-op — glow item frames are real entities, no manual ticking needed. */
+    public void tickHolders() {
+        // Item frames are server entities — no manual tick required.
+    }
+
+    /** Cleanup: remove virtual displays when zone is deleted. */
     public void destroyDisplay(String zoneName) {
-        var tiles = spawnedTiles.remove(zoneName.toLowerCase());
-        MapItemFrameSpawner.despawnGrid(tiles);
-        displays.remove(zoneName.toLowerCase());
+        String key = zoneName.toLowerCase();
+        var grid = grids.remove(key);
+        MapItemFrameSpawner.despawnGrid(grid);
+        displays.remove(key);
     }
 
     /** Get all zone names with active map displays. */

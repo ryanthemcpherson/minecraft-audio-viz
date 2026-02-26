@@ -47,8 +47,11 @@ public class StageManager {
 
         Stage stage = new Stage(name, anchor, worldName, templateName);
 
-        // Create zones for each role
-        for (StageZoneRole role : StageZoneRole.values()) {
+        // Create zones based on template type
+        Set<StageZoneRole> roles = getTemplateRoles(templateName);
+        float sizeScale = getTemplateScale(templateName);
+
+        for (StageZoneRole role : roles) {
             String zoneName = name.toLowerCase() + "_" + role.name().toLowerCase();
             Vec3d worldPos = stage.getWorldPositionForRole(role);
             BlockPos zoneOrigin = new BlockPos((int) worldPos.x, (int) worldPos.y, (int) worldPos.z);
@@ -59,7 +62,7 @@ public class StageManager {
             VisualizationZone zone = mod.getZoneManager().createZone(zoneName, world, zoneOrigin);
             if (zone != null) {
                 Vector3f size = role.getDefaultSize();
-                zone.setSize(size.x, size.y, size.z);
+                zone.setSize(size.x * sizeScale, size.y * sizeScale, size.z * sizeScale);
 
                 stage.getRoleToZone().put(role, zoneName);
 
@@ -84,6 +87,16 @@ public class StageManager {
         if (stage == null) return false;
 
         for (String zoneName : stage.getZoneNames()) {
+            // Clean up renderers and bitmap state before deleting the zone
+            try {
+                mod.getMapRenderer().destroyDisplay(zoneName);
+                mod.getBitmapToEntityBridge().destroyWall(zoneName);
+                mod.getVirtualRenderer().destroyPool(zoneName);
+                var bpm = mod.getBitmapPatternManager();
+                if (bpm != null) bpm.deactivateZone(zoneName);
+            } catch (Exception e) {
+                LOGGER.warn("Error cleaning up zone '{}' during stage delete: {}", zoneName, e.getMessage());
+            }
             mod.getZoneManager().deleteZone(zoneName);
         }
 
@@ -295,14 +308,49 @@ public class StageManager {
         }
     }
 
-    // ========== Helpers ==========
+    // ========== Template Helpers ==========
+
+    private static Set<StageZoneRole> getTemplateRoles(String template) {
+        return switch (template.toLowerCase()) {
+            case "small" -> EnumSet.of(
+                StageZoneRole.MAIN_STAGE,
+                StageZoneRole.AUDIENCE
+            );
+            case "medium" -> EnumSet.of(
+                StageZoneRole.MAIN_STAGE,
+                StageZoneRole.LEFT_WING,
+                StageZoneRole.RIGHT_WING,
+                StageZoneRole.AUDIENCE,
+                StageZoneRole.SKYBOX
+            );
+            default -> EnumSet.allOf(StageZoneRole.class); // large, custom
+        };
+    }
+
+    private static float getTemplateScale(String template) {
+        return switch (template.toLowerCase()) {
+            case "small" -> 0.6f;
+            case "large" -> 1.5f;
+            default -> 1.0f; // medium, custom
+        };
+    }
+
+    /** Get the roles a template creates (for UI descriptions). */
+    public static Set<StageZoneRole> getTemplateRolesPublic(String template) {
+        return getTemplateRoles(template);
+    }
+
+    // ========== World Helpers ==========
 
     private ServerWorld findWorld(String worldName) {
         for (ServerWorld w : mod.getServer().getWorlds()) {
             if (w.getRegistryKey().getValue().toString().equals(worldName)) return w;
         }
-        // Fallback: first world
-        for (ServerWorld w : mod.getServer().getWorlds()) return w;
+        // Fallback: try matching just the path (e.g., "overworld" matches "minecraft:overworld")
+        for (ServerWorld w : mod.getServer().getWorlds()) {
+            if (w.getRegistryKey().getValue().getPath().equals(worldName)) return w;
+        }
+        LOGGER.warn("World '{}' not found", worldName);
         return null;
     }
 
