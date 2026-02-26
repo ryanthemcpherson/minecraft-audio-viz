@@ -10,10 +10,13 @@ import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
 
+import net.minecraft.server.MinecraftServer;
+
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,11 +29,12 @@ public class VizWebSocketServer extends WebSocketServer {
 
     private final MessageHandler messageHandler;
     private final MessageQueue messageQueue;
+    private final MinecraftServer server;
     private final Gson gson = new Gson();
     private final ConcurrentHashMap<WebSocket, ClientInfo> clients = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<WebSocket, Long> lastPongTime = new ConcurrentHashMap<>();
 
-    private boolean asyncEnabled = true;
+    private volatile boolean asyncEnabled = true;
 
     // Connection metrics
     private final AtomicLong totalConnections = new AtomicLong(0);
@@ -50,10 +54,12 @@ public class VizWebSocketServer extends WebSocketServer {
 
     private static final int MAX_MESSAGE_SIZE = 262_144;
 
-    public VizWebSocketServer(String address, int port, MessageHandler messageHandler, MessageQueue messageQueue) {
+    public VizWebSocketServer(String address, int port, MessageHandler messageHandler,
+                              MessageQueue messageQueue, MinecraftServer server) {
         super(new InetSocketAddress(address, port));
         this.messageHandler = messageHandler;
         this.messageQueue = messageQueue;
+        this.server = server;
 
         setReuseAddr(true);
         setConnectionLostTimeout(0);
@@ -179,11 +185,43 @@ public class VizWebSocketServer extends WebSocketServer {
                     return;
                 }
 
-                JsonObject response = messageHandler.handleMessage(type, json);
-                if (response != null) {
-                    conn.send(gson.toJson(response));
-                    totalMessagesSent.incrementAndGet();
-                }
+                // Echo correlation ID (_seq) from request to response so the
+                // VJ server can match responses to the correct caller.
+                final int seq = json.has("_seq") ? json.get("_seq").getAsInt() : -1;
+
+                // Schedule handler on the server thread to avoid thread-safety issues
+                // (entity spawning, world access, etc. must happen on the server thread).
+                // Response is sent asynchronously when the server thread completes.
+                CompletableFuture<JsonObject> future = new CompletableFuture<>();
+                server.execute(() -> {
+                    try {
+                        JsonObject result = messageHandler.handleMessage(type, json);
+                        future.complete(result);
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                });
+
+                future.whenComplete((result, ex) -> {
+                    try {
+                        if (!conn.isOpen()) return;
+                        if (ex != null) {
+                            JsonObject error = new JsonObject();
+                            error.addProperty("type", "error");
+                            error.addProperty("message", ex.getMessage());
+                            if (seq >= 0) error.addProperty("_seq", seq);
+                            conn.send(gson.toJson(error));
+                            totalMessagesSent.incrementAndGet();
+                        } else if (result != null) {
+                            if (seq >= 0) result.addProperty("_seq", seq);
+                            conn.send(gson.toJson(result));
+                            totalMessagesSent.incrementAndGet();
+                        }
+                    } catch (Exception sendEx) {
+                        AudioVizMod.LOGGER.warn("Failed to send response: {}", sendEx.getMessage());
+                        totalSendFailures.incrementAndGet();
+                    }
+                });
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Error processing WebSocket message", e);
                 JsonObject error = new JsonObject();

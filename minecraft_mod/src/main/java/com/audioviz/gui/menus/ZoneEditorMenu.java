@@ -10,6 +10,7 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.Formatting;
 import org.joml.Vector3f;
 
@@ -138,8 +139,12 @@ public class ZoneEditorMenu extends AudioVizGui {
         setBackButton(slot(3, 0), onBack);
 
         setSlot(slot(3, 4), new GuiElementBuilder(Items.GLASS)
-            .setName(Text.literal("Show Boundaries").formatted(Formatting.GRAY))
-            .addLoreLine(Text.literal("Coming soon").formatted(Formatting.DARK_GRAY)));
+            .setName(Text.literal("Show Boundaries").formatted(Formatting.AQUA))
+            .addLoreLine(Text.literal("Spawn particles at zone edges").formatted(Formatting.GRAY))
+            .setCallback((i, t, a) -> {
+                playClickSound();
+                showZoneBoundaries(zone);
+            }));
 
         setSlot(slot(3, 8), new GuiElementBuilder(Items.BARRIER)
             .setName(Text.literal("Delete Zone").formatted(Formatting.RED, Formatting.BOLD))
@@ -186,6 +191,52 @@ public class ZoneEditorMenu extends AudioVizGui {
     private void save() {
         mod.getZoneManager().saveZones();
         rebuild();
+    }
+
+    /**
+     * Visualize zone boundaries by spawning particles along the 12 edges of the zone box.
+     * Respects zone rotation via localToWorld().
+     */
+    private void showZoneBoundaries(VisualizationZone zone) {
+        if (zone.getWorld() == null) return;
+
+        // Calculate 8 corners in world coordinates
+        Vec3d[] corners = new Vec3d[8];
+        for (int i = 0; i < 8; i++) {
+            double lx = (i & 1) != 0 ? 1.0 : 0.0;
+            double ly = (i & 2) != 0 ? 1.0 : 0.0;
+            double lz = (i & 4) != 0 ? 1.0 : 0.0;
+            corners[i] = zone.localToWorld(lx, ly, lz);
+        }
+
+        // 12 edges of the bounding box
+        int[][] edges = {
+            {0,1}, {2,3}, {4,5}, {6,7},  // along local X
+            {0,2}, {1,3}, {4,6}, {5,7},  // along local Y
+            {0,4}, {1,5}, {2,6}, {3,7},  // along local Z
+        };
+
+        var player = getPlayer();
+        for (int[] edge : edges) {
+            spawnEdgeParticles(player, corners[edge[0]], corners[edge[1]]);
+        }
+
+        player.sendMessage(Text.literal("Zone boundaries shown with particles").formatted(Formatting.AQUA));
+    }
+
+    private void spawnEdgeParticles(net.minecraft.server.network.ServerPlayerEntity player, Vec3d a, Vec3d b) {
+        double dist = a.distanceTo(b);
+        int steps = Math.max(2, (int)(dist / 0.5));
+        for (int s = 0; s <= steps; s++) {
+            double t = (double) s / steps;
+            double x = a.x + (b.x - a.x) * t;
+            double y = a.y + (b.y - a.y) * t;
+            double z = a.z + (b.z - a.z) * t;
+            player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.ParticleS2CPacket(
+                net.minecraft.particle.ParticleTypes.END_ROD,
+                true, true, x, y, z, 0f, 0f, 0f, 0f, 1
+            ));
+        }
     }
 
     private static String fmt(float v) {

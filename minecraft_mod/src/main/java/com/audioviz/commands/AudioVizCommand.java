@@ -9,6 +9,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -24,6 +25,42 @@ import net.minecraft.util.math.BlockPos;
 public class AudioVizCommand {
 
     public static void register(CommandDispatcher<ServerCommandSource> dispatcher, AudioVizMod mod) {
+        // Tab completion providers
+        SuggestionProvider<ServerCommandSource> zoneNames = (ctx, builder) -> {
+            for (String name : mod.getZoneManager().getZoneNames()) {
+                if (name.toLowerCase().startsWith(builder.getRemaining().toLowerCase()))
+                    builder.suggest(name);
+            }
+            return builder.buildFuture();
+        };
+
+        SuggestionProvider<ServerCommandSource> stageNames = (ctx, builder) -> {
+            for (String name : mod.getStageManager().getStageNames()) {
+                if (name.toLowerCase().startsWith(builder.getRemaining().toLowerCase()))
+                    builder.suggest(name);
+            }
+            return builder.buildFuture();
+        };
+
+        SuggestionProvider<ServerCommandSource> templateNames = (ctx, builder) -> {
+            for (String t : new String[]{"small", "medium", "large", "custom"}) {
+                if (t.startsWith(builder.getRemaining().toLowerCase()))
+                    builder.suggest(t);
+            }
+            return builder.buildFuture();
+        };
+
+        SuggestionProvider<ServerCommandSource> patternNames = (ctx, builder) -> {
+            var bpm = mod.getBitmapPatternManager();
+            if (bpm != null) {
+                for (String id : bpm.getPatternIds()) {
+                    if (id.toLowerCase().startsWith(builder.getRemaining().toLowerCase()))
+                        builder.suggest(id);
+                }
+            }
+            return builder.buildFuture();
+        };
+
         dispatcher.register(CommandManager.literal("audioviz")
             .requires(CommandManager.requirePermissionLevel(CommandManager.GAMEMASTERS_CHECK))
             .then(CommandManager.literal("zone")
@@ -32,14 +69,17 @@ public class AudioVizCommand {
                         .executes(ctx -> createZone(ctx, mod))))
                 .then(CommandManager.literal("delete")
                     .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(zoneNames)
                         .executes(ctx -> deleteZone(ctx, mod))))
                 .then(CommandManager.literal("list")
                     .executes(ctx -> listZones(ctx, mod)))
                 .then(CommandManager.literal("info")
                     .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(zoneNames)
                         .executes(ctx -> zoneInfo(ctx, mod))))
                 .then(CommandManager.literal("setsize")
                     .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(zoneNames)
                         .then(CommandManager.argument("x", IntegerArgumentType.integer(1, 100))
                             .then(CommandManager.argument("y", IntegerArgumentType.integer(1, 100))
                                 .then(CommandManager.argument("z", IntegerArgumentType.integer(1, 100))
@@ -51,18 +91,22 @@ public class AudioVizCommand {
                 .then(CommandManager.literal("create")
                     .then(CommandManager.argument("name", StringArgumentType.word())
                         .then(CommandManager.argument("template", StringArgumentType.word())
+                            .suggests(templateNames)
                             .executes(ctx -> stageCreate(ctx, mod)))))
                 .then(CommandManager.literal("delete")
                     .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(stageNames)
                         .executes(ctx -> stageDelete(ctx, mod))))
                 .then(CommandManager.literal("activate")
                     .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(stageNames)
                         .executes(ctx -> stageActivate(ctx, mod))))
             )
             .then(CommandManager.literal("menu")
                 .executes(ctx -> openMenu(ctx, mod)))
             .then(CommandManager.literal("pattern")
                 .then(CommandManager.argument("name", StringArgumentType.string())
+                    .suggests(patternNames)
                     .executes(ctx -> setPattern(ctx, mod))))
             .then(CommandManager.literal("status")
                 .executes(ctx -> showStatus(ctx, mod)))
@@ -103,9 +147,12 @@ public class AudioVizCommand {
     private static int deleteZone(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
         String name = StringArgumentType.getString(ctx, "name");
 
-        // Cleanup renderers
+        // Cleanup all renderers and bitmap state
         mod.getMapRenderer().destroyDisplay(name);
+        mod.getBitmapToEntityBridge().destroyWall(name);
         mod.getVirtualRenderer().destroyPool(name);
+        var bpm = mod.getBitmapPatternManager();
+        if (bpm != null) bpm.deactivateZone(name);
 
         if (mod.getZoneManager().deleteZone(name)) {
             ctx.getSource().sendFeedback(() -> Text.literal("Deleted zone '" + name + "'")
@@ -167,14 +214,29 @@ public class AudioVizCommand {
     }
 
     private static int showStatus(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
-        ctx.getSource().sendFeedback(() -> Text.literal("AudioViz Status")
+        var s = ctx.getSource();
+        s.sendFeedback(() -> Text.literal("AudioViz Status")
             .formatted(Formatting.AQUA, Formatting.BOLD), false);
-        ctx.getSource().sendFeedback(() -> Text.literal("  Zones: " +
+        s.sendFeedback(() -> Text.literal("  Zones: " +
             mod.getZoneManager().getZoneCount()).formatted(Formatting.WHITE), false);
-        ctx.getSource().sendFeedback(() -> Text.literal("  Map displays: " +
+        s.sendFeedback(() -> Text.literal("  Stages: " +
+            mod.getStageManager().getStageCount()).formatted(Formatting.WHITE), false);
+        s.sendFeedback(() -> Text.literal("  Map displays: " +
             mod.getMapRenderer().getActiveZones().size()).formatted(Formatting.WHITE), false);
-        ctx.getSource().sendFeedback(() -> Text.literal("  Virtual entity pools: " +
+        s.sendFeedback(() -> Text.literal("  Entity pools: " +
             mod.getVirtualRenderer().getActiveZones().size()).formatted(Formatting.WHITE), false);
+        s.sendFeedback(() -> Text.literal("  Entity walls: " +
+            mod.getBitmapToEntityBridge().getActiveWalls().size()).formatted(Formatting.WHITE), false);
+        int patternCount = mod.getBitmapPatternManager() != null
+            ? mod.getBitmapPatternManager().getPatternIds().size() : 0;
+        s.sendFeedback(() -> Text.literal("  Bitmap patterns: " + patternCount)
+            .formatted(Formatting.WHITE), false);
+        boolean wsConnected = mod.getWebSocketServer() != null;
+        s.sendFeedback(() -> Text.literal("  WebSocket: " + (wsConnected ? "running" : "stopped"))
+            .formatted(wsConnected ? Formatting.GREEN : Formatting.RED), false);
+        boolean voiceAvail = mod.getVoicechatIntegration() != null;
+        s.sendFeedback(() -> Text.literal("  Voice chat: " + (voiceAvail ? "available" : "not loaded"))
+            .formatted(voiceAvail ? Formatting.GREEN : Formatting.GRAY), false);
         return 1;
     }
 

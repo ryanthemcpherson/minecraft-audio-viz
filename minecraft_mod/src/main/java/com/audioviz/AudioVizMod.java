@@ -7,6 +7,7 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
+import com.audioviz.render.BitmapToEntityBridge;
 import com.audioviz.render.MapRendererBackend;
 import com.audioviz.render.VirtualEntityRendererBackend;
 import com.audioviz.stages.StageManager;
@@ -46,6 +47,7 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     private VizWebSocketServer wsServer;
     private MapRendererBackend mapRenderer;
     private VirtualEntityRendererBackend virtualRenderer;
+    private BitmapToEntityBridge bitmapToEntityBridge;
     private BitmapPatternManager bitmapPatternManager;
     private StageManager stageManager;
     private StageDecoratorManager stageDecoratorManager;
@@ -91,6 +93,7 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         // Initialize renderers
         mapRenderer = new MapRendererBackend();
         virtualRenderer = new VirtualEntityRendererBackend();
+        bitmapToEntityBridge = new BitmapToEntityBridge(virtualRenderer);
 
         // Initialize bitmap pattern engine
         bitmapPatternManager = new BitmapPatternManager(server, mapRenderer);
@@ -126,7 +129,7 @@ public class AudioVizMod implements DedicatedServerModInitializer {
 
         // Start WebSocket server
         String wsAddress = "0.0.0.0";
-        wsServer = new VizWebSocketServer(wsAddress, config.websocketPort, messageHandler, messageQueue);
+        wsServer = new VizWebSocketServer(wsAddress, config.websocketPort, messageHandler, messageQueue, server);
         wsServer.start();
         LOGGER.info("WebSocket server starting on port {}", config.websocketPort);
 
@@ -157,23 +160,35 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             stageDecoratorManager.updateAudioState(audio);
         }
 
-        // 4. Flush map display updates to players
+        // 4. Push bitmap frames to entity walls (bridge reads buffer after pattern tick)
+        if (bitmapToEntityBridge != null) {
+            for (String zoneName : bitmapToEntityBridge.getActiveWalls()) {
+                var buffer = bitmapPatternManager.getFrameBuffer(zoneName);
+                if (buffer != null) {
+                    bitmapToEntityBridge.applyFrame(zoneName,
+                        buffer.getRawPixels(), buffer.getWidth(), buffer.getHeight());
+                }
+            }
+        }
+
+        // 5. Flush map display updates to players (every tick = 20 TPS)
         for (String zoneName : mapRenderer.getActiveZones()) {
             var players = getPlayersNearZone(zoneName);
             mapRenderer.flush(zoneName, players);
         }
+        mapRenderer.tickHolders();
 
-        // 5. Flush virtual entity updates
+        // 6. Flush virtual entity updates
         for (String zoneName : virtualRenderer.getActiveZones()) {
             virtualRenderer.flush(zoneName);
         }
 
-        // 6. Tick stage decorators (runs at half rate internally)
+        // 7. Tick stage decorators (runs at half rate internally)
         if (stageDecoratorManager != null) {
             stageDecoratorManager.tick();
         }
 
-        // 7. Tick voice chat audio drain
+        // 8. Tick voice chat audio drain
         if (voicechatIntegration != null) {
             voicechatIntegration.tick();
         }
@@ -208,14 +223,21 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             menuManager.clearAllSessions();
         }
 
-        // Destroy all active displays
+        // Destroy entity walls
+        if (bitmapToEntityBridge != null) {
+            for (String zone : new ArrayList<>(bitmapToEntityBridge.getActiveWalls())) {
+                bitmapToEntityBridge.destroyWall(zone);
+            }
+        }
+
+        // Destroy all active displays (copy keyset to avoid ConcurrentModificationException)
         if (mapRenderer != null) {
-            for (String zone : mapRenderer.getActiveZones()) {
+            for (String zone : new ArrayList<>(mapRenderer.getActiveZones())) {
                 mapRenderer.destroyDisplay(zone);
             }
         }
         if (virtualRenderer != null) {
-            for (String zone : virtualRenderer.getActiveZones()) {
+            for (String zone : new ArrayList<>(virtualRenderer.getActiveZones())) {
                 virtualRenderer.destroyPool(zone);
             }
         }
@@ -238,74 +260,94 @@ public class AudioVizMod implements DedicatedServerModInitializer {
      * Converts normalized (0-1) coordinates to holder-relative translations.
      */
     private JsonObject handleBatchUpdateRendering(JsonObject message) {
-        String zone = message.has("zone") ? message.get("zone").getAsString() : null;
-        if (zone == null) return null;
+        try {
+            String zone = message.has("zone") ? message.get("zone").getAsString() : null;
+            if (zone == null) return null;
 
-        VisualizationZone vizZone = zoneManager.getZone(zone);
-        if (vizZone == null || !virtualRenderer.hasPool(zone)) return null;
+            VisualizationZone vizZone = zoneManager.getZone(zone);
+            if (vizZone == null || !virtualRenderer.hasPool(zone)) return null;
 
-        JsonArray entities = message.has("entities") ? message.getAsJsonArray("entities") : null;
-        if (entities == null || entities.isEmpty()) return null;
+            JsonArray entities = message.has("entities") ? message.getAsJsonArray("entities") : null;
+            if (entities == null || entities.isEmpty()) return null;
 
-        Vec3d origin = vizZone.getOriginVec3d();
-        List<VirtualEntityPool.EntityUpdate> updates = new ArrayList<>();
+            Vec3d origin = vizZone.getOriginVec3d();
+            List<VirtualEntityPool.EntityUpdate> updates = new ArrayList<>();
 
-        for (var jsonEl : entities) {
-            JsonObject e = jsonEl.getAsJsonObject();
-            String id = e.has("id") ? e.get("id").getAsString() : null;
-            if (id == null) continue;
+            for (var jsonEl : entities) {
+                JsonObject e = jsonEl.getAsJsonObject();
+                String id = e.has("id") ? e.get("id").getAsString() : null;
+                if (id == null) continue;
 
-            int index = parseEntityIndex(id);
-            if (index < 0) continue;
+                int index = parseEntityIndex(id);
+                if (index < 0) continue;
 
-            double x = e.has("x") ? e.get("x").getAsDouble() : 0.5;
-            double y = e.has("y") ? e.get("y").getAsDouble() : 0.5;
-            double z = e.has("z") ? e.get("z").getAsDouble() : 0.5;
-            Vec3d worldPos = vizZone.localToWorld(x, y, z);
-            Vec3d relative = worldPos.subtract(origin);
+                // Handle visibility — if explicitly false, hide entity
+                Boolean visible = e.has("visible") ? e.get("visible").getAsBoolean() : null;
 
-            float scale = e.has("scale") ? e.get("scale").getAsFloat() : 0.2f;
-            Vector3f scaleVec = new Vector3f(scale, scale, scale);
+                double x = e.has("x") ? e.get("x").getAsDouble() : 0.5;
+                double y = e.has("y") ? e.get("y").getAsDouble() : 0.5;
+                double z = e.has("z") ? e.get("z").getAsDouble() : 0.5;
+                Vec3d worldPos = vizZone.localToWorld(x, y, z);
+                Vec3d relative = worldPos.subtract(origin);
 
-            updates.add(new VirtualEntityPool.EntityUpdate(index, relative, scaleVec, null));
+                float scale = e.has("scale") ? e.get("scale").getAsFloat() : 0.2f;
+                Vector3f scaleVec = new Vector3f(scale, scale, scale);
+
+                // Per-entity material override (e.g. "GOLD_BLOCK", "NETHER_BRICKS")
+                net.minecraft.block.BlockState blockState = null;
+                if (e.has("material")) {
+                    blockState = com.audioviz.render.MaterialResolver.resolve(
+                        e.get("material").getAsString());
+                }
+
+                updates.add(new VirtualEntityPool.EntityUpdate(index, relative, scaleVec, blockState, visible));
+            }
+
+            if (!updates.isEmpty()) {
+                virtualRenderer.applyBatchUpdate(zone, updates);
+            }
+            return null;
+        } catch (Exception e) {
+            LOGGER.error("Error processing batch_update: {}", e.getMessage(), e);
+            return null;
         }
-
-        if (!updates.isEmpty()) {
-            virtualRenderer.applyBatchUpdate(zone, updates);
-        }
-        return null;
     }
 
     /**
      * Parse bitmap_frame JSON (base64 or array) and push pixels to the map renderer.
      */
     private JsonObject handleBitmapFrameRendering(JsonObject message) {
-        String zone = message.has("zone") ? message.get("zone").getAsString() : null;
-        if (zone == null) return null;
+        try {
+            String zone = message.has("zone") ? message.get("zone").getAsString() : null;
+            if (zone == null) return null;
 
-        if (!mapRenderer.hasDisplay(zone)) return null;
+            if (!mapRenderer.hasDisplay(zone)) return null;
 
-        var buffer = bitmapPatternManager.getFrameBuffer(zone);
-        int width = buffer != null ? buffer.getWidth() : 128;
-        int height = buffer != null ? buffer.getHeight() : 128;
+            var buffer = bitmapPatternManager.getFrameBuffer(zone);
+            int width = buffer != null ? buffer.getWidth() : 128;
+            int height = buffer != null ? buffer.getHeight() : 128;
 
-        int[] pixels = null;
-        if (message.has("pixels")) {
-            byte[] decoded = Base64.getDecoder().decode(message.get("pixels").getAsString());
-            pixels = new int[decoded.length / 4];
-            ByteBuffer.wrap(decoded).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-        } else if (message.has("pixel_array")) {
-            JsonArray arr = message.getAsJsonArray("pixel_array");
-            pixels = new int[arr.size()];
-            for (int i = 0; i < arr.size(); i++) {
-                pixels[i] = arr.get(i).getAsInt();
+            int[] pixels = null;
+            if (message.has("pixels")) {
+                byte[] decoded = Base64.getDecoder().decode(message.get("pixels").getAsString());
+                pixels = new int[decoded.length / 4];
+                ByteBuffer.wrap(decoded).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
+            } else if (message.has("pixel_array")) {
+                JsonArray arr = message.getAsJsonArray("pixel_array");
+                pixels = new int[arr.size()];
+                for (int i = 0; i < arr.size(); i++) {
+                    pixels[i] = arr.get(i).getAsInt();
+                }
             }
-        }
 
-        if (pixels != null) {
-            mapRenderer.applyFrame(zone, pixels, width, height);
+            if (pixels != null) {
+                mapRenderer.applyFrame(zone, pixels, width, height);
+            }
+            return null;
+        } catch (Exception e) {
+            LOGGER.error("Error processing bitmap_frame: {}", e.getMessage(), e);
+            return null;
         }
-        return null;
     }
 
     /** Extract numeric index from entity IDs like "block_42". */
@@ -337,6 +379,7 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     public MessageHandler getMessageHandler() { return messageHandler; }
     public MapRendererBackend getMapRenderer() { return mapRenderer; }
     public VirtualEntityRendererBackend getVirtualRenderer() { return virtualRenderer; }
+    public BitmapToEntityBridge getBitmapToEntityBridge() { return bitmapToEntityBridge; }
     public BitmapPatternManager getBitmapPatternManager() { return bitmapPatternManager; }
     public StageManager getStageManager() { return stageManager; }
     public StageDecoratorManager getStageDecoratorManager() { return stageDecoratorManager; }

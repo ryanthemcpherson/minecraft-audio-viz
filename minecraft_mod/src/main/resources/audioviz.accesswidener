@@ -1,0 +1,5 @@
+accessWidener v2 named
+
+# Allow setting ItemFrameEntity.fixed for invisible floating map displays
+accessible field net/minecraft/entity/decoration/ItemFrameEntity fixed Z
+mutable field net/minecraft/entity/decoration/ItemFrameEntity fixed Z

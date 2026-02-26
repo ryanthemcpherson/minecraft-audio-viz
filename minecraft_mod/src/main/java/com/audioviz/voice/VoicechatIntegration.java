@@ -204,7 +204,7 @@ public class VoicechatIntegration implements VoicechatPlugin {
     }
 
     private void recreateAllChannels() {
-        if (serverApi == null) return;
+        if (serverApi == null || mod == null || mod.getServer() == null) return;
 
         UUID[] playerIds = playerChannels.keySet().toArray(new UUID[0]);
         for (UUID playerId : playerIds) {
@@ -350,6 +350,7 @@ public class VoicechatIntegration implements VoicechatPlugin {
     // ========== Helpers ==========
 
     private Vec3d getZoneCenter() {
+        if (mod == null || mod.getZoneManager() == null) return null;
         VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
         if (zone == null) return null;
         return zone.getCenter();
