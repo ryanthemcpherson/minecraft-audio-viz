@@ -57,8 +57,8 @@ jobs:
           name: python-dist
           path: dist/
 
-  build-plugin:
-    name: Build Minecraft Plugin
+  build-mod:
+    name: Build Minecraft Mod
     needs: [ci-gate]
     runs-on: ubuntu-latest
     steps:
@@ -69,17 +69,17 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: maven
+          cache: gradle
 
-      - name: Build with Maven
-        working-directory: minecraft_plugin
-        run: mvn clean package -DskipTests
+      - name: Build with Gradle
+        working-directory: minecraft_mod
+        run: ./gradlew build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: minecraft-plugin
-          path: minecraft_plugin/target/audioviz-plugin-*.jar
+          name: minecraft-mod
+          path: minecraft_mod/build/libs/audioviz-mod-*.jar
 
   build-dj-client:
     name: Build DJ Client (${{ matrix.platform }})
@@ -238,7 +238,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-python, build-plugin, build-dj-client]
+    needs: [build-python, build-mod, build-dj-client]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -249,11 +249,11 @@ jobs:
           name: python-dist
           path: dist/
 
-      - name: Download Plugin artifacts
+      - name: Download Mod artifacts
         uses: actions/download-artifact@v7
         with:
-          name: minecraft-plugin
-          path: plugin/
+          name: minecraft-mod
+          path: mod/
 
       - name: Download DJ Client Windows
         uses: actions/download-artifact@v7
@@ -291,8 +291,8 @@ jobs:
         run: |
           echo "=== Python packages ==="
           ls -la dist/ || true
-          echo "=== Minecraft plugin ==="
-          ls -la plugin/ || true
+          echo "=== Minecraft mod ==="
+          ls -la mod/ || true
           echo "=== DJ Client Windows ==="
           ls -la dj-client/windows/ || true
           echo "=== DJ Client Linux ==="
@@ -312,7 +312,7 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
-            plugin/*.jar
+            mod/*.jar
             dj-client/windows/*
             dj-client/linux/*
             dj-client/macos-x64/*

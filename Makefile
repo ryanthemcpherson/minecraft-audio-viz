@@ -44,13 +44,13 @@ format-check: ## Check Python formatting without changes
 	ruff format --check vj_server/
 
 # ---------------------------------------------------------------------------
-# Java (Minecraft Plugin)
+# Java (Fabric Mod)
 # ---------------------------------------------------------------------------
-build: ## Build Minecraft plugin JAR (skip tests)
-	cd minecraft_plugin && mvn clean package -DskipTests
+build: ## Build Fabric mod JAR
+	cd minecraft_mod && ./gradlew build
 
-build-verbose: ## Build Minecraft plugin JAR with full output
-	cd minecraft_plugin && mvn clean package -DskipTests
+build-verbose: ## Build Fabric mod JAR with full output
+	cd minecraft_mod && ./gradlew build --info
 
 # ---------------------------------------------------------------------------
 # Deploy
@@ -127,7 +127,7 @@ ci: lint format-check test coordinator-lint coordinator-test site-lint site-buil
 # Cleanup
 # ---------------------------------------------------------------------------
 clean: ## Remove build artifacts
-	rm -rf minecraft_plugin/target
+	rm -rf minecraft_mod/build minecraft_mod/.gradle
 	rm -rf dist/ build/ *.egg-info
 	rm -rf site/.next site/out
 	rm -rf coordinator/*.egg-info

@@ -1,28 +1,26 @@
 name: Update Minecraft Server Jar
 
 on:
-  schedule:
-    - cron: '17 9 * * *'
+  # No scheduled auto-update — Fabric server JARs are updated via installer
   workflow_dispatch:
     inputs:
       provider:
         description: 'Jar source provider'
         required: true
-        default: 'paper'
+        default: 'url'
         type: choice
         options:
-          - paper
           - url
       minecraft_version:
-        description: 'Minecraft version (for Paper, optional if auto-detected)'
+        description: 'Minecraft version (informational)'
         required: false
         type: string
       jar_url:
-        description: 'Direct jar URL (required when provider=url)'
-        required: false
+        description: 'Direct jar URL (required)'
+        required: true
         type: string
       jar_sha256:
-        description: 'Optional SHA256 for provider=url'
+        description: 'Optional SHA256 checksum'
         required: false
         type: string
 
@@ -50,10 +48,7 @@ jobs:
           INPUT_JAR_URL: ${{ github.event.inputs.jar_url }}
           INPUT_JAR_SHA256: ${{ github.event.inputs.jar_sha256 }}
         run: |
-          PROVIDER="${INPUT_PROVIDER}"
-          if [ -z "$PROVIDER" ]; then
-            PROVIDER="paper"
-          fi
+          PROVIDER="${INPUT_PROVIDER:-url}"
           echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
           echo "mc_version=$INPUT_MC_VERSION" >> "$GITHUB_OUTPUT"
           echo "jar_url=$INPUT_JAR_URL" >> "$GITHUB_OUTPUT"
@@ -74,16 +69,14 @@ jobs:
             args+=(--mc-version "$RESOLVED_MC_VERSION")
           fi
 
-          if [ "$RESOLVED_PROVIDER" = "url" ]; then
-            if [ -z "$RESOLVED_JAR_URL" ]; then
-              echo "jar_url is required when provider=url" >&2
-              exit 1
-            fi
-            args+=(--jar-url "$RESOLVED_JAR_URL")
+          if [ -z "$RESOLVED_JAR_URL" ]; then
+            echo "jar_url is required" >&2
+            exit 1
+          fi
+          args+=(--jar-url "$RESOLVED_JAR_URL")
 
-            if [ -n "$RESOLVED_JAR_SHA256" ]; then
-              args+=(--sha256 "$RESOLVED_JAR_SHA256")
-            fi
+          if [ -n "$RESOLVED_JAR_SHA256" ]; then
+            args+=(--sha256 "$RESOLVED_JAR_SHA256")
           fi
 
           bash ./scripts/update-minecraft-jar.sh "${args[@]}"
@@ -98,6 +91,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Provider: \`${RESOLVED_PROVIDER}\`" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$RESOLVED_MC_VERSION" ]; then
-            echo "- Minecraft version input: \`${RESOLVED_MC_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Minecraft version: \`${RESOLVED_MC_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "- Service: \`minecraft.service\`" >> "$GITHUB_STEP_SUMMARY"

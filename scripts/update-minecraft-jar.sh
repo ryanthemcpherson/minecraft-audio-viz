@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Update Minecraft server jar (Paper by default) and restart service only when changed.
+# Update Minecraft server jar and restart service only when changed.
+# Fabric server — use --provider url to supply a direct JAR URL.
 #
 # Examples:
-#   ./scripts/update-minecraft-jar.sh
-#   ./scripts/update-minecraft-jar.sh --mc-version 1.21.11
-#   ./scripts/update-minecraft-jar.sh --provider url --jar-url https://example.com/purpur.jar
+#   ./scripts/update-minecraft-jar.sh --provider url --jar-url https://example.com/fabric-server.jar
+#   ./scripts/update-minecraft-jar.sh --provider url --jar-url https://example.com/fabric-server.jar --sha256 abc123
 
 SERVER_DIR="${SERVER_DIR:-/home/ryan/minecraft-server}"
 SERVICE_NAME="${SERVICE_NAME:-minecraft.service}"
-JAR_NAME="${JAR_NAME:-paper.jar}"
-PROVIDER="paper"
+JAR_NAME="${JAR_NAME:-fabric-server-launch.jar}"
+PROVIDER="url"
 MC_VERSION=""
 PROJECT="paper"
 JAR_URL=""
@@ -32,13 +32,13 @@ while [[ $# -gt 0 ]]; do
 Usage: update-minecraft-jar.sh [options]
 
 Options:
-  --provider paper|url   Source type (default: paper)
-  --project NAME         Paper project id (default: paper)
+  --provider paper|url   Source type (default: url)
+  --project NAME         Paper project id (only for --provider paper)
   --mc-version VERSION   Minecraft version (auto-detect when omitted)
-  --jar-url URL          Direct jar URL when --provider url
-  --sha256 HASH          Optional SHA256 for --provider url
+  --jar-url URL          Direct jar URL (required for --provider url)
+  --sha256 HASH          Optional SHA256 checksum
   --server-dir DIR       Server directory (default: /home/ryan/minecraft-server)
-  --jar-name NAME        Target jar name in server dir (default: paper.jar)
+  --jar-name NAME        Target jar name in server dir (default: fabric-server-launch.jar)
   --service NAME         Systemd service name (default: minecraft.service)
 EOF
             exit 0
