@@ -72,19 +72,19 @@ async def test_capacity_enforcement_with_disconnect(client: AsyncClient) -> None
     connect_code = show["connect_code"]
 
     # Connect DJ #1 — should succeed
-    resp1 = await client.get(f"/api/v1/connect/{connect_code}")
+    resp1 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp1.status_code == 200
     data1 = resp1.json()
     assert data1["dj_count"] == 1
 
     # Connect DJ #2 — should succeed (fills the show)
-    resp2 = await client.get(f"/api/v1/connect/{connect_code}")
+    resp2 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp2.status_code == 200
     data2 = resp2.json()
     assert data2["dj_count"] == 2
 
     # Connect DJ #3 — should be rejected (show full)
-    resp3 = await client.get(f"/api/v1/connect/{connect_code}")
+    resp3 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp3.status_code == 409
     assert "full" in resp3.json()["detail"].lower()
 
@@ -98,8 +98,7 @@ async def test_capacity_enforcement_with_disconnect(client: AsyncClient) -> None
 
     # Disconnect DJ #1
     disc_resp = await client.post(
-        f"/api/v1/shows/disconnect/{dj_session_id}",
-        headers={"Authorization": "Bearer cap-key-1"},
+        f"/api/v1/disconnect/{dj_session_id}",
     )
     assert disc_resp.status_code == 204
 
@@ -112,7 +111,7 @@ async def test_capacity_enforcement_with_disconnect(client: AsyncClient) -> None
     assert detail_resp.json()["current_djs"] == 1
 
     # Connect DJ #3 again — should succeed now
-    resp4 = await client.get(f"/api/v1/connect/{connect_code}")
+    resp4 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp4.status_code == 200
     assert resp4.json()["dj_count"] == 2
 
@@ -133,9 +132,9 @@ async def test_capacity_max_djs_one(client: AsyncClient) -> None:
     connect_code = show["connect_code"]
 
     # First connection fills the show
-    resp1 = await client.get(f"/api/v1/connect/{connect_code}")
+    resp1 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp1.status_code == 200
 
     # Second connection rejected
-    resp2 = await client.get(f"/api/v1/connect/{connect_code}")
+    resp2 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp2.status_code == 409

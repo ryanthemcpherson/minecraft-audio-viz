@@ -50,7 +50,31 @@ Tests use an in-memory SQLite database and require no external services.
 | POST | `/api/v1/shows` | Bearer API key | Create a show (generates connect code) |
 | GET | `/api/v1/shows/{id}` | Bearer API key | Get show details |
 | DELETE | `/api/v1/shows/{id}` | Bearer API key | End a show |
-| GET | `/api/v1/connect/{code}` | None (rate-limited) | Resolve connect code to WebSocket URL + JWT |
+| GET | `/api/v1/connect/{code}` | None (rate-limited) | Resolve connect code metadata (no side effects) |
+| POST | `/api/v1/connect/{code}/join` | None (rate-limited) | Join show and mint DJ JWT |
+| POST | `/api/v1/disconnect/{dj_session_id}` | None | Mark DJ session disconnected (idempotent) |
+
+`POST /api/v1/connect/{code}/join` supports an optional `Idempotency-Key` header.
+When a client retries with the same key from the same IP, the coordinator reuses
+the original join result instead of creating a duplicate DJ session.
+
+## Observability
+
+- Every request gets an `X-Request-ID` (propagated from incoming header if provided).
+- Access logs include structured `request_id`, `path`, `method`, `status_code`, and `duration_ms`.
+- `GET /health` includes in-process counters under `counters`, including:
+  - `connect.resolve.*`
+  - `connect.join.*`
+  - `connect.disconnect.*`
+- `GET /metrics` exposes the same counters in Prometheus text format (metric names like `mcav_connect_join_success_total`).
+- `GET /metrics` also includes request latency histograms:
+  - `mcav_http_request_duration_ms_bucket{method="...",path="...",le="..."}`
+  - `mcav_http_request_duration_ms_sum{method="...",path="..."}`
+  - `mcav_http_request_duration_ms_count{method="...",path="..."}`
+
+Grafana dashboard template:
+- `docs/grafana/coordinator-observability-dashboard.json`
+- Import into Grafana and select your Prometheus datasource when prompted.
 
 ## Environment Variables
 
