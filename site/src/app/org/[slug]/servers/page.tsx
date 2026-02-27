@@ -377,7 +377,7 @@ export default function OrgServersPage() {
         {/* Heading */}
         <div className="mb-8 flex items-center justify-between">
           <h1 className="text-2xl font-bold">
-            <span className="text-gradient">Servers</span>
+            <span className="text-disc-cyan">Servers</span>
           </h1>
           {isOwner && !showRegisterForm && (
             <button

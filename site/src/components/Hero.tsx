@@ -27,25 +27,19 @@ export default function Hero() {
 
       {/* Content */}
       <div className="relative z-10 mx-auto max-w-4xl text-center">
-        {/* Badge */}
-        <div className="animate-slide-up mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-text-secondary backdrop-blur-sm">
-          <span className="inline-block h-2 w-2 rounded-full bg-disc-cyan animate-pulse" />
-          Now with 30+ visualization patterns
-        </div>
-
         {/* Headline */}
-        <h1 className="animate-slide-up-delay-1 text-5xl font-bold leading-tight tracking-tight sm:text-6xl md:text-7xl lg:text-8xl">
+        <h1 className="animate-slide-up text-5xl font-bold leading-tight tracking-tight sm:text-6xl md:text-7xl lg:text-8xl">
           Minecraft Audio{" "}
           <span className="text-gradient">Visualizer</span>
         </h1>
 
         {/* Subline */}
-        <p className="animate-slide-up-delay-2 mx-auto mt-6 max-w-2xl text-lg text-text-secondary sm:text-xl md:text-2xl">
+        <p className="animate-slide-up-delay-1 mx-auto mt-6 max-w-2xl text-lg text-text-secondary sm:text-xl md:text-2xl">
           Real-time audio visualization in Minecraft. No client mods.
         </p>
 
         {/* CTA Buttons */}
-        <div className="animate-slide-up-delay-3 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+        <div className="animate-slide-up-delay-2 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
           <Link
             href="/getting-started"
             className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-8 py-4 text-sm font-semibold text-white shadow-lg shadow-disc-cyan/20 transition-all hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110"

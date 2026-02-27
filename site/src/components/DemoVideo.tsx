@@ -5,16 +5,10 @@ export default function DemoVideo() {
     <section id="demo" className="relative px-6 py-32">
       <div className="mx-auto max-w-5xl">
         {/* Section Header */}
-        <div className="mb-16 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-blue">
-            See It Live
-          </p>
+        <div className="mb-12 text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-            MCAV in <span className="text-gradient">action</span>
+            MCAV in <span className="text-disc-cyan">action</span>
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-text-secondary">
-            Watch real audio being transformed into Minecraft architecture in real-time.
-          </p>
         </div>
 
         {/* Video Embed */}
@@ -46,7 +40,7 @@ export default function DemoVideo() {
             { value: "60", label: "FPS Rendering" },
           ].map((stat) => (
             <div key={stat.label} className="text-center">
-              <div className="text-2xl font-bold text-gradient sm:text-3xl">
+              <div className="text-2xl font-bold text-disc-cyan sm:text-3xl">
                 {stat.value}
               </div>
               <div className="mt-1 text-sm text-text-secondary">
