@@ -1,4 +1,4 @@
-"""Tests for the DJ disconnect endpoint (POST /shows/disconnect/{session_id})."""
+"""Tests for the DJ disconnect endpoint (POST /disconnect/{session_id})."""
 
 from __future__ import annotations
 
@@ -81,8 +81,7 @@ class TestDisconnectIdempotent:
         )
         fake_id = str(uuid.uuid4())
         resp = await client.post(
-            f"/api/v1/shows/disconnect/{fake_id}",
-            headers={"Authorization": "Bearer disc1-key"},
+            f"/api/v1/disconnect/{fake_id}",
         )
         assert resp.status_code == 204
 
@@ -93,21 +92,19 @@ class TestDisconnectIdempotent:
         )
 
         # Connect a DJ
-        resolve_resp = await client.get(f"/api/v1/connect/{connect_code}")
+        resolve_resp = await client.post(f"/api/v1/connect/{connect_code}/join")
         assert resolve_resp.status_code == 200
         session_id = _extract_session_id(resolve_resp.json()["token"])
 
         # First disconnect
         resp1 = await client.post(
-            f"/api/v1/shows/disconnect/{session_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            f"/api/v1/disconnect/{session_id}",
         )
         assert resp1.status_code == 204
 
         # Second disconnect (already disconnected)
         resp2 = await client.post(
-            f"/api/v1/shows/disconnect/{session_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            f"/api/v1/disconnect/{session_id}",
         )
         assert resp2.status_code == 204
 
@@ -120,11 +117,11 @@ class TestDisconnectDJCount:
         )
 
         # Connect two DJs
-        resp1 = await client.get(f"/api/v1/connect/{connect_code}")
+        resp1 = await client.post(f"/api/v1/connect/{connect_code}/join")
         assert resp1.status_code == 200
         session_id_1 = _extract_session_id(resp1.json()["token"])
 
-        resp2 = await client.get(f"/api/v1/connect/{connect_code}")
+        resp2 = await client.post(f"/api/v1/connect/{connect_code}/join")
         assert resp2.status_code == 200
 
         # Verify current_djs is 2
@@ -136,8 +133,7 @@ class TestDisconnectDJCount:
 
         # Disconnect DJ #1
         disc_resp = await client.post(
-            f"/api/v1/shows/disconnect/{session_id_1}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            f"/api/v1/disconnect/{session_id_1}",
         )
         assert disc_resp.status_code == 204
 
@@ -155,20 +151,18 @@ class TestDisconnectDJCount:
         )
 
         # Connect one DJ
-        resp = await client.get(f"/api/v1/connect/{connect_code}")
+        resp = await client.post(f"/api/v1/connect/{connect_code}/join")
         assert resp.status_code == 200
         session_id = _extract_session_id(resp.json()["token"])
 
         # Disconnect once (1 -> 0)
         await client.post(
-            f"/api/v1/shows/disconnect/{session_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            f"/api/v1/disconnect/{session_id}",
         )
 
         # Disconnect again (already disconnected, count should stay at 0)
         await client.post(
-            f"/api/v1/shows/disconnect/{session_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            f"/api/v1/disconnect/{session_id}",
         )
 
         detail = await client.get(

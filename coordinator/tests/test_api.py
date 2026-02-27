@@ -57,6 +57,30 @@ async def test_health_returns_ok(client: AsyncClient) -> None:
     assert data["active_servers"] == 0
 
 
+@pytest.mark.asyncio
+async def test_request_id_echoed_in_response_header(client: AsyncClient) -> None:
+    request_id = "test-request-id-123"
+    resp = await client.get("/health", headers={"X-Request-ID": request_id})
+    assert resp.status_code == 200
+    assert resp.headers.get("X-Request-ID") == request_id
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_prometheus_format(client: AsyncClient) -> None:
+    # Trigger at least one known counter
+    _ = await client.get("/health")
+    _ = await client.get("/api/v1/connect/BASS-ZZZZ")
+    resp = await client.get("/metrics")
+    assert resp.status_code == 200
+    assert resp.headers.get("content-type", "").startswith("text/plain")
+    body = resp.text
+    assert "mcav_connect_resolve_attempt_total" in body
+    assert "mcav_connect_resolve_not_found_total" in body
+    assert "# TYPE mcav_connect_resolve_attempt_total counter" in body
+    assert "# TYPE mcav_http_request_duration_ms histogram" in body
+    assert 'mcav_http_request_duration_ms_bucket{method="GET",path="/health"' in body
+
+
 # ---------------------------------------------------------------------------
 # Server registration
 # ---------------------------------------------------------------------------
@@ -72,7 +96,7 @@ async def test_register_server(client: AsyncClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Full flow: register -> create show -> resolve code
+# Full flow: register -> create show -> resolve code -> join
 # ---------------------------------------------------------------------------
 
 
@@ -114,8 +138,17 @@ async def test_full_flow(client: AsyncClient) -> None:
     assert len(connect_code) == 9
     assert connect_code[4] == "-"
 
-    # 3. Resolve the connect code (public endpoint)
-    resolve_resp = await client.get(f"/api/v1/connect/{connect_code}")
+    # 3. Resolve the connect code metadata (public endpoint, read-only)
+    resolve_meta = await client.get(f"/api/v1/connect/{connect_code}")
+    assert resolve_meta.status_code == 200
+    meta_data = resolve_meta.json()
+    assert meta_data["websocket_url"] == "ws://192.168.1.50:9000"
+    assert meta_data["show_name"] == "Friday Night Beats"
+    assert meta_data["dj_count"] == 0
+    assert meta_data["max_djs"] == 4
+
+    # 4. Join using the connect code (public endpoint, side effects)
+    resolve_resp = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resolve_resp.status_code == 200
     resolve_data = resolve_resp.json()
     assert resolve_data["websocket_url"] == "ws://192.168.1.50:9000"
@@ -123,7 +156,7 @@ async def test_full_flow(client: AsyncClient) -> None:
     assert resolve_data["dj_count"] == 1
     assert "token" in resolve_data
 
-    # 4. Verify the JWT is valid
+    # 5. Verify the JWT is valid
     import jwt as pyjwt
 
     decoded = pyjwt.decode(
@@ -136,7 +169,7 @@ async def test_full_flow(client: AsyncClient) -> None:
     assert decoded["server_id"] == server_id
     assert decoded["permissions"] == ["stream"]
 
-    # 5. Get show details
+    # 6. Get show details
     detail_resp = await client.get(
         f"/api/v1/shows/{show_id}",
         headers={"Authorization": "Bearer test-key-12345"},
@@ -146,7 +179,7 @@ async def test_full_flow(client: AsyncClient) -> None:
     assert detail_data["current_djs"] == 1
     assert detail_data["status"] == "active"
 
-    # 6. End the show
+    # 7. End the show
     end_resp = await client.delete(
         f"/api/v1/shows/{show_id}",
         headers={"Authorization": "Bearer test-key-12345"},
@@ -155,7 +188,7 @@ async def test_full_flow(client: AsyncClient) -> None:
     end_data = end_resp.json()
     assert end_data["status"] == "ended"
 
-    # 7. Resolving the code again should fail (show ended, code cleared)
+    # 8. Resolving the code again should fail (show ended, code cleared)
     resolve_again = await client.get(f"/api/v1/connect/{connect_code}")
     assert resolve_again.status_code == 404
 
@@ -169,6 +202,44 @@ async def test_full_flow(client: AsyncClient) -> None:
 async def test_resolve_unknown_code_returns_404(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/connect/BASS-ZZZZ")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resolve_is_read_only_no_dj_session_side_effect(client: AsyncClient) -> None:
+    """Repeated GET resolve calls must not increment DJ counts."""
+    user_token = await _get_user_token(client, "readonly@example.com")
+    reg_data = await _register_server(
+        client,
+        user_token,
+        name="Read Only Stage",
+        websocket_url="ws://localhost:9020",
+        api_key="readonly-key",
+    )
+    server_id = reg_data["server_id"]
+
+    show_resp = await client.post(
+        "/api/v1/shows",
+        json={"server_id": server_id, "name": "Read Only Show", "max_djs": 4},
+        headers={"Authorization": "Bearer readonly-key"},
+    )
+    assert show_resp.status_code == 201
+    show_data = show_resp.json()
+    show_id = show_data["show_id"]
+    connect_code = show_data["connect_code"]
+
+    r1 = await client.get(f"/api/v1/connect/{connect_code}")
+    r2 = await client.get(f"/api/v1/connect/{connect_code}")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json()["dj_count"] == 0
+    assert r2.json()["dj_count"] == 0
+
+    detail = await client.get(
+        f"/api/v1/shows/{show_id}",
+        headers={"Authorization": "Bearer readonly-key"},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["current_djs"] == 0
 
 
 @pytest.mark.asyncio
@@ -247,13 +318,13 @@ async def test_max_djs_enforcement(client: AsyncClient) -> None:
     assert show.status_code == 201
     connect_code = show.json()["connect_code"]
 
-    # First resolution should succeed (fills the show)
-    resp1 = await client.get(f"/api/v1/connect/{connect_code}")
+    # First join should succeed (fills the show)
+    resp1 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp1.status_code == 200
     assert resp1.json()["dj_count"] == 1
 
-    # Second resolution should be rejected
-    resp2 = await client.get(f"/api/v1/connect/{connect_code}")
+    # Second join should be rejected
+    resp2 = await client.post(f"/api/v1/connect/{connect_code}/join")
     assert resp2.status_code == 409
 
 
