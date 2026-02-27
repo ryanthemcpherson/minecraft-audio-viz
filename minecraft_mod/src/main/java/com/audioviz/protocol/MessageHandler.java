@@ -153,20 +153,31 @@ public class MessageHandler {
         response.addProperty("type", "zones");
         JsonArray zonesArr = new JsonArray();
         for (VisualizationZone zone : mod.getZoneManager().getAllZones()) {
-            JsonObject z = new JsonObject();
-            z.addProperty("name", zone.getName());
-            z.addProperty("id", zone.getId().toString());
-            z.addProperty("x", zone.getOrigin().getX());
-            z.addProperty("y", zone.getOrigin().getY());
-            z.addProperty("z_pos", zone.getOrigin().getZ());
-            z.addProperty("size_x", zone.getSize().x);
-            z.addProperty("size_y", zone.getSize().y);
-            z.addProperty("size_z", zone.getSize().z);
-            z.addProperty("rotation", zone.getRotation());
-            zonesArr.add(z);
+            zonesArr.add(serializeZone(zone));
         }
         response.add("zones", zonesArr);
         return response;
+    }
+
+    private static JsonObject serializeZone(VisualizationZone zone) {
+        JsonObject z = new JsonObject();
+        z.addProperty("name", zone.getName());
+        z.addProperty("id", zone.getId().toString());
+
+        JsonObject origin = new JsonObject();
+        origin.addProperty("x", zone.getOrigin().getX());
+        origin.addProperty("y", zone.getOrigin().getY());
+        origin.addProperty("z", zone.getOrigin().getZ());
+        z.add("origin", origin);
+
+        JsonObject size = new JsonObject();
+        size.addProperty("x", zone.getSize().x);
+        size.addProperty("y", zone.getSize().y);
+        size.addProperty("z", zone.getSize().z);
+        z.add("size", size);
+
+        z.addProperty("rotation", zone.getRotation());
+        return z;
     }
 
     private JsonObject handleGetZone(JsonObject message) {
@@ -174,16 +185,8 @@ public class MessageHandler {
         if (name == null || !isValidZoneName(name)) return createError("Invalid zone name");
         VisualizationZone zone = mod.getZoneManager().getZone(name);
         if (zone == null) return createError("Zone not found: " + name);
-        JsonObject response = new JsonObject();
+        JsonObject response = serializeZone(zone);
         response.addProperty("type", "zone");
-        response.addProperty("name", zone.getName());
-        response.addProperty("x", zone.getOrigin().getX());
-        response.addProperty("y", zone.getOrigin().getY());
-        response.addProperty("z_pos", zone.getOrigin().getZ());
-        response.addProperty("size_x", zone.getSize().x);
-        response.addProperty("size_y", zone.getSize().y);
-        response.addProperty("size_z", zone.getSize().z);
-        response.addProperty("rotation", zone.getRotation());
         return response;
     }
 

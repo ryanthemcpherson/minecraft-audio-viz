@@ -94,6 +94,11 @@ public class BitmapToEntityBridge {
                     default    -> { relX = u; relZ = 0; }
                 }
 
+                // ChunkAttachment is at block center (+0.5, +0.5) but zone starts
+                // at block corner, so offset entities to align with zone bounds.
+                relX -= 0.5;
+                relZ -= 0.5;
+
                 posUpdates.add(new VirtualEntityPool.EntityUpdate(
                     idx, new Vec3d(relX, relY, relZ), scale, null, true));
             }
