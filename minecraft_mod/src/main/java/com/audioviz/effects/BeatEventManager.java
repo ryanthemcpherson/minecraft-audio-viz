@@ -109,6 +109,7 @@ public class BeatEventManager {
         List<ServerPlayerEntity> viewers = new ArrayList<>();
 
         ServerWorld world = zone.getWorld();
+        if (world == null) return viewers;
         for (ServerPlayerEntity player : world.getPlayers()) {
             if (player.squaredDistanceTo(center) <= maxDistance * maxDistance) {
                 viewers.add(player);
@@ -129,6 +130,7 @@ public class BeatEventManager {
             int count = (int) (20 * intensity);
             double spread = 2.0 * intensity;
             ServerWorld world = zone.getWorld();
+            if (world == null) return;
             world.spawnParticles(ParticleTypes.END_ROD,
                 location.x, location.y, location.z,
                 count, spread, spread, spread, 0.1);
@@ -173,6 +175,7 @@ public class BeatEventManager {
         public void trigger(Vec3d location, VisualizationZone zone, double intensity,
                             Collection<ServerPlayerEntity> viewers) {
             ServerWorld world = zone.getWorld();
+            if (world == null) return;
             // Vertical particle column simulating lightning
             for (int i = 0; i < 5; i++) {
                 double y = location.y + i * 2.0;
@@ -199,6 +202,7 @@ public class BeatEventManager {
         public void trigger(Vec3d location, VisualizationZone zone, double intensity,
                             Collection<ServerPlayerEntity> viewers) {
             ServerWorld world = zone.getWorld();
+            if (world == null) return;
             int count = (int) (30 * intensity);
             world.spawnParticles(ParticleTypes.EXPLOSION,
                 location.x, location.y, location.z,

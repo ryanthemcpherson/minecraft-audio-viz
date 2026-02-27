@@ -224,11 +224,18 @@ public class VizWebSocketServer extends WebSocketServer {
                 });
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Error processing WebSocket message", e);
-                JsonObject error = new JsonObject();
-                error.addProperty("type", "error");
-                error.addProperty("message", e.getMessage());
-                conn.send(gson.toJson(error));
-                totalMessagesSent.incrementAndGet();
+                try {
+                    if (conn.isOpen()) {
+                        JsonObject error = new JsonObject();
+                        error.addProperty("type", "error");
+                        error.addProperty("message", e.getMessage());
+                        conn.send(gson.toJson(error));
+                        totalMessagesSent.incrementAndGet();
+                    }
+                } catch (Exception sendEx) {
+                    AudioVizMod.LOGGER.warn("Failed to send error response: {}", sendEx.getMessage());
+                    totalSendFailures.incrementAndGet();
+                }
             }
         }
     }

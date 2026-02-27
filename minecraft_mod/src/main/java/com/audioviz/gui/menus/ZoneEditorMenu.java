@@ -1,6 +1,8 @@
 package com.audioviz.gui.menus;
 
 import com.audioviz.AudioVizMod;
+import com.audioviz.effects.BeatEffectConfig;
+import com.audioviz.effects.BeatType;
 import com.audioviz.gui.AudioVizGui;
 import com.audioviz.gui.MenuManager;
 import com.audioviz.zones.VisualizationZone;
@@ -32,7 +34,7 @@ public class ZoneEditorMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Zone: " + zoneName).formatted(Formatting.AQUA);
+        return Text.literal("Zone: " + zoneName).formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
@@ -101,6 +103,10 @@ public class ZoneEditorMenu extends AudioVizGui {
             .addLoreLine(Text.literal("Shift-Left: 16 entities").formatted(Formatting.GRAY))
             .setCallback((i, type, a) -> {
                 playClickSound();
+                if (zone.getWorld() == null) {
+                    getPlayer().sendMessage(Text.literal("Zone world not loaded").formatted(Formatting.RED));
+                    return;
+                }
                 int count = switch (type) {
                     case MOUSE_LEFT_SHIFT -> 16;
                     case MOUSE_RIGHT -> 128;
@@ -128,6 +134,10 @@ public class ZoneEditorMenu extends AudioVizGui {
             .setName(Text.literal("Teleport").formatted(Formatting.AQUA))
             .setCallback((i, type, a) -> {
                 playClickSound();
+                if (zone.getWorld() == null) {
+                    getPlayer().sendMessage(Text.literal("Zone world not loaded").formatted(Formatting.RED));
+                    return;
+                }
                 close();
                 getPlayer().teleport(zone.getWorld(),
                     zone.getOrigin().getX() + 0.5, (double) zone.getOrigin().getY(),
@@ -135,15 +145,94 @@ public class ZoneEditorMenu extends AudioVizGui {
                     getPlayer().getYaw(), getPlayer().getPitch(), false);
             }));
 
-        // Row 3: Back, Boundaries (stub), Delete
+        // Row 3: Back, Particles, Lights, Beats, Boundaries, Delete
         setBackButton(slot(3, 0), onBack);
 
-        setSlot(slot(3, 4), new GuiElementBuilder(Items.GLASS)
-            .setName(Text.literal("Show Boundaries").formatted(Formatting.AQUA))
-            .addLoreLine(Text.literal("Spawn particles at zone edges").formatted(Formatting.GRAY))
+        // Particle effects toggle
+        boolean particlesEnabled = mod.getParticleEffectManager() != null
+            && !mod.getParticleEffectManager().getEnabledEffects(zoneName.toLowerCase()).isEmpty();
+        setSlot(slot(3, 2), new GuiElementBuilder(particlesEnabled ? Items.BLAZE_POWDER : Items.GUNPOWDER)
+            .setName(Text.literal(particlesEnabled ? "Disable Particles" : "Enable Particles")
+                .formatted(particlesEnabled ? Formatting.GOLD : Formatting.GRAY))
+            .addLoreLine(Text.literal("Audio-reactive particle effects").formatted(Formatting.DARK_GRAY))
             .setCallback((i, t, a) -> {
                 playClickSound();
-                showZoneBoundaries(zone);
+                var pm = mod.getParticleEffectManager();
+                if (pm == null) return;
+                String key = zoneName.toLowerCase();
+                if (pm.getEnabledEffects(key).isEmpty()) {
+                    pm.enableDefaultEffects(key);
+                    getPlayer().sendMessage(Text.literal("Particles enabled").formatted(Formatting.GREEN));
+                } else {
+                    for (String eid : new java.util.ArrayList<>(pm.getEnabledEffects(key))) {
+                        pm.disableEffect(key, eid);
+                    }
+                    getPlayer().sendMessage(Text.literal("Particles disabled").formatted(Formatting.YELLOW));
+                }
+                rebuild();
+            }));
+
+        // Ambient lights toggle
+        boolean lightsOn = mod.getAmbientLightManager() != null && mod.getAmbientLightManager().hasZone(zoneName);
+        setSlot(slot(3, 3), new GuiElementBuilder(lightsOn ? Items.GLOWSTONE : Items.COAL)
+            .setName(Text.literal(lightsOn ? "Remove Lights" : "Place Lights")
+                .formatted(lightsOn ? Formatting.YELLOW : Formatting.GRAY))
+            .addLoreLine(Text.literal("Audio-reactive light blocks").formatted(Formatting.DARK_GRAY))
+            .setCallback((i, t, a) -> {
+                playClickSound();
+                var lm = mod.getAmbientLightManager();
+                if (lm == null) return;
+                if (lm.hasZone(zoneName)) {
+                    lm.teardownZone(zoneName);
+                    getPlayer().sendMessage(Text.literal("Lights removed").formatted(Formatting.YELLOW));
+                } else {
+                    lm.initializeZone(zone);
+                    getPlayer().sendMessage(Text.literal("Lights placed").formatted(Formatting.GREEN));
+                }
+                rebuild();
+            }));
+
+        // Beat effects toggle
+        boolean beatsOn = mod.getBeatEventManager() != null
+            && mod.getBeatEventManager().getZoneConfig(zoneName) != null;
+        setSlot(slot(3, 5), new GuiElementBuilder(beatsOn ? Items.NOTE_BLOCK : Items.JUKEBOX)
+            .setName(Text.literal(beatsOn ? "Disable Beats" : "Enable Beats")
+                .formatted(beatsOn ? Formatting.LIGHT_PURPLE : Formatting.GRAY))
+            .addLoreLine(Text.literal("Beat-triggered particle bursts").formatted(Formatting.DARK_GRAY))
+            .setCallback((i, t, a) -> {
+                playClickSound();
+                var bm = mod.getBeatEventManager();
+                if (bm == null) return;
+                if (bm.getZoneConfig(zoneName) != null) {
+                    bm.removeZoneConfig(zoneName);
+                    getPlayer().sendMessage(Text.literal("Beats disabled").formatted(Formatting.YELLOW));
+                } else {
+                    BeatEffectConfig config = new BeatEffectConfig.Builder()
+                        .addEffect(BeatType.BEAT, bm.get("particle_burst"))
+                        .build();
+                    bm.setZoneConfig(zoneName, config);
+                    getPlayer().sendMessage(Text.literal("Beats enabled").formatted(Formatting.GREEN));
+                }
+                rebuild();
+            }));
+
+        boolean bShowing = mod.getZoneBoundaryRenderer() != null
+            && mod.getZoneBoundaryRenderer().isShowing(zoneName);
+        setSlot(slot(3, 4), new GuiElementBuilder(bShowing ? Items.ENDER_EYE : Items.GLASS)
+            .setName(Text.literal(bShowing ? "Hide Boundaries" : "Show Boundaries").formatted(Formatting.AQUA))
+            .addLoreLine(Text.literal("Persistent particle outlines (30s)").formatted(Formatting.GRAY))
+            .setCallback((i, t, a) -> {
+                playClickSound();
+                var renderer = mod.getZoneBoundaryRenderer();
+                if (renderer != null) {
+                    boolean nowShowing = renderer.toggle(zoneName);
+                    getPlayer().sendMessage(Text.literal(nowShowing
+                        ? "Zone boundaries shown (30s)" : "Zone boundaries hidden")
+                        .formatted(nowShowing ? Formatting.AQUA : Formatting.YELLOW));
+                } else {
+                    showZoneBoundaries(zone);
+                }
+                rebuild();
             }));
 
         setSlot(slot(3, 8), new GuiElementBuilder(Items.BARRIER)
@@ -154,6 +243,10 @@ public class ZoneEditorMenu extends AudioVizGui {
                     playClickSound();
                     mod.getVirtualRenderer().destroyPool(zoneName);
                     mod.getMapRenderer().destroyDisplay(zoneName);
+                    if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zoneName);
+                    if (mod.getBitmapPatternManager() != null) mod.getBitmapPatternManager().deactivateZone(zoneName);
+                    if (mod.getAmbientLightManager() != null) mod.getAmbientLightManager().teardownZone(zoneName);
+                    if (mod.getBeatEventManager() != null) mod.getBeatEventManager().removeZoneConfig(zoneName);
                     mod.getZoneManager().deleteZone(zoneName);
                     getPlayer().sendMessage(Text.literal("Deleted zone '" + zoneName + "'").formatted(Formatting.RED));
                     onBack.run();

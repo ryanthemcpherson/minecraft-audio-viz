@@ -3,7 +3,11 @@ package com.audioviz;
 import com.audioviz.bitmap.BitmapPatternManager;
 import com.audioviz.decorators.DecoratorEntityManager;
 import com.audioviz.decorators.StageDecoratorManager;
+import com.audioviz.effects.BeatEventManager;
+import com.audioviz.effects.BeatType;
 import com.audioviz.gui.MenuManager;
+import com.audioviz.lighting.AmbientLightManager;
+import com.audioviz.particles.ParticleEffectManager;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
@@ -11,17 +15,26 @@ import com.audioviz.render.BitmapToEntityBridge;
 import com.audioviz.render.MapRendererBackend;
 import com.audioviz.render.VirtualEntityRendererBackend;
 import com.audioviz.stages.StageManager;
+import com.audioviz.stages.ZonePlacementManager;
 import com.audioviz.virtual.VirtualEntityPool;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.zones.VisualizationZone;
+import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneManager;
+import com.audioviz.zones.ZoneSelectionManager;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.Hand;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -33,7 +46,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
-import java.util.*;;
+import java.util.*;
 
 public class AudioVizMod implements DedicatedServerModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("audioviz");
@@ -54,6 +67,12 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     private DecoratorEntityManager decoratorEntityManager;
     private MenuManager menuManager;
     private VoicechatIntegration voicechatIntegration;
+    private ZonePlacementManager zonePlacementManager;
+    private ZoneBoundaryRenderer zoneBoundaryRenderer;
+    private ZoneSelectionManager zoneSelectionManager;
+    private ParticleEffectManager particleEffectManager;
+    private BeatEventManager beatEventManager;
+    private AmbientLightManager ambientLightManager;
 
     @Override
     public void onInitializeServer() {
@@ -71,6 +90,51 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         // Register commands
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             com.audioviz.commands.AudioVizCommand.register(dispatcher, this);
+        });
+
+        // Register interaction callbacks for zone placement wizard and zone selection
+        AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
+            if (!(player instanceof ServerPlayerEntity spe)) return ActionResult.PASS;
+            if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
+            // Zone placement takes priority
+            if (zonePlacementManager != null) {
+                ActionResult result = zonePlacementManager.handleLeftClick(spe);
+                if (result != ActionResult.PASS) return result;
+            }
+            // Zone selection mode
+            if (zoneSelectionManager != null && zoneSelectionManager.isInSelectionMode(spe)) {
+                boolean consumed = zoneSelectionManager.handleLeftClick(spe);
+                if (consumed) return ActionResult.FAIL;
+            }
+            return ActionResult.PASS;
+        });
+
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (zonePlacementManager == null) return ActionResult.PASS;
+            if (!(player instanceof ServerPlayerEntity spe)) return ActionResult.PASS;
+            if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
+            return zonePlacementManager.handleRightClick(spe);
+        });
+
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (zonePlacementManager == null) return ActionResult.PASS;
+            if (!(player instanceof ServerPlayerEntity spe)) return ActionResult.PASS;
+            if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
+            return zonePlacementManager.handleRightClick(spe);
+        });
+
+        // Handle player disconnect for placement and selection sessions
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            UUID uuid = handler.getPlayer().getUuid();
+            if (zonePlacementManager != null) {
+                zonePlacementManager.handleDisconnect(uuid);
+            }
+            if (zoneSelectionManager != null) {
+                zoneSelectionManager.handleDisconnect(uuid);
+            }
+            if (menuManager != null) {
+                menuManager.removeSession(uuid);
+            }
         });
     }
 
@@ -103,6 +167,16 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         stageManager.loadStages();
         decoratorEntityManager = new DecoratorEntityManager();
         stageDecoratorManager = new StageDecoratorManager(this);
+
+        // Initialize audio-reactive subsystems (particles, beat effects, ambient lights)
+        particleEffectManager = new ParticleEffectManager();
+        beatEventManager = new BeatEventManager(server, zoneManager);
+        ambientLightManager = new AmbientLightManager();
+
+        // Initialize zone placement wizard and zone boundary/selection systems
+        zonePlacementManager = new ZonePlacementManager(this);
+        zoneBoundaryRenderer = new ZoneBoundaryRenderer(this);
+        zoneSelectionManager = new ZoneSelectionManager(this);
 
         // Initialize GUI
         menuManager = new MenuManager(this);
@@ -160,6 +234,23 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             stageDecoratorManager.updateAudioState(audio);
         }
 
+        // 3b. Feed audio to particle effects, beat events, and ambient lights per zone
+        if (particleEffectManager != null || beatEventManager != null || ambientLightManager != null) {
+            for (VisualizationZone zone : zoneManager.getAllZones()) {
+                if (particleEffectManager != null) {
+                    particleEffectManager.processAudioUpdate(zone, audio);
+                }
+                if (ambientLightManager != null && ambientLightManager.hasZone(zone.getName())) {
+                    ambientLightManager.tick(zone, (float) audio.getAmplitude(), audio.isBeat());
+                }
+            }
+            if (beatEventManager != null && audio.isBeat()) {
+                for (String zoneName : zoneManager.getZoneNames()) {
+                    beatEventManager.processBeat(zoneName, BeatType.BEAT, audio.getBeatIntensity());
+                }
+            }
+        }
+
         // 4. Push bitmap frames to entity walls (bridge reads buffer after pattern tick)
         if (bitmapToEntityBridge != null) {
             for (String zoneName : bitmapToEntityBridge.getActiveWalls()) {
@@ -192,6 +283,21 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         if (voicechatIntegration != null) {
             voicechatIntegration.tick();
         }
+
+        // 9. Tick zone placement sessions (particle rendering)
+        if (zonePlacementManager != null) {
+            zonePlacementManager.tick();
+        }
+
+        // 10. Tick zone boundary renderer (persistent particle outlines)
+        if (zoneBoundaryRenderer != null) {
+            zoneBoundaryRenderer.tick();
+        }
+
+        // 11. Tick zone selection manager (look-at raycasting)
+        if (zoneSelectionManager != null) {
+            zoneSelectionManager.tick();
+        }
     }
 
     private void shutdown() {
@@ -216,6 +322,32 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         // Shutdown voice chat
         if (voicechatIntegration != null) {
             voicechatIntegration.shutdown();
+        }
+
+        // Teardown ambient lights (restore original blocks)
+        if (ambientLightManager != null) {
+            ServerWorld overworld = server != null ? server.getOverworld() : null;
+            if (overworld != null) {
+                ambientLightManager.teardownAll(overworld);
+            }
+        }
+
+        // Clear beat event configs
+        if (beatEventManager != null) {
+            beatEventManager.clearAllConfigs();
+        }
+
+        // Cancel active placement sessions
+        if (zonePlacementManager != null) {
+            zonePlacementManager.cancelAll();
+        }
+
+        // Stop zone boundary renderer and selection manager
+        if (zoneBoundaryRenderer != null) {
+            zoneBoundaryRenderer.stop();
+        }
+        if (zoneSelectionManager != null) {
+            zoneSelectionManager.stop();
         }
 
         // Clear GUI sessions
@@ -314,16 +446,19 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     }
 
     /**
-     * Parse bitmap_frame JSON (base64 or array) and push pixels to the map renderer.
+     * Parse bitmap_frame JSON (base64 or array) and push pixels to the appropriate renderer.
+     * Supports both map displays and entity wall backends.
      */
     private JsonObject handleBitmapFrameRendering(JsonObject message) {
         try {
             String zone = message.has("zone") ? message.get("zone").getAsString() : null;
             if (zone == null) return null;
 
-            if (!mapRenderer.hasDisplay(zone)) return null;
+            boolean hasMap = mapRenderer.hasDisplay(zone);
+            boolean hasWall = bitmapToEntityBridge != null && bitmapToEntityBridge.hasWall(zone);
+            if (!hasMap && !hasWall) return null;
 
-            var buffer = bitmapPatternManager.getFrameBuffer(zone);
+            var buffer = bitmapPatternManager != null ? bitmapPatternManager.getFrameBuffer(zone) : null;
             int width = buffer != null ? buffer.getWidth() : 128;
             int height = buffer != null ? buffer.getHeight() : 128;
 
@@ -341,7 +476,12 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             }
 
             if (pixels != null) {
-                mapRenderer.applyFrame(zone, pixels, width, height);
+                if (hasMap) {
+                    mapRenderer.applyFrame(zone, pixels, width, height);
+                }
+                if (hasWall) {
+                    bitmapToEntityBridge.applyFrame(zone, pixels, width, height);
+                }
             }
             return null;
         } catch (Exception e) {
@@ -387,4 +527,10 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     public MenuManager getMenuManager() { return menuManager; }
     public VoicechatIntegration getVoicechatIntegration() { return voicechatIntegration; }
     public VizWebSocketServer getWebSocketServer() { return wsServer; }
+    public ZonePlacementManager getZonePlacementManager() { return zonePlacementManager; }
+    public ZoneBoundaryRenderer getZoneBoundaryRenderer() { return zoneBoundaryRenderer; }
+    public ZoneSelectionManager getZoneSelectionManager() { return zoneSelectionManager; }
+    public ParticleEffectManager getParticleEffectManager() { return particleEffectManager; }
+    public BeatEventManager getBeatEventManager() { return beatEventManager; }
+    public AmbientLightManager getAmbientLightManager() { return ambientLightManager; }
 }

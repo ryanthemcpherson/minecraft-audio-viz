@@ -46,7 +46,7 @@ public class StageVJMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("VJ: " + stageName).formatted(Formatting.GOLD, Formatting.BOLD);
+        return Text.literal("VJ: " + stageName).formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
@@ -219,10 +219,12 @@ public class StageVJMenu extends AudioVizGui {
 
                 if ("entity".equals(newMode)) {
                     mod.getMapRenderer().destroyDisplay(zoneName);
-                    mod.getBitmapToEntityBridge().initializeWall(zoneName, vizZone, width, height,
-                        vizZone.getWorld(), facing);
+                    if (mod.getBitmapToEntityBridge() != null) {
+                        mod.getBitmapToEntityBridge().initializeWall(zoneName, vizZone, width, height,
+                            vizZone.getWorld(), facing);
+                    }
                 } else {
-                    mod.getBitmapToEntityBridge().destroyWall(zoneName);
+                    if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zoneName);
                     mod.getMapRenderer().initializeDisplay(zoneName, vizZone, width, height,
                         vizZone.getWorld(), facing);
                 }
@@ -270,7 +272,6 @@ public class StageVJMenu extends AudioVizGui {
                 if (effects.isFrozen()) {
                     effects.unfreeze();
                 } else {
-                    // Freeze using the first selected zone's frame buffer
                     for (StageZoneRole role : selectedZones) {
                         String zoneName = stage.getZoneName(role);
                         if (zoneName != null) {
@@ -283,10 +284,30 @@ public class StageVJMenu extends AudioVizGui {
                     }
                 }
             }
-            case "flash" -> effects.setBeatFlashEnabled(true);
+            case "flash" -> effects.setBeatFlashEnabled(!effects.isBeatFlashEnabled());
             case "strobe" -> effects.setStrobeEnabled(!effects.isStrobeEnabled());
-            default -> getPlayer().sendMessage(
-                Text.literal("Effect '" + effect + "' triggered").formatted(Formatting.YELLOW));
+            case "pulse" -> {
+                // Brief brightness surge: 150% → decays back to normal
+                effects.setBrightness(1.5);
+                effects.setBeatFlashEnabled(true);
+            }
+            case "wave" -> {
+                // Color wash sweep: cyan tint overlay
+                effects.setWash(0xFF00CCFF, 0.4);
+                effects.setEdgeFlashEnabled(true);
+            }
+            case "spiral" -> {
+                // RGB chromatic split + edge flash combo
+                effects.setRgbSplitEnabled(!effects.isRgbSplitEnabled());
+                effects.setEdgeFlashEnabled(true);
+            }
+            case "explode" -> {
+                // Dramatic burst: strobe + edge flash + beat flash
+                effects.setStrobeEnabled(true);
+                effects.setBeatFlashEnabled(true);
+                effects.setEdgeFlashEnabled(true);
+                effects.setEdgeFlashColor(0xFFFF6600);
+            }
         }
     }
 }

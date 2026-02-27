@@ -32,7 +32,7 @@ public class ZoneManagementMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Zone Management").formatted(Formatting.GOLD);
+        return Text.literal("Zone Management").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
@@ -65,6 +65,10 @@ public class ZoneManagementMenu extends AudioVizGui {
                 .setCallback((index, type, action) -> {
                     playClickSound();
                     if (type == eu.pb4.sgui.api.ClickType.MOUSE_RIGHT) {
+                        if (zone.getWorld() == null) {
+                            getPlayer().sendMessage(net.minecraft.text.Text.literal("Zone world not loaded").formatted(net.minecraft.util.Formatting.RED));
+                            return;
+                        }
                         close();
                         getPlayer().teleport(
                             zone.getWorld(),
@@ -93,7 +97,7 @@ public class ZoneManagementMenu extends AudioVizGui {
                 .addLoreLine(Text.literal("to create a zone.").formatted(Formatting.GRAY)));
         }
 
-        // Back button
+        // Row 3: Actions
         setSlot(SLOT_BACK, new GuiElementBuilder(Items.ARROW)
             .setName(Text.literal("Back").formatted(Formatting.WHITE))
             .setCallback((index, type, action) -> {
@@ -101,6 +105,22 @@ public class ZoneManagementMenu extends AudioVizGui {
                 menuManager.openMenu(getPlayer(),
                     new MainMenu(getPlayer(), menuManager, mod));
             }));
+
+        setSlot(31, new GuiElementBuilder(Items.EMERALD)
+            .setName(Text.literal("Create Zone").formatted(Formatting.GREEN, Formatting.BOLD))
+            .addLoreLine(Text.literal("Choose a template or custom size").formatted(Formatting.GRAY))
+            .glow()
+            .setCallback((index, type, action) -> {
+                playClickSound();
+                menuManager.openMenu(getPlayer(),
+                    new ZoneTemplateMenu(getPlayer(), menuManager, mod, () ->
+                        menuManager.openMenu(getPlayer(),
+                            new ZoneManagementMenu(getPlayer(), menuManager, mod))));
+            }));
+
+        setSlot(35, new GuiElementBuilder(Items.SUNFLOWER)
+            .setName(Text.literal("Refresh").formatted(Formatting.YELLOW))
+            .setCallback((i, t, a) -> { playClickSound(); rebuild(); }));
 
         fillBackground();
     }

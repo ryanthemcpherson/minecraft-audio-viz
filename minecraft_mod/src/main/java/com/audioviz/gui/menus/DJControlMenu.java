@@ -40,7 +40,7 @@ public class DJControlMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("DJ Control Panel").formatted(Formatting.LIGHT_PURPLE, Formatting.BOLD);
+        return Text.literal("DJ Control Panel").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
@@ -107,13 +107,15 @@ public class DJControlMenu extends AudioVizGui {
             }));
 
         // Beat Flash
-        setSlot(SLOT_BEAT_FLASH, new GuiElementBuilder(Items.TORCH)
-            .setName(Text.literal("Beat Flash").formatted(Formatting.GOLD))
-            .addLoreLine(Text.literal("Subtle flash on beats").formatted(Formatting.GRAY))
+        boolean beatFlashOn = effects != null && effects.isBeatFlashEnabled();
+        setSlot(SLOT_BEAT_FLASH, new GuiElementBuilder(beatFlashOn ? Items.TORCH : Items.SOUL_TORCH)
+            .setName(Text.literal("Beat Flash").formatted(beatFlashOn ? Formatting.GOLD : Formatting.GRAY))
+            .addLoreLine(Text.literal(beatFlashOn ? "ON" : "OFF").formatted(
+                beatFlashOn ? Formatting.GREEN : Formatting.RED))
             .addLoreLine(Text.literal("Click to toggle").formatted(Formatting.YELLOW))
             .setCallback((i, t, a) -> {
                 playClickSound();
-                if (effects != null) effects.setBeatFlashEnabled(true);
+                if (effects != null) effects.setBeatFlashEnabled(!beatFlashOn);
                 rebuild();
             }));
 

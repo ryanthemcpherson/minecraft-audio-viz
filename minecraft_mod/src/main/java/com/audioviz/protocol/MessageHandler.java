@@ -5,6 +5,7 @@ import com.audioviz.bitmap.BitmapPattern;
 import com.audioviz.bitmap.BitmapPatternManager;
 import com.audioviz.bitmap.effects.ColorPalette;
 import com.audioviz.bitmap.transitions.BitmapTransition;
+import com.audioviz.decorators.BannerConfig;
 import com.audioviz.decorators.DJInfo;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.stages.Stage;
@@ -85,6 +86,7 @@ public class MessageHandler {
             case "deactivate_stage" -> handleDeactivateStage(message);
             // DJ info
             case "dj_info" -> handleDjInfo(message);
+            case "banner_config" -> handleBannerConfig(message);
             // Voice chat
             case "voice_audio" -> handleVoiceAudio(message);
             case "voice_config" -> handleVoiceConfig(message);
@@ -212,7 +214,7 @@ public class MessageHandler {
 
     private JsonObject handleSetVisible(JsonObject message) {
         String zone = message.has("zone") ? message.get("zone").getAsString() : null;
-        if (zone == null) return null;
+        if (zone == null || !isValidZoneName(zone)) return null;
         boolean visible = !message.has("visible") || message.get("visible").getAsBoolean();
 
         // Hide all entities by scaling to zero (preserves pool for fast show/hide)
@@ -229,10 +231,12 @@ public class MessageHandler {
 
         try {
             mod.getMapRenderer().destroyDisplay(zone);
-            mod.getBitmapToEntityBridge().destroyWall(zone);
+            if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zone);
             mod.getVirtualRenderer().destroyPool(zone);
             BitmapPatternManager bpm = mod.getBitmapPatternManager();
             if (bpm != null) bpm.deactivateZone(zone);
+            if (mod.getAmbientLightManager() != null) mod.getAmbientLightManager().teardownZone(zone);
+            if (mod.getBeatEventManager() != null) mod.getBeatEventManager().removeZoneConfig(zone);
 
             LOGGER.info("Cleaned up zone '{}'", zone);
             JsonObject response = new JsonObject();
@@ -337,12 +341,14 @@ public class MessageHandler {
                 Direction facing = directionFromRotation(vizZone.getRotation());
                 if ("entity".equals(backend)) {
                     mod.getMapRenderer().destroyDisplay(zone);
-                    mod.getBitmapToEntityBridge().initializeWall(zone, vizZone, width, height,
-                        vizZone.getWorld(), facing);
+                    if (mod.getBitmapToEntityBridge() != null) {
+                        mod.getBitmapToEntityBridge().initializeWall(zone, vizZone, width, height,
+                            vizZone.getWorld(), facing);
+                    }
                     LOGGER.info("Initialized entity wall for bitmap zone '{}' ({}x{}, facing {})",
                         zone, width, height, facing);
                 } else {
-                    mod.getBitmapToEntityBridge().destroyWall(zone);
+                    if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zone);
                     mod.getMapRenderer().initializeDisplay(zone, vizZone, width, height,
                         vizZone.getWorld(), facing);
                     LOGGER.info("Initialized map display for bitmap zone '{}' ({}x{}, facing {})",
@@ -371,7 +377,7 @@ public class MessageHandler {
             BitmapPatternManager bpm = mod.getBitmapPatternManager();
             if (bpm != null) bpm.deactivateZone(zone);
             mod.getMapRenderer().destroyDisplay(zone);
-            mod.getBitmapToEntityBridge().destroyWall(zone);
+            if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zone);
             JsonObject response = new JsonObject();
             response.addProperty("type", "bitmap_teardown");
             response.addProperty("zone", zone);
@@ -551,6 +557,14 @@ public class MessageHandler {
         double bpm = message.has("bpm") ? message.get("bpm").getAsDouble() : 0.0;
         boolean active = message.has("active") && message.get("active").getAsBoolean();
         sdm.updateDJInfo(new DJInfo(djName, djId, bpm, active, System.currentTimeMillis()));
+        return null;
+    }
+
+    private JsonObject handleBannerConfig(JsonObject message) {
+        var sdm = mod.getStageDecoratorManager();
+        if (sdm == null) return null;
+        sdm.setCurrentBannerConfig(BannerConfig.fromJson(message));
+        LOGGER.debug("Updated banner config: {}", sdm.getCurrentBannerConfig());
         return null;
     }
 
