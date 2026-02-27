@@ -6,6 +6,7 @@ so the same models work against PostgreSQL in production and SQLite in tests.
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime, timezone
 
@@ -19,7 +20,32 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
+from sqlalchemy import (
+    Enum as SAEnum,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+
+class RoleType(str, enum.Enum):
+    """User role types for the multi-role system."""
+
+    DJ = "dj"
+    SERVER_OWNER = "server_owner"
+    VJ = "vj"
+    DEVELOPER = "developer"
+    BETA_TESTER = "beta_tester"
+
+
+class RoleSource(str, enum.Enum):
+    """Where a role assignment originated."""
+
+    DISCORD = "discord"
+    COORDINATOR = "coordinator"
+    BOTH = "both"
 
 
 def _utcnow() -> datetime:
@@ -74,6 +100,33 @@ class User(Base):
     dj_profile: Mapped[DJProfile | None] = relationship(
         "DJProfile", back_populates="user", uselist=False, lazy="selectin"
     )
+    roles: Mapped[list[UserRole]] = relationship(
+        "UserRole", back_populates="user", lazy="raise", cascade="all, delete-orphan"
+    )
+
+
+class UserRole(Base):
+    """Maps users to their roles (many-to-many: one user can have multiple roles)."""
+
+    __tablename__ = "user_roles"
+    __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_roles_user_role"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[RoleType] = mapped_column(
+        SAEnum(RoleType, values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    source: Mapped[RoleSource] = mapped_column(
+        SAEnum(RoleSource, values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    # Relationships
+    user: Mapped[User] = relationship("User", back_populates="roles")
 
 
 class Organization(Base):
@@ -201,6 +254,11 @@ class VJServer(Base):
 
 class Show(Base):
     __tablename__ = "shows"
+    __table_args__ = (
+        CheckConstraint("max_djs >= 1", name="ck_shows_max_djs_ge_1"),
+        CheckConstraint("current_djs >= 0", name="ck_shows_current_djs_ge_0"),
+        CheckConstraint("current_djs <= max_djs", name="ck_shows_current_djs_le_max_djs"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     server_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("vj_servers.id"), nullable=False)
