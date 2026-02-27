@@ -36,7 +36,7 @@ public class MainMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("AudioViz Control Panel").formatted(Formatting.GOLD, Formatting.BOLD);
+        return Text.literal("AudioViz Control Panel").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override

@@ -123,6 +123,7 @@ public class MessageQueue {
         for (Map.Entry<String, JsonObject> entry : latestBatchByZone.entrySet()) {
             try {
                 messageHandler.handleMessage("batch_update", entry.getValue());
+                batchesSent.incrementAndGet();
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Error handling batch_update for zone {}", entry.getKey(), e);
             }
@@ -132,6 +133,7 @@ public class MessageQueue {
         for (JsonObject frame : latestBitmapFrameByZone.values()) {
             try {
                 messageHandler.handleMessage("bitmap_frame", frame);
+                batchesSent.incrementAndGet();
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Error handling bitmap_frame", e);
             }

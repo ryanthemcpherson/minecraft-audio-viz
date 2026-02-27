@@ -87,13 +87,15 @@ public class StageManager {
         if (stage == null) return false;
 
         for (String zoneName : stage.getZoneNames()) {
-            // Clean up renderers and bitmap state before deleting the zone
+            // Clean up renderers, bitmap state, and audio-reactive subsystems
             try {
                 mod.getMapRenderer().destroyDisplay(zoneName);
-                mod.getBitmapToEntityBridge().destroyWall(zoneName);
+                if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zoneName);
                 mod.getVirtualRenderer().destroyPool(zoneName);
                 var bpm = mod.getBitmapPatternManager();
                 if (bpm != null) bpm.deactivateZone(zoneName);
+                if (mod.getAmbientLightManager() != null) mod.getAmbientLightManager().teardownZone(zoneName);
+                if (mod.getBeatEventManager() != null) mod.getBeatEventManager().removeZoneConfig(zoneName);
             } catch (Exception e) {
                 LOGGER.warn("Error cleaning up zone '{}' during stage delete: {}", zoneName, e.getMessage());
             }
@@ -116,6 +118,25 @@ public class StageManager {
         stage.setActive(false);
         saveStages();
         LOGGER.info("Deactivated stage '{}'", stage.getName());
+    }
+
+    /**
+     * Reposition all zones in a stage based on the current anchor and rotation.
+     * Call this after moving or rotating a stage so zone origins stay in sync.
+     */
+    public void repositionZones(Stage stage) {
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+            VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
+            if (zone == null) continue;
+
+            Vec3d worldPos = stage.getWorldPositionForRole(role);
+            zone.setOrigin(new BlockPos((int) worldPos.x, (int) worldPos.y, (int) worldPos.z));
+            zone.setRotation(stage.getRotation());
+        }
+        mod.getZoneManager().saveZones();
+        saveStages();
     }
 
     // ========== Lookup ==========
@@ -338,6 +359,55 @@ public class StageManager {
     /** Get the roles a template creates (for UI descriptions). */
     public static Set<StageZoneRole> getTemplateRolesPublic(String template) {
         return getTemplateRoles(template);
+    }
+
+    /** Get the scale for a template (for UI display). */
+    public static float getTemplateScalePublic(String template) {
+        return getTemplateScale(template);
+    }
+
+    /**
+     * Create a stage with user-configured layout from the zone layout wizard.
+     * Accepts custom role set, scale, and initial rotation.
+     */
+    public Stage createStageWithLayout(String name, BlockPos anchor, String worldName,
+                                        String templateName, Set<StageZoneRole> roles,
+                                        float sizeScale, float rotation) {
+        if (stages.containsKey(name.toLowerCase())) return null;
+
+        Stage stage = new Stage(name, anchor, worldName, templateName);
+        stage.setRotation(rotation);
+
+        for (StageZoneRole role : roles) {
+            String zoneName = name.toLowerCase() + "_" + role.name().toLowerCase();
+            Vec3d worldPos = stage.getWorldPositionForRole(role);
+            BlockPos zoneOrigin = new BlockPos((int) worldPos.x, (int) worldPos.y, (int) worldPos.z);
+
+            ServerWorld world = findWorld(worldName);
+            if (world == null) continue;
+
+            VisualizationZone zone = mod.getZoneManager().createZone(zoneName, world, zoneOrigin);
+            if (zone != null) {
+                Vector3f size = role.getDefaultSize();
+                zone.setSize(size.x * sizeScale, size.y * sizeScale, size.z * sizeScale);
+                zone.setRotation(rotation);
+
+                stage.getRoleToZone().put(role, zoneName);
+
+                StageZoneConfig config = new StageZoneConfig();
+                config.setPattern(role.getSuggestedPattern());
+                stage.getZoneConfigs().put(role, config);
+            }
+        }
+
+        mod.getZoneManager().saveZones();
+        stages.put(name.toLowerCase(), stage);
+        saveStages();
+
+        LOGGER.info("Created stage '{}' from template '{}' with {} zones (scale={}, rotation={})",
+            name, templateName, stage.getRoleToZone().size(), sizeScale, rotation);
+
+        return stage;
     }
 
     // ========== World Helpers ==========

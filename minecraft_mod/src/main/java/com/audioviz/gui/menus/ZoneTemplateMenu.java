@@ -36,7 +36,7 @@ public class ZoneTemplateMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Zone Templates").formatted(Formatting.AQUA);
+        return Text.literal("Zone Templates").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override

@@ -58,7 +58,7 @@ public class StageEditorMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Stage: " + stageName).formatted(Formatting.GOLD);
+        return Text.literal("Stage: " + stageName).formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
@@ -158,12 +158,31 @@ public class StageEditorMenu extends AudioVizGui {
         }
 
         // Row 4: Stage preview controls
-        setSlot(slot(4, 1), new GuiElementBuilder(Items.GLASS)
-            .setName(Text.literal("Show All Zones").formatted(Formatting.AQUA))
-            .addLoreLine(Text.literal("Particle outlines for all zones").formatted(Formatting.GRAY))
+        boolean boundariesShowing = mod.getZoneBoundaryRenderer() != null
+            && mod.getZoneBoundaryRenderer().isShowing(
+                stage.getActiveRoles().stream().findFirst()
+                    .map(stage::getZoneName).orElse("__none__"));
+        setSlot(slot(4, 1), new GuiElementBuilder(boundariesShowing ? Items.ENDER_EYE : Items.GLASS)
+            .setName(Text.literal(boundariesShowing ? "Hide Zone Boundaries" : "Show All Zones")
+                .formatted(Formatting.AQUA))
+            .addLoreLine(Text.literal("Persistent particle outlines (30s)").formatted(Formatting.GRAY))
             .setCallback((i, t, a) -> {
                 playClickSound();
-                showAllZoneBoundaries(stage);
+                var renderer = mod.getZoneBoundaryRenderer();
+                if (renderer != null) {
+                    if (boundariesShowing) {
+                        renderer.hideStage(stageName);
+                        getPlayer().sendMessage(Text.literal("Zone boundaries hidden")
+                            .formatted(Formatting.YELLOW));
+                    } else {
+                        renderer.showStage(stageName);
+                        getPlayer().sendMessage(Text.literal("Showing boundaries for all zones (persistent)")
+                            .formatted(Formatting.AQUA));
+                    }
+                } else {
+                    showAllZoneBoundaries(stage);
+                }
+                rebuild();
             }));
 
         setSlot(slot(4, 3), new GuiElementBuilder(Items.BRICKS)
@@ -208,7 +227,7 @@ public class StageEditorMenu extends AudioVizGui {
                 playClickSound();
                 stage.setAnchor(getPlayer().getBlockPos());
                 stage.setWorldName(getPlayer().getEntityWorld().getRegistryKey().getValue().toString());
-                mod.getStageManager().saveStages();
+                mod.getStageManager().repositionZones(stage);
                 getPlayer().sendMessage(Text.literal("Stage moved to your position").formatted(Formatting.GREEN));
                 rebuild();
             }));
@@ -217,10 +236,11 @@ public class StageEditorMenu extends AudioVizGui {
         setSlot(slot(5, 2), new GuiElementBuilder(Items.RECOVERY_COMPASS)
             .setName(Text.literal("Rotate -15\u00B0").formatted(Formatting.YELLOW))
             .addLoreLine(Text.literal("Current: " + (int) stage.getRotation() + "\u00B0").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("Repositions all zones").formatted(Formatting.GRAY))
             .setCallback((i, t, a) -> {
                 playClickSound();
                 stage.setRotation(stage.getRotation() - 15);
-                mod.getStageManager().saveStages();
+                mod.getStageManager().repositionZones(stage);
                 rebuild();
             }));
 
@@ -228,11 +248,25 @@ public class StageEditorMenu extends AudioVizGui {
         setSlot(slot(5, 3), new GuiElementBuilder(Items.COMPASS)
             .setName(Text.literal("Rotate +15\u00B0").formatted(Formatting.YELLOW))
             .addLoreLine(Text.literal("Current: " + (int) stage.getRotation() + "\u00B0").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("Repositions all zones").formatted(Formatting.GRAY))
             .setCallback((i, t, a) -> {
                 playClickSound();
                 stage.setRotation(stage.getRotation() + 15);
-                mod.getStageManager().saveStages();
+                mod.getStageManager().repositionZones(stage);
                 rebuild();
+            }));
+
+        // Place Zones (re-run placement wizard)
+        setSlot(slot(5, 4), new GuiElementBuilder(Items.GOLDEN_PICKAXE)
+            .setName(Text.literal("Place Zones").formatted(Formatting.GOLD))
+            .addLoreLine(Text.literal("Walk around and set zone").formatted(Formatting.GRAY))
+            .addLoreLine(Text.literal("positions with two corners").formatted(Formatting.GRAY))
+            .setCallback((i, t, a) -> {
+                playClickSound();
+                close();
+                mod.getZonePlacementManager().startSession(getPlayer(), stage, () ->
+                    mod.getMenuManager().openMenu(getPlayer(),
+                        new StageEditorMenu(getPlayer(), menuManager, mod, stageName, onBack)));
             }));
 
         // Decorators

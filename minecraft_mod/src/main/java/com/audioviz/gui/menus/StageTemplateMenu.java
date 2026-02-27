@@ -3,14 +3,12 @@ package com.audioviz.gui.menus;
 import com.audioviz.AudioVizMod;
 import com.audioviz.gui.AudioVizGui;
 import com.audioviz.gui.MenuManager;
-import com.audioviz.stages.Stage;
 import eu.pb4.sgui.api.elements.GuiElementBuilder;
 import net.minecraft.item.Items;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
 
 public class StageTemplateMenu extends AudioVizGui {
 
@@ -26,7 +24,7 @@ public class StageTemplateMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("New Stage - Choose Template").formatted(Formatting.GOLD);
+        return Text.literal("New Stage - Choose Template").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
@@ -87,18 +85,9 @@ public class StageTemplateMenu extends AudioVizGui {
                 reopen();
                 return;
             }
-            BlockPos pos = getPlayer().getBlockPos();
-            String worldName = getPlayer().getEntityWorld().getRegistryKey().getValue().toString();
-            Stage stage = mod.getStageManager().createStage(name, pos, worldName, template);
-            if (stage != null) {
-                getPlayer().sendMessage(Text.literal("Created stage '" + name + "' with " +
-                    stage.getRoleToZone().size() + " zones").formatted(Formatting.GREEN));
-                menuManager.openMenu(getPlayer(),
-                    new StageEditorMenu(getPlayer(), menuManager, mod, stage.getName(), onBack));
-            } else {
-                getPlayer().sendMessage(Text.literal("Failed to create stage").formatted(Formatting.RED));
-                reopen();
-            }
+            // Open zone layout wizard instead of creating immediately
+            menuManager.openMenu(getPlayer(),
+                new StageZoneLayoutMenu(getPlayer(), menuManager, mod, name, template, onBack));
         }, this::reopen);
     }
 
