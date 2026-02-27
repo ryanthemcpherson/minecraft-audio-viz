@@ -6,7 +6,7 @@ export default function NotFound() {
       <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
 
       <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
-        <p className="mb-2 text-6xl font-bold text-gradient">404</p>
+        <p className="mb-2 text-6xl font-bold text-disc-cyan">404</p>
         <h1 className="mb-2 text-xl font-semibold text-white">
           Page not found
         </h1>

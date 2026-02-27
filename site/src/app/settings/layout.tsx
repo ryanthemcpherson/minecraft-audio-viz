@@ -25,7 +25,7 @@ export default function SettingsLayout({
 
       <div className="relative z-10">
         <h1 className="mb-6 text-2xl font-bold">
-          <span className="text-gradient">Settings</span>
+          <span className="text-disc-cyan">Settings</span>
         </h1>
 
         <div className="flex gap-8">

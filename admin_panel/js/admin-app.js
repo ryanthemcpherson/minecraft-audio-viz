@@ -1883,7 +1883,14 @@ class AdminApp {
     }
 
     _handlePatterns(data) {
-        this.state.patterns = data.patterns || [];
+        // Deduplicate by ID as a safety net
+        const seen = new Set();
+        const raw = data.patterns || [];
+        this.state.patterns = raw.filter(p => {
+            if (seen.has(p.id)) return false;
+            seen.add(p.id);
+            return true;
+        });
         this.state.currentPattern = data.current || data.current_pattern;
         this._renderPatternGrid();
         this._updateCurrentPattern(this.state.currentPattern);

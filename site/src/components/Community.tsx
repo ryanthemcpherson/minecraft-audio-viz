@@ -48,23 +48,12 @@ const communityLinks = [
 export default function Community() {
   return (
     <section className="relative px-6 py-32">
-      {/* Background accent */}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/2 top-0 h-px w-2/3 -translate-x-1/2 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-      </div>
-
       <div className="mx-auto max-w-7xl">
         {/* Section Header */}
-        <div className="mb-16 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-cyan">
-            Community
-          </p>
+        <div className="mb-12 text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-            Join the <span className="text-gradient">Community</span>
+            Join the <span className="text-disc-cyan">Community</span>
           </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-text-secondary">
-            Connect with other DJs, VJs, and creators building the future of live audio visualization.
-          </p>
         </div>
 
         {/* Community Cards */}

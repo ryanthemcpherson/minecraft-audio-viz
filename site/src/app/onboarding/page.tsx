@@ -188,7 +188,7 @@ export default function OnboardingPage() {
             <StepProgress current={0} />
 
             <h1 className="mb-2 text-center text-3xl font-bold">
-              <span className="text-gradient">Welcome to MCAV</span>
+              <span className="text-disc-cyan">Welcome to MCAV</span>
             </h1>
             <p className="mb-8 text-center text-text-secondary">
               How will you be using MCAV?
@@ -282,7 +282,7 @@ export default function OnboardingPage() {
             </button>
 
             <h1 className="mb-2 text-2xl font-bold">
-              <span className="text-gradient">Create your organization</span>
+              <span className="text-disc-cyan">Create your organization</span>
             </h1>
             <p className="mb-8 text-text-secondary">
               Set up your server&apos;s home on MCAV
@@ -369,7 +369,7 @@ export default function OnboardingPage() {
               </div>
 
               <h1 className="mb-2 text-2xl font-bold">
-                <span className="text-gradient">Your organization is ready!</span>
+                <span className="text-disc-cyan">Your organization is ready!</span>
               </h1>
               {createdOrg && (
                 <p className="mb-6 text-text-secondary">
@@ -430,7 +430,7 @@ export default function OnboardingPage() {
             </button>
 
             <h1 className="mb-2 text-2xl font-bold">
-              <span className="text-gradient">Join an organization</span>
+              <span className="text-disc-cyan">Join an organization</span>
             </h1>
             <p className="mb-8 text-text-secondary">
               Enter the invite code from your server owner
@@ -486,7 +486,7 @@ export default function OnboardingPage() {
               </div>
 
               <h1 className="mb-2 text-2xl font-bold">
-                <span className="text-gradient">Welcome to {joinedOrg?.name || "the team"}!</span>
+                <span className="text-disc-cyan">Welcome to {joinedOrg?.name || "the team"}!</span>
               </h1>
               <p className="mb-6 text-text-secondary">
                 You&apos;re now part of the organization
@@ -538,7 +538,7 @@ export default function OnboardingPage() {
             </button>
 
             <h1 className="mb-2 text-2xl font-bold">
-              <span className="text-gradient">Set up your DJ profile</span>
+              <span className="text-disc-cyan">Set up your DJ profile</span>
             </h1>
             <p className="mb-8 text-text-secondary">
               Create your public profile for MCAV events
@@ -621,7 +621,7 @@ export default function OnboardingPage() {
               </div>
 
               <h1 className="mb-2 text-2xl font-bold">
-                <span className="text-gradient">Profile created!</span>
+                <span className="text-disc-cyan">Profile created!</span>
               </h1>
               <p className="mb-8 text-text-secondary">
                 You&apos;re all set to start performing at MCAV events.

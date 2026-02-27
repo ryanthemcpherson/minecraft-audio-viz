@@ -53,13 +53,10 @@ export default function HowItWorks() {
     <section className="relative px-6 py-32">
       <div className="mx-auto max-w-7xl">
         {/* Section Header */}
-        <div className="mb-20 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-cyan">
-            How It Works
-          </p>
+        <div className="mb-16 text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
             From Audio to{" "}
-            <span className="text-gradient">Architecture</span>
+            <span className="text-disc-cyan">Architecture</span>
           </h2>
         </div>
 

@@ -94,7 +94,7 @@ export default function PublicDJProfilePage() {
 
         {/* Name */}
         <h1 className="mb-1 text-3xl font-bold">
-          <span className="text-gradient">{profile.dj_name}</span>
+          <span className="text-disc-cyan">{profile.dj_name}</span>
         </h1>
 
         {/* Genres */}
