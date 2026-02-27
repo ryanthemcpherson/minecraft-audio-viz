@@ -4,6 +4,7 @@ import com.audioviz.virtual.VirtualEntityPool;
 import com.audioviz.zones.VisualizationZone;
 import eu.pb4.polymer.virtualentity.api.attachment.ChunkAttachment;
 import net.minecraft.block.BlockState;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 
 import java.util.Collections;
@@ -44,9 +45,17 @@ public class VirtualEntityRendererBackend {
             ? new VirtualEntityPool(entityCount, defaultBlock)
             : new VirtualEntityPool(entityCount);
 
-        // Attach to world at zone origin — auto-ticking keeps player tracking updated
-        // so spawn/destroy packets are sent as players enter/leave chunks.
+        // Attach to world at zone origin. ofTicking auto-ticks the holder from chunk ticks.
         ChunkAttachment.ofTicking(pool.getHolder(), world, zone.getOriginVec3d());
+
+        // Polymer's ChunkDataSenderMixin only calls startWatching when a chunk is first
+        // sent to a player. If the pool is created after players already have the chunk
+        // loaded (common: VJ server connects after players join), they never receive spawn
+        // packets. Fix: manually start watching for all online players. ElementHolder
+        // handles dedup internally, and players out of range simply won't render them.
+        for (ServerPlayerEntity player : world.getPlayers()) {
+            pool.getHolder().startWatching(player.networkHandler);
+        }
 
         pools.put(key, pool);
     }
