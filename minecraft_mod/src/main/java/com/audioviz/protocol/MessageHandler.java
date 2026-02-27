@@ -10,17 +10,25 @@ import com.audioviz.decorators.DJInfo;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageManager;
+import com.audioviz.stages.StageTemplate;
+import com.audioviz.stages.StageZoneConfig;
 import com.audioviz.stages.StageZoneRole;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.zones.VisualizationZone;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import net.minecraft.block.BlockState;
+import net.minecraft.registry.Registries;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import org.joml.Vector3f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -84,6 +92,11 @@ public class MessageHandler {
             case "delete_stage" -> handleDeleteStage(message);
             case "activate_stage" -> handleActivateStage(message);
             case "deactivate_stage" -> handleDeactivateStage(message);
+            case "get_stage" -> handleGetStage(message);
+            case "update_stage" -> handleUpdateStage(message);
+            case "set_stage_zone_config" -> handleSetStageZoneConfig(message);
+            case "get_stage_templates" -> handleGetStageTemplates();
+            case "scan_stage_blocks" -> handleScanStageBlocks(message);
             // DJ info
             case "dj_info" -> handleDjInfo(message);
             case "banner_config" -> handleBannerConfig(message);
@@ -623,6 +636,322 @@ public class MessageHandler {
             return response;
         }
         return vc.getStatus();
+    }
+
+    // --- Stage serialization helpers ---
+
+    private JsonObject stageToJson(Stage stage) {
+        JsonObject json = new JsonObject();
+        json.addProperty("name", stage.getName());
+        json.addProperty("id", stage.getId().toString());
+        json.addProperty("template", stage.getTemplateName());
+        json.addProperty("active", stage.isActive());
+        json.addProperty("rotation", stage.getRotation());
+
+        JsonObject anchorJson = new JsonObject();
+        anchorJson.addProperty("world", stage.getWorldName());
+        anchorJson.addProperty("x", stage.getAnchor().getX());
+        anchorJson.addProperty("y", stage.getAnchor().getY());
+        anchorJson.addProperty("z", stage.getAnchor().getZ());
+        json.add("anchor", anchorJson);
+
+        JsonObject zonesJson = new JsonObject();
+        for (var entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+
+            JsonObject zoneJson = new JsonObject();
+            zoneJson.addProperty("zone_name", zoneName);
+            zoneJson.addProperty("role", role.name());
+            zoneJson.addProperty("display_name", role.getDisplayName());
+
+            StageZoneConfig config = stage.getZoneConfigs().get(role);
+            if (config != null) {
+                zoneJson.add("config", stageZoneConfigToJson(config));
+                zoneJson.addProperty("entity_count", config.getEntityCount());
+            }
+
+            zonesJson.add(role.name(), zoneJson);
+        }
+        json.add("zones", zonesJson);
+        json.addProperty("zone_count", stage.getRoleToZone().size());
+        json.addProperty("total_entities", stage.getTotalEntityCount());
+
+        return json;
+    }
+
+    private JsonObject stageZoneConfigToJson(StageZoneConfig config) {
+        JsonObject json = new JsonObject();
+        json.addProperty("pattern", config.getPattern());
+        json.addProperty("entity_count", config.getEntityCount());
+        json.addProperty("render_mode", config.getRenderMode());
+        json.addProperty("block_type", config.getBlockType());
+        json.addProperty("brightness", config.getBrightness());
+        json.addProperty("glow_on_beat", config.isGlowOnBeat());
+        json.addProperty("intensity_multiplier", config.getIntensityMultiplier());
+        return json;
+    }
+
+    // --- Stage detail handlers ---
+
+    private JsonObject handleGetStage(JsonObject message) {
+        if (!message.has("name")) return createError("Missing required field: name");
+        String name = message.get("name").getAsString();
+        StageManager sm = mod.getStageManager();
+        if (sm == null) return createError("Stage system not initialized");
+        Stage stage = sm.getStage(name);
+        if (stage == null) return createError("Stage not found: " + name);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "stage");
+        response.add("stage", stageToJson(stage));
+        return response;
+    }
+
+    private JsonObject handleGetStageTemplates() {
+        StageManager sm = mod.getStageManager();
+        if (sm == null) return createError("Stage system not initialized");
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "stage_templates");
+
+        JsonArray templatesArray = new JsonArray();
+        for (var entry : sm.getAllTemplates().entrySet()) {
+            StageTemplate template = entry.getValue();
+            JsonObject templateJson = new JsonObject();
+            templateJson.addProperty("name", template.getName());
+            templateJson.addProperty("description", template.getDescription());
+            templateJson.addProperty("role_count", template.getRoleCount());
+            templateJson.addProperty("estimated_entities", template.getEstimatedEntityCount());
+
+            JsonArray roles = new JsonArray();
+            for (StageZoneRole role : template.getRoles()) {
+                JsonObject roleJson = new JsonObject();
+                roleJson.addProperty("name", role.name());
+                roleJson.addProperty("display_name", role.getDisplayName());
+                roleJson.addProperty("suggested_pattern", role.getSuggestedPattern());
+                roles.add(roleJson);
+            }
+            templateJson.add("roles", roles);
+            templatesArray.add(templateJson);
+        }
+        response.add("templates", templatesArray);
+        return response;
+    }
+
+    private JsonObject handleUpdateStage(JsonObject message) {
+        if (!message.has("name")) return createError("Missing required field: name");
+        String name = message.get("name").getAsString();
+        StageManager sm = mod.getStageManager();
+        if (sm == null) return createError("Stage system not initialized");
+        Stage stage = sm.getStage(name);
+        if (stage == null) return createError("Stage not found: " + name);
+
+        if (message.has("anchor")) {
+            JsonObject anchorJson = message.getAsJsonObject("anchor");
+            String worldName = anchorJson.has("world") ? anchorJson.get("world").getAsString() : stage.getWorldName();
+            int x = anchorJson.has("x") ? anchorJson.get("x").getAsInt() : stage.getAnchor().getX();
+            int y = anchorJson.has("y") ? anchorJson.get("y").getAsInt() : stage.getAnchor().getY();
+            int z = anchorJson.has("z") ? anchorJson.get("z").getAsInt() : stage.getAnchor().getZ();
+            sm.moveStage(stage, new BlockPos(x, y, z), worldName);
+        }
+
+        if (message.has("rotation")) {
+            float rotation = message.get("rotation").getAsFloat();
+            sm.rotateStage(stage, rotation);
+        }
+
+        if (message.has("add_role")) {
+            String roleName = message.get("add_role").getAsString();
+            try {
+                StageZoneRole role = StageZoneRole.valueOf(roleName.toUpperCase());
+                sm.addRoleToStage(stage, role);
+            } catch (IllegalArgumentException e) {
+                return createError("Unknown zone role: " + roleName);
+            }
+        }
+
+        if (message.has("remove_role")) {
+            String roleName = message.get("remove_role").getAsString();
+            try {
+                StageZoneRole role = StageZoneRole.valueOf(roleName.toUpperCase());
+                sm.removeRoleFromStage(stage, role);
+            } catch (IllegalArgumentException e) {
+                return createError("Unknown zone role: " + roleName);
+            }
+        }
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "stage_updated");
+        response.add("stage", stageToJson(stage));
+        return response;
+    }
+
+    private JsonObject handleSetStageZoneConfig(JsonObject message) {
+        if (!message.has("stage") || !message.has("role") || !message.has("config")) {
+            return createError("Missing required field: stage, role, or config");
+        }
+        String stageName = message.get("stage").getAsString();
+        if (!isValidZoneName(stageName)) return createError("Invalid stage name");
+        String roleName = message.get("role").getAsString();
+
+        StageManager sm = mod.getStageManager();
+        if (sm == null) return createError("Stage system not initialized");
+        Stage stage = sm.getStage(stageName);
+        if (stage == null) return createError("Stage not found: " + stageName);
+
+        StageZoneRole role;
+        try {
+            role = StageZoneRole.valueOf(roleName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return createError("Unknown zone role: " + roleName);
+        }
+
+        if (!stage.getRoleToZone().containsKey(role)) {
+            return createError("Stage '" + stageName + "' does not have role: " + roleName);
+        }
+
+        JsonObject configJson = message.getAsJsonObject("config");
+        StageZoneConfig config = stage.getOrCreateConfig(role);
+
+        if (configJson.has("pattern")) config.setPattern(configJson.get("pattern").getAsString());
+        if (configJson.has("entity_count")) config.setEntityCount(configJson.get("entity_count").getAsInt());
+        if (configJson.has("render_mode")) config.setRenderMode(configJson.get("render_mode").getAsString());
+        if (configJson.has("block_type")) config.setBlockType(configJson.get("block_type").getAsString());
+        if (configJson.has("brightness")) config.setBrightness(configJson.get("brightness").getAsInt());
+        if (configJson.has("glow_on_beat")) config.setGlowOnBeat(configJson.get("glow_on_beat").getAsBoolean());
+        if (configJson.has("intensity_multiplier")) config.setIntensityMultiplier(configJson.get("intensity_multiplier").getAsFloat());
+
+        sm.saveStages();
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "stage_zone_config_updated");
+        response.addProperty("stage", stageName);
+        response.addProperty("role", role.name());
+        response.add("config", stageZoneConfigToJson(config));
+        return response;
+    }
+
+    // --- Block scanner ---
+
+    /**
+     * Scan all non-air blocks in the bounding box around a stage's zones.
+     * Returns palette-compressed block data for 3D preview rendering.
+     *
+     * Block access requires the server thread — the caller (VizWebSocketServer)
+     * already dispatches to the server thread, so we call the scan directly.
+     */
+    private JsonObject handleScanStageBlocks(JsonObject message) {
+        if (!message.has("stage")) return createError("Missing required field: stage");
+        String stageName = message.get("stage").getAsString();
+        if (!isValidZoneName(stageName)) return createError("Invalid stage name");
+
+        StageManager sm = mod.getStageManager();
+        if (sm == null) return createError("Stage system not initialized");
+        Stage stage = sm.getStage(stageName);
+        if (stage == null) return createError("Stage not found: " + stageName);
+
+        // Already on the server thread (VizWebSocketServer dispatches via server.execute()),
+        // so call the scan directly — no need for a second server.execute() which would deadlock.
+        try {
+            return scanStageBlocksSync(stage, stageName);
+        } catch (Exception e) {
+            LOGGER.warn("Stage block scan failed for {}: {}", stageName, e.getMessage());
+            return createError("Scan failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Perform the actual block scan on the server thread.
+     */
+    private JsonObject scanStageBlocksSync(Stage stage, String stageName) {
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        ServerWorld world = null;
+
+        for (String zoneName : stage.getZoneNames()) {
+            VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
+            if (zone == null) continue;
+
+            if (world == null) world = zone.getWorld();
+
+            int ox = zone.getOrigin().getX();
+            int oy = zone.getOrigin().getY();
+            int oz = zone.getOrigin().getZ();
+            Vector3f size = zone.getSize();
+            int ex = ox + (int) Math.ceil(size.x);
+            int ey = oy + (int) Math.ceil(size.y);
+            int ez = oz + (int) Math.ceil(size.z);
+
+            minX = Math.min(minX, ox);
+            minY = Math.min(minY, oy);
+            minZ = Math.min(minZ, oz);
+            maxX = Math.max(maxX, ex);
+            maxY = Math.max(maxY, ey);
+            maxZ = Math.max(maxZ, ez);
+        }
+
+        if (world == null) return createError("No zones found for stage: " + stageName);
+
+        // Expand bounding box: +5 XZ, +3 below, +2 above
+        minX -= 5;
+        minZ -= 5;
+        maxX += 5;
+        maxZ += 5;
+        minY -= 3;
+        maxY += 2;
+
+        // Scan blocks — build palette and block array
+        LinkedHashMap<String, Integer> palette = new LinkedHashMap<>();
+        JsonArray blocksArray = new JsonArray();
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (state.isAir()) continue;
+
+                    String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
+                    // Convert to uppercase material-style name for compatibility
+                    // e.g. "minecraft:stone" → "STONE"
+                    String matName = blockId.contains(":") ? blockId.substring(blockId.indexOf(':') + 1).toUpperCase() : blockId.toUpperCase();
+                    int paletteIdx = palette.computeIfAbsent(matName, k -> palette.size());
+
+                    JsonArray block = new JsonArray();
+                    block.add(x);
+                    block.add(y);
+                    block.add(z);
+                    block.add(paletteIdx);
+                    blocksArray.add(block);
+                }
+            }
+        }
+
+        // Build palette array
+        JsonArray paletteArray = new JsonArray();
+        for (String matName : palette.keySet()) {
+            paletteArray.add(matName);
+        }
+
+        // Build bounds object
+        JsonObject bounds = new JsonObject();
+        bounds.addProperty("minX", minX);
+        bounds.addProperty("minY", minY);
+        bounds.addProperty("minZ", minZ);
+        bounds.addProperty("maxX", maxX);
+        bounds.addProperty("maxY", maxY);
+        bounds.addProperty("maxZ", maxZ);
+
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "stage_blocks");
+        response.addProperty("stage", stageName);
+        response.add("palette", paletteArray);
+        response.add("blocks", blocksArray);
+        response.add("bounds", bounds);
+
+        LOGGER.info("Scanned stage '{}': {} blocks, {} materials", stageName, blocksArray.size(), palette.size());
+        return response;
     }
 
     // --- Utilities ---
