@@ -11,6 +11,9 @@
     "server": ["com.audioviz.AudioVizMod"],
     "voicechat": ["com.audioviz.voice.VoicechatIntegration"]
   },
+  "mixins": [
+    "audioviz.mixins.json"
+  ],
   "accessWidener": "audioviz.accesswidener",
   "depends": {
     "fabricloader": ">=0.18.0",

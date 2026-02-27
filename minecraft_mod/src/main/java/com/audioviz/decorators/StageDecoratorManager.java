@@ -157,7 +157,22 @@ public class StageDecoratorManager {
     }
 
     public void updateDJInfo(DJInfo info) {
+        DJInfo previous = this.currentDJInfo;
         this.currentDJInfo = info;
+
+        // Detect DJ change and trigger transition decorators
+        if (previous != null && info != null && info.isActive()
+                && !previous.djId().equals(info.djId())
+                && !info.djId().isEmpty()
+                && !transitionInProgress) {
+            for (List<StageDecorator> decorators : stageDecorators.values()) {
+                for (StageDecorator decorator : decorators) {
+                    if (decorator instanceof com.audioviz.decorators.impl.DJTransitionDecorator td) {
+                        td.triggerTransition(previous, info, this);
+                    }
+                }
+            }
+        }
     }
 
     // ========== Queries ==========

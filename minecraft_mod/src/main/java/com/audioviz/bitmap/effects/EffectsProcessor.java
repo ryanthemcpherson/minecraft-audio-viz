@@ -151,6 +151,7 @@ public class EffectsProcessor {
     public void clearWash() { this.washOpacity = 0; }
 
     public void setBeatFlashEnabled(boolean enabled) { this.beatFlashEnabled = enabled; }
+    public boolean isBeatFlashEnabled() { return beatFlashEnabled; }
 
     public void setRgbSplitEnabled(boolean enabled) { this.rgbSplitEnabled = enabled; }
     public boolean isRgbSplitEnabled() { return rgbSplitEnabled; }
