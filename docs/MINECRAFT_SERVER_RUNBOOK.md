@@ -35,13 +35,26 @@ Notes:
 
 ## Java Flags
 
-For an 8 GB host dedicated primarily to Minecraft:
+For an 8 GB host dedicated primarily to Minecraft + AudioViz:
 
 ```bash
-java -Xms4G -Xmx4G -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -jar paper.jar nogui
+java -Xms4G -Xmx4G \
+  -XX:+UseZGC -XX:+ZGenerational \
+  -XX:+AlwaysPreTouch \
+  -XX:+UseStringDeduplication \
+  -jar paper.jar nogui
 ```
 
-Using equal `Xms`/`Xmx` avoids heap resizing pauses.
+| Flag | Purpose |
+|-|-|
+| `-Xms4G -Xmx4G` | Fixed heap — avoids resize pauses |
+| `UseZGC + ZGenerational` | Sub-millisecond GC pauses (Java 21+). Critical for AudioViz where the 50ms tick budget leaves no room for G1's 10-50ms stop-the-world pauses |
+| `AlwaysPreTouch` | Pre-faults memory pages at startup — eliminates page fault latency during ticks |
+| `UseStringDeduplication` | Reduces heap pressure from duplicate block ID / zone name strings |
+
+Use `scripts/start-minecraft-server.sh` or `scripts/start-minecraft-server.ps1` which include these flags.
+
+**Previous flags (kept for reference):** The old G1GC flags (`-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200`) work on Java 17 but ZGC is strongly preferred on Java 21+ for AudioViz workloads.
 
 ## Plugin Auto-Update Status
 
