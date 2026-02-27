@@ -1,0 +1,55 @@
+plugins {
+    id 'fabric-loom' version '1.15.4'
+    id 'java'
+}
+
+version = '1.0.0'
+group = 'com.audioviz'
+
+repositories {
+    maven { url = 'https://maven.nucleoid.xyz' }
+    maven { url = 'https://maven.maxhenkel.de/repository/public' }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Polymer for virtual entities
+    modImplementation include("eu.pb4:polymer-virtual-entity:${project.polymer_version}")
+
+    // SGUI for server-side GUI menus
+    modImplementation include("eu.pb4:sgui:${project.sgui_version}")
+
+    // WebSocket (same library as Paper plugin)
+    implementation include("org.java-websocket:Java-WebSocket:1.5.7")
+
+    // Simple Voice Chat API (optional - server must have the mod installed)
+    compileOnly "de.maxhenkel.voicechat:voicechat-api:2.6.0"
+
+    // Gson (bundled with Minecraft, but declare for clarity)
+    compileOnly "com.google.code.gson:gson:2.11.0"
+
+    // Testing
+    testImplementation "org.junit.jupiter:junit-jupiter:5.11.0"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation "org.mockito:mockito-core:5.14.0"
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+test {
+    useJUnitPlatform()
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}

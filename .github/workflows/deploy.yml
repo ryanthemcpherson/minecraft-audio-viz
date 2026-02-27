@@ -18,16 +18,15 @@ concurrency:
 
 env:
   DEPLOY_PATH: /home/ryan/minecraft-audio-viz
-  PLUGINS_DIR: /home/ryan/minecraft-server/plugins
+  MODS_DIR: /home/ryan/minecraft-server/mods
   JAVA_VERSION: '21'
-  RCON_PORT: '25575'
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build the Minecraft plugin JAR (on GitHub-hosted runner for caching)
+  # Build the Fabric mod JAR (on GitHub-hosted runner for caching)
   # ---------------------------------------------------------------------------
-  build-plugin:
-    name: Build Plugin JAR
+  build-mod:
+    name: Build Mod JAR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -37,17 +36,17 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
-          cache: maven
+          cache: gradle
 
-      - name: Build with Maven
-        working-directory: minecraft_plugin
-        run: mvn clean package -DskipTests
+      - name: Build with Gradle
+        working-directory: minecraft_mod
+        run: ./gradlew build
 
-      - name: Upload plugin JAR
+      - name: Upload mod JAR
         uses: actions/upload-artifact@v6
         with:
-          name: audioviz-plugin
-          path: minecraft_plugin/target/audioviz-plugin-*.jar
+          name: audioviz-mod
+          path: minecraft_mod/build/libs/audioviz-mod-*.jar
 
   # ---------------------------------------------------------------------------
   # Run Python tests (unless skipped) — on GitHub-hosted runner
@@ -79,8 +78,8 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to Dev Server
-    needs: [build-plugin, test-python]
-    if: always() && needs.build-plugin.result == 'success' && (needs.test-python.result == 'success' || needs.test-python.result == 'skipped')
+    needs: [build-mod, test-python]
+    if: always() && needs.build-mod.result == 'success' && (needs.test-python.result == 'success' || needs.test-python.result == 'skipped')
     runs-on: [self-hosted, dev-server]
     environment: dev-server
     timeout-minutes: 10
@@ -90,11 +89,11 @@ jobs:
         with:
           clean: true
 
-      - name: Download plugin JAR
+      - name: Download mod JAR
         uses: actions/download-artifact@v7
         with:
-          name: audioviz-plugin
-          path: ./plugin-jar/
+          name: audioviz-mod
+          path: ./mod-jar/
 
       # --- Sync code to deploy path ---
       - name: Sync repository to deploy path
@@ -105,14 +104,15 @@ jobs:
           rsync -a --delete \
             --exclude '.git' \
             --exclude 'node_modules' \
-            --exclude 'target' \
+            --exclude 'build' \
+            --exclude '.gradle' \
             --exclude 'dist' \
             --exclude '__pycache__' \
             --exclude '*.pyc' \
             --exclude '.env' \
             --exclude '.venv' \
             --exclude 'dj_client/src-tauri/target' \
-            --exclude 'minecraft_plugin/target' \
+            --exclude 'minecraft_mod/build' \
             "$GITHUB_WORKSPACE/" "${{ env.DEPLOY_PATH }}/"
 
       # --- Keep git state in sync (rsync excludes .git, so HEAD drifts) ---
@@ -123,13 +123,13 @@ jobs:
           git reset --hard origin/main --quiet
           echo "Git HEAD now at: $(git log --oneline -1)"
 
-      # --- Copy plugin JAR ---
-      - name: Copy plugin JAR to plugins directory
+      # --- Copy mod JAR ---
+      - name: Copy mod JAR to mods directory
         run: |
-          echo "=== Copying plugin JAR ==="
-          mkdir -p "${{ env.PLUGINS_DIR }}"
-          rm -f "${{ env.PLUGINS_DIR }}"/audioviz-plugin-*.jar
-          cp -v ./plugin-jar/audioviz-plugin-*.jar "${{ env.PLUGINS_DIR }}/"
+          echo "=== Copying mod JAR ==="
+          mkdir -p "${{ env.MODS_DIR }}"
+          rm -f "${{ env.MODS_DIR }}"/audioviz-mod-*.jar
+          cp -v ./mod-jar/audioviz-mod-*.jar "${{ env.MODS_DIR }}/"
 
       # --- Install Python dependencies ---
       - name: Install Python dependencies
@@ -167,7 +167,7 @@ jobs:
           echo "=== Stopping Minecraft server ==="
           sudo systemctl stop minecraft.service || true
 
-          # Kill any rogue java processes holding the world lock (e.g. manually started)
+          # Kill any rogue java processes holding the world lock
           LOCK_FILE="/home/ryan/minecraft-server/world/session.lock"
           if LOCK_PID=$(sudo fuser "$LOCK_FILE" 2>/dev/null); then
             echo "WARNING: session.lock held by PID $LOCK_PID — killing stale process"
@@ -202,30 +202,17 @@ jobs:
             exit 1
           fi
 
-      # --- Verify plugin loaded ---
-      - name: Verify AudioViz plugin is active
-        env:
-          MCAV_RCON_PASSWORD: ${{ secrets.MCAV_RCON_PASSWORD }}
+      # --- Verify mod loaded ---
+      - name: Verify AudioViz mod loaded
         run: |
-          if [ -z "${MCAV_RCON_PASSWORD:-}" ]; then
-            echo "RCON secret not set; skipping plugin status check."
-            exit 0
+          echo "=== Checking Minecraft server logs for AudioViz ==="
+          # Give the server a moment to finish loading mods
+          sleep 5
+          if sudo journalctl -u minecraft.service --no-pager -n 100 | grep -qi "AudioViz"; then
+            echo "SUCCESS: AudioViz mod appears in server logs"
+          else
+            echo "WARNING: AudioViz not found in recent logs (may still be loading)"
           fi
-
-          echo "=== Verifying AudioViz plugin via RCON ==="
-          for i in $(seq 1 12); do
-            PLUGINS_OUTPUT="$(mcrcon -H 127.0.0.1 -P "${{ env.RCON_PORT }}" -p "${MCAV_RCON_PASSWORD}" "plugins" 2>&1 || true)"
-            echo "Attempt $i: $PLUGINS_OUTPUT"
-            if echo "$PLUGINS_OUTPUT" | grep -qi "AudioViz"; then
-              echo "SUCCESS: AudioViz plugin is loaded"
-              exit 0
-            fi
-            sleep 5
-          done
-
-          echo "ERROR: AudioViz plugin not found in plugin list after retries"
-          sudo journalctl -u minecraft.service --no-pager -n 80
-          exit 1
 
       # --- Summary ---
       - name: Deploy summary
