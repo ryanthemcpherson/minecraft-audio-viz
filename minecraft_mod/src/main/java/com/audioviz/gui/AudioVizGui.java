@@ -113,10 +113,15 @@ public abstract class AudioVizGui extends SimpleGui {
      */
     protected void promptTextInput(String title, String defaultText,
                                     Consumer<String> onResult, Runnable onCancel) {
+        // Track whether confirm was clicked so onClose doesn't double-fire onCancel
+        boolean[] confirmed = {false};
+
         var anvil = new AnvilInputGui(getPlayer(), false) {
             @Override
             public void onClose() {
-                onCancel.run();
+                if (!confirmed[0]) {
+                    onCancel.run();
+                }
             }
         };
         anvil.setTitle(Text.literal(title));
@@ -125,6 +130,7 @@ public abstract class AudioVizGui extends SimpleGui {
         anvil.setSlot(2, new GuiElementBuilder(Items.LIME_CONCRETE)
             .setName(Text.literal("Confirm").formatted(Formatting.GREEN))
             .setCallback((index, type, action) -> {
+                confirmed[0] = true;
                 String input = anvil.getInput();
                 anvil.close();
                 onResult.accept(input != null ? input.trim() : "");

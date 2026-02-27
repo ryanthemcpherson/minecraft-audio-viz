@@ -3,3 +3,7 @@ accessWidener v2 named
 # Allow setting ItemFrameEntity.fixed for invisible floating map displays
 accessible field net/minecraft/entity/decoration/ItemFrameEntity fixed Z
 mutable field net/minecraft/entity/decoration/ItemFrameEntity fixed Z
+
+# Allow direct access to MapState.colors for fast bulk pixel writes
+# (avoids calling setColor() per-pixel which is too slow for 60+ tiles/tick)
+accessible field net/minecraft/item/map/MapState colors [B

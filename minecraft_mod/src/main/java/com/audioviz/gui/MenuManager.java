@@ -29,8 +29,8 @@ public class MenuManager {
     public void openMenu(ServerPlayerEntity player, AudioVizGui gui) {
         UUID playerId = player.getUuid();
 
-        // Close any existing menu
-        AudioVizGui existing = activeSessions.get(playerId);
+        // Close any existing menu (always remove to prevent orphaned references)
+        AudioVizGui existing = activeSessions.remove(playerId);
         if (existing != null && existing.isOpen()) {
             existing.close();
         }
