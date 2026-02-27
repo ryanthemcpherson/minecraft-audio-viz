@@ -4744,6 +4744,7 @@ class VJServer:
         logger.info(f"Connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}...")
         self.viz_client = VizClient(self.minecraft_host, self.minecraft_port, enable_heartbeat=True)
         self.viz_client.on("stage_zone_configs", self._handle_stage_zone_configs)
+        self.viz_client.on("bitmap_frame", self._relay_bitmap_frame)
 
         try:
             # 10 second timeout for initial connection
@@ -5288,6 +5289,10 @@ class VJServer:
         if zone_name == self.zone:
             self.entity_count = zone_state.entity_count
             self._pattern_config.entity_count = zone_state.entity_count
+
+    async def _relay_bitmap_frame(self, data: dict):
+        """Relay bitmap_frame from Minecraft to browser clients for 1:1 preview."""
+        await self._broadcast_to_browsers(_json_str(data))
 
     async def _handle_stage_zone_configs(self, data: dict):
         """Handle stage_zone_configs from MC plugin to apply patterns with correct entity counts."""
