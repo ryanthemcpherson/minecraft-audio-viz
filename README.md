@@ -7,8 +7,10 @@
   [![Deploy](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/deploy.yml/badge.svg)](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/deploy.yml)
   [![Security](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/security.yml/badge.svg)](https://github.com/ryanthemcpherson/minecraft-audio-viz/actions/workflows/security.yml)
 
+  ![Rust](https://img.shields.io/badge/rust-stable-orange.svg)
   ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
   ![Java 21](https://img.shields.io/badge/java-21-orange.svg)
+  ![Fabric](https://img.shields.io/badge/fabric-MC%201.21.1-green.svg)
   ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
   ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 </div>
@@ -29,7 +31,7 @@
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Screenshots & Demo](#screenshots--demo)
-- [Visualization Patterns](#visualization-patterns-27)
+- [Visualization Patterns](#visualization-patterns)
 - [CLI Reference](#cli-reference)
 - [Minecraft Commands](#minecraft-commands)
 - [Project Structure](#project-structure)
@@ -44,16 +46,17 @@
 
 - **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
 - **Real-time FFT Analysis** — 5-band frequency processing with ultra-low latency (~20ms)
-- **40 Visualization Patterns** — from Spectrum Bars to Galaxy Spirals, Black Holes, Auroras, and more
-- **Bitmap LED Wall** — flat 2D pixel-grid display using text display entities as pixels, inspired by [TheCymaera](https://github.com/TheCymaera/minecraft-text-display-experiments)
+- **80+ Visualization Patterns** — 41 Lua 3D patterns + 42 Java bitmap patterns, from Spectrum Bars to Galaxy Spirals, Auroras, Plasma, and more
+- **Dual Render Backends** — high-res map tile displays (128x128 per tile) and virtual entity LED walls, switchable per zone
 - **6 Audio Presets** — auto, edm, chill, rock, hiphop, classical
-- **Minecraft Rendering** — Display Entity batching with interpolation, zone management, beat-reactive particles
+- **Minecraft Rendering** — Fabric mod with SGUI menus, Polymer virtual entities, beat-reactive particles, and ambient lighting
 - **3D Browser Preview** — WebGL scene with full Minecraft rendering parity
 - **Admin Control Panel** — VJ-style control surface with live meters, effects, and zone controls
-- **DJ Client** — cross-platform Tauri desktop app for remote DJ sessions
+- **DJ Client** — cross-platform Tauri desktop app (Rust) for remote DJ sessions
 - **Multi-DJ Support** — multiple remote DJs performing with centralized VJ control
-- **Bedrock Mode** — particle-based visualization for Geyser/Bedrock players
+- **Stage System** — multi-zone stages with decorators, spotlight effects, and DJ billboards
 - **Timeline System** — pre-program timed shows with pattern, preset, and effect cues
+- **Coordinator API** — central DJ coordination with connect codes, show management, and JWT auth
 - **Docker Deployment** — containerized VJ server for production events
 
 ---
@@ -80,7 +83,7 @@ See [`demo/README.md`](demo/README.md) for full details.
 
 ### Download DJ Client (Recommended)
 
-**[⬇️ Download Latest Release](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)**
+**[Download Latest Release](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)**
 
 The DJ Client is a cross-platform desktop app (Windows/macOS/Linux) for capturing and streaming audio:
 
@@ -107,13 +110,14 @@ audioviz-vj                   # Starts on port 9000
 #    Admin Panel:  http://localhost:8081
 ```
 
-### Minecraft Plugin Setup (Optional)
+### Minecraft Mod Setup (Optional)
 
-To connect to Minecraft, build the plugin and drop it into your server's `plugins/` folder:
+To render visualizations in Minecraft, build the Fabric mod and add it to your server's `mods/` folder:
 
 ```bash
-cd minecraft_plugin && mvn package
-# Copy target/audioviz-plugin-*.jar to your server's plugins/ folder
+cd minecraft_mod && ./gradlew build
+# Copy build/libs/audioviz-mod-*.jar to your server's mods/ folder
+# Requires: Fabric Loader, Fabric API, SGUI, Polymer
 # Configure VJ server: audioviz-vj --minecraft-host your-mc-server
 ```
 
@@ -123,38 +127,26 @@ cd minecraft_plugin && mvn package
 
 ### Single DJ Mode (standalone)
 
-```text
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   DJ Client     │────▶│    VJ Server     │────▶│   Minecraft      │
-│ (Rust/Tauri)    │     │  (Python/Lua)    │     │    Plugin        │
-│  Audio Capture  │     │  Pattern Engine  │     │                  │
-└─────────────────┘     └────────┬─────────┘     └─────────────────┘
-                                 │
-                    ┌────────────┴────────────┐
-                    ▼                         ▼
-           ┌───────────────┐         ┌───────────────┐
-           │ Browser 3D    │         │ Admin Panel   │
-           │ Preview       │         │ Control UI    │
-           └───────────────┘         └───────────────┘
+```
+DJ Client (Rust/Tauri) ---> VJ Server (Python/Lua) ---> Minecraft Mod (Fabric)
+     Audio Capture              Pattern Engine          Map/Entity Renderer
+                                     |
+                          +----------+----------+
+                          v                     v
+                    Browser 3D            Admin Panel
+                     Preview              Control UI
 ```
 
 ### Multi-DJ Mode (live events)
 
-```text
-┌──────────────┐
-│  DJ Client 1 │───┐
-│   (Remote)   │   │
-└──────────────┘   │    ┌────────────────┐     ┌─────────────────┐
-                   ├───▶│    VJ Server    │────▶│    Minecraft     │
-┌──────────────┐   │    │   (Central)     │     │    (Shared)      │
-│  DJ Client 2 │───┤    └───────┬────────┘     └─────────────────┘
-│   (Remote)   │   │            │
-└──────────────┘   │    ┌───────┴────────┐
-                   │    ▼                ▼
-┌──────────────┐   │ ┌───────────┐ ┌───────────┐
-│  DJ Client 3 │───┘ │  Viewers   │ │  VJ Admin  │
-│   (Remote)   │     │ (Browser)  │ │   Panel    │
-└──────────────┘     └───────────┘ └───────────┘
+```
+DJ Client 1 ---+
+DJ Client 2 ---+--> VJ Server (Central) ---> Minecraft (Shared)
+DJ Client 3 ---+         |
+                    +-----+-----+
+                    v           v
+                 Viewers     VJ Admin
+                (Browser)     Panel
 ```
 
 ---
@@ -177,12 +169,14 @@ cd minecraft_plugin && mvn package
 
 ---
 
-## Visualization Patterns (40)
+## Visualization Patterns
 
-### 3D Entity Patterns (27)
+### Lua 3D Patterns (41)
+
+3D entity-based patterns computed by the VJ server's Lua engine and rendered by the Minecraft mod using virtual entities.
 
 | Pattern | Key | Description |
-|---------|-----|-------------|
+|-|-|-|
 | Spectrum Bars | `bars` | Classic frequency bar display |
 | Stacked Tower | `spectrum` | Vertical stacking bars |
 | Spectrum Tubes | `tubes` | 3D tube-based spectrum analyzer |
@@ -210,25 +204,68 @@ cd minecraft_plugin && mvn package
 | Aurora | `aurora` | Northern lights effect |
 | Ocean Waves | `ocean` | Ocean wave simulation |
 | Fireflies | `fireflies` | Swarm of glowing fireflies |
+| Laser Fan | `laserfan` | Scanning laser fan array |
+| Moving Heads | `movingheads` | Concert moving head lights |
+| Pyrotechnics | `pyro` | Stage pyro flame effects |
+| Shockwave | `shockwave` | Expanding shockwave rings |
+| Crown | `crown` | Rotating crown structure |
+| Dragon | `dragon` | Beat-reactive dragon form |
+| Phoenix | `phoenix` | Rising phoenix visualization |
+| Fist | `fist` | Pumping fist animation |
+| Sword | `sword` | Glowing sword visualization |
+| LED Wall | `ledwall` | Flat LED grid rendering |
+| Drop Sequence | `dropsequence` | Build-up and drop animation |
+| BPM Pulse | `bpm_pulse` | BPM-synced pulsing effect |
+| BPM Strobe | `bpm_strobe` | BPM-synced strobe effect |
+| Strobe | `strobe` | Classic strobe effect |
 
-### Bitmap LED Wall Patterns (13)
+### Bitmap Patterns (42)
 
-Flat 2D pixel-grid patterns rendered on a virtual LED wall using text display entities as pixels. Inspired by [TheCymaera's text display experiments](https://github.com/TheCymaera/minecraft-text-display-experiments).
+Flat 2D pixel-grid patterns rendered in-mod via map tile displays (128x128 per tile, glow item frames) or virtual entity LED walls. Includes effects processing, transitions, and layer compositing.
 
 | Pattern | Key | Description |
-|---------|-----|-------------|
+|-|-|-|
 | Spectrum Bars | `bmp_spectrum_bars` | Classic LED bar graph with color mapping |
-| Spectrogram | `bmp_spectrogram` | Scrolling frequency × time heat map |
-| Plasma | `bmp_plasma` | Audio-reactive plasma shader effect |
+| Spectrogram | `bmp_spectrogram` | Scrolling frequency x time heat map |
+| Plasma | `bmp_plasma` | Audio-reactive plasma shader |
 | Waveform | `bmp_waveform` | Oscilloscope-style waveform display |
 | VU Meter | `bmp_vu_meter` | Stereo VU meter with peak hold |
+| Fire | `bmp_fire` | Fluid fire simulation |
+| Kaleidoscope | `bmp_kaleidoscope` | Symmetrical kaleidoscope effect |
+| Matrix Rain | `bmp_matrix_rain` | Digital rain cascade |
+| Starfield | `bmp_starfield` | Warp-speed starfield |
+| Circular Spectrum | `bmp_circular` | Radial spectrum analyzer |
+| Aurora | `bmp_aurora` | Northern lights effect |
+| Checkerboard Flash | `bmp_checkerboard` | Beat-synced checkerboard |
+| Color Wash | `bmp_color_wash` | Smooth color gradient sweep |
+| Concentric Rings | `bmp_rings` | Expanding ring visualization |
+| Data Mosh | `bmp_datamosh` | Glitch art data corruption |
+| Digital Noise | `bmp_noise` | Audio-reactive digital noise |
+| Fireflies | `bmp_fireflies` | Glowing particle swarm |
+| Fractal Zoom | `bmp_fractal` | Mandelbrot zoom animation |
+| Galaxy | `bmp_galaxy` | Spiral galaxy with star particles |
+| Grid Warp | `bmp_grid_warp` | Audio-warped grid mesh |
+| Hex Grid | `bmp_hex_grid` | Hexagonal grid visualization |
+| Ink Drop | `bmp_ink_drop` | Fluid ink drop simulation |
+| Lightning | `bmp_lightning` | Beat-triggered lightning bolts |
+| Moire | `bmp_moire` | Interference pattern animation |
+| Particle Rain | `bmp_particle_rain` | Falling particle systems |
+| Pixel Sort | `bmp_pixel_sort` | Glitch-art pixel sorting |
+| Radial Burst | `bmp_radial_burst` | Explosive radial pattern |
+| Ripple | `bmp_ripple` | Water ripple propagation |
+| Rotating Geometry | `bmp_geometry` | Rotating 3D wireframes |
+| Scan Lines | `bmp_scan_lines` | Retro scan line effect |
+| Terrain | `bmp_terrain` | Audio-reactive terrain mesh |
+| Tunnel Zoom | `bmp_tunnel` | Infinite tunnel zoom |
+| Wave Propagation | `bmp_wave` | Wave interference patterns |
 | Marquee | `bmp_marquee` | Scrolling text with reactive colors |
 | Track Display | `bmp_track_display` | Now-playing artist/title overlay |
 | Countdown | `bmp_countdown` | Event countdown timer |
-| Chat Wall | `bmp_chat_wall` | Live player chat messages on the wall |
+| Chat Wall | `bmp_chat_wall` | Live player chat messages |
 | Crowd Cam | `bmp_crowd_cam` | Spotlight frames for nearby players |
 | Minimap | `bmp_minimap` | Overhead map with pulsing player dots |
 | Fireworks | `bmp_firework` | Interactive firework particle system |
+| DJ Logo | `bmp_dj_logo` | Custom DJ logo display |
 | Image | `bmp_image` | Static/animated image display |
 
 ---
@@ -243,6 +280,7 @@ audioviz-vj                               # start on default port 9000
 audioviz-vj --port 9000                   # custom DJ port
 audioviz-vj --minecraft-host mc.local     # connect to Minecraft server
 audioviz-vj --no-auth                     # dev mode - skip authentication
+audioviz-vj --metrics-port 9001           # health metrics endpoint
 ```
 
 ### DJ Client
@@ -258,7 +296,7 @@ For development, see `dj_client/README.md`
 ## Minecraft Commands
 
 | Command | Description |
-|---------|-------------|
+|-|-|
 | `/audioviz menu` | Open the main control panel (`/av menu`, `/mcav menu`) |
 | `/audioviz zone create <name>` | Create a new visualization zone |
 | `/audioviz zone delete <name>` | Delete a zone |
@@ -266,10 +304,8 @@ For development, see `dj_client/README.md`
 | `/audioviz zone setsize <name> <x> <y> <z>` | Set zone dimensions |
 | `/audioviz zone setrotation <name> <degrees>` | Set zone rotation |
 | `/audioviz zone info <name>` | Show zone details |
-| `/audioviz pool init <zone> [count] [material]` | Initialize display-entity pool |
-| `/audioviz pool cleanup <zone>` | Remove zone entities |
 | `/audioviz test <zone> <wave\|pulse\|random>` | Run test animation |
-| `/audioviz status` | Show plugin status |
+| `/audioviz status` | Show mod status |
 | `/audioviz help` | Show command help |
 
 ---
@@ -304,33 +340,33 @@ For production, the VJ server enforces authentication by default.
 </details>
 
 <details>
-<summary><strong>Minecraft Plugin Features</strong></summary>
+<summary><strong>Minecraft Mod Features</strong></summary>
 
-### GUI menu system
-- Main menu (system status)
+### GUI menu system (SGUI)
+- Main menu (system status, active zones, connection info)
 - DJ control panel (effects, presets, zone selection)
+- Stage management (create/edit stages, assign zone roles)
+- VJ control panel (pattern selection, intensity slider, render mode toggle)
+- Zone management + zone editor (size/rotation/placement)
+- Stage decorator menus (spotlights, DJ banners, floor tiles)
 - Settings menu (performance tuning)
-- Zone management + zone editor (size/rotation/entity pools)
+
+### Dual render backends
+- **Map display** — high-resolution 128x128 pixel maps in glow item frames, dirty-rect tracking for efficient updates
+- **Virtual entity LED wall** — Polymer virtual block display entities as individually-addressable pixels
 
 ### Beat effects
-- Particle bursts on beats
-- Screen shake on bass drops
-- Lightning strikes on drops
-- Explosion visuals
+- Particle bursts on beats (bass flame, beat ring, spectrum dust, ambient mist)
+- Beat event system with configurable thresholds
+- Ambient lighting that responds to audio state
+- Stage decorators (spotlights, DJ billboards, floor tiles, beat text FX)
 
 ### Performance optimizations
-- Batched entity updates (single scheduler per tick)
-- Async JSON parsing on a dedicated thread
-- Tick-based message queue
-- View distance culling
+- Batched entity updates via Polymer virtual entities (no real entity overhead)
+- Async bitmap rendering on dedicated thread pool
+- Tick-based message queue with bundle packet sending
+- Map dirty-rect tracking (only re-send changed regions)
 - Entity pool management + interpolation
-
-### Bedrock Mode (Geyser)
-Bedrock players can't see Display Entities, so use particles:
-- Switch to **Particles** or **Hybrid** mode in Admin Panel
-- Particle types: `DUST`, `FLAME`, `SOUL_FIRE_FLAME`, `END_ROD`, `NOTE`
-- Color modes: frequency-based, rainbow, intensity, fixed color
-- Adjustable density + particle size
 
 </details>
 
@@ -367,28 +403,30 @@ MINECRAFT_HOST=mc.example.com docker-compose up -d
 
 ```text
 minecraft-audio-viz/
-├── dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
-├── vj_server/             # VJ Server (Python, pattern engine + routing)
-├── admin_panel/           # Web control panel (VJ interface)
-├── preview_tool/          # 3D browser preview (Three.js)
-├── minecraft_plugin/      # Paper plugin (Java 21)
-├── site/                  # Landing page (Next.js 15, mcav.live)
-├── coordinator/           # DJ coordinator API (FastAPI, PostgreSQL)
-├── worker/                # Tenant router (Cloudflare Workers)
-├── protocol/              # Shared protocol schemas
-├── patterns/              # Lua visualization patterns
-├── configs/               # Configuration files
-├── docs/                  # Architecture and ops docs
-├── scripts/               # PowerShell quick-start scripts
-├── shows/                 # Saved show files
-└── archive/               # Archived components
-    └── python_dj_cli/     # Old Python DJ CLI (deprecated)
++-- dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
++-- vj_server/             # VJ Server (Python, Lua pattern engine + routing)
++-- minecraft_mod/         # Fabric mod (Java 21, MC 1.21.1)
++-- admin_panel/           # Web control panel (VJ interface)
++-- preview_tool/          # 3D browser preview (Three.js)
++-- site/                  # Landing page (Next.js 15, mcav.live)
++-- coordinator/           # DJ coordinator API (FastAPI, PostgreSQL)
++-- community_bot/         # Discord community bot (discord.py)
++-- discord_bot/           # Discord voice audio capture bot
++-- worker/                # Tenant router (Cloudflare Workers)
++-- protocol/              # Shared WebSocket protocol schemas
++-- patterns/              # Lua 3D visualization patterns (41)
++-- configs/               # Configuration files
++-- docs/                  # Architecture and ops docs
++-- scripts/               # PowerShell quick-start scripts
++-- shows/                 # Saved show files
++-- archive/               # Archived components
+    +-- python_dj_cli/     # Old Python DJ CLI (deprecated)
 ```
 
 ### Web Platform (mcav.live)
 
 | Component | Path | Stack | Purpose |
-|-----------|------|-------|---------|
+|-|-|-|-|
 | Landing Site | `site/` | Next.js 15, Tailwind CSS 4, Three.js | Product page, pattern gallery, getting started |
 | Coordinator | `coordinator/` | FastAPI, SQLAlchemy, PostgreSQL | DJ connect codes, show management, JWT auth |
 | Tenant Router | `worker/` | Cloudflare Workers, TypeScript | Multi-tenant subdomain routing |
@@ -398,11 +436,20 @@ minecraft-audio-viz/
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest
-ruff check vj_server/
+# VJ Server
+cd vj_server && pip install -e ".[dev]" && pytest
 
-cd minecraft_plugin && mvn package
+# Minecraft Mod (Fabric)
+cd minecraft_mod && ./gradlew build
+
+# DJ Client (Rust/Tauri)
+cd dj_client && npm install && npm run tauri dev
+
+# Coordinator API
+cd coordinator && pip install -e ".[dev]" && pytest
+
+# Site (Next.js)
+cd site && npm install && npm run dev
 ```
 
 ---
@@ -410,7 +457,7 @@ cd minecraft_plugin && mvn package
 ## Known Limitations
 
 - **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server can run on Linux/Docker, but DJs must run on Windows.
-- **Display Entities require Java Edition** — Bedrock players (via Geyser) need to use Particles mode instead.
+- **Java Edition only** — The Fabric mod requires Java Edition 1.21.1+ with Fabric Loader.
 - **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
 
 ---
