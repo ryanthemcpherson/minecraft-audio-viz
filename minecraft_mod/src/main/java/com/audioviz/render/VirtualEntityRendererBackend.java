@@ -106,4 +106,15 @@ public class VirtualEntityRendererBackend {
     public Set<String> getActiveZones() {
         return Collections.unmodifiableSet(pools.keySet());
     }
+
+    /**
+     * Called when a player joins or enters range. Sends spawn packets for all
+     * active virtual entity pools so the player can see them immediately.
+     * ElementHolder deduplicates internally, so safe to call multiple times.
+     */
+    public void onPlayerJoin(ServerPlayerEntity player) {
+        for (VirtualEntityPool pool : pools.values()) {
+            pool.getHolder().startWatching(player.networkHandler);
+        }
+    }
 }
