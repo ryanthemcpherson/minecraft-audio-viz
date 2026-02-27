@@ -7,14 +7,19 @@ This module provides the pattern engine (LuaPattern) and registry functions.
 
 import logging
 import os
+import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Feature flag: set MCAV_FLAT_PACK=0 to disable flat array optimization
+# Feature flag: set MCAV_FLAT_PACK=0 to disable flat array optimization.
+# On Windows + Python 3.13, disable by default due to observed native instability
+# in some lupa/LuaJIT combinations during test teardown.
 _USE_FLAT_PACK = os.environ.get("MCAV_FLAT_PACK", "1") != "0"
+if sys.platform == "win32" and sys.version_info >= (3, 13):
+    _USE_FLAT_PACK = False
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,9 @@ class PatternConfig:
     beat_boost: float = 1.5
     base_scale: float = 0.2
     max_scale: float = 1.0
+    attack: float = 0.5
+    release: float = 0.1
+    beat_threshold: float = 1.3
 
 
 @dataclass
@@ -77,6 +85,54 @@ class VisualizationPattern(ABC):
 # Lua Pattern Runner
 # ============================================================================
 
+# Cached LuaRuntime class — resolved once on first use to avoid repeated
+# import probing (4 try/except blocks) on every pattern creation.
+_resolved_lua_runtime = None
+_resolved_lua_runtime_name = None
+
+
+def _resolve_lua_runtime():
+    """Resolve the best available LuaRuntime class once and cache it."""
+    global _resolved_lua_runtime, _resolved_lua_runtime_name
+    if _resolved_lua_runtime is not None:
+        return _resolved_lua_runtime
+
+    # Prefer PUC Lua runtime on Windows/Python 3.13 for stability.
+    if sys.platform == "win32" and sys.version_info >= (3, 13):
+        try:
+            from lupa import LuaRuntime as _LuaRuntime
+
+            _resolved_lua_runtime = _LuaRuntime
+            _resolved_lua_runtime_name = "default Lua runtime (PUC Lua)"
+            logger.info("Resolved %s", _resolved_lua_runtime_name)
+            return _resolved_lua_runtime
+        except ImportError:
+            pass
+
+    try:
+        from lupa.luajit21 import LuaRuntime as _LuaRuntime
+
+        _resolved_lua_runtime = _LuaRuntime
+        _resolved_lua_runtime_name = "LuaJIT 2.1 runtime"
+    except ImportError:
+        try:
+            from lupa.luajit20 import LuaRuntime as _LuaRuntime
+
+            _resolved_lua_runtime = _LuaRuntime
+            _resolved_lua_runtime_name = "LuaJIT 2.0 runtime"
+        except ImportError:
+            try:
+                from lupa import LuaRuntime as _LuaRuntime
+
+                _resolved_lua_runtime = _LuaRuntime
+                _resolved_lua_runtime_name = "default Lua runtime (PUC Lua)"
+            except ImportError:
+                logger.warning("lupa not installed, Lua patterns unavailable")
+                return None
+
+    logger.info("Resolved %s", _resolved_lua_runtime_name)
+    return _resolved_lua_runtime
+
 
 class LuaPattern(VisualizationPattern):
     """Pattern implementation that runs a Lua script."""
@@ -101,23 +157,9 @@ class LuaPattern(VisualizationPattern):
         self._entity_state = {k: dict(v) for k, v in state.items()}
 
     def _load_lua(self, pattern_key: str):
-        try:
-            from lupa.luajit21 import LuaRuntime
-
-            logger.debug("Using LuaJIT 2.1 runtime")
-        except ImportError:
-            try:
-                from lupa.luajit20 import LuaRuntime
-
-                logger.debug("Using LuaJIT 2.0 runtime")
-            except ImportError:
-                try:
-                    from lupa import LuaRuntime
-
-                    logger.debug("Using default Lua runtime (PUC Lua)")
-                except ImportError:
-                    logger.warning("lupa not installed, Lua patterns unavailable")
-                    return
+        LuaRuntime = _resolve_lua_runtime()
+        if LuaRuntime is None:
+            return
 
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 
@@ -566,8 +608,42 @@ def refresh_pattern_cache() -> None:
     _cached_patterns = _build_pattern_list()
 
 
+def _extract_lua_string(text: str, varname: str) -> Optional[str]:
+    """Extract a top-level Lua string assignment like: name = "Foo Bar" """
+    import re
+
+    # Match: varname = "value" or varname = 'value' (top-level, not inside functions)
+    pattern = rf'^{varname}\s*=\s*["\'](.+?)["\']'
+    match = re.search(pattern, text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def _extract_lua_number(text: str, varname: str) -> Optional[int]:
+    """Extract a top-level Lua number assignment like: recommended_entities = 64"""
+    import re
+
+    pattern = rf"^{varname}\s*=\s*(\d+)"
+    match = re.search(pattern, text, re.MULTILINE)
+    return int(match.group(1)) if match else None
+
+
+def _extract_lua_bool(text: str, varname: str) -> Optional[bool]:
+    """Extract a top-level Lua boolean assignment like: static_camera = true"""
+    import re
+
+    pattern = rf"^{varname}\s*=\s*(true|false)"
+    match = re.search(pattern, text, re.MULTILINE)
+    if match:
+        return match.group(1) == "true"
+    return None
+
+
 def _build_pattern_list() -> List[Dict[str, Any]]:
-    """Scan patterns/*.lua and build pattern metadata list."""
+    """Scan patterns/*.lua and build pattern metadata list.
+
+    Uses lightweight regex extraction instead of creating Lua VMs,
+    making startup ~100x faster (string parsing vs N Lua VM creations).
+    """
     result = []
     if not _PATTERNS_DIR.is_dir():
         return result
@@ -576,19 +652,31 @@ def _build_pattern_list() -> List[Dict[str, Any]]:
             continue
         key = lua_file.stem
         try:
-            pat = LuaPattern(key)
+            text = _file_cache.get(key)
+            if text is None:
+                text = lua_file.read_text(encoding="utf-8")
+
+            name = _extract_lua_string(text, "name") or key.replace("_", " ").title()
+            description = _extract_lua_string(text, "description") or ""
+            category = _extract_lua_string(text, "category") or ""
+            static_camera = _extract_lua_bool(text, "static_camera") or False
+            rec = _extract_lua_number(text, "recommended_entities")
+            if rec is None:
+                rec = _extract_lua_number(text, "start_blocks")
+            recommended_entities = max(1, min(256, rec)) if rec else 64
+
             result.append(
                 {
                     "id": key,
-                    "name": pat.name,
-                    "description": pat.description,
-                    "category": pat.category,
-                    "static_camera": pat.static_camera,
-                    "recommended_entities": pat.recommended_entities or 64,
+                    "name": name,
+                    "description": description,
+                    "category": category,
+                    "static_camera": static_camera,
+                    "recommended_entities": recommended_entities,
                 }
             )
         except Exception as e:
-            logger.warning(f"Failed to load pattern '{key}': {e}")
+            logger.warning(f"Failed to parse pattern metadata for '{key}': {e}")
             result.append(
                 {
                     "id": key,
@@ -617,15 +705,18 @@ def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern
 
 
 def get_recommended_entity_count(name: str, fallback: int = 64) -> int:
-    """Get recommended block count for a pattern from its Lua metadata."""
+    """Get recommended block count for a pattern from cached metadata.
+
+    Uses the pre-built pattern list instead of creating a throwaway Lua VM.
+    """
     key = name.lower()
-    if _lua_pattern_exists(key):
-        try:
-            pat = LuaPattern(key)
-            if pat.recommended_entities is not None:
-                return pat.recommended_entities
-        except Exception:
-            pass
+    patterns = list_patterns()
+    for pat in patterns:
+        if pat["id"] == key:
+            rec = pat.get("recommended_entities")
+            if rec is not None:
+                return max(1, min(256, int(rec)))
+            break
     return max(1, min(256, int(fallback)))
 
 

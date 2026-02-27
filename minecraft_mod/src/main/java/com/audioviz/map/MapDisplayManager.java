@@ -1,6 +1,8 @@
 package com.audioviz.map;
 
 import net.minecraft.server.network.ServerPlayerEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.Collection;
 
 /**
@@ -11,6 +13,10 @@ import java.util.Collection;
  * we tile multiple maps in a grid.
  */
 public class MapDisplayManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("audioviz.map");
+    private int writeFrameCount = 0;
+    private int sendUpdateCount = 0;
+
     private final int displayWidth;
     private final int displayHeight;
     private final int tilesX;
@@ -38,8 +44,14 @@ public class MapDisplayManager {
     /**
      * Write a full ARGB frame into the tiled maps.
      * Handles splitting across tile boundaries.
+     *
+     * If width/height are smaller than displayWidth/displayHeight (i.e. the pattern
+     * was rendered at reduced resolution via RENDER_SCALE), nearest-neighbor upscaling
+     * is applied so each source pixel maps to a block of display pixels.
      */
     public void writeFrame(int[] argb, int width, int height) {
+        boolean needsScale = (width != displayWidth || height != displayHeight);
+
         for (int tz = 0; tz < tilesZ; tz++) {
             for (int tx = 0; tx < tilesX; tx++) {
                 int tileOffsetX = tx * MapFrameBuffer.SIZE;
@@ -47,34 +59,69 @@ public class MapDisplayManager {
                 // the image. Flip so bottom tiles get bottom pixel rows.
                 int tileOffsetZ = (tilesZ - 1 - tz) * MapFrameBuffer.SIZE;
 
-                int regionW = Math.min(MapFrameBuffer.SIZE, width - tileOffsetX);
-                int regionH = Math.min(MapFrameBuffer.SIZE, height - tileOffsetZ);
+                int regionW = Math.min(MapFrameBuffer.SIZE, displayWidth - tileOffsetX);
+                int regionH = Math.min(MapFrameBuffer.SIZE, displayHeight - tileOffsetZ);
 
                 if (regionW <= 0 || regionH <= 0) continue;
 
                 // Reuse pre-allocated buffer instead of allocating per frame
                 int[] subRegion = tileBuffers[tz * tilesX + tx];
-                for (int row = 0; row < regionH; row++) {
-                    System.arraycopy(argb, (tileOffsetZ + row) * width + tileOffsetX,
-                                     subRegion, row * regionW, regionW);
+
+                if (needsScale) {
+                    // Nearest-neighbor upscale: map display pixel → source pixel
+                    for (int row = 0; row < regionH; row++) {
+                        int srcY = (tileOffsetZ + row) * height / displayHeight;
+                        if (srcY >= height) srcY = height - 1;
+                        for (int col = 0; col < regionW; col++) {
+                            int srcX = (tileOffsetX + col) * width / displayWidth;
+                            if (srcX >= width) srcX = width - 1;
+                            subRegion[row * regionW + col] = argb[srcY * width + srcX];
+                        }
+                    }
+                } else {
+                    // Fast path: 1:1 copy when source matches display
+                    for (int row = 0; row < regionH; row++) {
+                        System.arraycopy(argb, (tileOffsetZ + row) * width + tileOffsetX,
+                                         subRegion, row * regionW, regionW);
+                    }
                 }
 
                 tiles[tz][tx].writeFromArgb(subRegion, regionW, regionH, 0, 0);
             }
         }
+
+        writeFrameCount++;
+        if (writeFrameCount % 100 == 1) {
+            int dirtyCount = 0;
+            for (int tz = 0; tz < tilesZ; tz++)
+                for (int tx = 0; tx < tilesX; tx++)
+                    if (tiles[tz][tx].getDirtyRect().isPresent()) dirtyCount++;
+            LOGGER.info("MapDisplay writeFrame #{}: src={}x{} disp={}x{} scale={} dirty={}/{} tiles",
+                writeFrameCount, width, height, displayWidth, displayHeight, needsScale, dirtyCount, tilesX * tilesZ);
+        }
     }
 
-    /** Send full-frame updates for all tiles to players. */
+    /** Send dirty tile updates to players. */
     public void sendUpdates(Collection<ServerPlayerEntity> players) {
+        int sentCount = 0;
         for (int tz = 0; tz < tilesZ; tz++) {
             for (int tx = 0; tx < tilesX; tx++) {
                 int mapId = mapIds[tz * tilesX + tx];
+                boolean wasDirty = tiles[tz][tx].getDirtyRect().isPresent();
                 MapPacketSender.sendUpdate(mapId, tiles[tz][tx], players);
+                if (wasDirty) sentCount++;
             }
+        }
+
+        sendUpdateCount++;
+        if (sendUpdateCount % 100 == 1) {
+            LOGGER.info("MapDisplay sendUpdates #{}: sent={}/{} tiles to {} players",
+                sendUpdateCount, sentCount, tilesX * tilesZ, players.size());
         }
     }
 
     public void setMapId(int tileX, int tileZ, int mapId) {
+        if (tileX < 0 || tileX >= tilesX || tileZ < 0 || tileZ >= tilesZ) return;
         mapIds[tileZ * tilesX + tileX] = mapId;
     }
 

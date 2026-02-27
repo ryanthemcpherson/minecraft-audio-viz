@@ -88,7 +88,7 @@ public class BitmapFrameBuffer {
         if (y < 0 || y >= height) return;
         int rowOffset = y * width;
         for (int x = 0; x < width; x++) {
-            float t = (float) x / (width - 1);
+            float t = width <= 1 ? 0f : (float) x / (width - 1);
             pixels[rowOffset + x] = lerpColor(leftARGB, rightARGB, t);
         }
     }
@@ -96,7 +96,7 @@ public class BitmapFrameBuffer {
     public void drawVerticalGradient(int x, int topARGB, int bottomARGB) {
         if (x < 0 || x >= width) return;
         for (int y = 0; y < height; y++) {
-            float t = (float) y / (height - 1);
+            float t = height <= 1 ? 0f : (float) y / (height - 1);
             pixels[y * width + x] = lerpColor(topARGB, bottomARGB, t);
         }
     }
