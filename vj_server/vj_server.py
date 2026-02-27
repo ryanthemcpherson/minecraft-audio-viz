@@ -1021,7 +1021,7 @@ class VJServer:
 
     def _get_all_patterns_list(self) -> list:
         """Get merged list of Lua patterns + bitmap patterns for the admin panel."""
-        all_patterns = list_patterns()
+        all_patterns = list(list_patterns())  # copy — don't mutate the global cache
         for p in self._bitmap_pattern_cache:
             all_patterns.append(
                 {
@@ -2577,7 +2577,11 @@ class VJServer:
 
         # Apply audio settings
         if "band_sensitivity" in scene_data:
-            self._band_sensitivity = scene_data["band_sensitivity"].copy()
+            bs = scene_data["band_sensitivity"]
+            if isinstance(bs, list) and len(bs) == 5:
+                self._band_sensitivity = bs.copy()
+            else:
+                logger.warning("Ignoring invalid band_sensitivity in scene: %r", bs)
         if "attack" in scene_data:
             self._pattern_config.attack = scene_data["attack"]
         if "release" in scene_data:
@@ -2592,6 +2596,8 @@ class VJServer:
         # Apply entity count
         if "entity_count" in scene_data:
             new_count = scene_data["entity_count"]
+            if not isinstance(new_count, int) or new_count < 1 or new_count > 1000:
+                new_count = 16
             if new_count != self.entity_count:
                 self.entity_count = new_count
                 self._pattern_config.entity_count = new_count
@@ -4268,7 +4274,7 @@ class VJServer:
         return scripts
 
     async def _send_with_timeout(
-        self, client, message: str, dead_clients: set, timeout: float = 0.5
+        self, client, message: str, dead_clients: set, timeout: float = 2.0
     ):
         """Send a message to a client with a timeout. Adds to dead_clients on failure."""
         try:
@@ -4310,8 +4316,10 @@ class VJServer:
         jitter_ms = 0.0
         sync_confidence = 0.0
         visual_delay_ms = self._visual_delay_ms
-        if self._active_dj_id and self._active_dj_id in self._djs:
-            dj = self._djs[self._active_dj_id]
+        # Snapshot active DJ once to avoid TOCTOU races
+        active_dj_id = self._active_dj_id
+        dj = self._djs.get(active_dj_id) if active_dj_id else None
+        if dj is not None:
             latency_ms = dj.latency_ms
             ping_ms = dj.network_rtt_ms
             pipeline_latency_ms = dj.pipeline_latency_ms
@@ -4322,9 +4330,7 @@ class VJServer:
             visual_delay_ms = self._get_effective_delay_ms(dj)
 
         # Build active DJ profile for state broadcast
-        active_dj_profile = None
-        if self._active_dj_id and self._active_dj_id in self._djs:
-            active_dj_profile = self._dj_profile_dict(self._djs[self._active_dj_id])
+        active_dj_profile = self._dj_profile_dict(dj) if dj is not None else None
 
         state = VizStateBroadcast(
             entities=entities,
@@ -4365,8 +4371,13 @@ class VJServer:
             client_list = list(self._broadcast_clients)
             for client in client_list:
                 send_tasks.append(self._send_with_timeout(client, message, dead_clients))
-            await asyncio.gather(*send_tasks)
-        self._broadcast_clients -= dead_clients
+            try:
+                await asyncio.gather(*send_tasks)
+            except Exception:
+                pass  # Individual failures already captured in dead_clients
+            finally:
+                if dead_clients:
+                    self._broadcast_clients -= dead_clients
 
     async def _auto_init_bitmap_zones(self, zone_names: list[str]):
         """Auto-initialize bitmap grids for all zones after Minecraft connect."""
@@ -5020,8 +5031,8 @@ class VJServer:
                     except Exception as e:
                         logger.debug(f"[PATTERN RELOAD] Error checking {lua_file.name}: {e}")
 
-                # Check for deleted files
-                cached_files = set(self._pattern_file_mtimes.keys())
+                # Check for deleted files (exclude lib.lua which is tracked separately)
+                cached_files = set(self._pattern_file_mtimes.keys()) - {"lib.lua"}
                 for filename in cached_files - current_files:
                     pattern_key = Path(filename).stem
                     deleted_patterns.append(pattern_key)
@@ -5247,7 +5258,8 @@ class VJServer:
                 and self.viz_client.connected
             ):
                 try:
-                    await self.viz_client.cleanup_zone(zone_name)
+                    # Just resize — init_pool resizes existing pools in place
+                    # (no cleanup_zone needed; that would destroy + recreate = flash)
                     await self.viz_client.init_pool(
                         zone_name, zone_state.entity_count, zone_state.block_type
                     )
@@ -5903,10 +5915,10 @@ class VJServer:
                     dt=loop_dt,
                 )
 
-                # Send to Minecraft when there's a DJ providing audio data.
-                # Skip when idle (no DJ) to avoid burning CPU on Lua pattern
-                # calculations with zero audio — resumes instantly on DJ connect.
-                should_send_to_mc = dj is not None
+                # Send to Minecraft whenever the MC plugin is connected.
+                # Patterns run fine with silent audio (idle animations),
+                # so no need to gate on DJ presence.
+                should_send_to_mc = self.viz_client is not None and self.viz_client.connected
 
                 # Clean up expired effects
                 now = time.time()
@@ -6029,20 +6041,23 @@ class VJServer:
                         )
                     mc_ms = (time.perf_counter() - mc_start) * 1000.0
 
-                # Send to browser clients (always, for preview)
+                # Send to browser clients at ~20fps (every 3rd frame) to avoid
+                # overwhelming slow clients. Beats always send immediately.
                 broadcast_start = time.perf_counter()
-                await self._broadcast_viz_state(
-                    entities,
-                    visual_bands,
-                    visual_peak,
-                    is_beat,
-                    visual_beat_intensity,
-                    instant_bass,
-                    instant_kick,
-                    tempo_confidence,
-                    beat_phase,
-                    zone_entities=zone_entities if len(zone_entities) > 1 else None,
-                )
+                should_broadcast = is_beat or (self._frame_count % 3 == 0)
+                if should_broadcast:
+                    await self._broadcast_viz_state(
+                        entities,
+                        visual_bands,
+                        visual_peak,
+                        is_beat,
+                        visual_beat_intensity,
+                        instant_bass,
+                        instant_kick,
+                        tempo_confidence,
+                        beat_phase,
+                        zone_entities=zone_entities if len(zone_entities) > 1 else None,
+                    )
                 broadcast_ms = (time.perf_counter() - broadcast_start) * 1000.0
 
                 # Log health summary every 60 seconds
@@ -6190,6 +6205,13 @@ class VJServer:
                 self._pattern_hot_reload_task.cancel()
                 try:
                     await self._pattern_hot_reload_task
+                except asyncio.CancelledError:
+                    pass
+            # Cancel coordinator heartbeat task
+            if self._coordinator_heartbeat_task:
+                self._coordinator_heartbeat_task.cancel()
+                try:
+                    await self._coordinator_heartbeat_task
                 except asyncio.CancelledError:
                     pass
             # Cancel Link sync task
