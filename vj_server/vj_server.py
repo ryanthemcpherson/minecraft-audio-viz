@@ -74,12 +74,24 @@ from vj_server.patterns import (
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.viz_client import VizClient
 
-# Feature flag: MCAV_ASYNC_LUA=1 to force threaded Lua execution, =0 or unset
-# to disable.  Threading via asyncio.to_thread is counterproductive because
-# ~85% of calculate_entities() is Python code (_unpack_flat, _smooth_entity)
-# that holds the GIL.  With N threads contending, wall-clock time increases
-# ~10x due to context-switch overhead while throughput stays the same.
-_USE_ASYNC_LUA = os.environ.get("MCAV_ASYNC_LUA", "0") == "1"
+# Feature flag for threaded Lua execution.
+#   MCAV_ASYNC_LUA=1  → force enabled
+#   MCAV_ASYNC_LUA=0  → force disabled
+#   unset / auto       → enabled only on free-threaded Python (3.13t+)
+#
+# With the GIL, threading is counterproductive: ~85% of calculate_entities()
+# is Python code (_unpack_flat, _smooth_entity) that holds the GIL, causing
+# ~10x slowdown from context-switch overhead.  On free-threaded builds (3.14t)
+# threads run truly in parallel → 1.6-2.1x speedup at 5 zones.
+_async_lua_env = os.environ.get("MCAV_ASYNC_LUA", "auto").lower()
+if _async_lua_env == "1":
+    _USE_ASYNC_LUA = True
+elif _async_lua_env == "0":
+    _USE_ASYNC_LUA = False
+else:
+    # Auto-detect: enable only when the GIL is disabled (free-threaded build)
+    _gil_check = getattr(sys, "_is_gil_enabled", None)
+    _USE_ASYNC_LUA = _gil_check is not None and not _gil_check()
 
 # ---------------------------------------------------------------------------
 # Input validation helpers (security hardening)
@@ -6159,7 +6171,14 @@ class VJServer:
         # Register with coordinator if configured
         await self._init_coordinator()
 
-        logger.info("VJ Server ready. Waiting for DJ connections...")
+        _ft = getattr(sys, "_is_gil_enabled", None)
+        _ft_label = f"free-threaded (GIL={'on' if _ft() else 'off'})" if _ft else "standard"
+        logger.info(
+            "VJ Server ready. Python %s (%s), async_lua=%s",
+            sys.version.split()[0],
+            _ft_label,
+            _USE_ASYNC_LUA,
+        )
 
         # Start Minecraft reconnection loop (runs in background)
         # Skip when --no-minecraft is set to avoid spamming connection attempts
