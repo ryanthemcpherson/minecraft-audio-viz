@@ -99,7 +99,11 @@ class VizClient:
             # Use open_timeout instead of asyncio.wait_for — the latter wraps
             # the awaitable in a Task which breaks websockets 14+'s internal
             # reader setup, causing recv() to block forever.
-            self.ws = await websockets.connect(self.uri, open_timeout=self.connect_timeout)
+            self.ws = await websockets.connect(
+                self.uri,
+                open_timeout=self.connect_timeout,
+                max_size=10 * 1024 * 1024,  # 10MB — stage block scans can be large
+            )
             self._connected = True
 
             # Reset reconnection counter on successful connection

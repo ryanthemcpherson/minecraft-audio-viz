@@ -8,9 +8,9 @@ Usage:
     python -m vj_server.vj_server --config configs/dj_auth.json
 
 Architecture:
-    DJ 1 (Remote) â”€â”€â”
-    DJ 2 (Remote) â”€â”€â”¼â”€â”€> VJ Server â”€â”€> Minecraft + Browsers
-    DJ 3 (Remote) â”€â”€â”˜
+    DJ 1 (Remote) â"€â"€â"
+    DJ 2 (Remote) â"€â"€â"¼â"€â"€> VJ Server â"€â"€> Minecraft + Browsers
+    DJ 3 (Remote) â"€â"€â"˜
                     â†‘
                 VJ Admin Panel
 """
@@ -6148,7 +6148,7 @@ class VJServer:
             logger.info(f"Admin panel: http://localhost:{self.http_port}/")
             logger.info(f"3D Preview: http://localhost:{self.http_port}/preview/")
 
-        # Start DJ listener (64KB max message â€” valid audio frames are ~200 bytes)
+        # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
         dj_server = await ws_serve(
             self._handle_dj_connection,
             "0.0.0.0",
@@ -6157,12 +6157,12 @@ class VJServer:
         )
         logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
 
-        # Start browser broadcast server (256KB max â€” config messages can be larger)
+        # Start browser broadcast server (10MB - stage block scan responses can be large)
         broadcast_server = await ws_serve(
             self._handle_browser_client,
             "0.0.0.0",
             self.broadcast_port,
-            max_size=262_144,
+            max_size=10 * 1024 * 1024,
         )
         logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
 
