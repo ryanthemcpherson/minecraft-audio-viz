@@ -6,9 +6,10 @@ import com.audioviz.stages.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.audioviz.decorators.impl.*;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
 
 /**
  * Manages all stage decorator instances.
@@ -26,6 +27,8 @@ public class StageDecoratorManager {
 
     private volatile AudioState currentAudioState;
     private volatile DJInfo currentDJInfo = DJInfo.none();
+    private volatile BannerConfig currentBannerConfig;
+    private volatile boolean transitionInProgress = false;
     private int tickCounter = 0;
 
     @FunctionalInterface
@@ -36,6 +39,27 @@ public class StageDecoratorManager {
     public StageDecoratorManager(AudioVizMod mod) {
         this.mod = mod;
         this.stageDecorators = new ConcurrentHashMap<>();
+        registerBuiltInFactories();
+    }
+
+    /**
+     * Register all built-in decorator factories.
+     */
+    private void registerBuiltInFactories() {
+        registerFactory("billboard", (id, stage, config, m) ->
+            new DJBillboardDecorator(stage, m));
+        registerFactory("text_fx", (id, stage, config, m) ->
+            new BeatTextFXDecorator(stage, m));
+        registerFactory("spotlight", (id, stage, config, m) ->
+            new SpotlightDecorator(stage, m));
+        registerFactory("floor_tiles", (id, stage, config, m) ->
+            new FloorTileDecorator(stage, m));
+        registerFactory("crowd", (id, stage, config, m) ->
+            new CrowdInteractionDecorator(stage, m));
+        registerFactory("transition", (id, stage, config, m) ->
+            new DJTransitionDecorator(stage, m));
+        registerFactory("banner", (id, stage, config, m) ->
+            new DJBannerDecorator(stage, m));
     }
 
     /**
@@ -147,6 +171,12 @@ public class StageDecoratorManager {
     }
 
     public DJInfo getCurrentDJInfo() { return currentDJInfo; }
+
+    public BannerConfig getCurrentBannerConfig() { return currentBannerConfig; }
+    public void setCurrentBannerConfig(BannerConfig config) { this.currentBannerConfig = config; }
+
+    public boolean isTransitionInProgress() { return transitionInProgress; }
+    public void setTransitionInProgress(boolean inProgress) { this.transitionInProgress = inProgress; }
 
     public void shutdown() {
         for (Map.Entry<String, List<StageDecorator>> entry : stageDecorators.entrySet()) {

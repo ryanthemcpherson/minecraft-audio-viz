@@ -1,0 +1,124 @@
+package com.audioviz.effects;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Configuration for beat-triggered effects in a zone.
+ * Maps beat types to effects and configures thresholds/cooldowns.
+ */
+public class BeatEffectConfig {
+
+    private final Map<BeatType, List<BeatEffect>> effects;
+    private final Map<BeatType, Float> thresholds;
+    private final Map<BeatType, Long> cooldowns;
+    private final Map<BeatType, Long> lastTriggerTime;
+
+    public BeatEffectConfig() {
+        this.effects = new ConcurrentHashMap<>();
+        this.thresholds = new ConcurrentHashMap<>();
+        this.cooldowns = new ConcurrentHashMap<>();
+        this.lastTriggerTime = new ConcurrentHashMap<>();
+
+        thresholds.put(BeatType.BEAT, 0.4f);
+        cooldowns.put(BeatType.BEAT, 150L);
+    }
+
+    private BeatEffectConfig(Builder builder) {
+        this.effects = new ConcurrentHashMap<>(builder.effects);
+        this.thresholds = new ConcurrentHashMap<>(builder.thresholds);
+        this.cooldowns = new ConcurrentHashMap<>(builder.cooldowns);
+        this.lastTriggerTime = new ConcurrentHashMap<>();
+    }
+
+    public void addEffect(BeatType type, BeatEffect effect) {
+        effects.computeIfAbsent(type, k -> new ArrayList<>()).add(effect);
+    }
+
+    public void removeEffect(BeatType type, BeatEffect effect) {
+        List<BeatEffect> list = effects.get(type);
+        if (list != null) {
+            list.remove(effect);
+            if (list.isEmpty()) effects.remove(type);
+        }
+    }
+
+    public void setThreshold(BeatType type, double threshold) {
+        thresholds.put(type, (float) Math.max(0, Math.min(1, threshold)));
+    }
+
+    public void setCooldown(BeatType type, long cooldownMs) {
+        cooldowns.put(type, Math.max(0, cooldownMs));
+    }
+
+    public List<BeatEffect> getEffects(BeatType type) {
+        return effects.getOrDefault(type, Collections.emptyList());
+    }
+
+    public float getThreshold(BeatType type) {
+        return thresholds.getOrDefault(type, 0.5f);
+    }
+
+    public long getCooldown(BeatType type) {
+        return cooldowns.getOrDefault(type, 150L);
+    }
+
+    public boolean canTrigger(BeatType type) {
+        long now = System.currentTimeMillis();
+        long lastTrigger = lastTriggerTime.getOrDefault(type, 0L);
+        return (now - lastTrigger) >= getCooldown(type);
+    }
+
+    public void markTriggered(BeatType type) {
+        lastTriggerTime.put(type, System.currentTimeMillis());
+    }
+
+    public boolean hasEffects() {
+        return !effects.isEmpty();
+    }
+
+    public Set<BeatType> getBeatTypes() {
+        return effects.keySet();
+    }
+
+    public static class Builder {
+        private final Map<BeatType, List<BeatEffect>> effects = new HashMap<>();
+        private final Map<BeatType, Float> thresholds = new HashMap<>();
+        private final Map<BeatType, Long> cooldowns = new HashMap<>();
+
+        public Builder() {
+            thresholds.put(BeatType.KICK, 0.4f);
+            thresholds.put(BeatType.SNARE, 0.35f);
+            thresholds.put(BeatType.HIHAT, 0.3f);
+            thresholds.put(BeatType.BASS_DROP, 0.6f);
+            thresholds.put(BeatType.PEAK, 0.5f);
+            thresholds.put(BeatType.ANY, 0.3f);
+
+            cooldowns.put(BeatType.KICK, 150L);
+            cooldowns.put(BeatType.SNARE, 200L);
+            cooldowns.put(BeatType.HIHAT, 100L);
+            cooldowns.put(BeatType.BASS_DROP, 2000L);
+            cooldowns.put(BeatType.PEAK, 500L);
+            cooldowns.put(BeatType.ANY, 100L);
+        }
+
+        public Builder addEffect(BeatType type, BeatEffect effect) {
+            effects.computeIfAbsent(type, k -> new ArrayList<>()).add(effect);
+            return this;
+        }
+
+        public Builder setThreshold(BeatType type, float threshold) {
+            thresholds.put(type, Math.max(0, Math.min(1, threshold)));
+            return this;
+        }
+
+        public Builder setCooldown(BeatType type, long cooldownMs) {
+            cooldowns.put(type, Math.max(0, cooldownMs));
+            return this;
+        }
+
+        public BeatEffectConfig build() {
+            return new BeatEffectConfig(this);
+        }
+    }
+}

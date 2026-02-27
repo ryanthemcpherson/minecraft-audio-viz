@@ -14,6 +14,7 @@ import com.audioviz.zones.VisualizationZone;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -297,6 +298,16 @@ public class MessageHandler {
         BitmapPatternManager bpm = mod.getBitmapPatternManager();
         if (bpm == null) return createError("Bitmap pattern manager not initialized");
         bpm.activateZone(zone, patternId, width, height);
+
+        // Initialize map display so the renderer has somewhere to draw
+        if (!mod.getMapRenderer().hasDisplay(zone)) {
+            var vizZone = mod.getZoneManager().getZone(zone);
+            if (vizZone != null && vizZone.getWorld() != null) {
+                mod.getMapRenderer().initializeDisplay(zone, vizZone, width, height,
+                    vizZone.getWorld(), Direction.NORTH);
+                LOGGER.info("Initialized map display for bitmap zone '{}' ({}x{})", zone, width, height);
+            }
+        }
 
         JsonObject response = new JsonObject();
         response.addProperty("type", "bitmap_init_ok");

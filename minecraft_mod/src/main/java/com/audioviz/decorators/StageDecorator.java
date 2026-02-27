@@ -3,14 +3,20 @@ package com.audioviz.decorators;
 import com.audioviz.AudioVizMod;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.stages.Stage;
+import com.audioviz.zones.VisualizationZone;
+import net.minecraft.block.BlockState;
+import net.minecraft.entity.decoration.DisplayEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import org.joml.Vector3f;
 
 /**
  * Abstract base class for stage decorators.
  *
- * <p>Ported from Paper: AudioVizPlugin → AudioVizMod,
- * Location → Vec3d, Material → block string reference.
- * Entity pool management via Polymer virtual entities.
+ * <p>Ported from Paper: AudioVizPlugin -> AudioVizMod,
+ * Location -> Vec3d, Material -> BlockState.
+ * Entity pool management via Polymer virtual entities through DecoratorEntityManager.
  */
 public abstract class StageDecorator {
 
@@ -40,6 +46,8 @@ public abstract class StageDecorator {
         return stage.getName().toLowerCase() + "_deco_" + id;
     }
 
+    // ========== Zone & Entity Helpers ==========
+
     /**
      * Calculate a world position relative to the stage anchor, applying rotation.
      */
@@ -53,6 +61,83 @@ public abstract class StageDecorator {
             stage.getAnchor().getZ() + rotatedZ
         );
     }
+
+    /**
+     * Create a visualization zone for this decorator at the given origin.
+     * Registers the zone in ZoneManager so other code can find it.
+     */
+    protected VisualizationZone createDecoratorZone(Vec3d origin, Vector3f size) {
+        String zoneName = getDecoratorZoneName();
+        ServerWorld world = getStageWorld();
+        BlockPos blockOrigin = BlockPos.ofFloored(origin.x, origin.y, origin.z);
+
+        VisualizationZone zone = mod.getZoneManager().createZone(zoneName, world, blockOrigin);
+        if (zone == null) {
+            zone = mod.getZoneManager().getZone(zoneName);
+        }
+        if (zone != null) {
+            zone.setSize(size);
+            zone.setRotation(stage.getRotation());
+        }
+        return zone;
+    }
+
+    /**
+     * Initialize a text display entity pool for this decorator.
+     */
+    protected void initTextPool(int count) {
+        initTextPool(count, DisplayEntity.BillboardMode.CENTER);
+    }
+
+    /**
+     * Initialize a text display entity pool with a specific billboard mode.
+     */
+    protected void initTextPool(int count, DisplayEntity.BillboardMode billboard) {
+        String zoneName = getDecoratorZoneName();
+        VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
+        Vec3d origin = zone != null ? zone.getOriginVec3d() : getStageRelativePosition(0, 0, 0);
+        ServerWorld world = getStageWorld();
+
+        mod.getDecoratorEntityManager().initTextPool(zoneName, count, billboard, world, origin);
+    }
+
+    /**
+     * Initialize a block display entity pool for this decorator.
+     */
+    protected void initBlockPool(int count, BlockState blockState) {
+        String zoneName = getDecoratorZoneName();
+        VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
+        Vec3d origin = zone != null ? zone.getOriginVec3d() : getStageRelativePosition(0, 0, 0);
+        ServerWorld world = getStageWorld();
+
+        mod.getDecoratorEntityManager().initBlockPool(zoneName, count, blockState, world, origin);
+    }
+
+    /**
+     * Clean up the entity pool and zone for this decorator.
+     */
+    protected void cleanupDecoratorZone() {
+        String zoneName = getDecoratorZoneName();
+        mod.getDecoratorEntityManager().cleanup(zoneName);
+        mod.getZoneManager().deleteZone(zoneName);
+    }
+
+    /**
+     * Resolve the ServerWorld for this stage.
+     */
+    protected ServerWorld getStageWorld() {
+        String worldName = stage.getWorldName();
+        if (worldName != null && mod.getServer() != null) {
+            for (ServerWorld w : mod.getServer().getWorlds()) {
+                if (w.getRegistryKey().getValue().toString().equals(worldName)) {
+                    return w;
+                }
+            }
+        }
+        return mod.getServer().getOverworld();
+    }
+
+    // ========== Audio Helpers ==========
 
     protected int getDominantBand(AudioState audio) {
         double[] bands = audio.getBands();
@@ -70,6 +155,8 @@ public abstract class StageDecorator {
     protected double lerp(double a, double b, double t) {
         return a + (b - a) * Math.max(0, Math.min(1, t));
     }
+
+    // ========== Lifecycle ==========
 
     public void incrementTick() { tickCount++; }
 

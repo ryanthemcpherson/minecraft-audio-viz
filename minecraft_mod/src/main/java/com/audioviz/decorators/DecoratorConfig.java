@@ -64,6 +64,22 @@ public class DecoratorConfig {
         return defaultVal;
     }
 
+    @SuppressWarnings("unchecked")
+    public List<String> getStringList(String key, List<String> defaultVal) {
+        Object val = settings.get(key);
+        if (val instanceof List<?> list) {
+            List<String> result = new ArrayList<>();
+            for (Object item : list) {
+                result.add(String.valueOf(item));
+            }
+            return result;
+        }
+        if (val instanceof String[] arr) {
+            return List.of(arr);
+        }
+        return defaultVal;
+    }
+
     public void set(String key, Object value) { settings.put(key, value); }
     public void remove(String key) { settings.remove(key); }
 }
