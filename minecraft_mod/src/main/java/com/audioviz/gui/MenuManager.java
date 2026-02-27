@@ -36,6 +36,7 @@ public class MenuManager {
         }
 
         activeSessions.put(playerId, gui);
+        gui.init();
         gui.open();
     }
 

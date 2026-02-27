@@ -2,11 +2,15 @@ package com.audioviz.gui;
 
 import eu.pb4.sgui.api.ClickType;
 import eu.pb4.sgui.api.elements.GuiElementBuilder;
+import eu.pb4.sgui.api.gui.AnvilInputGui;
 import eu.pb4.sgui.api.gui.SimpleGui;
 import net.minecraft.item.Items;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
+
+import java.util.function.Consumer;
 
 /**
  * Base class for all AudioViz GUI screens built on SGUI.
@@ -25,6 +29,12 @@ public abstract class AudioVizGui extends SimpleGui {
     protected AudioVizGui(ScreenHandlerType<?> type, ServerPlayerEntity player, MenuManager menuManager) {
         super(type, player, false);
         this.menuManager = menuManager;
+    }
+
+    /**
+     * Initialize title and build slots. Must be called after subclass constructor completes.
+     */
+    public void init() {
         setTitle(getMenuTitle());
         build();
     }
@@ -74,6 +84,53 @@ public abstract class AudioVizGui extends SimpleGui {
             net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(),
             0.5f, 1.0f
         );
+    }
+
+    // ========== Layout Helpers ==========
+
+    /**
+     * Convert row/col to slot index. Row 0 = top, Col 0 = left.
+     */
+    protected static int slot(int row, int col) {
+        return row * 9 + col;
+    }
+
+    /**
+     * Add a standard back button at the given slot.
+     */
+    protected void setBackButton(int slotIndex, Runnable action) {
+        setSlot(slotIndex, new GuiElementBuilder(Items.ARROW)
+            .setName(Text.literal("Back").formatted(Formatting.WHITE))
+            .setCallback((index, type, act) -> {
+                playClickSound();
+                action.run();
+            }));
+    }
+
+    /**
+     * Open an anvil text input GUI. On submit, calls onResult with the typed text.
+     * On close/cancel, calls onCancel (typically reopens this menu).
+     */
+    protected void promptTextInput(String title, String defaultText,
+                                    Consumer<String> onResult, Runnable onCancel) {
+        var anvil = new AnvilInputGui(getPlayer(), false) {
+            @Override
+            public void onClose() {
+                onCancel.run();
+            }
+        };
+        anvil.setTitle(Text.literal(title));
+        anvil.setDefaultInputValue(defaultText != null ? defaultText : "");
+
+        anvil.setSlot(2, new GuiElementBuilder(Items.LIME_CONCRETE)
+            .setName(Text.literal("Confirm").formatted(Formatting.GREEN))
+            .setCallback((index, type, action) -> {
+                String input = anvil.getInput();
+                anvil.close();
+                onResult.accept(input != null ? input.trim() : "");
+            }));
+
+        anvil.open();
     }
 
     @Override

@@ -21,8 +21,9 @@ import net.minecraft.util.Formatting;
 public class MainMenu extends AudioVizGui {
 
     private static final int SLOT_ZONES = 10;
-    private static final int SLOT_DJ_PANEL = 12;
-    private static final int SLOT_SETTINGS = 14;
+    private static final int SLOT_STAGES = 11;
+    private static final int SLOT_DJ_PANEL = 13;
+    private static final int SLOT_SETTINGS = 15;
     private static final int SLOT_STATUS = 16;
     private static final int SLOT_HELP = 31;
 
@@ -53,6 +54,22 @@ public class MainMenu extends AudioVizGui {
                 playClickSound();
                 menuManager.openMenu(getPlayer(),
                     new ZoneManagementMenu(getPlayer(), menuManager, mod));
+            }));
+
+        // Stage Management
+        int stageCount = mod.getStageManager().getStageCount();
+        setSlot(SLOT_STAGES, new GuiElementBuilder(Items.NETHER_STAR)
+            .setName(Text.literal("Stages").formatted(Formatting.GOLD))
+            .addLoreLine(Text.literal("Manage visualization stages").formatted(Formatting.GRAY))
+            .addLoreLine(Text.empty())
+            .addLoreLine(Text.literal("Stages: " + stageCount).formatted(Formatting.YELLOW))
+            .addLoreLine(Text.empty())
+            .addLoreLine(Text.literal("Click to manage stages").formatted(Formatting.YELLOW))
+            .setCallback((index, type, action) -> {
+                playClickSound();
+                menuManager.openMenu(getPlayer(),
+                    new StageListMenu(getPlayer(), menuManager, mod, () ->
+                        menuManager.openMenu(getPlayer(), new MainMenu(getPlayer(), menuManager, mod))));
             }));
 
         // DJ Control Panel
