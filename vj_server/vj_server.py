@@ -74,8 +74,12 @@ from vj_server.patterns import (
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.viz_client import VizClient
 
-# Feature flag: set MCAV_ASYNC_LUA=0 to disable threaded Lua execution
-_USE_ASYNC_LUA = os.environ.get("MCAV_ASYNC_LUA", "1") != "0"
+# Feature flag: MCAV_ASYNC_LUA=1 to force threaded Lua execution, =0 or unset
+# to disable.  Threading via asyncio.to_thread is counterproductive because
+# ~85% of calculate_entities() is Python code (_unpack_flat, _smooth_entity)
+# that holds the GIL.  With N threads contending, wall-clock time increases
+# ~10x due to context-switch overhead while throughput stays the same.
+_USE_ASYNC_LUA = os.environ.get("MCAV_ASYNC_LUA", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # Input validation helpers (security hardening)
@@ -5321,10 +5325,10 @@ class VJServer:
     ) -> List[dict]:
         """Calculate entity positions for a specific zone, with crossfade support.
 
-        When MCAV_ASYNC_LUA is enabled, Lua pattern calculation runs on a
-        thread pool worker via asyncio.to_thread so it doesn't block the
-        event loop.  Lupa releases the GIL during Lua execution, so this
-        gives true parallelism for multi-zone setups.
+        When MCAV_ASYNC_LUA=1, pattern calculation runs on a thread pool
+        worker via asyncio.to_thread.  Disabled by default because ~85%
+        of the work is Python code (_unpack_flat, _smooth_entity) that
+        holds the GIL, making threading counterproductive.
         """
         # Inject active DJ palette into zone pattern config
         active_dj = self._get_active_dj()
@@ -5976,8 +5980,6 @@ class VJServer:
                             calc_tasks[zone_name] = self._calculate_entities_for_zone(
                                 zone_state, audio_state, zone_name
                             )
-                    # Run all zone calculations concurrently (each on its own thread
-                    # when MCAV_ASYNC_LUA is enabled — lupa releases the GIL)
                     if calc_tasks:
                         results = await asyncio.gather(*calc_tasks.values())
                         for zn, zents in zip(calc_tasks.keys(), results):
