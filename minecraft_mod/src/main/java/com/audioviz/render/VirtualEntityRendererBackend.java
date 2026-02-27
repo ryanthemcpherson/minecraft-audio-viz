@@ -44,8 +44,9 @@ public class VirtualEntityRendererBackend {
             ? new VirtualEntityPool(entityCount, defaultBlock)
             : new VirtualEntityPool(entityCount);
 
-        // Attach to world at zone origin — auto sends spawn/destroy as players load chunks
-        ChunkAttachment.of(pool.getHolder(), world, zone.getOriginVec3d());
+        // Attach to world at zone origin — auto-ticking keeps player tracking updated
+        // so spawn/destroy packets are sent as players enter/leave chunks.
+        ChunkAttachment.ofTicking(pool.getHolder(), world, zone.getOriginVec3d());
 
         pools.put(key, pool);
     }

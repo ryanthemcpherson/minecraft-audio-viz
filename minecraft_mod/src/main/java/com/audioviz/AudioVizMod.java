@@ -419,7 +419,8 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             if (zone == null) return null;
 
             VisualizationZone vizZone = zoneManager.getZone(zone);
-            if (vizZone == null || !virtualRenderer.hasPool(zone)) return null;
+            if (vizZone == null) return null;
+            if (!virtualRenderer.hasPool(zone)) return null;
 
             JsonArray entities = message.has("entities") ? message.getAsJsonArray("entities") : null;
             if (entities == null || entities.isEmpty()) return null;
