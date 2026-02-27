@@ -81,6 +81,32 @@ jobs:
           name: minecraft-mod
           path: minecraft_mod/build/libs/audioviz-mod-*.jar
 
+  build-plugin:
+    name: Build Minecraft Plugin
+    needs: [ci-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: minecraft_plugin
+        run: ./mvnw package -q
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: minecraft-plugin
+          path: |
+            minecraft_plugin/target/audioviz-plugin-*.jar
+            !minecraft_plugin/target/original-*.jar
+
   build-dj-client:
     name: Build DJ Client (${{ matrix.platform }})
     needs: [ci-gate]
@@ -238,7 +264,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-python, build-mod, build-dj-client]
+    needs: [build-python, build-mod, build-plugin, build-dj-client]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -254,6 +280,12 @@ jobs:
         with:
           name: minecraft-mod
           path: mod/
+
+      - name: Download Plugin artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: minecraft-plugin
+          path: plugin/
 
       - name: Download DJ Client Windows
         uses: actions/download-artifact@v7
@@ -293,6 +325,8 @@ jobs:
           ls -la dist/ || true
           echo "=== Minecraft mod ==="
           ls -la mod/ || true
+          echo "=== Minecraft plugin ==="
+          ls -la plugin/ || true
           echo "=== DJ Client Windows ==="
           ls -la dj-client/windows/ || true
           echo "=== DJ Client Linux ==="
@@ -313,6 +347,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             mod/*.jar
+            plugin/*.jar
             dj-client/windows/*
             dj-client/linux/*
             dj-client/macos-x64/*
