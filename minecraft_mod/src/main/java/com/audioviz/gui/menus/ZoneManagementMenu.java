@@ -60,12 +60,11 @@ public class ZoneManagementMenu extends AudioVizGui {
                 .addLoreLine(Text.literal("Size: " + (int) zone.getSize().x + "x" + (int) zone.getSize().y
                     + "x" + (int) zone.getSize().z).formatted(Formatting.GRAY))
                 .addLoreLine(Text.empty())
-                .addLoreLine(Text.literal("Left-click: teleport").formatted(Formatting.YELLOW))
-                .addLoreLine(Text.literal("Right-click: delete").formatted(Formatting.RED))
+                .addLoreLine(Text.literal("Left-click: edit zone").formatted(Formatting.YELLOW))
+                .addLoreLine(Text.literal("Right-click: teleport").formatted(Formatting.AQUA))
                 .setCallback((index, type, action) -> {
                     playClickSound();
-                    // Teleport on left click
-                    if (type == eu.pb4.sgui.api.ClickType.MOUSE_LEFT) {
+                    if (type == eu.pb4.sgui.api.ClickType.MOUSE_RIGHT) {
                         close();
                         getPlayer().teleport(
                             zone.getWorld(),
@@ -77,6 +76,11 @@ public class ZoneManagementMenu extends AudioVizGui {
                             getPlayer().getPitch(),
                             false
                         );
+                    } else {
+                        menuManager.openMenu(getPlayer(),
+                            new ZoneEditorMenu(getPlayer(), menuManager, mod, zoneName, () ->
+                                menuManager.openMenu(getPlayer(),
+                                    new ZoneManagementMenu(getPlayer(), menuManager, mod))));
                     }
                 }));
             slot++;
