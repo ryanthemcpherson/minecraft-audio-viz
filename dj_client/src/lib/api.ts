@@ -270,19 +270,28 @@ export interface ResolvedConnectCode {
 
 export async function resolveConnectCode(
   code: string,
+  idempotencyKey?: string,
 ): Promise<ResolvedConnectCode> {
   // Send user auth if signed in so coordinator links the session to the user.
   // Fall back to unauthenticated fetch when no tokens are available.
   try {
     return await authedFetch<ResolvedConnectCode>(
-      `/connect/${encodeURIComponent(code)}`,
+      `/connect/${encodeURIComponent(code)}/join`,
+      {
+        method: 'POST',
+        headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      },
     );
   } catch (e) {
     // If the error is "Not signed in", fall back to unauthenticated fetch.
     // Any other error (ApiError with 4xx/5xx) should propagate as-is.
     if (e instanceof Error && e.message === 'Not signed in') {
       return apiFetch<ResolvedConnectCode>(
-        `/connect/${encodeURIComponent(code)}`,
+        `/connect/${encodeURIComponent(code)}/join`,
+        {
+          method: 'POST',
+          headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        },
       );
     }
     throw e;

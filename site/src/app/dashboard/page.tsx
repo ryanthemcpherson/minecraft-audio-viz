@@ -511,7 +511,7 @@ export default function DashboardPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold">
-                <span className="text-gradient">{profile.display_name}</span>
+                <span className="text-disc-cyan">{profile.display_name}</span>
               </h1>
               <div className="flex gap-1.5">
                 {dashboard?.has_dj_profile && (

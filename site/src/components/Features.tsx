@@ -85,25 +85,13 @@ const features = [
 export default function Features() {
   return (
     <section id="features" className="relative px-6 py-32">
-      {/* Background accent */}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/2 top-0 h-px w-2/3 -translate-x-1/2 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-      </div>
-
       <div className="mx-auto max-w-7xl">
         {/* Section Header */}
-        <div className="mb-20 text-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-noteblock-amber">
-            Features
-          </p>
+        <div className="mb-16 text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
             Everything you need for{" "}
-            <span className="text-gradient">live shows</span>
+            <span className="text-disc-cyan">live shows</span>
           </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-text-secondary">
-            A complete audio visualization pipeline from system audio to Minecraft world,
-            with tools for DJs and VJs alike.
-          </p>
         </div>
 
         {/* Feature Grid */}
@@ -111,7 +99,7 @@ export default function Features() {
           {features.map((feature) => (
             <div
               key={feature.title}
-              className={`glass-card rounded-2xl p-8 ${feature.borderHover}`}
+              className={`flat-card rounded-2xl p-8 ${feature.borderHover}`}
             >
               <div className={`mb-5 ${feature.accent}`}>{feature.icon}</div>
               <h3 className="mb-3 text-lg font-bold">{feature.title}</h3>

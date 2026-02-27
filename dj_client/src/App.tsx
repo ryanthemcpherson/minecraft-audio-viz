@@ -462,7 +462,10 @@ function App() {
         connPort = serverPort;
       } else {
         // Resolve connect code through the coordinator API
-        const resolved = await api.resolveConnectCode(formattedCode);
+        const idempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const resolved = await api.resolveConnectCode(formattedCode, idempotencyKey);
         const wsUrl = new URL(resolved.websocket_url);
         connHost = wsUrl.hostname;
         connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);

@@ -11,7 +11,7 @@ export class WebSocketService extends EventTarget {
         this.port = options.port || 8766;
         this.vjPassword = options.vjPassword || '';
         this.reconnectInterval = options.reconnectInterval || 1000;
-        this.maxReconnectAttempts = options.maxReconnectAttempts || 10;
+        this.maxReconnectAttempts = options.maxReconnectAttempts || 50;
 
         this.ws = null;
         this.reconnectAttempts = 0;
@@ -154,8 +154,7 @@ export class WebSocketService extends EventTarget {
         this._emit('connected');
         this._startPingInterval();
 
-        // Request initial state
-        this.send({ type: 'get_patterns' });
+        // Request initial state (get_state response includes patterns in vj_state)
         this.send({ type: 'get_state' });
 
         // Flush message queue
@@ -249,7 +248,7 @@ export class WebSocketService extends EventTarget {
 
         const delay = Math.min(
             this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1),
-            30000 // Max 30 seconds
+            60000 // Max 60 seconds
         );
 
         console.log(`[WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempts})`);

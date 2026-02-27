@@ -100,19 +100,15 @@ class TestLuaPattern:
         # With no calculate function, should return empty list
         assert isinstance(entities, list)
 
-    def test_lua_os_module_accessible(self):
-        """Verify Lua runtime state: os module is currently available (not sandboxed).
-
-        NOTE: If a sandbox is added later that restricts os.execute,
-        update this test to assert it's None instead.
-        """
+    def test_lua_os_module_sandboxed(self):
+        """Verify sandbox removes the Lua ``os`` module."""
         pat = LuaPattern("spectrum")
         lua = pat._lua
         if lua is None:
             pytest.skip("lupa not installed")
         lua.execute("_test_os_avail = (os ~= nil)")
         result = lua.globals()["_test_os_avail"]
-        assert result is True, "os module should be available in the Lua runtime"
+        assert result is False, "os module should be removed from the Lua runtime"
 
 
 # ============================================================================
