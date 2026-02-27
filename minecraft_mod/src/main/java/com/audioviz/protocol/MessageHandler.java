@@ -824,6 +824,17 @@ public class MessageHandler {
 
         sm.saveStages();
 
+        // Apply to the live entity pool if stage is active
+        if (stage.isActive()) {
+            String zoneName = stage.getRoleToZone().get(role);
+            VisualizationZone vizZone = mod.getZoneManager().getZone(zoneName);
+            if (vizZone != null) {
+                BlockState blockState = com.audioviz.render.MaterialResolver.resolve(config.getBlockType());
+                mod.getVirtualRenderer().initializePool(
+                    zoneName, vizZone, config.getEntityCount(), vizZone.getWorld(), blockState);
+            }
+        }
+
         JsonObject response = new JsonObject();
         response.addProperty("type", "stage_zone_config_updated");
         response.addProperty("stage", stageName);
