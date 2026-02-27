@@ -226,7 +226,7 @@ impl DjClient {
                 self.config.coordinator_token.clone(),
             ))
             .map_err(|e| ClientError::SendError(format!("Failed to serialize auth message: {}", e)))?
-        } else if let (Some(ref id), Some(ref key)) = (&self.config.dj_id, &self.config.dj_key) {
+        } else if let (Some(id), Some(key)) = (&self.config.dj_id, &self.config.dj_key) {
             // Credential-based authentication
             serde_json::to_string(&DjAuthMessage::new(
                 id.clone(),

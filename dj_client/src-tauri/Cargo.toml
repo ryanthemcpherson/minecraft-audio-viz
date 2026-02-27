@@ -3,7 +3,7 @@ name = "dj-client"
 version = "1.1.0"
 description = "MCAV DJ Client - Connect to VJ servers and stream audio visualizations"
 authors = ["MCAV Team"]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 
 [lib]

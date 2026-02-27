@@ -1,3 +1,6 @@
+// TODO: incrementally add unsafe blocks inside unsafe fns, then remove this allow
+#![allow(unsafe_op_in_unsafe_fn)]
+
 //! MCAV DJ Client Library
 //!
 //! Cross-platform DJ client for connecting to VJ servers and streaming
