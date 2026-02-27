@@ -286,9 +286,22 @@ public class MessageHandler {
         String backend = message.has("backend") ? message.get("backend").getAsString() : null;
         if (zone == null || backend == null) return createError("Missing zone or backend");
 
-        // Acknowledge — the VJ server tracks which backend is active and
-        // routes batch_update vs bitmap_frame messages accordingly.
-        // The Minecraft side just needs the corresponding renderer initialized.
+        // When switching to entity mode, ensure the pool exists so batch_update
+        // messages aren't silently dropped.  The VJ server reliably sends a
+        // separate init_pool when switching *from* bitmap, but going directly to
+        // entity mode skips that — so we auto-initialize here as a fallback.
+        if ("VIRTUAL_ENTITY".equalsIgnoreCase(backend) && !mod.getVirtualRenderer().hasPool(zone)) {
+            var vizZone = mod.getZoneManager().getZone(zone);
+            if (vizZone != null && vizZone.getWorld() != null) {
+                int entityCount = message.has("entity_count") ? message.get("entity_count").getAsInt() : 64;
+                String material = message.has("material") ? message.get("material").getAsString() : null;
+                net.minecraft.block.BlockState blockState = material != null
+                    ? com.audioviz.render.MaterialResolver.resolve(material) : null;
+                mod.getVirtualRenderer().initializePool(zone, vizZone, entityCount, vizZone.getWorld(), blockState);
+                LOGGER.info("Auto-initialized entity pool '{}' ({} entities) on backend switch", zone, entityCount);
+            }
+        }
+
         LOGGER.info("Renderer backend for zone '{}' set to '{}'", zone, backend);
 
         JsonObject response = new JsonObject();
