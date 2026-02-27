@@ -117,7 +117,7 @@ public class DJLogoPattern extends BitmapPattern {
         g.setColor(java.awt.Color.BLACK);
         g.fillRect(0, 0, targetWidth, targetHeight);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-            RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         int offsetX = (targetWidth - fitW) / 2;
         int offsetY = (targetHeight - fitH) / 2;
         g.drawImage(cropped, offsetX, offsetY, fitW, fitH, null);
