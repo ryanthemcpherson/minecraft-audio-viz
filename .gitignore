@@ -48,7 +48,9 @@ config.local.json
 .claude/settings.local.json
 configs/dj_auth.json
 
-# Minecraft plugin build
+# Minecraft mod build
+minecraft_mod/build/
+minecraft_mod/eu/
 minecraft_plugin/target/
 *.jar
 
@@ -131,3 +133,11 @@ worker/dist/
 
 # Test databases
 coordinator/test.db
+
+# Tool caches
+.desloppify/
+.claude/skills/
+pytest-cache-files-*/
+
+# Community bot
+community_bot/.venv/
