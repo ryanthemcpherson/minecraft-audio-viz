@@ -907,13 +907,13 @@ public class MessageHandler {
 
         if (world == null) return createError("No zones found for stage: " + stageName);
 
-        // Expand bounding box: +5 XZ, +3 below, +2 above
-        minX -= 5;
-        minZ -= 5;
-        maxX += 5;
-        maxZ += 5;
-        minY -= 3;
-        maxY += 2;
+        // Expand bounding box to capture surrounding stage structure
+        minX -= 20;
+        minZ -= 20;
+        maxX += 20;
+        maxZ += 20;
+        minY -= 10;
+        maxY += 5;
 
         // Scan blocks — build palette and block array
         LinkedHashMap<String, Integer> palette = new LinkedHashMap<>();
