@@ -334,13 +334,13 @@ public class MessageHandler {
         try {
             BitmapPatternManager bpm = mod.getBitmapPatternManager();
             if (bpm == null) return createError("Bitmap pattern manager not initialized");
-            bpm.activateZone(zone, patternId, width, height);
 
             var vizZone = mod.getZoneManager().getZone(zone);
             if (vizZone != null && vizZone.getWorld() != null) {
                 Direction facing = directionFromRotation(vizZone.getRotation());
                 if ("entity".equals(backend)) {
                     mod.getMapRenderer().destroyDisplay(zone);
+                    bpm.activateZone(zone, patternId, width, height);
                     if (mod.getBitmapToEntityBridge() != null) {
                         mod.getBitmapToEntityBridge().initializeWall(zone, vizZone, width, height,
                             vizZone.getWorld(), facing);
@@ -349,11 +349,17 @@ public class MessageHandler {
                         zone, width, height, facing);
                 } else {
                     if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zone);
-                    mod.getMapRenderer().initializeDisplay(zone, vizZone, width, height,
+                    // Map display derives tile count from zone dimensions and returns actual pixel size
+                    int[] actualSize = mod.getMapRenderer().initializeDisplay(zone, vizZone, width, height,
                         vizZone.getWorld(), facing);
+                    width = actualSize[0];
+                    height = actualSize[1];
+                    bpm.activateZone(zone, patternId, width, height);
                     LOGGER.info("Initialized map display for bitmap zone '{}' ({}x{}, facing {})",
                         zone, width, height, facing);
                 }
+            } else {
+                bpm.activateZone(zone, patternId, width, height);
             }
 
             JsonObject response = new JsonObject();
@@ -444,12 +450,15 @@ public class MessageHandler {
         JsonArray transitions = new JsonArray();
         if (bpm != null) {
             var tm = bpm.getTransitionManager();
-            for (String id : tm.getTransitionIds()) {
-                BitmapTransition t = tm.getTransition(id);
-                JsonObject tObj = new JsonObject();
-                tObj.addProperty("id", t.getId());
-                tObj.addProperty("name", t.getName());
-                transitions.add(tObj);
+            if (tm != null) {
+                for (String id : tm.getTransitionIds()) {
+                    BitmapTransition t = tm.getTransition(id);
+                    if (t == null) continue;
+                    JsonObject tObj = new JsonObject();
+                    tObj.addProperty("id", t.getId());
+                    tObj.addProperty("name", t.getName());
+                    transitions.add(tObj);
+                }
             }
         }
         response.add("transitions", transitions);

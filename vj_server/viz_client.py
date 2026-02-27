@@ -50,18 +50,15 @@ class VizClient:
         self._receive_task: Optional[asyncio.Task] = None
         self._last_pong: float = 0
 
-        # Response queue for request/response pattern (only used when heartbeat enabled)
-        # TODO: Replace with correlation-ID-based dict[str, asyncio.Future] so that
-        # concurrent send() calls receive their own response instead of racing on a
-        # shared FIFO.  Requires adding a `req_id` field to outgoing messages and
-        # matching it in the receive loop.  For now, maxsize prevents unbounded growth
-        # if responses are never consumed.
-        self._pending_responses: asyncio.Queue = asyncio.Queue(maxsize=100)
-        self._use_receive_loop: bool = False  # Set to True when receive loop is started
+        # Correlation-ID-based request/response matching.
+        # Each send() assigns a unique _seq, which the MC mod echoes back.
+        # The receive loop matches responses to pending futures by _seq.
+        self._pending_futures: dict[int, asyncio.Future] = {}
+        self._seq: int = 0
+        self._use_receive_loop: bool = False
 
-        # Serialize send+wait-for-response to prevent FIFO queue race conditions
-        # when multiple coroutines call send() concurrently.
-        self._send_lock: asyncio.Lock = asyncio.Lock()
+        # Fallback queue for responses without a seq (e.g. welcome message)
+        self._unmatched_responses: asyncio.Queue = asyncio.Queue(maxsize=50)
 
         # Logging flags for batch_update_fast
         self._audio_logged: bool = False
@@ -120,10 +117,10 @@ class VizClient:
                 self._receive_task = asyncio.create_task(self._receive_loop())
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-                # Read welcome message from the receive loop's queue
+                # Read welcome message from unmatched queue (has no seq)
                 try:
                     welcome = await asyncio.wait_for(
-                        self._pending_responses.get(), timeout=self.connect_timeout
+                        self._unmatched_responses.get(), timeout=self.connect_timeout
                     )
                     logger.info(f"Connected to AudioViz: {welcome.get('message', 'OK')}")
                 except asyncio.TimeoutError:
@@ -207,81 +204,30 @@ class VizClient:
                         self._last_pong = time.time()
                         continue
 
-                    # Discard "ok" and "batch_updated" responses from fire-and-forget
-                    # batch_update_fast() calls to prevent queue flooding.
-                    # batch_update returns {"type":"ok"} at ~20 TPS which would
-                    # drown out real responses (bitmap_initialized, etc.)
+                    # Discard fire-and-forget acknowledgments that flood the channel
                     if msg_type in ("batch_updated", "ok"):
                         continue
 
-                    # Queue response messages for send() to pick up
-                    # (any message that's a response to a request)
-                    if msg_type in (
-                        "zones",
-                        "zone",
-                        "pool_initialized",
-                        "entity_updated",
-                        "visibility_updated",
-                        "zone_cleaned",
-                        "zone_config_updated",
-                        "glow_updated",
-                        "brightness_updated",
-                        "render_mode_updated",
-                        "renderer_backend_updated",
-                        "renderer_capabilities",
-                        "hologram_config_updated",
-                        "particle_viz_config_updated",
-                        "particle_effect_updated",
-                        "particle_config_updated",
-                        "banner_config_received",
-                        "stage_created",
-                        "stage_deleted",
-                        "stage_activated",
-                        "stage_deactivated",
-                        "stage_updated",
-                        "stage_zone_config_updated",
-                        "stage_templates",
-                        "stages",
-                        "stage",
-                        "stage_blocks",
-                        "voice_status",
-                        # Bitmap LED wall responses
-                        "bitmap_patterns",
-                        "bitmap_transitions",
-                        "bitmap_palettes",
-                        "bitmap_initialized",
-                        "bitmap_pattern_set",
-                        "bitmap_palette_set",
-                        "bitmap_status",
-                        "bitmap_effects_updated",
-                        "bitmap_marquee_set",
-                        "bitmap_track_display_set",
-                        "bitmap_countdown_started",
-                        "bitmap_countdown_stopped",
-                        "bitmap_chat_sent",
-                        "bitmap_layer_set",
-                        "bitmap_layer_cleared",
-                        "bitmap_firework_launched",
-                        "bitmap_composition_updated",
-                        "bitmap_transition_started",
-                        "bitmap_composition_zones",
-                        "bitmap_teardown",
-                        "zone_status_report",
-                        "error",
-                        "connected",
-                    ):
+                    # Route responses to pending futures by correlation ID (_seq).
+                    # If the response has a _seq that matches a pending future, deliver it.
+                    # Otherwise, put it on the unmatched queue (e.g. welcome message).
+                    resp_seq = data.get("_seq")
+                    if resp_seq is not None and resp_seq in self._pending_futures:
+                        future = self._pending_futures.pop(resp_seq)
+                        if not future.done():
+                            future.set_result(data)
+                        continue
+
+                    # No matching seq — queue as unmatched (welcome, unsolicited messages)
+                    if msg_type not in self._message_handlers:
                         try:
-                            self._pending_responses.put_nowait(data)
+                            self._unmatched_responses.put_nowait(data)
                         except asyncio.QueueFull:
-                            # Discard oldest response to make room — prevents
-                            # the receive loop from blocking when send() callers
-                            # aren't consuming responses fast enough.
                             try:
-                                self._pending_responses.get_nowait()
+                                self._unmatched_responses.get_nowait()
                             except asyncio.QueueEmpty:
                                 pass
-                            self._pending_responses.put_nowait(data)
-                        continue
+                            self._unmatched_responses.put_nowait(data)
 
                     # Route to registered handlers
                     if msg_type in self._message_handlers:
@@ -297,6 +243,7 @@ class VizClient:
                 except websockets.exceptions.ConnectionClosed:
                     logger.warning("Connection closed by server")
                     self._connected = False
+                    self._cancel_pending_futures("connection closed")
                     if self.auto_reconnect:
                         asyncio.create_task(self.reconnect())
                     break
@@ -313,6 +260,13 @@ class VizClient:
                             break
         except asyncio.CancelledError:
             pass  # Task cancelled during shutdown
+
+    def _cancel_pending_futures(self, reason: str):
+        """Cancel all pending request futures (e.g. on disconnect)."""
+        for seq, future in list(self._pending_futures.items()):
+            if not future.done():
+                future.cancel()
+        self._pending_futures.clear()
 
     def on(self, message_type: str, callback: Callable[[dict], Any]):
         """Register a handler for a specific message type.
@@ -344,10 +298,10 @@ class VizClient:
             self._receive_task.cancel()
             self._receive_task = None
         self._use_receive_loop = False
-        # Clear pending responses queue
-        while not self._pending_responses.empty():
+        # Clear unmatched responses queue
+        while not self._unmatched_responses.empty():
             try:
-                self._pending_responses.get_nowait()
+                self._unmatched_responses.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
@@ -389,11 +343,11 @@ class VizClient:
         return False
 
     async def send(self, message: dict) -> Optional[dict]:
-        """Send a message and wait for response.
+        """Send a message and wait for response using correlation IDs.
 
-        Uses a lock to serialize concurrent callers when the receive loop is
-        active, preventing FIFO queue race conditions where response A is
-        consumed by caller B.
+        Each request is tagged with a unique _seq. The MC mod echoes it back,
+        and the receive loop delivers the response to the matching future.
+        Concurrent callers each get their own response — no FIFO races.
         """
         if not self.ws or not self._connected:
             logger.error("Not connected")
@@ -401,23 +355,29 @@ class VizClient:
 
         try:
             if self._use_receive_loop:
-                async with self._send_lock:
-                    # Drain stale responses that may have accumulated
-                    while not self._pending_responses.empty():
-                        try:
-                            self._pending_responses.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
+                # Assign correlation ID
+                self._seq += 1
+                seq = self._seq
+                message["_seq"] = seq
 
+                # Create future for this request
+                loop = asyncio.get_running_loop()
+                future: asyncio.Future = loop.create_future()
+                self._pending_futures[seq] = future
+
+                try:
                     await self.ws.send(self._encode(message))
-                    try:
-                        response = await asyncio.wait_for(
-                            self._pending_responses.get(), timeout=self.connect_timeout
-                        )
-                        return response
-                    except asyncio.TimeoutError:
-                        logger.error("Timeout waiting for response")
-                        return None
+                    response = await asyncio.wait_for(future, timeout=self.connect_timeout)
+                    return response
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Timeout waiting for response (seq=%d, type=%s)",
+                        seq,
+                        message.get("type", "?"),
+                    )
+                    return None
+                finally:
+                    self._pending_futures.pop(seq, None)
             else:
                 await self.ws.send(self._encode(message))
                 response = await self.ws.recv()

@@ -1,30 +1,51 @@
-"""Public connect-code resolution endpoint.
+"""Public connect-code resolution and join endpoints.
 
-This is the main endpoint DJ clients hit: they provide a WORD-XXXX code and
-receive back the VJ server's WebSocket URL along with a short-lived JWT.
+GET resolves metadata only (safe/read-only).
+POST performs the side-effectful DJ join and returns a short-lived JWT.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_session
 from app.models.db import DJSession, Show, VJServer
-from app.models.schemas import ConnectCodeResponse
+from app.models.schemas import ConnectCodeResponse, ConnectResolveResponse
 from app.services.code_generator import normalise_code
 from app.services.jwt_service import create_token
+from app.services.metrics import incr as metrics_incr
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["connect"])
+
+_IDEMPOTENCY_TTL_SECONDS = 300
+_IDEMPOTENCY_MAX_KEYS = 10_000
+_idempotency_cache: dict[str, tuple[float, ConnectCodeResponse]] = {}
+_idempotency_locks: dict[str, asyncio.Lock] = {}
+
+
+def _prune_idempotency_cache(now_ts: float) -> None:
+    expired = [k for k, (expires_at, _) in _idempotency_cache.items() if expires_at <= now_ts]
+    for key in expired:
+        _idempotency_cache.pop(key, None)
+        _idempotency_locks.pop(key, None)
+    # Bound memory in case of unusually high unique-key traffic bursts.
+    if len(_idempotency_cache) > _IDEMPOTENCY_MAX_KEYS:
+        overflow = len(_idempotency_cache) - _IDEMPOTENCY_MAX_KEYS
+        oldest_keys = sorted(_idempotency_cache.items(), key=lambda item: item[1][0])[:overflow]
+        for key, _ in oldest_keys:
+            _idempotency_cache.pop(key, None)
+            _idempotency_locks.pop(key, None)
 
 
 # ---------------------------------------------------------------------------
@@ -34,21 +55,22 @@ router = APIRouter(tags=["connect"])
 
 @router.get(
     "/connect/{code}",
-    response_model=ConnectCodeResponse,
+    response_model=ConnectResolveResponse,
     summary="Resolve a connect code (public)",
 )
 async def resolve_connect_code(
     code: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    settings: Settings = Depends(get_settings),
-) -> ConnectCodeResponse:
-    """Resolve a WORD-XXXX connect code to a WebSocket URL and JWT.
+) -> ConnectResolveResponse:
+    """Resolve a WORD-XXXX connect code to websocket metadata.
 
     This endpoint is public and rate-limited to 10 requests per IP per minute
     (enforced by ``RateLimitMiddleware``).
     """
     normalised = normalise_code(code)
+    request_id = getattr(request.state, "request_id", None)
+    metrics_incr("connect.resolve.attempt")
 
     # Find active show with this code
     stmt = select(Show).where(Show.connect_code == normalised, Show.status == "active")
@@ -56,6 +78,7 @@ async def resolve_connect_code(
     show = result.scalar_one_or_none()
 
     if show is None:
+        metrics_incr("connect.resolve.not_found")
         raise HTTPException(status_code=404, detail="Connect code not found or expired")
 
     # Fetch the owning server
@@ -64,19 +87,133 @@ async def resolve_connect_code(
     server = result_srv.scalar_one_or_none()
 
     if server is None:
+        metrics_incr("connect.resolve.server_offline")
         raise HTTPException(status_code=503, detail="Server registered but currently offline")
 
-    # Compute active DJ count from DJSession table (avoids counter drift
-    # when DJs crash or drop without explicit disconnect).
-    active_count = await session.scalar(
-        select(func.count())
-        .select_from(DJSession)
-        .where(
-            DJSession.show_id == show.id,
-            DJSession.disconnected_at.is_(None),
-        )
+    metrics_incr("connect.resolve.success")
+    logger.info(
+        "Connect code resolved metadata: code=%s show_id=%s",
+        normalised,
+        show.id,
+        extra={
+            "request_id": request_id,
+            "event": "connect_resolve",
+            "path": request.url.path,
+            "method": request.method,
+        },
     )
-    if active_count >= show.max_djs:
+
+    return ConnectResolveResponse(
+        websocket_url=server.websocket_url,
+        show_name=show.name,
+        dj_count=show.current_djs,
+        max_djs=show.max_djs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /connect/{code}/join  --  PUBLIC, rate-limited via middleware
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/connect/{code}/join",
+    response_model=ConnectCodeResponse,
+    summary="Join a show with a connect code (public)",
+)
+async def join_connect_code(
+    code: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ConnectCodeResponse:
+    """Join a show with a WORD-XXXX code and mint a DJ session token."""
+    normalised = normalise_code(code)
+    metrics_incr("connect.join.attempt")
+    raw_idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+    idempotency_key = raw_idempotency_key[:128] if raw_idempotency_key else ""
+    client_ip = request.client.host if request.client else "unknown"
+
+    if idempotency_key:
+        cache_key = f"{normalised}:{client_ip}:{idempotency_key}"
+        now_ts = datetime.now(timezone.utc).timestamp()
+        _prune_idempotency_cache(now_ts)
+        cached = _idempotency_cache.get(cache_key)
+        if cached and cached[0] > now_ts:
+            metrics_incr("connect.join.idempotent_hit")
+            return cached[1]
+        lock = _idempotency_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            now_ts = datetime.now(timezone.utc).timestamp()
+            _prune_idempotency_cache(now_ts)
+            cached = _idempotency_cache.get(cache_key)
+            if cached and cached[0] > now_ts:
+                metrics_incr("connect.join.idempotent_hit")
+                return cached[1]
+            try:
+                response = await _join_connect_code_inner(
+                    normalised=normalised,
+                    request=request,
+                    session=session,
+                    settings=settings,
+                    client_ip=client_ip,
+                )
+                _idempotency_cache[cache_key] = (now_ts + _IDEMPOTENCY_TTL_SECONDS, response)
+                return response
+            finally:
+                if cache_key not in _idempotency_cache:
+                    _idempotency_locks.pop(cache_key, None)
+
+    return await _join_connect_code_inner(
+        normalised=normalised,
+        request=request,
+        session=session,
+        settings=settings,
+        client_ip=client_ip,
+    )
+
+
+async def _join_connect_code_inner(
+    *,
+    normalised: str,
+    request: Request,
+    session: AsyncSession,
+    settings: Settings,
+    client_ip: str,
+) -> ConnectCodeResponse:
+    """Join implementation shared by regular and idempotent flows."""
+
+    # Find active show with this code
+    stmt = select(Show).where(Show.connect_code == normalised, Show.status == "active")
+    result = await session.execute(stmt)
+    show = result.scalar_one_or_none()
+
+    if show is None:
+        metrics_incr("connect.join.not_found")
+        raise HTTPException(status_code=404, detail="Connect code not found or expired")
+
+    # Fetch the owning server
+    stmt_srv = select(VJServer).where(VJServer.id == show.server_id, VJServer.is_active.is_(True))
+    result_srv = await session.execute(stmt_srv)
+    server = result_srv.scalar_one_or_none()
+
+    if server is None:
+        metrics_incr("connect.join.server_offline")
+        raise HTTPException(status_code=503, detail="Server registered but currently offline")
+
+    # Reserve a DJ slot atomically to avoid capacity races under concurrency.
+    updated_count = await session.scalar(
+        update(Show)
+        .where(
+            Show.id == show.id,
+            Show.status == "active",
+            Show.current_djs < Show.max_djs,
+        )
+        .values(current_djs=Show.current_djs + 1)
+        .returning(Show.current_djs)
+    )
+    if updated_count is None:
+        metrics_incr("connect.join.full")
         raise HTTPException(status_code=409, detail="Show is full — maximum DJ limit reached")
 
     # Try to extract user identity from optional Authorization header
@@ -87,13 +224,12 @@ async def resolve_connect_code(
             from app.services.user_jwt import verify_user_token
 
             payload = verify_user_token(auth_header[7:], jwt_secret=settings.user_jwt_secret)
-            user_id = payload.sub
-        except Exception:
-            pass  # Anonymous is fine — don't fail the connect flow
+            user_id = uuid.UUID(payload.sub)
+        except Exception as exc:
+            logger.debug("JWT parse failed (anonymous connect): %s", exc)
 
     # Create a DJ session record
     dj_session_id = uuid.uuid4()
-    client_ip = request.client.host if request.client else "unknown"
     dj_session = DJSession(
         id=dj_session_id,
         show_id=show.id,
@@ -102,16 +238,7 @@ async def resolve_connect_code(
         ip_address=client_ip,
     )
     session.add(dj_session)
-
-    # Sync the cached counter to match reality (new session included: +1)
-    await session.execute(
-        update(Show).where(Show.id == show.id).values(current_djs=active_count + 1)
-    )
-
     await session.commit()
-
-    # Refresh to get the updated count
-    await session.refresh(show)
 
     # Mint JWT
     token = create_token(
@@ -123,17 +250,24 @@ async def resolve_connect_code(
     )
 
     logger.info(
-        "Connect code resolved: code=%s show_id=%s dj_session=%s",
+        "Connect code joined: code=%s show_id=%s dj_session=%s",
         normalised,
         show.id,
         dj_session_id,
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "event": "connect_join",
+            "path": request.url.path,
+            "method": request.method,
+        },
     )
+    metrics_incr("connect.join.success")
 
     return ConnectCodeResponse(
         websocket_url=server.websocket_url,
         token=token,
         show_name=show.name,
-        dj_count=show.current_djs,
+        dj_count=int(updated_count),
         dj_session_id=str(dj_session_id),
     )
 
@@ -151,15 +285,18 @@ async def resolve_connect_code(
 )
 async def disconnect_dj(
     dj_session_id: uuid.UUID,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Record DJ disconnect and decrement the show's current_djs counter."""
+    metrics_incr("connect.disconnect.attempt")
     stmt = select(DJSession).where(
         DJSession.id == dj_session_id,
         DJSession.disconnected_at.is_(None),
     )
     dj_session_row = (await session.execute(stmt)).scalar_one_or_none()
     if dj_session_row is None:
+        metrics_incr("connect.disconnect.noop")
         return Response(status_code=204)  # Already disconnected or not found — idempotent
 
     dj_session_row.disconnected_at = datetime.now(timezone.utc)
@@ -171,6 +308,17 @@ async def disconnect_dj(
         .values(current_djs=Show.current_djs - 1)
     )
     await session.commit()
+    metrics_incr("connect.disconnect.success")
 
-    logger.info("DJ disconnected: dj_session=%s show_id=%s", dj_session_id, dj_session_row.show_id)
+    logger.info(
+        "DJ disconnected: dj_session=%s show_id=%s",
+        dj_session_id,
+        dj_session_row.show_id,
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "event": "connect_disconnect",
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
     return Response(status_code=204)
