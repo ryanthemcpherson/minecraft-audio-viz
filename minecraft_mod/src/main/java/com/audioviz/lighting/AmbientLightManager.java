@@ -29,6 +29,8 @@ public class AmbientLightManager {
 
     /** zone name -> list of light block positions. */
     private final Map<String, List<BlockPos>> zoneLights = new HashMap<>();
+    /** zone name -> world reference (for teardown without zone object). */
+    private final Map<String, ServerWorld> zoneWorlds = new HashMap<>();
     /** position -> original block state (for restoration). */
     private final Map<BlockPos, BlockState> originalBlocks = new HashMap<>();
     /** zone name -> current light level (avoid redundant updates). */
@@ -48,6 +50,10 @@ public class AmbientLightManager {
         }
 
         ServerWorld world = zone.getWorld();
+        if (world == null) {
+            LOGGER.warn("Ambient lights: cannot initialize zone '{}' — world is null", zoneName);
+            return;
+        }
         BlockPos origin = zone.getOrigin();
         float sizeX = zone.getSize().x;
         float sizeY = zone.getSize().y;
@@ -89,6 +95,7 @@ public class AmbientLightManager {
         }
 
         zoneLights.put(zoneName, positions);
+        zoneWorlds.put(zoneName, world);
         currentLevels.put(zoneName, 0);
         LOGGER.info("Ambient lights: initialized {} lights for zone '{}'", positions.size(), zoneName);
     }
@@ -128,24 +135,27 @@ public class AmbientLightManager {
     /** Remove all light blocks for a zone and restore originals. */
     public void teardownZone(String zoneName) {
         String key = zoneName.toLowerCase();
-        List<BlockPos> lights = zoneLights.remove(key);
-        currentLevels.remove(key);
-        if (lights == null) return;
-
-        for (BlockPos pos : lights) {
-            BlockState original = originalBlocks.remove(pos);
-            // Need the world — get from any remaining zone context, or find loaded world
-            // Since we stored the original, just restore it via the block's world
-            // Iterate all server worlds to find the one containing this pos
-            // (in practice, all lights are in the same world as the zone)
+        ServerWorld world = zoneWorlds.remove(key);
+        if (world != null) {
+            teardownZone(zoneName, world);
+        } else {
+            // No world reference — just clean up maps
+            List<BlockPos> lights = zoneLights.remove(key);
+            currentLevels.remove(key);
+            if (lights != null) {
+                for (BlockPos pos : lights) {
+                    originalBlocks.remove(pos);
+                }
+            }
+            LOGGER.warn("Ambient lights: cleaned up zone '{}' without world (blocks not restored)", zoneName);
         }
-        LOGGER.info("Ambient lights: cleaned up zone '{}'", zoneName);
     }
 
     /** Remove all light blocks for a zone, given its world. */
     public void teardownZone(String zoneName, ServerWorld world) {
         String key = zoneName.toLowerCase();
         List<BlockPos> lights = zoneLights.remove(key);
+        zoneWorlds.remove(key);
         currentLevels.remove(key);
         if (lights == null) return;
 

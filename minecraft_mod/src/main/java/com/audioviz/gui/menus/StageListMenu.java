@@ -39,7 +39,7 @@ public class StageListMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Stages").formatted(Formatting.GOLD);
+        return Text.literal("Stages").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override

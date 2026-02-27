@@ -32,7 +32,7 @@ public class SettingsMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Settings").formatted(Formatting.AQUA);
+        return Text.literal("Settings").formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override

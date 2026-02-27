@@ -21,12 +21,13 @@ public class StageDecoratorMenu extends AudioVizGui {
     private final Runnable onBack;
 
     // Decorator definitions: id, display name, icon, description
+    // IDs must match the factory keys in StageDecoratorManager.registerBuiltInFactories()
     private static final Object[][] DECORATORS = {
         {"billboard",   "DJ Billboard",      Items.OAK_SIGN,        "DJ name above stage"},
         {"spotlight",   "Spotlights",        Items.SEA_LANTERN,     "Sweeping light beams"},
         {"floor_tiles", "Floor Tiles",       Items.PURPLE_CONCRETE, "Reactive dance floor"},
-        {"crowd_fx",    "Crowd FX",          Items.FIREWORK_ROCKET, "Audience particles"},
-        {"beat_text",   "Beat Text FX",      Items.WRITABLE_BOOK,   "Hype text on beats"},
+        {"crowd",       "Crowd FX",          Items.FIREWORK_ROCKET, "Audience particles"},
+        {"text_fx",     "Beat Text FX",      Items.WRITABLE_BOOK,   "Hype text on beats"},
         {"banner",      "DJ Banner",         Items.WHITE_BANNER,    "DJ branding display"},
         {"transition",  "DJ Transitions",    Items.ENDER_EYE,       "Blackout/flash on DJ switch"},
     };
@@ -41,7 +42,7 @@ public class StageDecoratorMenu extends AudioVizGui {
 
     @Override
     protected Text getMenuTitle() {
-        return Text.literal("Decorators: " + stageName).formatted(Formatting.LIGHT_PURPLE);
+        return Text.literal("Decorators: " + stageName).formatted(Formatting.DARK_BLUE, Formatting.BOLD);
     }
 
     @Override
