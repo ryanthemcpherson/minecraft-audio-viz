@@ -718,6 +718,13 @@ function connectWebSocket() {
                     if (bitmapPreview && data.zone) {
                         bitmapPreview.setPattern(data.zone, data.pattern);
                     }
+                } else if (data.type === 'bitmap_frame') {
+                    if (bitmapPreview && data.zone && data.pixels) {
+                        bitmapPreview.applyServerFrame(
+                            data.zone, data.pixels,
+                            data.width || 16, data.height || 12
+                        );
+                    }
                 } else if (data.type === 'dj_joined') {
                     console.log('[Preview] DJ joined:', data.dj && data.dj.dj_name);
                 } else if (data.type === 'dj_left') {

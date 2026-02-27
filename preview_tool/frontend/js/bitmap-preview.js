@@ -94,12 +94,65 @@ class BitmapPreview {
         if (this.effects.frozen) return;
         this.time += dt;
 
+        const now = performance.now();
         for (const s of Object.values(this.zones)) {
             if (!s.mesh.visible) continue;
+            // Skip local rendering if server frames arrived within last 2 seconds
+            if (s._serverFrameTime && (now - s._serverFrameTime) < 2000) continue;
             this._renderPattern(s, audioState);
             this._applyEffects(s);
             s.texture.needsUpdate = true;
         }
+    }
+
+    /**
+     * Apply a server-rendered bitmap frame directly to the canvas.
+     * Decodes base64 little-endian ARGB int array to RGBA ImageData.
+     */
+    applyServerFrame(zoneName, base64Pixels, width, height) {
+        const s = this.zones[zoneName];
+        if (!s || !s.mesh.visible) return;
+
+        // Resize canvas if dimensions changed
+        if (s.canvas.width !== width || s.canvas.height !== height) {
+            s.canvas.width = width;
+            s.canvas.height = height;
+            s.width = width;
+            s.height = height;
+        }
+
+        // Decode base64 to byte array
+        const binaryStr = atob(base64Pixels);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+        }
+
+        // Convert LE ARGB int array to RGBA ImageData
+        const pixelCount = width * height;
+        const img = s.ctx.createImageData(width, height);
+        const d = img.data;
+        const view = new DataView(bytes.buffer);
+
+        for (let i = 0; i < pixelCount; i++) {
+            const argb = view.getInt32(i * 4, true); // little-endian
+            const a = (argb >>> 24) & 0xFF;
+            const r = (argb >>> 16) & 0xFF;
+            const g = (argb >>> 8) & 0xFF;
+            const b = argb & 0xFF;
+            const j = i << 2;
+            d[j] = r;
+            d[j + 1] = g;
+            d[j + 2] = b;
+            d[j + 3] = a || 255; // Default to opaque if alpha is 0
+        }
+
+        s.ctx.putImageData(img, 0, 0);
+        this._applyEffects(s);
+        s.texture.needsUpdate = true;
+
+        // Mark as receiving server frames (skip local rendering for this zone)
+        s._serverFrameTime = performance.now();
     }
 
     // ────────────────── Pattern Dispatch ──────────────────
