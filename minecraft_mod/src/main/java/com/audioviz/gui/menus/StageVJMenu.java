@@ -3,6 +3,7 @@ package com.audioviz.gui.menus;
 import com.audioviz.AudioVizMod;
 import com.audioviz.gui.AudioVizGui;
 import com.audioviz.gui.MenuManager;
+import com.audioviz.protocol.MessageHandler;
 import com.audioviz.stages.Stage;
 import com.audioviz.stages.StageZoneConfig;
 import com.audioviz.stages.StageZoneRole;
@@ -12,6 +13,8 @@ import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import net.minecraft.util.math.Direction;
+import org.joml.Vector3f;
 
 import java.util.*;
 
@@ -24,6 +27,7 @@ public class StageVJMenu extends AudioVizGui {
     private final Set<StageZoneRole> selectedZones = new HashSet<>();
     private int intensity = 4; // 1-7
     private int patternIndex = 0;
+    private boolean dirty = false;
 
     private static final String[] EFFECT_NAMES = {
         "Blackout", "Freeze", "Flash", "Strobe", "Pulse", "Wave", "Spiral", "Explode"
@@ -188,6 +192,8 @@ public class StageVJMenu extends AudioVizGui {
                 playClickSound();
                 applyIntensity(stage);
                 applyPattern(stage, patterns.isEmpty() ? "none" : patterns.get(patternIndex));
+                mod.getStageManager().saveStages();
+                dirty = false;
                 getPlayer().sendMessage(Text.literal("Applied settings to " +
                     selectedZones.size() + " zones").formatted(Formatting.GREEN));
             }));
@@ -225,12 +231,17 @@ public class StageVJMenu extends AudioVizGui {
                     }
                 } else {
                     if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zoneName);
-                    mod.getMapRenderer().initializeDisplay(zoneName, vizZone, width, height,
+                    int[] actualSize = mod.getMapRenderer().initializeDisplay(zoneName, vizZone, width, height,
                         vizZone.getWorld(), facing);
+                    // Resize bitmap buffer to match the zone-derived map dimensions
+                    if (bpm != null && bpm.isActive(zoneName)) {
+                        String patternId = config.getPattern() != null ? config.getPattern() : "bmp_spectrum";
+                        bpm.activateZone(zoneName, patternId, actualSize[0], actualSize[1]);
+                    }
                 }
             }
         }
-        mod.getStageManager().saveStages();
+        dirty = true;
         getPlayer().sendMessage(Text.literal("Toggled render mode for " +
             selectedZones.size() + " zones").formatted(Formatting.LIGHT_PURPLE));
         rebuild();
@@ -242,20 +253,25 @@ public class StageVJMenu extends AudioVizGui {
             StageZoneConfig config = stage.getOrCreateConfig(role);
             config.setIntensityMultiplier(multiplier);
         }
-        mod.getStageManager().saveStages();
+        dirty = true;
     }
 
     private void applyPattern(Stage stage, String patternId) {
         var bpm = mod.getBitmapPatternManager();
         for (StageZoneRole role : selectedZones) {
             String zoneName = stage.getZoneName(role);
-            if (zoneName != null && bpm != null && bpm.isActive(zoneName)) {
+            if (zoneName == null) continue;
+
+            // Initialize zone display if not yet active (e.g. wing zones)
+            ensureZoneInitialized(zoneName, patternId);
+
+            if (bpm != null && bpm.isActive(zoneName)) {
                 bpm.setPattern(zoneName, patternId);
             }
             StageZoneConfig config = stage.getOrCreateConfig(role);
             config.setPattern(patternId);
         }
-        mod.getStageManager().saveStages();
+        dirty = true;
     }
 
     private void triggerEffect(String effect) {
@@ -309,5 +325,51 @@ public class StageVJMenu extends AudioVizGui {
                 effects.setEdgeFlashColor(0xFFFF6600);
             }
         }
+    }
+
+    /**
+     * Ensure a zone has an active bitmap display. Wing zones aren't initialized
+     * by init_bitmap messages (those only come for zones the VJ server knows about),
+     * so we set up their renderer and activate them on first use from the VJ menu.
+     */
+    private void ensureZoneInitialized(String zoneName, String patternId) {
+        var bpm = mod.getBitmapPatternManager();
+        if (bpm == null || bpm.isActive(zoneName)) return;
+
+        var vizZone = mod.getZoneManager().getZone(zoneName);
+        if (vizZone == null || vizZone.getWorld() == null) return;
+
+        Direction facing = MessageHandler.directionFromRotation(vizZone.getRotation());
+
+        // Determine render mode from stage config, default to map
+        Stage stage = mod.getStageManager().getStage(stageName);
+        StageZoneRole role = stage != null ? stage.getRoleForZone(zoneName) : null;
+        StageZoneConfig config = role != null ? stage.getOrCreateConfig(role) : null;
+        String renderMode = config != null ? config.getRenderMode() : "map";
+
+        Vector3f zoneSize = vizZone.getSize();
+
+        if ("entity".equalsIgnoreCase(renderMode)) {
+            int width = Math.max(1, (int) zoneSize.x);
+            int height = Math.max(1, (int) zoneSize.y);
+            bpm.activateZone(zoneName, patternId, width, height);
+            if (mod.getBitmapToEntityBridge() != null) {
+                mod.getBitmapToEntityBridge().initializeWall(zoneName, vizZone, width, height,
+                    vizZone.getWorld(), facing);
+            }
+        } else {
+            if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zoneName);
+            int[] actualSize = mod.getMapRenderer().initializeDisplay(zoneName, vizZone, 128, 128,
+                vizZone.getWorld(), facing);
+            bpm.activateZone(zoneName, patternId, actualSize[0], actualSize[1]);
+        }
+    }
+
+    @Override
+    public void onClose() {
+        if (dirty) {
+            mod.getStageManager().saveStages();
+        }
+        super.onClose();
     }
 }

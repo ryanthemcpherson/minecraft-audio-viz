@@ -146,6 +146,11 @@ public class DecoratorEntityManager {
         if (update.glow() != null) {
             el.setGlowing(update.glow());
         }
+
+        // Start interpolation so transforms actually animate over interpolationDuration
+        if (update.interpolationDuration() != null && update.interpolationDuration() > 0) {
+            el.startInterpolation();
+        }
     }
 
     // ========== Text-Specific Operations ==========

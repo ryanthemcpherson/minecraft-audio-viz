@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.audioviz.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "server": [
+    "ServerPlayNetworkHandlerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -50,7 +50,10 @@ import java.util.*;
 
 public class AudioVizMod implements DedicatedServerModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("audioviz");
+    private static AudioVizMod instance;
     private static MinecraftServer server;
+
+    public static AudioVizMod getInstance() { return instance; }
 
     private Path configDir;
     private ModConfig config;
@@ -76,6 +79,7 @@ public class AudioVizMod implements DedicatedServerModInitializer {
 
     @Override
     public void onInitializeServer() {
+        instance = this;
         LOGGER.info("AudioViz Fabric mod initializing...");
 
         ServerLifecycleEvents.SERVER_STARTED.register(s -> {
@@ -93,18 +97,27 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         });
 
         // Register interaction callbacks for zone placement wizard and zone selection
+        // Note: AttackBlockCallback only fires on block targets. Left-click in air
+        // is handled by ServerPlayNetworkHandlerMixin (onHandSwing).
         AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
             if (!(player instanceof ServerPlayerEntity spe)) return ActionResult.PASS;
             if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
             // Zone placement takes priority
             if (zonePlacementManager != null) {
                 ActionResult result = zonePlacementManager.handleLeftClick(spe);
-                if (result != ActionResult.PASS) return result;
+                if (result != ActionResult.PASS) {
+                    // Mark so the HandSwing mixin doesn't double-fire
+                    zonePlacementManager.markBlockClickHandled(spe);
+                    return result;
+                }
             }
             // Zone selection mode
             if (zoneSelectionManager != null && zoneSelectionManager.isInSelectionMode(spe)) {
                 boolean consumed = zoneSelectionManager.handleLeftClick(spe);
-                if (consumed) return ActionResult.FAIL;
+                if (consumed) {
+                    if (zonePlacementManager != null) zonePlacementManager.markBlockClickHandled(spe);
+                    return ActionResult.FAIL;
+                }
             }
             return ActionResult.PASS;
         });
@@ -213,6 +226,9 @@ public class AudioVizMod implements DedicatedServerModInitializer {
 
     private void tick() {
         if (messageQueue == null) return;
+
+        // 0. Clear dedup flags from previous tick (for mixin left-click-in-air detection)
+        if (zonePlacementManager != null) zonePlacementManager.clearBlockClickFlags();
 
         // 1. Process incoming WebSocket messages
         messageQueue.processTick();
