@@ -3417,8 +3417,8 @@ class VJServer:
                     elif msg_type == "upload_banner_logo":
                         dj_id = data.get("dj_id")
                         image_data = data.get("image_base64")
-                        grid_width = min(48, max(4, data.get("grid_width", 24)))
-                        grid_height = min(24, max(2, data.get("grid_height", 12)))
+                        grid_width = min(128, max(4, data.get("grid_width", 24)))
+                        grid_height = min(128, max(2, data.get("grid_height", 12)))
                         if dj_id and image_data:
                             pixels = self._process_logo_image(image_data, grid_width, grid_height)
                             if pixels is not None:
