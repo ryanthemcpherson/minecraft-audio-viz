@@ -136,6 +136,16 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             return zonePlacementManager.handleRightClick(spe);
         });
 
+        // Send virtual entity spawn packets when a player joins
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            // Delay 1 tick so the player's chunk tracking is fully initialized
+            server.execute(() -> {
+                if (virtualRenderer != null) {
+                    virtualRenderer.onPlayerJoin(handler.getPlayer());
+                }
+            });
+        });
+
         // Handle player disconnect for placement and selection sessions
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             UUID uuid = handler.getPlayer().getUuid();
