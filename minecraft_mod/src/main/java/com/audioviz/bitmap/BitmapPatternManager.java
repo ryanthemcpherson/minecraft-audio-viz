@@ -13,8 +13,14 @@ import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.gson.JsonObject;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
+import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Manages bitmap patterns, frame buffers, and the render loop for bitmap zones.
@@ -60,6 +66,9 @@ public class BitmapPatternManager {
     /** Game state modulator. */
     private final GameStateModulator gameStateModulator;
 
+    /** Optional callback for broadcasting rendered frames to WebSocket clients. */
+    private volatile Consumer<JsonObject> frameBroadcaster;
+
     /** Latest audio state from VJ server. */
     private volatile AudioState latestAudioState = AudioState.silent();
 
@@ -69,6 +78,10 @@ public class BitmapPatternManager {
         this.gameStateModulator = new GameStateModulator(server);
         registerBuiltInPatterns();
         this.asyncRenderer = new AsyncBitmapRenderer();
+    }
+
+    public void setFrameBroadcaster(Consumer<JsonObject> broadcaster) {
+        this.frameBroadcaster = broadcaster;
     }
 
     /**
@@ -283,6 +296,11 @@ public class BitmapPatternManager {
                     effectsProcessor.process(state.buffer, audio, time);
 
                     renderer.applyFrame(zoneName, state.buffer.getRawPixels(), state.buffer.getWidth(), state.buffer.getHeight());
+
+                    // Broadcast frame to WebSocket clients for browser preview
+                    if (frameBroadcaster != null) {
+                        broadcastFrame(zoneName, state.buffer);
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.warn("Error in bitmap zone '{}' pattern '{}': {}",
@@ -294,6 +312,36 @@ public class BitmapPatternManager {
         if (diagnosticTickCounter >= 100) {
             diagnosticTickCounter = 0;
             logRenderDiagnostics();
+        }
+    }
+
+    /**
+     * Encode a frame buffer as a bitmap_frame JSON message and broadcast it.
+     * Uses base64-encoded little-endian ARGB int array (matches protocol spec).
+     */
+    private void broadcastFrame(String zoneName, BitmapFrameBuffer buffer) {
+        try {
+            int[] pixels = buffer.getRawPixels();
+            int pixelCount = buffer.getPixelCount();
+
+            ByteBuffer byteBuffer = ByteBuffer.allocate(pixelCount * 4);
+            byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < pixelCount; i++) {
+                byteBuffer.putInt(pixels[i]);
+            }
+
+            String base64 = Base64.getEncoder().encodeToString(byteBuffer.array());
+
+            JsonObject msg = new JsonObject();
+            msg.addProperty("type", "bitmap_frame");
+            msg.addProperty("zone", zoneName);
+            msg.addProperty("width", buffer.getWidth());
+            msg.addProperty("height", buffer.getHeight());
+            msg.addProperty("pixels", base64);
+
+            frameBroadcaster.accept(msg);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to broadcast bitmap frame for zone '{}': {}", zoneName, e.getMessage());
         }
     }
 
