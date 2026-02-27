@@ -139,6 +139,118 @@ public class StageManager {
         saveStages();
     }
 
+    /**
+     * Move a stage to a new anchor position and reposition all zones.
+     */
+    public void moveStage(Stage stage, BlockPos newAnchor, String worldName) {
+        stage.setAnchor(newAnchor);
+        if (worldName != null) stage.setWorldName(worldName);
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+            VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
+            if (zone == null) continue;
+
+            Vec3d worldPos = stage.getWorldPositionForRole(role);
+            zone.setOrigin(new BlockPos((int) worldPos.x, (int) worldPos.y, (int) worldPos.z));
+
+            if (worldName != null) {
+                ServerWorld world = findWorld(worldName);
+                if (world != null) zone.setWorld(world);
+            }
+        }
+
+        mod.getZoneManager().saveZones();
+        saveStages();
+        LOGGER.info("Moved stage '{}' to ({}, {}, {})", stage.getName(),
+            newAnchor.getX(), newAnchor.getY(), newAnchor.getZ());
+    }
+
+    /**
+     * Rotate the entire stage and recalculate zone positions.
+     */
+    public void rotateStage(Stage stage, float newRotation) {
+        stage.setRotation(newRotation);
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+            VisualizationZone zone = mod.getZoneManager().getZone(zoneName);
+            if (zone == null) continue;
+
+            Vec3d worldPos = stage.getWorldPositionForRole(role);
+            zone.setOrigin(new BlockPos((int) worldPos.x, (int) worldPos.y, (int) worldPos.z));
+            zone.setRotation(newRotation);
+        }
+
+        mod.getZoneManager().saveZones();
+        saveStages();
+        LOGGER.info("Rotated stage '{}' to {}°", stage.getName(), newRotation);
+    }
+
+    /**
+     * Add a zone role to an existing stage.
+     */
+    public boolean addRoleToStage(Stage stage, StageZoneRole role) {
+        if (stage.getRoleToZone().containsKey(role)) return false;
+
+        String zoneName = stage.getName().toLowerCase() + "_" + role.name().toLowerCase();
+        Vec3d worldPos = stage.getWorldPositionForRole(role);
+        BlockPos zoneOrigin = new BlockPos((int) worldPos.x, (int) worldPos.y, (int) worldPos.z);
+
+        ServerWorld world = findWorld(stage.getWorldName());
+        if (world == null) return false;
+
+        VisualizationZone zone = mod.getZoneManager().createZone(zoneName, world, zoneOrigin);
+        if (zone == null) return false;
+
+        // Use template size override if available, otherwise default
+        StageTemplate template = StageTemplate.getBuiltin(stage.getTemplateName());
+        Vector3f size = (template != null) ? template.getSizeForRole(role) : role.getDefaultSize();
+        zone.setSize(size);
+        zone.setRotation(stage.getRotation());
+
+        stage.getRoleToZone().put(role, zoneName);
+
+        StageZoneConfig config = new StageZoneConfig();
+        config.setPattern(role.getSuggestedPattern());
+        stage.getZoneConfigs().put(role, config);
+
+        mod.getZoneManager().saveZones();
+        saveStages();
+        LOGGER.info("Added role {} to stage '{}'", role.name(), stage.getName());
+        return true;
+    }
+
+    /**
+     * Remove a zone role from a stage.
+     */
+    public boolean removeRoleFromStage(Stage stage, StageZoneRole role) {
+        String zoneName = stage.getRoleToZone().remove(role);
+        if (zoneName == null) return false;
+
+        stage.getZoneConfigs().remove(role);
+
+        // Clean up renderers and subsystems
+        try {
+            mod.getMapRenderer().destroyDisplay(zoneName);
+            if (mod.getBitmapToEntityBridge() != null) mod.getBitmapToEntityBridge().destroyWall(zoneName);
+            mod.getVirtualRenderer().destroyPool(zoneName);
+            var bpm = mod.getBitmapPatternManager();
+            if (bpm != null) bpm.deactivateZone(zoneName);
+            if (mod.getAmbientLightManager() != null) mod.getAmbientLightManager().teardownZone(zoneName);
+            if (mod.getBeatEventManager() != null) mod.getBeatEventManager().removeZoneConfig(zoneName);
+        } catch (Exception e) {
+            LOGGER.warn("Error cleaning up zone '{}' during role removal: {}", zoneName, e.getMessage());
+        }
+
+        mod.getZoneManager().deleteZone(zoneName);
+        saveStages();
+        LOGGER.info("Removed role {} from stage '{}'", role.name(), stage.getName());
+        return true;
+    }
+
     // ========== Lookup ==========
 
     public Stage getStage(String name) { return stages.get(name.toLowerCase()); }
@@ -152,6 +264,14 @@ public class StageManager {
             if (stage.ownsZone(zoneName)) return stage;
         }
         return null;
+    }
+
+    public StageTemplate getTemplate(String name) {
+        return StageTemplate.getBuiltin(name);
+    }
+
+    public Map<String, StageTemplate> getAllTemplates() {
+        return StageTemplate.getBuiltinTemplates();
     }
 
     // ========== Persistence (JSON) ==========
