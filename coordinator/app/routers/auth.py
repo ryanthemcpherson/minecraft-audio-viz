@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.database import get_session
 from app.dependencies.auth import get_current_user, require_admin
-from app.models.db import DesktopExchangeCode, User
+from app.models.db import DesktopExchangeCode, User, UserRole
 from app.models.db import RefreshToken as RefreshTokenModel
 from app.models.schemas import (
     AuthResponse,
@@ -44,6 +44,7 @@ from app.models.schemas import (
 )
 from app.services import auth_service, discord_oauth, google_oauth
 from app.services.audit import log_auth_event
+from app.services.discord_bot_notifier import notify_role_change
 from app.services.email import send_password_reset_email, send_verification_email
 from app.services.password import hash_password, verify_password
 
@@ -289,6 +290,12 @@ async def discord_callback(
     ip = _client_ip(request)
     ua = request.headers.get("user-agent")
 
+    # Check if this Discord ID is already linked (to detect first-time link)
+    existing_discord_user = (
+        await session.execute(select(User).where(User.discord_id == discord_user.id))
+    ).scalar_one_or_none()
+    is_new_discord_link = existing_discord_user is None
+
     result = await auth_service.login_discord(
         discord_id=discord_user.id,
         discord_username=discord_user.username,
@@ -307,6 +314,20 @@ async def discord_callback(
     log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="discord")
 
     user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
+
+    # Notify community bot on first Discord link
+    if is_new_discord_link and user.discord_id:
+        role_rows = (
+            (await session.execute(select(UserRole).where(UserRole.user_id == user.id)))
+            .scalars()
+            .all()
+        )
+        await notify_role_change(
+            settings=settings,
+            discord_id=user.discord_id,
+            user_id=user.id,
+            roles=[r.role.value for r in role_rows],
+        )
 
     auth_resp = _auth_response(result, user)
 

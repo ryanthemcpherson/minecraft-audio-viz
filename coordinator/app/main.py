@@ -19,17 +19,21 @@ from app.config import Settings, get_settings
 from app.database import init_engine, shutdown_engine
 from app.logging_config import configure_logging
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
 from app.routers import (
     admin,
     auth,
     connect,
     dashboard,
+    discord_webhooks,
     dj_profiles,
     health,
     internal,
+    metrics,
     onboarding,
     orgs,
+    roles,
     servers,
     shows,
     tenants,
@@ -69,6 +73,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -- Security headers middleware -------------------------------------------
     application.add_middleware(SecurityHeadersMiddleware)
 
+    # -- Request context middleware --------------------------------------------
+    application.add_middleware(RequestContextMiddleware)
+
     # -- Rate-limit middleware --------------------------------------------------
     application.add_middleware(RateLimitMiddleware)
 
@@ -80,12 +87,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.get_cors_origins(),
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key"],
         max_age=3600,
     )
 
     # -- Routers ---------------------------------------------------------------
     application.include_router(health.router)
+    application.include_router(metrics.router)
     application.include_router(servers.router, prefix="/api/v1")
     application.include_router(shows.router, prefix="/api/v1")
     application.include_router(connect.router, prefix="/api/v1")
@@ -97,7 +105,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(uploads.router, prefix="/api/v1")
     application.include_router(dashboard.router, prefix="/api/v1")
     application.include_router(internal.router, prefix="/api/v1")
+    application.include_router(roles.router, prefix="/api/v1")
     application.include_router(admin.router, prefix="/api/v1")
+    application.include_router(discord_webhooks.router)
 
     # -- Exception handlers ----------------------------------------------------
     @application.exception_handler(RateLimitExceeded)
@@ -118,6 +128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _logger.exception(
             "Unhandled exception",
             extra={
+                "request_id": getattr(request.state, "request_id", None),
                 "path": request.url.path,
                 "method": request.method,
             },
@@ -128,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(
                 status_code=500,
                 content={"detail": "Internal server error"},
+                headers={"X-Request-ID": getattr(request.state, "request_id", "")},
             )
         else:
             # In development, include exception details for debugging
@@ -138,6 +150,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "error": str(exc),
                     "type": type(exc).__name__,
                 },
+                headers={"X-Request-ID": getattr(request.state, "request_id", "")},
             )
 
     return application

@@ -8,6 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.models.db import RoleSource, RoleType
 from app.services.content_filter import validate_no_slurs
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,13 @@ class ConnectCodeResponse(BaseModel):
     dj_session_id: str
 
 
+class ConnectResolveResponse(BaseModel):
+    websocket_url: str
+    show_name: str
+    dj_count: int
+    max_djs: int
+
+
 # ---------------------------------------------------------------------------
 # Health schema
 # ---------------------------------------------------------------------------
@@ -125,6 +133,7 @@ class HealthResponse(BaseModel):
     version: str
     active_shows: int
     active_servers: int
+    counters: dict[str, int] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -822,3 +831,34 @@ class AdminStats(BaseModel):
 class AdminUpdateUserRequest(BaseModel):
     is_active: bool | None = None
     is_admin: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Role schemas
+# ---------------------------------------------------------------------------
+
+
+class UserRoleResponse(BaseModel):
+    role: RoleType
+    source: RoleSource
+    created_at: datetime
+
+
+class UserRolesResponse(BaseModel):
+    user_id: uuid.UUID
+    roles: list[UserRoleResponse]
+
+
+class UpdateRolesRequest(BaseModel):
+    roles: list[RoleType] = Field(..., max_length=5)
+
+
+class DiscordRoleSyncRequest(BaseModel):
+    discord_id: str = Field(..., min_length=1, max_length=30)
+    roles: list[RoleType]
+
+
+class DiscordRoleChangeNotification(BaseModel):
+    discord_id: str
+    roles: list[RoleType]
+    user_id: uuid.UUID

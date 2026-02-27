@@ -92,6 +92,14 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
 14. **archive/python_dj_cli/** - Archived Python DJ CLI (replaced by dj_client/)
     - Preserved for reference only; see `archive/python_dj_cli/README.md`
 
+15. **community_bot/** (Python) - Discord community management bot
+    - `bot.py` - Main bot: role buttons, welcome messages, slash commands
+    - `views.py` - Persistent Discord UI views (role selection buttons)
+    - `coordinator_client.py` - HTTP client for coordinator API
+    - `webhook_server.py` - aiohttp server for coordinator notifications
+    - `config.py` - Environment variable configuration
+    - `pyproject.toml` (name: mcav-community-bot) - Independent package
+
 ### Ports
 - 8765: Minecraft plugin ↔ VJ server (WebSocket)
 - 8766: Browser clients ↔ VJ server (WebSocket)
@@ -99,6 +107,7 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
 - 9001: VJ server metrics endpoint (HTTP, optional)
 - 8090: Coordinator REST API
 - 3000: Site dev server (Next.js)
+- 8100: Community bot webhook server (HTTP)
 
 ### Frequency Bands
 Bass (40-250Hz), Low-mid (250-500Hz), Mid (500-2000Hz), High-mid (2-6kHz), High (6-20kHz)
@@ -273,3 +282,57 @@ client = VizClient(
 - Requires **Paper/Spigot 1.21.1+** (Display Entities)
 - **Java 21** for Minecraft plugin
 - **Rust** + **Node.js** for DJ client (Tauri v2)
+
+## Design Context
+
+### Users
+Three distinct user groups, each with their own surface:
+- **DJs / music creators** use the Tauri desktop client during live performance — low-light, glanceable, real-time feedback is critical
+- **Minecraft server admins** use the admin panel and in-game menus to configure visualizations for their community
+- **Visitors** use the mcav.live site and 3D preview to discover the project and browse patterns
+
+### Brand Personality
+**Sleek, Professional, Immersive.** MCAV is a pro audio/visual tool that happens to render in Minecraft — not a Minecraft mod that plays music. The interface should feel like VJ software (Resolume, VDMX) — dark, neon-accented, performance-oriented.
+
+### Aesthetic Direction
+- **Theme**: Dark-only across all surfaces. Deep navy/near-black backgrounds (`#050b12` to `#08090d`)
+- **Accent palette**: Cyan (`#00CCFF` / `#43c5ff`) as primary accent, indigo (`#5B6AFF`) as secondary, amber (`#FFAA00` / `#ff9f43`) as warm highlight. Brand gradient: `cyan → indigo → amber`
+- **Surface treatment**: Glassmorphism — translucent cards with `backdrop-filter: blur()`, subtle white-alpha borders, layered depth
+- **Typography**: Inter (body), Space Grotesk (DJ client headings), JetBrains Mono (code/data). Pixel-rendered logo preserves Minecraft connection
+- **Motion**: Reactive glow effects, EQ-bar animations, smooth interpolation. Interfaces should feel alive
+- **Reference**: Resolume / VDMX — dark, neon accents, real-time performance feel
+- **Anti-reference**: None specific — avoid obviously bad design
+
+### Design Principles
+1. **Immersion over decoration** — Every visual element should support flow state. Reduce chrome, maximize content. The interface should disappear during performance
+2. **Reactive and alive** — UI elements should respond to audio state where appropriate (glow intensity, subtle pulses). Static feels broken in an audio viz tool
+3. **Information density without clutter** — DJs and admins need many controls visible simultaneously. Use spatial hierarchy and progressive disclosure, not hiding behind menus
+4. **Dark-first, glow-accented** — All surfaces are dark. Color comes from accent glows, data visualizations, and interactive states — never from backgrounds or large filled areas
+5. **Consistent across surfaces** — The site, DJ client, admin panel, and preview tool should feel like the same product despite different tech stacks. Shared color tokens, typography, and surface treatments
+
+### Design Tokens (Canonical)
+Two token systems exist and should converge toward these values:
+
+| Role | Token | Value |
+|-|-|-|
+| Background (deepest) | `bg-primary` | `#08090d` |
+| Background (surface) | `bg-secondary` | `#0f1118` |
+| Card/panel fill | `bg-card` | `rgba(255,255,255,0.03)` |
+| Border | `border-subtle` | `rgba(255,255,255,0.06)` |
+| Accent primary | `accent` | `#00CCFF` (cyan) |
+| Accent secondary | `accent-secondary` | `#5B6AFF` (indigo) |
+| Accent warm | `accent-warm` | `#FFAA00` (amber) |
+| Success | `success` | `#2fe098` |
+| Warning | `warning` | `#ffd166` |
+| Danger | `danger` | `#ff6767` |
+| Text primary | `text-primary` | `#f5f5f5` |
+| Text secondary | `text-secondary` | `#a1a1aa` |
+| Font body | `font-body` | Inter |
+| Font heading | `font-heading` | Space Grotesk |
+| Font mono | `font-mono` | JetBrains Mono |
+
+### Accessibility
+- Target WCAG AA compliance (4.5:1 contrast for text, 3:1 for large text and UI components)
+- Respect `prefers-reduced-motion` — disable glow pulses, EQ animations, and transitions for users who opt out
+- Keyboard navigable controls in admin panel and DJ client
+- Standard best practices for screen readers on the marketing site

@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     r2_bucket_name: str = ""
     r2_public_url: str = ""
 
+    # Community bot webhook
+    discord_webhook_secret: str = ""
+    discord_guild_id: str = ""
+    community_bot_url: str = ""  # e.g. http://localhost:8100
+
     # Desktop deep link
     desktop_deep_link_scheme: str = "mcav"
 
