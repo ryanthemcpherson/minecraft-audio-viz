@@ -162,9 +162,6 @@ DJ Client 3 ---+         |
 ### Zone Management
 ![Zone Management](images/admin_panel_zones.png)
 
-### Multi-DJ Setup
-![Multi-DJ Setup](images/VJ_multi_dj_client.png)
-
 **Demo Video:** [Watch on YouTube](https://www.youtube.com/watch?v=zH30YXrc2uw)
 
 ---
