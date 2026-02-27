@@ -20,7 +20,10 @@ import java.nio.ByteOrder;
 import java.util.*;
 import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 
 /**
  * Manages bitmap patterns, frame buffers, and the render loop for bitmap zones.
@@ -41,6 +44,8 @@ import java.util.function.Consumer;
 public class BitmapPatternManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("audioviz");
+    private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
+    private static final int BROADCAST_INTERVAL_TICKS = 3; // ~7 FPS
 
     private final MinecraftServer server;
     private final MapRendererBackend renderer;
@@ -69,6 +74,19 @@ public class BitmapPatternManager {
     /** Optional callback for broadcasting rendered frames to WebSocket clients. */
     private volatile Consumer<JsonObject> frameBroadcaster;
 
+    /** Supplier for checking connected client count (avoids broadcasting to nobody). */
+    private volatile IntSupplier connectionCountSupplier;
+
+    /** Off-thread executor for frame encoding + broadcast. */
+    private final ExecutorService broadcastExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "audioviz-bitmap-broadcast");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** Frame throttle counter — only broadcast every BROADCAST_INTERVAL_TICKS ticks. */
+    private int broadcastTickCounter = 0;
+
     /** Latest audio state from VJ server. */
     private volatile AudioState latestAudioState = AudioState.silent();
 
@@ -82,6 +100,10 @@ public class BitmapPatternManager {
 
     public void setFrameBroadcaster(Consumer<JsonObject> broadcaster) {
         this.frameBroadcaster = broadcaster;
+    }
+
+    public void setConnectionCountSupplier(IntSupplier supplier) {
+        this.connectionCountSupplier = supplier;
     }
 
     /**
@@ -297,9 +319,12 @@ public class BitmapPatternManager {
 
                     renderer.applyFrame(zoneName, state.buffer.getRawPixels(), state.buffer.getWidth(), state.buffer.getHeight());
 
-                    // Broadcast frame to WebSocket clients for browser preview
-                    if (frameBroadcaster != null) {
-                        broadcastFrame(zoneName, state.buffer);
+                    // Broadcast frame to WebSocket clients for browser preview (throttled, off-thread)
+                    if (frameBroadcaster != null
+                            && broadcastTickCounter % BROADCAST_INTERVAL_TICKS == 0
+                            && connectionCountSupplier != null
+                            && connectionCountSupplier.getAsInt() > 0) {
+                        broadcastFrame(zoneName, state);
                     }
                 }
             } catch (Exception e) {
@@ -308,6 +333,7 @@ public class BitmapPatternManager {
             }
         }
 
+        broadcastTickCounter++;
         diagnosticTickCounter++;
         if (diagnosticTickCounter >= 100) {
             diagnosticTickCounter = 0;
@@ -318,30 +344,46 @@ public class BitmapPatternManager {
     /**
      * Encode a frame buffer as a bitmap_frame JSON message and broadcast it.
      * Uses base64-encoded little-endian ARGB int array (matches protocol spec).
+     *
+     * <p>Copies pixels on the server thread, then submits encoding + broadcast
+     * to a dedicated single-thread executor to avoid blocking the tick loop.
      */
-    private void broadcastFrame(String zoneName, BitmapFrameBuffer buffer) {
+    private void broadcastFrame(String zoneName, ZoneState state) {
         try {
+            BitmapFrameBuffer buffer = state.buffer;
             int[] pixels = buffer.getRawPixels();
             int pixelCount = buffer.getPixelCount();
+            int width = buffer.getWidth();
+            int height = buffer.getHeight();
 
-            ByteBuffer byteBuffer = ByteBuffer.allocate(pixelCount * 4);
-            byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-            for (int i = 0; i < pixelCount; i++) {
-                byteBuffer.putInt(pixels[i]);
-            }
+            // Copy pixels for off-thread use
+            System.arraycopy(pixels, 0, state.broadcastPixelsCopy, 0, pixelCount);
 
-            String base64 = Base64.getEncoder().encodeToString(byteBuffer.array());
+            broadcastExecutor.execute(() -> {
+                try {
+                    ByteBuffer bb = state.broadcastByteBuffer;
+                    bb.clear();
+                    for (int i = 0; i < pixelCount; i++) {
+                        bb.putInt(state.broadcastPixelsCopy[i]);
+                    }
+                    bb.flip();
 
-            JsonObject msg = new JsonObject();
-            msg.addProperty("type", "bitmap_frame");
-            msg.addProperty("zone", zoneName);
-            msg.addProperty("width", buffer.getWidth());
-            msg.addProperty("height", buffer.getHeight());
-            msg.addProperty("pixels", base64);
+                    String base64 = BASE64_ENCODER.encodeToString(bb.array());
 
-            frameBroadcaster.accept(msg);
+                    JsonObject msg = new JsonObject();
+                    msg.addProperty("type", "bitmap_frame");
+                    msg.addProperty("zone", zoneName);
+                    msg.addProperty("width", width);
+                    msg.addProperty("height", height);
+                    msg.addProperty("pixels", base64);
+
+                    frameBroadcaster.accept(msg);
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to broadcast bitmap frame for zone '{}': {}", zoneName, e.getMessage());
+                }
+            });
         } catch (Exception e) {
-            LOGGER.warn("Failed to broadcast bitmap frame for zone '{}': {}", zoneName, e.getMessage());
+            LOGGER.warn("Failed to prepare bitmap frame broadcast for zone '{}': {}", zoneName, e.getMessage());
         }
     }
 
@@ -370,6 +412,7 @@ public class BitmapPatternManager {
     }
 
     public void shutdown() {
+        broadcastExecutor.shutdownNow();
         transitionManager.cancelAll();
         effectsProcessor.reset();
         asyncRenderer.shutdown();
@@ -390,10 +433,15 @@ public class BitmapPatternManager {
         BitmapPattern pattern;
         BitmapPattern pendingPattern;
         final BitmapFrameBuffer buffer;
+        final int[] broadcastPixelsCopy;
+        final ByteBuffer broadcastByteBuffer;
 
         ZoneState(BitmapPattern pattern, BitmapFrameBuffer buffer) {
             this.pattern = pattern;
             this.buffer = buffer;
+            this.broadcastPixelsCopy = new int[buffer.getPixelCount()];
+            this.broadcastByteBuffer = ByteBuffer.allocate(buffer.getPixelCount() * 4);
+            this.broadcastByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
         }
     }
 }

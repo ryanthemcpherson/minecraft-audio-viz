@@ -223,6 +223,7 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         // Wire bitmap frame broadcasting to WebSocket clients for browser preview
         if (bitmapPatternManager != null && wsServer != null) {
             bitmapPatternManager.setFrameBroadcaster(wsServer::broadcast);
+            bitmapPatternManager.setConnectionCountSupplier(wsServer::getConnectionCount);
         }
 
         LOGGER.info("AudioViz started ({} bitmap patterns, {} stages)",
