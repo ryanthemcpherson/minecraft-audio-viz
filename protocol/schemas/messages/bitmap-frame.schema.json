@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "bitmap-frame.schema.json",
   "title": "BitmapFrameMessage",
-  "description": "Push a raw pixel frame to a bitmap zone. Supports base64-encoded binary (fast) or JSON array (debug-friendly) pixel formats.",
+  "description": "Bitmap pixel frame for a zone. Inbound: VJ server pushes custom frames to Minecraft. Outbound: Minecraft forwards rendered pattern frames for browser preview.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -31,6 +31,16 @@
     "brightness": {
       "type": "string",
       "description": "Per-pixel brightness (0-15). Base64-encoded byte array, one byte per pixel. If absent, all pixels use brightness 15."
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Grid width in pixels. Present on outbound frames from Minecraft."
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Grid height in pixels. Present on outbound frames from Minecraft."
     }
   },
   "required": ["type", "zone"],
