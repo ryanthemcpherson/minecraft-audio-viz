@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config-sync.schema.json",
+  "title": "ConfigSyncMessage",
+  "description": "Server broadcasts entity count and zone configuration changes to DJ clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "config_sync"
+    },
+    "v": {
+      "type": "string"
+    },
+    "entity_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of display entities in the active zone."
+    },
+    "zone": {
+      "type": "string",
+      "description": "Active visualization zone name."
+    }
+  },
+  "required": ["type", "entity_count", "zone"]
+}

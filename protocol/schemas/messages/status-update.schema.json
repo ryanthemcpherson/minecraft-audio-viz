@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "status-update.schema.json",
+  "title": "StatusUpdateMessage",
+  "description": "Server notifies a DJ whether they are the currently active DJ.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "status_update"
+    },
+    "v": {
+      "type": "string"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether the receiving DJ is currently active."
+    }
+  },
+  "required": ["type", "is_active"]
+}

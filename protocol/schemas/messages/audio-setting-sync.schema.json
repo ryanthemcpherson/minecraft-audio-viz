@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audio-setting-sync.schema.json",
+  "title": "AudioSettingSyncMessage",
+  "description": "Server broadcasts an individual audio setting change to DJ clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "audio_setting_sync"
+    },
+    "v": {
+      "type": "string"
+    },
+    "setting": {
+      "type": "string",
+      "description": "Setting name (e.g. attack, release, beat_threshold, min_db, max_db)."
+    },
+    "value": {
+      "type": "number",
+      "description": "New value for the setting."
+    }
+  },
+  "required": ["type", "setting", "value"]
+}
