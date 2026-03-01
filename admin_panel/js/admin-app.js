@@ -18,9 +18,10 @@ class AdminApp {
         if (vjPassword) {
             localStorage.setItem('mcav_vj_password', vjPassword);
         }
+        const wsPort = parseInt(urlParams.get('port'), 10) || 8766;
         this.ws = new WebSocketService({
             host: wsHost,
-            port: 8766,
+            port: wsPort,
             vjPassword: vjPassword,
         });
 
