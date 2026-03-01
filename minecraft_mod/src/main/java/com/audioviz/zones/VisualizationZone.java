@@ -19,6 +19,7 @@ public class VisualizationZone {
     private BlockPos origin;
     private Vector3f size;
     private float rotation; // Y-axis rotation in degrees
+    private double cosRot, sinRot; // Cached trig for rotation
     private boolean glowOnBeat;
     private boolean dynamicBrightness;
     private ServerWorld world;
@@ -30,6 +31,8 @@ public class VisualizationZone {
         this.origin = origin;
         this.size = new Vector3f(10, 10, 10);
         this.rotation = 0f;
+        this.cosRot = 1.0;
+        this.sinRot = 0.0;
     }
 
     public VisualizationZone(String name, UUID id, ServerWorld world, BlockPos origin, Vector3f size, float rotation) {
@@ -39,6 +42,9 @@ public class VisualizationZone {
         this.origin = origin;
         this.size = new Vector3f(size);
         this.rotation = rotation;
+        double rad = Math.toRadians(rotation);
+        this.cosRot = Math.cos(rad);
+        this.sinRot = Math.sin(rad);
     }
 
     public String getName() { return name; }
@@ -46,6 +52,9 @@ public class VisualizationZone {
     public BlockPos getOrigin() { return origin; }
     public ServerWorld getWorld() { return world; }
     public Vector3f getSize() { return new Vector3f(size); }
+    public float getSizeX() { return size.x; }
+    public float getSizeY() { return size.y; }
+    public float getSizeZ() { return size.z; }
     public float getRotation() { return rotation; }
     public boolean isGlowOnBeat() { return glowOnBeat; }
     public boolean isDynamicBrightness() { return dynamicBrightness; }
@@ -54,7 +63,12 @@ public class VisualizationZone {
     public void setWorld(ServerWorld world) { this.world = world; }
     public void setSize(Vector3f size) { this.size = new Vector3f(size); }
     public void setSize(float x, float y, float z) { this.size = new Vector3f(x, y, z); }
-    public void setRotation(float rotation) { this.rotation = rotation % 360; }
+    public void setRotation(float rotation) {
+        this.rotation = rotation % 360;
+        double rad = Math.toRadians(this.rotation);
+        this.cosRot = Math.cos(rad);
+        this.sinRot = Math.sin(rad);
+    }
     public void setGlowOnBeat(boolean glowOnBeat) { this.glowOnBeat = glowOnBeat; }
     public void setDynamicBrightness(boolean dynamicBrightness) { this.dynamicBrightness = dynamicBrightness; }
 
@@ -74,10 +88,9 @@ public class VisualizationZone {
         double scaledY = localY * size.y;
         double scaledZ = localZ * size.z;
 
-        // Apply rotation around Y axis
-        double radians = Math.toRadians(rotation);
-        double rotatedX = scaledX * Math.cos(radians) - scaledZ * Math.sin(radians);
-        double rotatedZ = scaledX * Math.sin(radians) + scaledZ * Math.cos(radians);
+        // Apply rotation around Y axis (using cached trig values)
+        double rotatedX = scaledX * cosRot - scaledZ * sinRot;
+        double rotatedZ = scaledX * sinRot + scaledZ * cosRot;
 
         return new Vec3d(
             origin.getX() + rotatedX,

@@ -18,6 +18,10 @@ public class BitmapPixelSort extends BitmapPattern {
     private double beatPulse = 0;
     private boolean sortDirection = false; // false = left-to-right, true = right-to-left
 
+    // Pre-allocated scratch buffers for sortRun() — sized to buffer width
+    private int[] sortScratchPixels = new int[0];
+    private long[] sortScratchKeyed = new long[0];
+
     public BitmapPixelSort() {
         super("bmp_pixelsort", "Bitmap Pixel Sort",
               "Glitch art pixel sorting with audio-reactive threshold");
@@ -93,13 +97,18 @@ public class BitmapPixelSort extends BitmapPattern {
         int len = end - start + 1;
         if (len < 2) return;
 
-        int[] run = new int[len];
+        // Reuse scratch buffers, resizing only if needed
+        if (sortScratchPixels.length < len) {
+            sortScratchPixels = new int[len];
+            sortScratchKeyed = new long[len];
+        }
+        int[] run = sortScratchPixels;
         for (int i = 0; i < len; i++) {
             run[i] = buffer.getPixel(start + i, y);
         }
 
         // Sort by brightness using a keyed sort (pack brightness + index)
-        long[] keyed = new long[len];
+        long[] keyed = sortScratchKeyed;
         for (int i = 0; i < len; i++) {
             int bri = brightness(run[i]);
             keyed[i] = ((long) bri << 32) | i;

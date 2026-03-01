@@ -91,14 +91,17 @@ public class BitmapGalaxy extends BitmapPattern {
                 double normRadius = radius / maxRadius;
 
                 // Spiral arm structure: logarithmic spiral
+                // Hoist log computation outside arm loop (only depends on pixel distance)
+                double logNormRadius = 0.4 * Math.log(Math.max(0.01, normRadius));
+                double radiusFade = Math.exp(-normRadius * 1.5);
                 double spiralFactor = 0;
                 for (int arm = 0; arm < 2; arm++) {
                     double armAngle = angle - spiralAngle + arm * Math.PI;
                     // Log-spiral: r = a * e^(b*theta)
-                    double spiralPhase = armAngle - 0.4 * Math.log(Math.max(0.01, normRadius));
+                    double spiralPhase = armAngle - logNormRadius;
                     double armStrength = Math.cos(spiralPhase * 2.0) * 0.5 + 0.5;
                     // Arm fades at large radius
-                    armStrength *= Math.exp(-normRadius * 1.5);
+                    armStrength *= radiusFade;
                     spiralFactor = Math.max(spiralFactor, armStrength);
                 }
 
