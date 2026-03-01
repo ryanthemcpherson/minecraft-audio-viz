@@ -56,7 +56,7 @@ impl CodeAuthMessage {
 #[derive(Debug, Clone, Serialize)]
 pub struct AudioFrameMessage {
     #[serde(rename = "type")]
-    pub msg_type: String,
+    pub msg_type: &'static str,
     pub seq: u64,
     pub bands: [f32; 5],
     pub peak: f32,
@@ -90,7 +90,7 @@ impl AudioFrameMessage {
         instant_kick: bool,
     ) -> Self {
         Self {
-            msg_type: "dj_audio_frame".to_string(),
+            msg_type: "dj_audio_frame",
             seq,
             bands,
             peak,
