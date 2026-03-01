@@ -47,12 +47,16 @@ public class BitmapDataMosh extends BitmapPattern {
 
         // On beat: capture new reference frame and reset corruption
         if (audio.isBeat()) {
-            referenceFrame = buffer.getRawPixels().clone();
+            int[] raw = buffer.getRawPixels();
+            if (referenceFrame == null || referenceFrame.length != raw.length) {
+                referenceFrame = new int[raw.length];
+            }
+            System.arraycopy(raw, 0, referenceFrame, 0, raw.length);
             frameWidth = w;
             frameHeight = h;
             hasReference = true;
             corruption = 0.1;
-            rng.setSeed(audio.getFrame()); // New seed per beat for variety
+            rng.setSeed(audio.getFrame());
         }
 
         if (!hasReference || frameWidth != w || frameHeight != h) return;
