@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ambient-lights-state.schema.json",
+  "title": "AmbientLightsStateMessage",
+  "description": "Server broadcasts ambient light settings to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "ambient_lights_state"
+    },
+    "v": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "enabled"]
+}

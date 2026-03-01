@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-denied.schema.json",
+  "title": "DjDeniedMessage",
+  "description": "Server notifies browser clients that a pending DJ has been denied or disconnected.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_denied"
+    },
+    "v": {
+      "type": "string"
+    },
+    "dj_id": {
+      "type": "string",
+      "description": "ID of the denied DJ."
+    }
+  },
+  "required": ["type", "dj_id"]
+}

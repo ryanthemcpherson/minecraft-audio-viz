@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "minecraft-status.schema.json",
+  "title": "MinecraftStatusMessage",
+  "description": "Server broadcasts Minecraft connection status to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "minecraft_status"
+    },
+    "v": {
+      "type": "string"
+    },
+    "connected": {
+      "type": "boolean",
+      "description": "Whether the VJ server is connected to the Minecraft plugin."
+    }
+  },
+  "required": ["type", "connected"]
+}

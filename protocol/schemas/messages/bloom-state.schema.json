@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bloom-state.schema.json",
+  "title": "BloomStateMessage",
+  "description": "Server broadcasts bloom effect settings to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "bloom_state"
+    },
+    "v": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "strength": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": ["type", "enabled"]
+}

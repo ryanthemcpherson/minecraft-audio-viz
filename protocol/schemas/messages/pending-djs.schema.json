@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pending-djs.schema.json",
+  "title": "PendingDjsMessage",
+  "description": "Server sends list of DJs waiting for approval to admin clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "pending_djs"
+    },
+    "v": {
+      "type": "string"
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dj_id": { "type": "string" },
+          "dj_name": { "type": "string" },
+          "waiting_since": { "type": "number" },
+          "direct_mode": { "type": "boolean" }
+        },
+        "required": ["dj_id", "dj_name"]
+      }
+    }
+  },
+  "required": ["type", "pending"]
+}
