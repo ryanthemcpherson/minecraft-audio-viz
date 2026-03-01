@@ -450,6 +450,21 @@ impl DjClient {
         Ok(())
     }
 
+    /// Send the DJ's preferred audio preset to the VJ server.
+    pub async fn send_preset(&self, preset_name: &str) -> Result<(), ClientError> {
+        let tx = self.tx.as_ref().ok_or(ClientError::NotConnected)?;
+        let msg = serde_json::json!({
+            "type": "set_my_preset",
+            "preset": preset_name
+        });
+        let json =
+            serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
+        tx.send(Message::Text(json.into()))
+            .await
+            .map_err(|e| ClientError::SendError(e.to_string()))?;
+        Ok(())
+    }
+
     /// Disconnect from server
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         if let Some(ref shutdown) = self.shutdown_tx {
@@ -679,6 +694,10 @@ async fn handle_server_message(
             if let Some(ref pattern) = route.current_pattern {
                 s.current_pattern = pattern.clone();
                 s.pending_pattern_change = Some(pattern.clone());
+            }
+            if let Some(ref preset) = route.preset {
+                log::info!("Stream route includes preset: {}", preset);
+                s.pending_preset = Some(preset.clone());
             }
         }
         ServerMessage::VoiceStatus(vs) => {
