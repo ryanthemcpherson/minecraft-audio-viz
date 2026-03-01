@@ -46,6 +46,9 @@ async def get_my_roles(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserRolesResponse:
+    """Return all roles assigned to the authenticated user, including the
+    role source (coordinator, discord, or both).
+    """
     roles = await _get_user_roles(session, user.id)
     return _roles_response(user.id, roles)
 
@@ -61,6 +64,10 @@ async def update_my_roles(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> UserRolesResponse:
+    """Add roles to the authenticated user (union merge -- never removes
+    existing roles).  Notifies the Discord community bot if the user has
+    a linked Discord account.
+    """
     # Get existing roles for this user
     existing_roles = await _get_user_roles(session, user.id)
     existing_role_types = {r.role for r in existing_roles}
@@ -103,6 +110,9 @@ async def delete_my_role(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> UserRolesResponse:
+    """Remove a specific role from the authenticated user.  Returns 404 if
+    the role is not currently assigned.
+    """
     result = await session.execute(
         select(UserRole).where(
             UserRole.user_id == user.id,

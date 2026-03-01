@@ -129,6 +129,10 @@ async def register(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    """Create a new account with email and password.  Returns access and
+    refresh tokens.  Sends a verification email (best-effort).  Returns 409
+    if the email is already registered.
+    """
     ip = _client_ip(request)
     ua = request.headers.get("user-agent")
 
@@ -186,6 +190,10 @@ async def login(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    """Authenticate with email and password.  Returns access and refresh
+    tokens.  Returns 401 on invalid credentials or if the account is locked
+    after too many failed attempts.
+    """
     ip = _client_ip(request)
     ua = request.headers.get("user-agent")
 
@@ -234,6 +242,10 @@ async def discord_authorize(
     desktop: bool = Query(False, description="Set to true for desktop app deep-link flow"),
     settings: Settings = Depends(get_settings),
 ) -> OAuthAuthorizeResponse:
+    """Return a Discord OAuth2 authorize URL and CSRF state token.  When
+    ``desktop=true``, also returns a ``poll_token`` for the desktop polling flow.
+    Returns 501 if Discord OAuth is not configured.
+    """
     if not settings.discord_client_id:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
@@ -268,6 +280,10 @@ async def discord_callback(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse | HTMLResponse:
+    """Handle the Discord OAuth2 redirect.  Exchanges the authorization code
+    for tokens, creates or updates the user, and returns an ``AuthResponse``.
+    For desktop flows, stores an exchange code and returns an HTML success page.
+    """
     if not settings.discord_client_id or not settings.discord_client_secret:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
@@ -379,6 +395,10 @@ async def google_authorize(
     desktop: bool = Query(False, description="Set to true for desktop app deep-link flow"),
     settings: Settings = Depends(get_settings),
 ) -> OAuthAuthorizeResponse:
+    """Return a Google OAuth2 authorize URL and CSRF state token.  When
+    ``desktop=true``, also returns a ``poll_token`` for the desktop polling flow.
+    Returns 501 if Google OAuth is not configured.
+    """
     if not settings.google_client_id:
         raise HTTPException(status_code=501, detail="Google OAuth not configured")
 
@@ -413,6 +433,10 @@ async def google_callback(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse | HTMLResponse:
+    """Handle the Google OAuth2 redirect.  Exchanges the authorization code
+    for tokens, creates or updates the user, and returns an ``AuthResponse``.
+    For desktop flows, stores an exchange code and returns an HTML success page.
+    """
     if not settings.google_client_id or not settings.google_client_secret:
         raise HTTPException(status_code=501, detail="Google OAuth not configured")
 
@@ -577,6 +601,9 @@ async def forgot_password(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    """Request a password-reset email.  Always returns success to prevent
+    email enumeration, even if no account matches the provided email.
+    """
     ip = _client_ip(request)
 
     token = await auth_service.request_password_reset(
@@ -621,6 +648,9 @@ async def reset_password_endpoint(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    """Reset a user's password using a one-time token from the reset email.
+    Returns 400 if the token is invalid or expired.
+    """
     ip = _client_ip(request)
 
     try:
@@ -653,6 +683,10 @@ async def refresh(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    """Exchange a valid refresh token for a new access/refresh token pair.
+    The old refresh token is rotated.  Returns 401 if the token is invalid,
+    expired, or revoked.
+    """
     ip = _client_ip(request)
     ua = request.headers.get("user-agent")
 
@@ -757,6 +791,9 @@ def _build_user_profile_response(user: User) -> UserProfileResponse:
 async def me(
     user: User = Depends(get_current_user),
 ) -> UserProfileResponse:
+    """Return the authenticated user's full profile, including organizations
+    and DJ profile if present.  Requires a valid access token.
+    """
     return _build_user_profile_response(user)
 
 
@@ -775,6 +812,9 @@ async def update_me(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserProfileResponse:
+    """Update the authenticated user's account fields (currently display_name).
+    Only provided fields are updated; omitted fields are left unchanged.
+    """
     if body.display_name is not None:
         user.display_name = body.display_name
 
@@ -798,6 +838,10 @@ async def change_password(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserProfileResponse:
+    """Change the authenticated user's password.  Requires the current password
+    for verification.  Returns 400 if the account uses OAuth-only login or if
+    the current password is incorrect.
+    """
     if user.password_hash is None:
         raise HTTPException(
             status_code=400,
@@ -832,6 +876,9 @@ async def delete_account(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
+    """Soft-delete the authenticated user's account (deactivate) and revoke
+    all refresh tokens.  Email-auth users must confirm with their password.
+    """
     # Email-auth users must confirm with their password
     if user.password_hash is not None:
         if not verify_password(body.password, user.password_hash):
@@ -883,6 +930,9 @@ async def logout(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
+    """Revoke a specific refresh token, ending that session.  The token must
+    belong to the authenticated user.  Returns 404 if not found.
+    """
     # Verify the refresh token belongs to the authenticated user before revoking
     token_hash = auth_service._hash_refresh_token(body.refresh_token)
     stmt = select(RefreshTokenModel).where(
@@ -915,6 +965,9 @@ async def verify_email_endpoint(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    """Verify a user's email address using the one-time token sent via email.
+    Returns 400 if the token is invalid or expired.
+    """
     try:
         await auth_service.verify_email(
             token_value=body.token,
@@ -945,6 +998,10 @@ async def resend_verification(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    """Resend the email verification link for the authenticated user.  Returns
+    a no-op message if the email is already verified.  Returns 503 if the
+    email service is unavailable.
+    """
     if user.email_verified:
         return {"message": "Email is already verified."}
 
@@ -990,6 +1047,10 @@ async def list_sessions(
     limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
     offset: int = Query(0, ge=0, description="Number of sessions to skip"),
 ) -> list[SessionInfo]:
+    """List active (non-revoked, non-expired) sessions for the authenticated
+    user, ordered by most recent first.  Supports pagination via ``limit``
+    and ``offset``.
+    """
     now = datetime.now(timezone.utc)
     stmt = (
         select(RefreshTokenModel)
@@ -1037,6 +1098,9 @@ async def revoke_session(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
+    """Revoke a specific session by ID, invalidating its refresh token.
+    The session must belong to the authenticated user.
+    """
     try:
         sid = _uuid.UUID(session_id)
     except ValueError:
@@ -1077,6 +1141,9 @@ async def cleanup_tokens(
     _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    """Admin-only: delete expired and revoked refresh tokens from the database.
+    Returns the count of deleted rows.
+    """
     deleted = await auth_service.cleanup_expired_tokens(session)
     await session.commit()
     return {"deleted": deleted}

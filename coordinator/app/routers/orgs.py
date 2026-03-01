@@ -104,6 +104,11 @@ async def create_org(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> CreateOrgResponse:
+    """Create a new organization with the given name and slug.  The
+    authenticated user becomes the owner and first member automatically.
+    Returns 409 if the slug is already taken, 400 if the slug is invalid
+    or reserved.
+    """
     slug = _validate_slug(body.slug)
 
     # Check uniqueness
@@ -160,6 +165,9 @@ async def get_org_by_slug(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> OrgDetailResponse:
+    """Resolve an organization by its URL slug.  Requires the authenticated
+    user to be a member.  Returns 404 if not found, 403 if not a member.
+    """
     org = (
         await session.execute(
             select(Organization).where(
@@ -207,6 +215,9 @@ async def get_org(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> OrgDetailResponse:
+    """Get organization details by ID.  Requires the authenticated user to be
+    a member.  Returns 404 if not found, 403 if not a member.
+    """
     org = (
         await session.execute(
             select(Organization).where(Organization.id == org_id, Organization.is_active.is_(True))
@@ -253,6 +264,9 @@ async def update_org(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> OrgDetailResponse:
+    """Update organization name, description, or avatar.  Only the org owner
+    can perform this action.
+    """
     org = (
         await session.execute(select(Organization).where(Organization.id == org_id))
     ).scalar_one_or_none()
@@ -297,6 +311,9 @@ async def assign_server(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> AssignServerResponse:
+    """Link an existing VJ server to this organization.  Owner-only.
+    Returns 409 if the server is already assigned to a different org.
+    """
     server = (
         await session.execute(select(VJServer).where(VJServer.id == body.server_id))
     ).scalar_one_or_none()
@@ -334,6 +351,9 @@ async def list_org_servers(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[OrgServerDetailResponse]:
+    """List VJ servers belonging to this organization with online status and
+    active show counts.  Requires org membership.
+    """
     # Check membership
     membership = (
         await session.execute(
@@ -398,6 +418,10 @@ async def register_org_server(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> RegisterOrgServerResponse:
+    """Register a new VJ server under this organization.  Owner-only.
+    Generates an API key and JWT secret automatically.  The API key is
+    returned **once** and cannot be retrieved again.
+    """
     api_key = f"mcav_{_secrets.token_urlsafe(32)}"
     api_key_hash = hash_password(api_key)
     jwt_secret = f"jws_{_secrets.token_urlsafe(32)}"
@@ -443,6 +467,9 @@ async def remove_org_server(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    """Unlink a server from this organization (does not delete the server).
+    Owner-only.
+    """
     server = (
         await session.execute(
             select(VJServer).where(VJServer.id == server_id, VJServer.org_id == org_id)
@@ -480,6 +507,9 @@ async def create_invite(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> InviteResponse:
+    """Create an invite code for this organization.  Owner-only.  Optionally
+    set ``expires_in_hours`` and ``max_uses`` to limit the invite.
+    """
     expires_at = None
     if body.expires_in_hours is not None:
         expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours)
@@ -525,6 +555,7 @@ async def list_invites(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> list[InviteResponse]:
+    """List active invite codes for this organization.  Owner-only."""
     invites = (
         (
             await session.execute(
@@ -570,6 +601,7 @@ async def delete_invite(
     user: User = Depends(require_org_owner),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    """Deactivate an invite code so it can no longer be used.  Owner-only."""
     invite = (
         await session.execute(
             select(OrgInvite).where(OrgInvite.id == invite_id, OrgInvite.org_id == org_id)
@@ -598,6 +630,9 @@ async def join_org(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> JoinOrgResponse:
+    """Join an organization using an invite code.  Returns 404 if the code is
+    invalid, 410 if expired or max uses reached, 409 if already a member.
+    """
     invite = (
         await session.execute(
             select(OrgInvite).where(
