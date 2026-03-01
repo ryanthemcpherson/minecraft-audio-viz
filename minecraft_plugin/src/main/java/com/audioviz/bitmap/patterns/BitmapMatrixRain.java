@@ -16,6 +16,13 @@ public class BitmapMatrixRain extends BitmapPattern {
 
     private static final int HEAD_COLOR = BitmapFrameBuffer.rgb(180, 255, 180);
     private static final int BG_COLOR = 0x00000000;
+    private static final int[] JITTER_TABLE = new int[256];
+    static {
+        Random jitterRng = new Random(0xCAFE);
+        for (int i = 0; i < 256; i++) {
+            JITTER_TABLE[i] = jitterRng.nextInt(30);
+        }
+    }
 
     private double[] dropY;        // Current y position per column
     private double[] dropSpeed;    // Fall speed per column
@@ -89,7 +96,7 @@ public class BitmapMatrixRain extends BitmapPattern {
                         buffer.setPixel(x, y, HEAD_COLOR);
                     } else {
                         // Trail: green with varying brightness + random jitter
-                        int g = Math.min(255, brightness + rng.nextInt(30));
+                        int g = Math.min(255, brightness + JITTER_TABLE[(x + y * 17) & 0xFF]);
                         int r = brightness / 10;
                         int b = brightness / 12;
                         buffer.setPixel(x, y, BitmapFrameBuffer.rgb(r, g, b));

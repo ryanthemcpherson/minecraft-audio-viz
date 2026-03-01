@@ -59,8 +59,7 @@ public class ColorPalette {
             int r = (c >> 16) & 0xFF;
             int g = (c >> 8) & 0xFF;
             int b = c & 0xFF;
-            // Luminance as intensity
-            double intensity = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
+            double intensity = (r * 77 + g * 150 + b * 29) / 65280.0;
             pixels[i] = mapSmooth(intensity);
         }
     }

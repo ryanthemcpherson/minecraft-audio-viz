@@ -774,6 +774,9 @@ public class EntityPoolManager {
      * this compensates so the visual center stays put.
      */
     private Vector3f centeredScaleTranslation(float tx, float ty, float tz, float scale, float rotationRadians) {
+        if (rotationRadians == 0f) {
+            return centeredScaleTranslation(tx, ty, tz, scale);
+        }
         float halfScale = scale * 0.5f;
         float cosR = (float) Math.cos(rotationRadians);
         float sinR = (float) Math.sin(rotationRadians);

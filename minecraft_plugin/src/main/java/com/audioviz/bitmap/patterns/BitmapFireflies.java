@@ -29,6 +29,16 @@ import java.util.concurrent.ThreadLocalRandom;
 public class BitmapFireflies extends BitmapPattern {
 
     private static final int MAX_FIREFLIES = 40;
+    private static final float[][] GLOW_FALLOFF = new float[5][5];
+    static {
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                double dist = Math.sqrt(dx * dx + dy * dy);
+                GLOW_FALLOFF[dy + 2][dx + 2] = (dist <= 2.5 && !(dx == 0 && dy == 0))
+                    ? (float) (1.0 - dist / 2.5) : 0f;
+            }
+        }
+    }
 
     // Firefly state arrays
     private final double[] flyX = new double[MAX_FIREFLIES];
@@ -208,11 +218,10 @@ public class BitmapFireflies extends BitmapPattern {
                               float hue, float sat, float brightness) {
         for (int dy = -2; dy <= 2; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
-                if (dx == 0 && dy == 0) continue;
-                double dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist > 2.5) continue;
+                float baseFalloff = GLOW_FALLOFF[dy + 2][dx + 2];
+                if (baseFalloff <= 0) continue;
 
-                float falloff = (float) (1.0 - dist / 2.5) * brightness * 0.35f;
+                float falloff = baseFalloff * brightness * 0.35f;
                 if (falloff < 0.02f) continue;
 
                 int glowColor = BitmapFrameBuffer.fromHSB(hue, sat * 0.7f, falloff);

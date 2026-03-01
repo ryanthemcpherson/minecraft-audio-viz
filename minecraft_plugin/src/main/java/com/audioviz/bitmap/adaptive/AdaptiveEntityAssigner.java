@@ -14,6 +14,7 @@ import java.util.List;
 public class AdaptiveEntityAssigner {
 
     private final int maxSlots;
+    private final String[] slotIds;
 
     // Per-slot cached state
     private final float[] lastX, lastY, lastScaleX, lastScaleY;
@@ -23,6 +24,10 @@ public class AdaptiveEntityAssigner {
 
     public AdaptiveEntityAssigner(int maxSlots) {
         this.maxSlots = maxSlots;
+        this.slotIds = new String[maxSlots];
+        for (int i = 0; i < maxSlots; i++) {
+            slotIds[i] = "bmp_" + i;
+        }
         this.lastX = new float[maxSlots];
         this.lastY = new float[maxSlots];
         this.lastScaleX = new float[maxSlots];
@@ -49,7 +54,7 @@ public class AdaptiveEntityAssigner {
 
         for (int i = 0; i < assignCount; i++) {
             MergedRect rect = rects.get(i);
-            String entityId = "bmp_" + i;
+            String entityId = slotIds[i];
 
             // Compute geometry
             float x = rect.x() * pixelScale;

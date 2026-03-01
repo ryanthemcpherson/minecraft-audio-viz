@@ -13,6 +13,19 @@ import com.audioviz.patterns.AudioState;
  */
 public class BitmapMoire extends BitmapPattern {
 
+    private float[] sqrtTable;
+    private int sqrtTableSize;
+
+    private void ensureSqrtTable(int w, int h) {
+        int needed = (w + h) * (w + h) + 1;
+        if (sqrtTable != null && sqrtTableSize == needed) return;
+        sqrtTableSize = needed;
+        sqrtTable = new float[needed];
+        for (int i = 0; i < needed; i++) {
+            sqrtTable[i] = (float) Math.sqrt(i);
+        }
+    }
+
     public BitmapMoire() {
         super("bmp_moire", "Bitmap Moiré",
               "Overlapping circle patterns creating interference illusions");
@@ -47,11 +60,25 @@ public class BitmapMoire extends BitmapPattern {
 
         float hueShift = (float) (time * 10);
 
+        ensureSqrtTable(w, h);
+
         for (int y = 0; y < h; y++) {
+            double dy1 = y - c1y;
+            double dy2 = y - c2y;
+            double dy3 = y - c3y;
+            double dy1Sq = dy1 * dy1;
+            double dy2Sq = dy2 * dy2;
+            double dy3Sq = dy3 * dy3;
             for (int x = 0; x < w; x++) {
-                double d1 = Math.sqrt((x - c1x) * (x - c1x) + (y - c1y) * (y - c1y));
-                double d2 = Math.sqrt((x - c2x) * (x - c2x) + (y - c2y) * (y - c2y));
-                double d3 = Math.sqrt((x - c3x) * (x - c3x) + (y - c3y) * (y - c3y));
+                double dx1 = x - c1x;
+                double dx2 = x - c2x;
+                double dx3 = x - c3x;
+                int distSq1 = (int) (dx1 * dx1 + dy1Sq);
+                int distSq2 = (int) (dx2 * dx2 + dy2Sq);
+                int distSq3 = (int) (dx3 * dx3 + dy3Sq);
+                double d1 = sqrtTable[Math.min(distSq1, sqrtTableSize - 1)];
+                double d2 = sqrtTable[Math.min(distSq2, sqrtTableSize - 1)];
+                double d3 = sqrtTable[Math.min(distSq3, sqrtTableSize - 1)];
 
                 // Concentric ring patterns (0 or 1 alternating)
                 double v1 = Math.sin(d1 / spacing * Math.PI);

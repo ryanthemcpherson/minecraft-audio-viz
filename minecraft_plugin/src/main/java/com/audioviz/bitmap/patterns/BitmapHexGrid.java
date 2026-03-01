@@ -27,7 +27,10 @@ import com.audioviz.patterns.AudioState;
 public class BitmapHexGrid extends BitmapPattern {
 
     private static final int MAX_WAVES = 8;
-    private static final double HEX_SIZE = 3.5; // pixel radius of each hex cell
+    private static final double HEX_SIZE = 3.5;
+    private static final double SQRT_3 = Math.sqrt(3.0);
+    private static final double HEX_INTERIOR_THRESHOLD_SQ = (HEX_SIZE * 0.65) * (HEX_SIZE * 0.65);
+    private static final double HEX_EDGE_OUTER_THRESHOLD_SQ = (HEX_SIZE * 0.9) * (HEX_SIZE * 0.9);
 
     /** Active wave epicenters and radii. */
     private final double[] waveX = new double[MAX_WAVES];
@@ -104,7 +107,7 @@ public class BitmapHexGrid extends BitmapPattern {
         buffer.clear(); // Transparent background
 
         double hexW = HEX_SIZE * 2.0;
-        double hexH = HEX_SIZE * Math.sqrt(3.0);
+        double hexH = HEX_SIZE * SQRT_3;
 
         for (int py = 0; py < h; py++) {
             for (int px = 0; px < w; px++) {
@@ -117,14 +120,9 @@ public class BitmapHexGrid extends BitmapPattern {
                 double cellCenterX = hexCol * hexW + offsetX + HEX_SIZE;
                 double cellCenterY = hexRow * hexH + hexH * 0.5;
 
-                // Distance from pixel to cell center
-                double distToCenter = Math.sqrt(
-                        (px - cellCenterX) * (px - cellCenterX) +
-                        (py - cellCenterY) * (py - cellCenterY));
-
-                // Determine if this pixel is on the hex edge (border) or interior
-                boolean isEdge = distToCenter > HEX_SIZE * 0.65 && distToCenter < HEX_SIZE * 0.9;
-                boolean isInterior = distToCenter <= HEX_SIZE * 0.65;
+                double distToCenterSq = (px - cellCenterX) * (px - cellCenterX) + (py - cellCenterY) * (py - cellCenterY);
+                boolean isInterior = distToCenterSq <= HEX_INTERIOR_THRESHOLD_SQ;
+                boolean isEdge = !isInterior && distToCenterSq < HEX_EDGE_OUTER_THRESHOLD_SQ;
 
                 if (!isEdge && !isInterior) continue; // Gap between hexes
 
@@ -133,16 +131,19 @@ public class BitmapHexGrid extends BitmapPattern {
                 float blendedHue = 0;
                 double hueWeight = 0;
 
+                double waveThickness = 3.0 + amplitude * 2.0;
+
                 for (int i = 0; i < MAX_WAVES; i++) {
                     if (waveBrightness[i] < 0.01) continue;
 
-                    double distToWave = Math.sqrt(
-                            (cellCenterX - waveX[i]) * (cellCenterX - waveX[i]) +
-                            (cellCenterY - waveY[i]) * (cellCenterY - waveY[i]));
+                    double dxW = cellCenterX - waveX[i];
+                    double dyW = cellCenterY - waveY[i];
+                    double distToWaveSq = dxW * dxW + dyW * dyW;
+                    double maxDist = waveRadius[i] + waveThickness;
+                    if (distToWaveSq > maxDist * maxDist) continue;
+                    double distToWave = Math.sqrt(distToWaveSq);
 
-                    // Wave is a ring: activates cells near its current radius
                     double ringDist = Math.abs(distToWave - waveRadius[i]);
-                    double waveThickness = 3.0 + amplitude * 2.0;
 
                     if (ringDist < waveThickness) {
                         double activation = (1.0 - ringDist / waveThickness) * waveBrightness[i];

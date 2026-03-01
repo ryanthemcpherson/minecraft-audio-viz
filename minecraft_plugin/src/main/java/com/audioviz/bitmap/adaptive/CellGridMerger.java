@@ -51,6 +51,21 @@ public final class CellGridMerger {
         return cells;
     }
 
+    public static void buildCellGridInto(int[] pixels, int pixelWidth, int pixelHeight,
+                                          int[] topARGB, int[] bottomARGB) {
+        int cellHeight = cellGridHeight(pixelHeight);
+        for (int cy = 0; cy < cellHeight; cy++) {
+            int topRow = cy * 2;
+            int bottomRow = topRow + 1;
+            boolean hasBottom = bottomRow < pixelHeight;
+            for (int cx = 0; cx < pixelWidth; cx++) {
+                int idx = cy * pixelWidth + cx;
+                topARGB[idx] = pixels[topRow * pixelWidth + cx];
+                bottomARGB[idx] = hasBottom ? pixels[bottomRow * pixelWidth + cx] : 0;
+            }
+        }
+    }
+
     /**
      * Build cell grid and merge uniform rectangular regions.
      *
@@ -74,8 +89,11 @@ public final class CellGridMerger {
     public static List<MergedRect> merge(int[] pixels, int pixelWidth, int pixelHeight) {
         int cellWidth = pixelWidth;
         int cellHeight = cellGridHeight(pixelHeight);
-        HalfBlockCell[] cells = buildCellGrid(pixels, pixelWidth, pixelHeight);
-        boolean[] consumed = new boolean[cells.length];
+        int cellCount = cellWidth * cellHeight;
+        int[] topARGB = new int[cellCount];
+        int[] bottomARGB = new int[cellCount];
+        buildCellGridInto(pixels, pixelWidth, pixelHeight, topARGB, bottomARGB);
+        boolean[] consumed = new boolean[cellCount];
 
         List<MergedRect> result = new ArrayList<>();
 
@@ -84,23 +102,24 @@ public final class CellGridMerger {
                 int idx = cy * cellWidth + cx;
                 if (consumed[idx]) continue;
 
-                HalfBlockCell ref = cells[idx];
+                int refTop = topARGB[idx];
+                int refBottom = bottomARGB[idx];
 
                 // Extend right
                 int runW = 1;
                 while (cx + runW < cellWidth) {
                     int nextIdx = cy * cellWidth + (cx + runW);
-                    if (consumed[nextIdx] || !cells[nextIdx].equals(ref)) break;
+                    if (consumed[nextIdx] || topARGB[nextIdx] != refTop || bottomARGB[nextIdx] != refBottom) break;
                     runW++;
                 }
 
-                // Extend the full run downward
+                // Extend down
                 int runH = 1;
                 outer:
                 while (cy + runH < cellHeight) {
                     for (int dx = 0; dx < runW; dx++) {
                         int belowIdx = (cy + runH) * cellWidth + (cx + dx);
-                        if (consumed[belowIdx] || !cells[belowIdx].equals(ref)) break outer;
+                        if (consumed[belowIdx] || topARGB[belowIdx] != refTop || bottomARGB[belowIdx] != refBottom) break outer;
                     }
                     runH++;
                 }
@@ -112,7 +131,7 @@ public final class CellGridMerger {
                     }
                 }
 
-                result.add(new MergedRect(cx, cy, runW, runH, ref.topARGB(), ref.bottomARGB()));
+                result.add(new MergedRect(cx, cy, runW, runH, refTop, refBottom));
             }
         }
 
@@ -131,13 +150,16 @@ public final class CellGridMerger {
     public static List<MergedRect> asCellRects(int[] pixels, int pixelWidth, int pixelHeight) {
         int cellWidth = pixelWidth;
         int cellHeight = cellGridHeight(pixelHeight);
-        HalfBlockCell[] cells = buildCellGrid(pixels, pixelWidth, pixelHeight);
-        List<MergedRect> result = new ArrayList<>(cells.length);
+        int cellCount = cellWidth * cellHeight;
+        int[] topARGB = new int[cellCount];
+        int[] bottomARGB = new int[cellCount];
+        buildCellGridInto(pixels, pixelWidth, pixelHeight, topARGB, bottomARGB);
+        List<MergedRect> result = new ArrayList<>(cellCount);
 
         for (int cy = 0; cy < cellHeight; cy++) {
             for (int cx = 0; cx < cellWidth; cx++) {
-                HalfBlockCell cell = cells[cy * cellWidth + cx];
-                result.add(new MergedRect(cx, cy, 1, 1, cell.topARGB(), cell.bottomARGB()));
+                int idx = cy * cellWidth + cx;
+                result.add(new MergedRect(cx, cy, 1, 1, topARGB[idx], bottomARGB[idx]));
             }
         }
         return result;

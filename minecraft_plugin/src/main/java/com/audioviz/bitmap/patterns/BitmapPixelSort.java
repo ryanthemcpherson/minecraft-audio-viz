@@ -17,6 +17,8 @@ public class BitmapPixelSort extends BitmapPattern {
 
     private double beatPulse = 0;
     private boolean sortDirection = false; // false = left-to-right, true = right-to-left
+    private int[] sortScratchPixels = new int[0];
+    private long[] sortScratchKeyed = new long[0];
 
     public BitmapPixelSort() {
         super("bmp_pixelsort", "Bitmap Pixel Sort",
@@ -93,26 +95,28 @@ public class BitmapPixelSort extends BitmapPattern {
         int len = end - start + 1;
         if (len < 2) return;
 
-        int[] run = new int[len];
+        if (sortScratchPixels.length < len) {
+            sortScratchPixels = new int[len];
+            sortScratchKeyed = new long[len];
+        }
         for (int i = 0; i < len; i++) {
-            run[i] = buffer.getPixel(start + i, y);
+            sortScratchPixels[i] = buffer.getPixel(start + i, y);
         }
 
         // Sort by brightness using a keyed sort (pack brightness + index)
-        long[] keyed = new long[len];
         for (int i = 0; i < len; i++) {
-            int bri = brightness(run[i]);
-            keyed[i] = ((long) bri << 32) | i;
+            int bri = brightness(sortScratchPixels[i]);
+            sortScratchKeyed[i] = ((long) bri << 32) | i;
         }
-        Arrays.sort(keyed);
+        Arrays.sort(sortScratchKeyed, 0, len);
 
         if (reverse) {
             for (int i = 0; i < len; i++) {
-                buffer.setPixel(start + i, y, run[(int) (keyed[len - 1 - i] & 0xFFFFFFFFL)]);
+                buffer.setPixel(start + i, y, sortScratchPixels[(int) (sortScratchKeyed[len - 1 - i] & 0xFFFFFFFFL)]);
             }
         } else {
             for (int i = 0; i < len; i++) {
-                buffer.setPixel(start + i, y, run[(int) (keyed[i] & 0xFFFFFFFFL)]);
+                buffer.setPixel(start + i, y, sortScratchPixels[(int) (sortScratchKeyed[i] & 0xFFFFFFFFL)]);
             }
         }
     }

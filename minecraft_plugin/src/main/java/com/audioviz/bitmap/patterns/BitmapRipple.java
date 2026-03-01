@@ -47,37 +47,91 @@ public class BitmapRipple extends BitmapPattern {
             ripples.add(new RippleWave(time, rx, ry, color, audio.getBeatIntensity()));
         }
 
-        // Render: sum wave contributions at each pixel
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                double totalR = 0, totalG = 0, totalB = 0;
+        // Render: loop-inverted (iterate per ripple, not per pixel)
+        double[] rBuf = new double[w * h];
+        double[] gBuf = new double[w * h];
+        double[] bBuf = new double[w * h];
 
-                for (RippleWave ripple : ripples) {
-                    double age = time - ripple.startTime;
-                    double fadeout = Math.max(0, 1.0 - age * 0.4);
-                    if (fadeout <= 0) continue;
+        for (RippleWave ripple : ripples) {
+            double age = time - ripple.startTime;
+            double fadeout = Math.max(0, 1.0 - age * 0.4);
+            if (fadeout <= 0) continue;
 
-                    double dist = Math.sqrt((x - ripple.cx) * (x - ripple.cx)
-                                          + (y - ripple.cy) * (y - ripple.cy));
-                    double waveRadius = age * 20.0; // Expansion speed
-                    double waveWidth = 3.0 + age * 0.5;
+            double waveRadius = age * 20.0;
+            double waveWidth = 3.0 + age * 0.5;
 
-                    // Sine wave centered on expanding ring
-                    double phase = (dist - waveRadius) / waveWidth;
-                    double waveVal = Math.exp(-phase * phase) * Math.cos(phase * Math.PI);
-                    waveVal *= fadeout * ripple.intensity;
+            double rInner = waveRadius - waveWidth * 3.0;
+            double rOuter = waveRadius + waveWidth * 3.0;
+            if (rOuter < 0) continue;
+            double rInnerSq = rInner > 0 ? rInner * rInner : 0;
+            double rOuterSq = rOuter * rOuter;
 
-                    if (waveVal > 0) {
-                        totalR += ((ripple.color >> 16) & 0xFF) * waveVal / 255.0;
-                        totalG += ((ripple.color >> 8) & 0xFF) * waveVal / 255.0;
-                        totalB += (ripple.color & 0xFF) * waveVal / 255.0;
+            double rippleR = ((ripple.color >> 16) & 0xFF) / 255.0 * fadeout * ripple.intensity;
+            double rippleG = ((ripple.color >> 8) & 0xFF) / 255.0 * fadeout * ripple.intensity;
+            double rippleB = (ripple.color & 0xFF) / 255.0 * fadeout * ripple.intensity;
+
+            int yMin = Math.max(0, (int) Math.floor(ripple.cy - rOuter));
+            int yMax = Math.min(h - 1, (int) Math.ceil(ripple.cy + rOuter));
+
+            for (int y = yMin; y <= yMax; y++) {
+                double dy = y - ripple.cy;
+                double dySq = dy * dy;
+                if (dySq > rOuterSq) continue;
+
+                double xSpanOuter = Math.sqrt(rOuterSq - dySq);
+                int xMinOuter = Math.max(0, (int) Math.floor(ripple.cx - xSpanOuter));
+                int xMaxOuter = Math.min(w - 1, (int) Math.ceil(ripple.cx + xSpanOuter));
+
+                if (rInner > 0 && dySq < rInnerSq) {
+                    double xSpanInner = Math.sqrt(rInnerSq - dySq);
+                    int xMinInner = (int) Math.ceil(ripple.cx - xSpanInner);
+                    int xMaxInner = (int) Math.floor(ripple.cx + xSpanInner);
+
+                    for (int x = xMinOuter; x < xMinInner && x <= xMaxOuter; x++) {
+                        double dist = Math.sqrt((x - ripple.cx) * (x - ripple.cx) + dySq);
+                        double phase = (dist - waveRadius) / waveWidth;
+                        double waveVal = Math.exp(-phase * phase) * Math.cos(phase * Math.PI);
+                        if (waveVal > 0) {
+                            int idx = y * w + x;
+                            rBuf[idx] += rippleR * waveVal;
+                            gBuf[idx] += rippleG * waveVal;
+                            bBuf[idx] += rippleB * waveVal;
+                        }
+                    }
+                    for (int x = Math.max(xMaxInner + 1, xMinOuter); x <= xMaxOuter; x++) {
+                        double dist = Math.sqrt((x - ripple.cx) * (x - ripple.cx) + dySq);
+                        double phase = (dist - waveRadius) / waveWidth;
+                        double waveVal = Math.exp(-phase * phase) * Math.cos(phase * Math.PI);
+                        if (waveVal > 0) {
+                            int idx = y * w + x;
+                            rBuf[idx] += rippleR * waveVal;
+                            gBuf[idx] += rippleG * waveVal;
+                            bBuf[idx] += rippleB * waveVal;
+                        }
+                    }
+                } else {
+                    for (int x = xMinOuter; x <= xMaxOuter; x++) {
+                        double dist = Math.sqrt((x - ripple.cx) * (x - ripple.cx) + dySq);
+                        double phase = (dist - waveRadius) / waveWidth;
+                        double waveVal = Math.exp(-phase * phase) * Math.cos(phase * Math.PI);
+                        if (waveVal > 0) {
+                            int idx = y * w + x;
+                            rBuf[idx] += rippleR * waveVal;
+                            gBuf[idx] += rippleG * waveVal;
+                            bBuf[idx] += rippleB * waveVal;
+                        }
                     }
                 }
+            }
+        }
 
-                if (totalR > 0 || totalG > 0 || totalB > 0) {
-                    int r = Math.min(255, (int) (totalR * 255));
-                    int g = Math.min(255, (int) (totalG * 255));
-                    int b = Math.min(255, (int) (totalB * 255));
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int idx = y * w + x;
+                if (rBuf[idx] > 0 || gBuf[idx] > 0 || bBuf[idx] > 0) {
+                    int r = Math.min(255, (int) (rBuf[idx] * 255));
+                    int g = Math.min(255, (int) (gBuf[idx] * 255));
+                    int b = Math.min(255, (int) (bBuf[idx] * 255));
                     buffer.setPixel(x, y, BitmapFrameBuffer.rgb(r, g, b));
                 }
             }
