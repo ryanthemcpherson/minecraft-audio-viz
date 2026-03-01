@@ -6,6 +6,7 @@ import com.audioviz.patterns.AudioState;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -73,9 +74,11 @@ public class AsyncBitmapRenderer {
                     pattern.render(state.backBuffer, audio, time);
                 }
 
-                int[] snapshot = new int[state.backBuffer.getPixelCount()];
+                int writeIdx = state.bufferIndex.get() ^ 1; // write to the non-active buffer
+                int[] snapshot = state.doubleBuffer[writeIdx];
                 System.arraycopy(state.backBuffer.getRawPixels(), 0,
                                  snapshot, 0, snapshot.length);
+                state.bufferIndex.set(writeIdx);
                 state.completedPixels.set(snapshot);
             } catch (Exception e) {
                 LOGGER.warn("Async bitmap render error [{}]: {}", zoneName, e.getMessage());
@@ -142,9 +145,14 @@ public class AsyncBitmapRenderer {
         final AtomicReference<int[]> completedPixels = new AtomicReference<>();
         final AtomicBoolean rendering = new AtomicBoolean(false);
         final BitmapRenderTimer timer = new BitmapRenderTimer();
+        /** Pre-allocated double buffers — swap index to avoid per-frame allocation. */
+        final int[][] doubleBuffer;
+        final AtomicInteger bufferIndex = new AtomicInteger(0);
 
         ZoneRenderState(int width, int height) {
             this.backBuffer = new BitmapFrameBuffer(width, height);
+            int pixelCount = width * height;
+            this.doubleBuffer = new int[][] { new int[pixelCount], new int[pixelCount] };
         }
     }
 }
