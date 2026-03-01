@@ -220,6 +220,7 @@ impl AudioBuffer {
         }
     }
 
+    #[cfg(test)]
     pub fn get_latest(&self, count: usize) -> Vec<f32> {
         let count = count.min(self.capacity);
         let mut result = Vec::with_capacity(count);
@@ -236,6 +237,28 @@ impl AudioBuffer {
         }
 
         result
+    }
+
+    /// Copy the latest `count` samples into `dst` using memcpy (no heap allocation).
+    /// Returns the number of samples actually written.
+    pub fn get_latest_into(&self, dst: &mut [f32]) -> usize {
+        let count = dst.len().min(self.capacity);
+        let start = if self.write_pos >= count {
+            self.write_pos - count
+        } else {
+            self.capacity - (count - self.write_pos)
+        };
+
+        if start + count <= self.capacity {
+            // Contiguous region: single memcpy
+            dst[..count].copy_from_slice(&self.samples[start..start + count]);
+        } else {
+            // Wraps around: two memcpys
+            let first_len = self.capacity - start;
+            dst[..first_len].copy_from_slice(&self.samples[start..]);
+            dst[first_len..count].copy_from_slice(&self.samples[..count - first_len]);
+        }
+        count
     }
 }
 
@@ -335,6 +358,7 @@ fn run_audio_thread(
                         let bass_lane = Arc::new(Mutex::new(BassLane::new(sample_rate as f32)));
 
                         // Run analysis loop - copy samples under lock, release, then process
+                        let mut sample_buf = vec![0.0f32; 4096];
                         loop {
                             match command_rx.try_recv() {
                                 Ok(AudioCommand::Stop) => {
@@ -349,22 +373,22 @@ fn run_audio_thread(
                             }
 
                             // Copy samples under lock, then release before expensive processing
-                            let (samples, fft_size) = {
-                                let buf = buffer.lock();
-                                let ana = analyzer.lock();
-                                let sz = ana.fft_size();
-                                (buf.get_latest(sz), sz)
-                            };
+                            let fft_size = analyzer.lock().fft_size();
+                            if sample_buf.len() < fft_size {
+                                sample_buf.resize(fft_size, 0.0);
+                            }
+                            let count = buffer.lock().get_latest_into(&mut sample_buf[..fft_size]);
 
-                            if samples.len() >= fft_size {
+                            if count >= fft_size {
+                                let samples = &sample_buf[..count];
                                 let (i_bass, i_kick) = {
                                     let mut bl = bass_lane.lock();
-                                    bl.process(&samples)
+                                    bl.process(samples)
                                 };
 
                                 let mut result = {
                                     let mut ana = analyzer.lock();
-                                    ana.analyze(&samples)
+                                    ana.analyze(samples)
                                 };
 
                                 result.instant_bass = i_bass;
@@ -506,6 +530,7 @@ fn run_audio_thread(
     log::info!("Audio capture started");
 
     // Main loop - analyze audio and check for stop command
+    let mut sample_buf = vec![0.0f32; 4096];
     loop {
         // Check for stop command (non-blocking)
         match command_rx.try_recv() {
@@ -525,25 +550,25 @@ fn run_audio_thread(
         // Analyze audio (FFT + merge bass lane results)
         // IMPORTANT: Copy samples under lock, then release lock before expensive FFT.
         // Holding the buffer lock during analyze() blocks the audio callback.
-        let (samples, fft_size) = {
-            let buf = buffer.lock();
-            let ana = analyzer.lock();
-            let sz = ana.fft_size();
-            (buf.get_latest(sz), sz)
-        };
+        let fft_size = analyzer.lock().fft_size();
+        if sample_buf.len() < fft_size {
+            sample_buf.resize(fft_size, 0.0);
+        }
+        let count = buffer.lock().get_latest_into(&mut sample_buf[..fft_size]);
         // All locks dropped - audio callback can push freely
 
-        if samples.len() >= fft_size {
+        if count >= fft_size {
+            let samples = &sample_buf[..count];
             // Run bass lane on the same samples (moved out of audio callback to avoid contention)
             let (i_bass, i_kick) = {
                 let mut bl = bass_lane.lock();
-                bl.process(&samples)
+                bl.process(samples)
             };
             // bass_lane lock dropped
 
             let mut result = {
                 let mut ana = analyzer.lock();
-                ana.analyze(&samples)
+                ana.analyze(samples)
             };
             // analyzer lock dropped
 
@@ -578,32 +603,33 @@ fn build_stream<T: cpal::Sample + cpal::SizedSample>(
 where
     f32: cpal::FromSample<T>,
 {
+    // Pre-allocate scratch buffers for the audio callback (avoids per-callback heap allocation).
+    // Typical callback: ~960 samples * 2 channels = 1920 f32s; capacity grows once if needed.
+    let mut f32_scratch: Vec<f32> = Vec::with_capacity(8192);
+    let mut mono_scratch: Vec<f32> = Vec::with_capacity(4096);
+
     device.build_input_stream(
         config,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
-            // Convert all samples to f32 (interleaved)
-            let f32_data: Vec<f32> = data
-                .iter()
-                .map(|s| cpal::Sample::from_sample(*s))
-                .collect();
+            // Convert to f32 (reuse scratch — no allocation after first callback)
+            f32_scratch.clear();
+            f32_scratch.extend(data.iter().map(|s| -> f32 { cpal::Sample::from_sample(*s) }));
 
             // Feed raw interleaved f32 samples to voice streamer (before downmix)
             if let Some(ref streamer) = voice_streamer {
-                streamer.push_samples(&f32_data, channels);
+                streamer.push_samples(&f32_scratch, channels);
             }
 
-            // Convert to mono f32 for FFT analysis
-            let mono: Vec<f32> = f32_data
-                .chunks(channels)
-                .map(|frame| {
-                    let sum: f32 = frame.iter().sum();
-                    sum / channels as f32
-                })
-                .collect();
+            // Downmix to mono (reuse scratch)
+            mono_scratch.clear();
+            mono_scratch.extend(f32_scratch.chunks(channels).map(|frame| {
+                let sum: f32 = frame.iter().sum();
+                sum / channels as f32
+            }));
 
             // Push mono samples to buffer for FFT + bass lane analysis
             // Bass lane runs in the analysis thread (not callback) to avoid lock contention
-            buffer.lock().push_samples(&mono);
+            buffer.lock().push_samples(&mono_scratch);
         },
         |err| {
             log::error!("Audio stream error: {}", err);
