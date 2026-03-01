@@ -218,7 +218,9 @@ async def test_join_idempotency_key_reuses_session(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_join_different_idempotency_keys_create_distinct_sessions(client: AsyncClient) -> None:
+async def test_join_different_idempotency_keys_create_distinct_sessions(
+    client: AsyncClient,
+) -> None:
     """Different idempotency keys should create separate sessions."""
     user_token = await _get_user_token(client, "idem2@example.com")
     reg = await _register_server(
