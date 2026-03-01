@@ -15,7 +15,7 @@ import java.util.Random;
  */
 public class BitmapFire extends BitmapPattern {
 
-    private double[][] heatMap;
+    private double[] heatMap;
     private boolean initialized = false;
     private final Random rng = new Random(42);
     private double beatPulse = 0;
@@ -33,8 +33,8 @@ public class BitmapFire extends BitmapPattern {
         int w = buffer.getWidth();
         int h = buffer.getHeight();
 
-        if (!initialized || heatMap == null || heatMap.length != w || heatMap[0].length != h) {
-            heatMap = new double[w][h];
+        if (!initialized || heatMap == null || heatMap.length != w * h) {
+            heatMap = new double[w * h];
             initialized = true;
         }
 
@@ -55,10 +55,10 @@ public class BitmapFire extends BitmapPattern {
             if (beatPulse > 0.3) {
                 seed += beatPulse * 0.5 * rng.nextDouble();
             }
-            heatMap[x][h - 1] = Math.min(1.0, seed);
+            heatMap[(h - 1) * w + x] = Math.min(1.0, seed);
             // Also seed second-to-bottom for thicker base
             if (h > 1) {
-                heatMap[x][h - 2] = Math.min(1.0, heatMap[x][h - 2] + seed * 0.5);
+                heatMap[(h - 2) * w + x] = Math.min(1.0, heatMap[(h - 2) * w + x] + seed * 0.5);
             }
         }
 
@@ -68,21 +68,21 @@ public class BitmapFire extends BitmapPattern {
 
         for (int y = 0; y < h - 1; y++) {
             for (int x = 0; x < w; x++) {
-                double below = heatMap[x][y + 1];
-                double left = (x > 0) ? heatMap[x - 1][y + 1] : below;
-                double right = (x < w - 1) ? heatMap[x + 1][y + 1] : below;
-                double belowBelow = (y + 2 < h) ? heatMap[x][y + 2] : below;
+                double below = heatMap[(y + 1) * w + x];
+                double left = (x > 0) ? heatMap[(y + 1) * w + x - 1] : below;
+                double right = (x < w - 1) ? heatMap[(y + 1) * w + x + 1] : below;
+                double belowBelow = (y + 2 < h) ? heatMap[(y + 2) * w + x] : below;
 
                 double heat = (below + left + right + belowBelow) / 4.0;
                 heat -= coolingFactor + rng.nextDouble() * 0.03;
-                heatMap[x][y] = Math.max(0, heat);
+                heatMap[y * w + x] = Math.max(0, heat);
             }
         }
 
         // Render heat map to pixels
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                double heat = Math.min(1.0, heatMap[x][y]);
+                double heat = Math.min(1.0, heatMap[y * w + x]);
                 int paletteIdx = (int) (heat * (FIRE_PALETTE.length - 1));
                 buffer.setPixel(x, y, FIRE_PALETTE[paletteIdx]);
             }

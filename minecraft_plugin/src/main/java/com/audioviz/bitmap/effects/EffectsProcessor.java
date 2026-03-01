@@ -59,6 +59,8 @@ public class EffectsProcessor {
     private int edgeFlashColor = 0xFFFFFFFF;
     private int edgeFlashWidth = 2;
 
+    private int[] rgbSplitSnapshot = new int[0];
+
     /**
      * Process a rendered frame buffer with all active effects.
      * Modifies the buffer in-place.
@@ -252,12 +254,15 @@ public class EffectsProcessor {
     /**
      * RGB Split: offset red and blue channels horizontally for chromatic aberration.
      */
-    private static void applyRgbSplit(BitmapFrameBuffer buffer, int offset) {
+    private void applyRgbSplit(BitmapFrameBuffer buffer, int offset) {
         int w = buffer.getWidth();
         int h = buffer.getHeight();
         int[] pixels = buffer.getRawPixels();
-        // Snapshot so reads don't see writes
-        int[] snapshot = pixels.clone();
+        if (rgbSplitSnapshot.length != pixels.length) {
+            rgbSplitSnapshot = new int[pixels.length];
+        }
+        System.arraycopy(pixels, 0, rgbSplitSnapshot, 0, pixels.length);
+        int[] snapshot = rgbSplitSnapshot;
 
         for (int y = 0; y < h; y++) {
             int row = y * w;
@@ -375,5 +380,6 @@ public class EffectsProcessor {
         bitCrushPixelSize = 1;
         edgeFlashEnabled = false;
         edgeFlashIntensity = 0;
+        rgbSplitSnapshot = new int[0];
     }
 }
