@@ -263,10 +263,13 @@ pub struct FftAnalyzer {
 
     // Beat detection
     beat_history: VecDeque<f32>,
+    beat_sum: f32,          // Running sum for O(1) mean
     beat_cooldown: usize,
     last_beat_times: VecDeque<f64>,
     prev_bass: f32,
     flux_history: VecDeque<f32>,
+    flux_sum: f32,           // Running sum for O(1) mean
+    flux_sum_sq: f32,        // Running sum of squares for O(1) variance
     last_onset_time: Option<f64>,
     tempo_histogram: Vec<f32>,
     ioi_history: VecDeque<f64>,
@@ -333,10 +336,13 @@ impl FftAnalyzer {
             bass_weight: 0.7,
             band_sensitivity: [1.0; 5],
             beat_history: VecDeque::with_capacity(60),
+            beat_sum: 0.0,
             beat_cooldown: 0,
             last_beat_times: VecDeque::with_capacity(20),
             prev_bass: 0.0,
             flux_history: VecDeque::with_capacity(120),
+            flux_sum: 0.0,
+            flux_sum_sq: 0.0,
             last_onset_time: None,
             tempo_histogram: vec![0.0; 201], // 40-240 BPM
             ioi_history: VecDeque::with_capacity(32),
@@ -457,18 +463,23 @@ impl FftAnalyzer {
 
     /// Detect beats based on bass energy
     fn detect_beat(&mut self, bass: f32) -> (bool, f32) {
-        // Update history
+        // Update beat history with running sum (O(1) mean)
         self.beat_history.push_back(bass);
+        self.beat_sum += bass;
         if self.beat_history.len() > 60 {
-            self.beat_history.pop_front();
+            self.beat_sum -= self.beat_history.pop_front().unwrap_or(0.0);
         }
 
         // Bass flux is a robust onset signal for EDM kick transients.
         let bass_flux = (bass - self.prev_bass).max(0.0);
         self.prev_bass = bass;
         self.flux_history.push_back(bass_flux);
+        self.flux_sum += bass_flux;
+        self.flux_sum_sq += bass_flux * bass_flux;
         if self.flux_history.len() > 120 {
-            self.flux_history.pop_front();
+            let removed = self.flux_history.pop_front().unwrap_or(0.0);
+            self.flux_sum -= removed;
+            self.flux_sum_sq -= removed * removed;
         }
 
         let current_time = self.start_time.elapsed().as_secs_f64();
@@ -478,28 +489,21 @@ impl FftAnalyzer {
             self.beat_cooldown -= 1;
         }
 
-        // Dynamic bass threshold
+        // Dynamic bass threshold (O(1) via running sum)
         let avg = if self.beat_history.is_empty() {
             0.0
         } else {
-            self.beat_history.iter().sum::<f32>() / self.beat_history.len() as f32
+            self.beat_sum / self.beat_history.len() as f32
         };
         let bass_threshold = (avg * self.beat_threshold).max(0.12);
 
-        // Flux adaptive threshold: mean + N*std, clamped to avoid dead zones.
+        // Flux adaptive threshold: mean + N*std (O(1) via running sum/sum_sq)
         let (flux_mean, flux_std) = if self.flux_history.is_empty() {
             (0.0, 0.0)
         } else {
-            let mean = self.flux_history.iter().sum::<f32>() / self.flux_history.len() as f32;
-            let var = self
-                .flux_history
-                .iter()
-                .map(|v| {
-                    let d = *v - mean;
-                    d * d
-                })
-                .sum::<f32>()
-                / self.flux_history.len() as f32;
+            let n = self.flux_history.len() as f32;
+            let mean = self.flux_sum / n;
+            let var = (self.flux_sum_sq / n - mean * mean).max(0.0);
             (mean, var.sqrt())
         };
         let flux_threshold = (flux_mean + flux_std * self.beat_threshold).max(0.015);
