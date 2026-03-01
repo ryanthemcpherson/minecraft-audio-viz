@@ -15,6 +15,12 @@ public class BitmapCircularSpectrum extends BitmapPattern {
     private final double[] smoothBands = new double[5];
     private double beatPulse = 0;
 
+    // Precomputed lookup tables (recomputed when dimensions change)
+    private float[] distTable;
+    private float[] angleTable;
+    private int cachedWidth = -1;
+    private int cachedHeight = -1;
+
     // Band colors: bass(red) → high(blue)
     private static final int[] BAND_COLORS = {
         BitmapFrameBuffer.rgb(255, 40, 40),
@@ -29,6 +35,32 @@ public class BitmapCircularSpectrum extends BitmapPattern {
               "Frequency bars arranged in a ring with radial extension");
     }
 
+    private void ensureLookupTables(int w, int h) {
+        if (w == cachedWidth && h == cachedHeight) return;
+
+        cachedWidth = w;
+        cachedHeight = h;
+        int totalPixels = w * h;
+        distTable = new float[totalPixels];
+        angleTable = new float[totalPixels];
+
+        double cx = w / 2.0;
+        double cy = h / 2.0;
+
+        for (int y = 0; y < h; y++) {
+            double dy = y - cy;
+            int rowOffset = y * w;
+            for (int x = 0; x < w; x++) {
+                double dx = x - cx;
+                int idx = rowOffset + x;
+                distTable[idx] = (float) Math.sqrt(dx * dx + dy * dy);
+                float angle = (float) Math.atan2(dy, dx);
+                if (angle < 0) angle += (float) (Math.PI * 2);
+                angleTable[idx] = angle;
+            }
+        }
+    }
+
     @Override
     public void render(BitmapFrameBuffer buffer, AudioState audio, double time) {
         int w = buffer.getWidth();
@@ -37,6 +69,8 @@ public class BitmapCircularSpectrum extends BitmapPattern {
         double cy = h / 2.0;
         double maxR = Math.min(cx, cy) * 0.9;
         double innerR = maxR * 0.3;
+
+        ensureLookupTables(w, h);
 
         buffer.clear();
 
@@ -60,17 +94,23 @@ public class BitmapCircularSpectrum extends BitmapPattern {
             barValues[i] = smoothBands[lo] * (1 - frac) + smoothBands[hi] * frac;
         }
 
+        double twoPi = Math.PI * 2;
+        double barWidth = twoPi / numBars;
+        float innerRMinus1 = (float) (innerR - 1);
+        float innerRPlus1 = (float) (innerR + 1);
+        float maxRF = (float) maxR;
+
         // Draw bars as angular wedges
         for (int y = 0; y < h; y++) {
+            int rowOffset = y * w;
             for (int x = 0; x < w; x++) {
-                double dx = x - cx;
-                double dy = y - cy;
-                double dist = Math.sqrt(dx * dx + dy * dy);
+                int idx = rowOffset + x;
+                float dist = distTable[idx];
 
-                if (dist < innerR - 1 || dist > maxR) continue;
+                if (dist < innerRMinus1 || dist > maxRF) continue;
 
                 // Inner ring glow
-                if (dist < innerR + 1) {
+                if (dist < innerRPlus1) {
                     double pulse = 0.3 + beatPulse * 0.5 + audio.getAmplitude() * 0.2;
                     float hue = (float) ((time * 30) % 360);
                     int ringColor = BitmapFrameBuffer.fromHSB(hue, 0.6f, (float) Math.min(1, pulse));
@@ -78,16 +118,14 @@ public class BitmapCircularSpectrum extends BitmapPattern {
                     continue;
                 }
 
-                double angle = Math.atan2(dy, dx);
-                if (angle < 0) angle += Math.PI * 2;
+                float angle = angleTable[idx];
 
                 // Which bar does this angle fall in?
-                int barIdx = (int) (angle / (Math.PI * 2) * numBars);
+                int barIdx = (int) (angle / twoPi * numBars);
                 barIdx = Math.min(barIdx, numBars - 1);
 
                 // Angular position within the bar (for gap between bars)
-                double barAngle = angle - barIdx * (Math.PI * 2 / numBars);
-                double barWidth = Math.PI * 2 / numBars;
+                double barAngle = angle - barIdx * barWidth;
                 double normalizedInBar = barAngle / barWidth;
                 if (normalizedInBar < 0.1 || normalizedInBar > 0.9) continue; // Gap
 

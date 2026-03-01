@@ -48,33 +48,102 @@ public class BitmapConcentricRings extends BitmapPattern {
             rings.add(new Ring(time, color, 1 + (int) (audio.getBeatIntensity() * 2)));
         }
 
-        // Render all active rings
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                double dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+        // Accumulator buffers for additive blending (ring-first loop inversion)
+        int totalPixels = w * h;
+        int[] rBuf = new int[totalPixels];
+        int[] gBuf = new int[totalPixels];
+        int[] bBuf = new int[totalPixels];
 
-                int r = 0, g = 0, b = 0;
-                for (Ring ring : rings) {
-                    double age = time - ring.startTime;
-                    double radius = age * 15.0; // Expansion speed
-                    double thickness = ring.thickness + age * 0.5;
-                    double fadeFactor = Math.max(0, 1.0 - age * 0.4); // Fade over time
+        // Process each ring: only iterate pixels in the annular band
+        for (Ring ring : rings) {
+            double age = time - ring.startTime;
+            double radius = age * 15.0; // Expansion speed
+            double thickness = ring.thickness + age * 0.5;
+            double fadeFactor = Math.max(0, 1.0 - age * 0.4); // Fade over time
+            if (fadeFactor <= 0) continue;
 
+            int ringR = (ring.color >> 16) & 0xFF;
+            int ringG = (ring.color >> 8) & 0xFF;
+            int ringB = ring.color & 0xFF;
+
+            double rInner = Math.max(0, radius - thickness);
+            double rOuter = radius + thickness;
+            double rInnerSq = rInner * rInner;
+            double rOuterSq = rOuter * rOuter;
+
+            // Bounding box for the annular region
+            int yMin = Math.max(0, (int) Math.floor(cy - rOuter));
+            int yMax = Math.min(h - 1, (int) Math.ceil(cy + rOuter));
+
+            for (int y = yMin; y <= yMax; y++) {
+                double dy = y - cy;
+                double dySq = dy * dy;
+
+                // Skip row if entirely inside inner circle or outside outer circle
+                if (dySq > rOuterSq) continue;
+
+                // Compute x range for outer circle
+                double xSpanOuter = Math.sqrt(rOuterSq - dySq);
+                int xMinOuter = Math.max(0, (int) Math.floor(cx - xSpanOuter));
+                int xMaxOuter = Math.min(w - 1, (int) Math.ceil(cx + xSpanOuter));
+
+                // Compute x range for inner circle (hole)
+                int xMinInner = -1, xMaxInner = -1;
+                if (dySq < rInnerSq) {
+                    double xSpanInner = Math.sqrt(rInnerSq - dySq);
+                    xMinInner = (int) Math.ceil(cx - xSpanInner);
+                    xMaxInner = (int) Math.floor(cx + xSpanInner);
+                }
+
+                int rowOffset = y * w;
+
+                // Process left band (from outer left to inner left)
+                int leftEnd = (xMinInner >= 0) ? Math.min(xMinInner - 1, xMaxOuter) : xMaxOuter;
+                for (int x = xMinOuter; x <= leftEnd; x++) {
+                    double dx = x - cx;
+                    double distSq = dx * dx + dySq;
+                    // distSq is guaranteed within [rInnerSq, rOuterSq] by bounds
+                    double dist = Math.sqrt(distSq);
                     double ringDist = Math.abs(dist - radius);
                     if (ringDist < thickness) {
                         double edgeFade = 1.0 - ringDist / thickness;
                         double intensity = edgeFade * fadeFactor;
-                        int rc = (int) (((ring.color >> 16) & 0xFF) * intensity);
-                        int gc = (int) (((ring.color >> 8) & 0xFF) * intensity);
-                        int bc = (int) ((ring.color & 0xFF) * intensity);
-                        r = Math.min(255, r + rc);
-                        g = Math.min(255, g + gc);
-                        b = Math.min(255, b + bc);
+                        int idx = rowOffset + x;
+                        rBuf[idx] = Math.min(255, rBuf[idx] + (int) (ringR * intensity));
+                        gBuf[idx] = Math.min(255, gBuf[idx] + (int) (ringG * intensity));
+                        bBuf[idx] = Math.min(255, bBuf[idx] + (int) (ringB * intensity));
                     }
                 }
 
-                if (r > 0 || g > 0 || b > 0) {
-                    buffer.setPixel(x, y, BitmapFrameBuffer.rgb(r, g, b));
+                // Process right band (from inner right to outer right)
+                int rightStart = (xMaxInner >= 0) ? Math.max(xMaxInner + 1, xMinOuter) : xMinOuter;
+                // Avoid double-processing if there's no inner hole
+                if (xMinInner >= 0) {
+                    for (int x = rightStart; x <= xMaxOuter; x++) {
+                        double dx = x - cx;
+                        double distSq = dx * dx + dySq;
+                        double dist = Math.sqrt(distSq);
+                        double ringDist = Math.abs(dist - radius);
+                        if (ringDist < thickness) {
+                            double edgeFade = 1.0 - ringDist / thickness;
+                            double intensity = edgeFade * fadeFactor;
+                            int idx = rowOffset + x;
+                            rBuf[idx] = Math.min(255, rBuf[idx] + (int) (ringR * intensity));
+                            gBuf[idx] = Math.min(255, gBuf[idx] + (int) (ringG * intensity));
+                            bBuf[idx] = Math.min(255, bBuf[idx] + (int) (ringB * intensity));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write accumulated pixels to buffer
+        for (int y = 0; y < h; y++) {
+            int rowOffset = y * w;
+            for (int x = 0; x < w; x++) {
+                int idx = rowOffset + x;
+                if (rBuf[idx] > 0 || gBuf[idx] > 0 || bBuf[idx] > 0) {
+                    buffer.setPixel(x, y, BitmapFrameBuffer.rgb(rBuf[idx], gBuf[idx], bBuf[idx]));
                 }
             }
         }

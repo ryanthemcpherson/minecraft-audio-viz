@@ -47,37 +47,108 @@ public class BitmapRipple extends BitmapPattern {
             ripples.add(new RippleWave(time, rx, ry, color, audio.getBeatIntensity()));
         }
 
-        // Render: sum wave contributions at each pixel
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                double totalR = 0, totalG = 0, totalB = 0;
+        // Accumulator buffers for additive blending (ripple-first loop inversion)
+        int totalPixels = w * h;
+        double[] rBuf = new double[totalPixels];
+        double[] gBuf = new double[totalPixels];
+        double[] bBuf = new double[totalPixels];
 
-                for (RippleWave ripple : ripples) {
-                    double age = time - ripple.startTime;
-                    double fadeout = Math.max(0, 1.0 - age * 0.4);
-                    if (fadeout <= 0) continue;
+        // Process each ripple: only iterate pixels in the annular wave band
+        for (RippleWave ripple : ripples) {
+            double age = time - ripple.startTime;
+            double fadeout = Math.max(0, 1.0 - age * 0.4);
+            if (fadeout <= 0) continue;
 
-                    double dist = Math.sqrt((x - ripple.cx) * (x - ripple.cx)
-                                          + (y - ripple.cy) * (y - ripple.cy));
-                    double waveRadius = age * 20.0; // Expansion speed
-                    double waveWidth = 3.0 + age * 0.5;
+            double waveRadius = age * 20.0; // Expansion speed
+            double waveWidth = 3.0 + age * 0.5;
 
-                    // Sine wave centered on expanding ring
+            // Gaussian envelope exp(-phase^2) is negligible when |phase| > 3
+            // Also cos(phase * PI) is only positive when |phase| < 0.5, and the
+            // overall product is only positive within a limited band. But to match
+            // the original exactly, we use the full Gaussian cutoff.
+            double bandHalf = waveWidth * 3.0;
+            double rInner = Math.max(0, waveRadius - bandHalf);
+            double rOuter = waveRadius + bandHalf;
+            double rInnerSq = rInner * rInner;
+            double rOuterSq = rOuter * rOuter;
+
+            double ripR = ((ripple.color >> 16) & 0xFF) / 255.0;
+            double ripG = ((ripple.color >> 8) & 0xFF) / 255.0;
+            double ripB = (ripple.color & 0xFF) / 255.0;
+            double intensityScale = fadeout * ripple.intensity;
+
+            // Bounding box for this ripple's annular region
+            int yMin = Math.max(0, (int) Math.floor(ripple.cy - rOuter));
+            int yMax = Math.min(h - 1, (int) Math.ceil(ripple.cy + rOuter));
+
+            for (int y = yMin; y <= yMax; y++) {
+                double dy = y - ripple.cy;
+                double dySq = dy * dy;
+
+                if (dySq > rOuterSq) continue;
+
+                // X range for outer circle
+                double xSpanOuter = Math.sqrt(rOuterSq - dySq);
+                int xMinOuter = Math.max(0, (int) Math.floor(ripple.cx - xSpanOuter));
+                int xMaxOuter = Math.min(w - 1, (int) Math.ceil(ripple.cx + xSpanOuter));
+
+                // X range for inner hole
+                int xMinInner = -1, xMaxInner = -1;
+                if (dySq < rInnerSq) {
+                    double xSpanInner = Math.sqrt(rInnerSq - dySq);
+                    xMinInner = (int) Math.ceil(ripple.cx - xSpanInner);
+                    xMaxInner = (int) Math.floor(ripple.cx + xSpanInner);
+                }
+
+                int rowOffset = y * w;
+
+                // Process left band
+                int leftEnd = (xMinInner >= 0) ? Math.min(xMinInner - 1, xMaxOuter) : xMaxOuter;
+                for (int x = xMinOuter; x <= leftEnd; x++) {
+                    double dx = x - ripple.cx;
+                    double dist = Math.sqrt(dx * dx + dySq);
                     double phase = (dist - waveRadius) / waveWidth;
                     double waveVal = Math.exp(-phase * phase) * Math.cos(phase * Math.PI);
-                    waveVal *= fadeout * ripple.intensity;
+                    waveVal *= intensityScale;
 
                     if (waveVal > 0) {
-                        totalR += ((ripple.color >> 16) & 0xFF) * waveVal / 255.0;
-                        totalG += ((ripple.color >> 8) & 0xFF) * waveVal / 255.0;
-                        totalB += (ripple.color & 0xFF) * waveVal / 255.0;
+                        int idx = rowOffset + x;
+                        rBuf[idx] += ripR * waveVal;
+                        gBuf[idx] += ripG * waveVal;
+                        bBuf[idx] += ripB * waveVal;
                     }
                 }
 
-                if (totalR > 0 || totalG > 0 || totalB > 0) {
-                    int r = Math.min(255, (int) (totalR * 255));
-                    int g = Math.min(255, (int) (totalG * 255));
-                    int b = Math.min(255, (int) (totalB * 255));
+                // Process right band (only if inner hole exists)
+                if (xMinInner >= 0) {
+                    int rightStart = Math.max(xMaxInner + 1, xMinOuter);
+                    for (int x = rightStart; x <= xMaxOuter; x++) {
+                        double dx = x - ripple.cx;
+                        double dist = Math.sqrt(dx * dx + dySq);
+                        double phase = (dist - waveRadius) / waveWidth;
+                        double waveVal = Math.exp(-phase * phase) * Math.cos(phase * Math.PI);
+                        waveVal *= intensityScale;
+
+                        if (waveVal > 0) {
+                            int idx = rowOffset + x;
+                            rBuf[idx] += ripR * waveVal;
+                            gBuf[idx] += ripG * waveVal;
+                            bBuf[idx] += ripB * waveVal;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write accumulated pixels to buffer
+        for (int y = 0; y < h; y++) {
+            int rowOffset = y * w;
+            for (int x = 0; x < w; x++) {
+                int idx = rowOffset + x;
+                if (rBuf[idx] > 0 || gBuf[idx] > 0 || bBuf[idx] > 0) {
+                    int r = Math.min(255, (int) (rBuf[idx] * 255));
+                    int g = Math.min(255, (int) (gBuf[idx] * 255));
+                    int b = Math.min(255, (int) (bBuf[idx] * 255));
                     buffer.setPixel(x, y, BitmapFrameBuffer.rgb(r, g, b));
                 }
             }
