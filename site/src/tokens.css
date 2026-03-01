@@ -1,0 +1,27 @@
+:root {
+  /* Backgrounds */
+  --mcav-bg-primary: #08090d;
+  --mcav-bg-secondary: #0f1118;
+  --mcav-bg-card: rgba(255, 255, 255, 0.03);
+
+  /* Borders */
+  --mcav-border-subtle: rgba(255, 255, 255, 0.06);
+
+  /* Brand accent colors */
+  --mcav-cyan: #00CCFF;
+  --mcav-blue: #5B6AFF;
+  --mcav-amber: #FFAA00;
+
+  /* Text */
+  --mcav-text-primary: #f5f5f5;
+  --mcav-text-secondary: #a1a1aa;
+
+  /* Typography */
+  --mcav-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mcav-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Shared effects */
+  --mcav-glow-cyan: 0 0 30px rgba(0, 204, 255, 0.15);
+  --mcav-glow-amber: 0 0 30px rgba(255, 170, 0, 0.15);
+  --mcav-glow-blue: 0 0 30px rgba(91, 106, 255, 0.15);
+}
