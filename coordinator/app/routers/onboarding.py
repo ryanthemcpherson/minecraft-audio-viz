@@ -38,6 +38,9 @@ async def complete_onboarding(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserResponse:
+    """Mark onboarding as complete and set the user's chosen type (dj,
+    server_owner, team_member).
+    """
     user.user_type = body.user_type
     user.onboarding_completed_at = datetime.now(timezone.utc)
     await session.commit()
@@ -54,6 +57,9 @@ async def skip_onboarding(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserResponse:
+    """Mark onboarding as complete without setting a user type.  The user
+    can revisit onboarding later.
+    """
     user.onboarding_completed_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(user)
@@ -69,6 +75,9 @@ async def reset_onboarding(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UserResponse:
+    """Reset the user's onboarding status and user type so they can redo
+    the onboarding flow.
+    """
     user.onboarding_completed_at = None
     user.user_type = None
     await session.commit()

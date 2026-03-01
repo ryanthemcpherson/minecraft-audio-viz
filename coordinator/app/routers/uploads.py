@@ -26,6 +26,11 @@ async def get_presigned_url(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> UploadUrlResponse:
+    """Generate a presigned URL for uploading an image to R2 storage.
+    Requires authentication.  Returns both the upload URL (PUT) and the
+    resulting public URL.  The upload URL expires in 300 seconds.  Returns
+    501 if R2 is not configured.
+    """
     if not settings.r2_account_id or not settings.r2_bucket_name:
         raise HTTPException(
             status_code=501,

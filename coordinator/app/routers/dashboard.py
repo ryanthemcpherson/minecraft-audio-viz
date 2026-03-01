@@ -91,6 +91,11 @@ async def dashboard_summary(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ServerOwnerDashboard | TeamMemberDashboard | DJDashboardData | GenericDashboard:
+    """Return role-specific dashboard data for the authenticated user.
+    Response shape varies by ``user_type``: server owners get a setup
+    checklist and org summaries, team members get active shows, DJs get
+    session history.
+    """
     # Clear identity map so the re-fetch below loads all objects and
     # relationships fresh from the DB (avoids stale cached state).
     user_id = user.id
@@ -200,6 +205,10 @@ async def unified_dashboard(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UnifiedDashboard:
+    """Return a single unified dashboard combining all user capabilities
+    (orgs, DJ profile, checklist, recent shows) regardless of user type.
+    Preferred over ``/summary`` for clients that want a single response.
+    """
     # Clear identity map so the re-fetch below loads all objects and
     # relationships fresh from the DB (avoids stale cached state).
     user_id = user.id

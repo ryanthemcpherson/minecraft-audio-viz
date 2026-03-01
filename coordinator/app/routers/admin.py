@@ -41,6 +41,9 @@ async def admin_stats(
     _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> AdminStats:
+    """Return aggregate statistics: total users, orgs, servers, shows, and
+    new users in the last 30 days.  Admin-only.
+    """
     now = datetime.now(timezone.utc)
     thirty_days_ago = now - timedelta(days=30)
 
@@ -80,6 +83,9 @@ async def list_users(
     offset: int = Query(0, ge=0),
     search: str | None = Query(None),
 ) -> list[AdminUserRow]:
+    """List all users with optional search by display name, email, or Discord
+    username.  Supports pagination.  Admin-only.
+    """
     stmt = (
         select(User)
         .options(selectinload(User.org_memberships), selectinload(User.dj_profile))
@@ -136,6 +142,9 @@ async def update_user(
     admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> AdminUserRow:
+    """Update a user's active/admin status.  Admin-only.  Prevents admins
+    from removing their own admin access or deactivating themselves.
+    """
     stmt = (
         select(User)
         .where(User.id == user_id)
@@ -193,6 +202,9 @@ async def list_organizations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> list[AdminOrgRow]:
+    """List all organizations with owner, member count, and server count.
+    Supports pagination.  Admin-only.
+    """
     stmt = (
         select(Organization)
         .options(
@@ -238,6 +250,9 @@ async def list_servers(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> list[AdminServerRow]:
+    """List all VJ servers with org association, heartbeat, and active show
+    count.  Supports pagination.  Admin-only.
+    """
     stmt = (
         select(VJServer)
         .options(
@@ -283,6 +298,9 @@ async def list_shows(
     offset: int = Query(0, ge=0),
     status: str | None = Query(None),
 ) -> list[AdminShowRow]:
+    """List all shows with optional status filter (``active``, ``ended``).
+    Supports pagination.  Admin-only.
+    """
     stmt = (
         select(Show)
         .options(selectinload(Show.server))
