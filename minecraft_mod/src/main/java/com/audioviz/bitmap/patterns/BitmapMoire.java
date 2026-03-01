@@ -13,9 +13,27 @@ import com.audioviz.patterns.AudioState;
  */
 public class BitmapMoire extends BitmapPattern {
 
+    // Precomputed sqrt lookup table indexed by integer squared distance
+    private float[] sqrtTable;
+    private int sqrtTableSize;
+
     public BitmapMoire() {
         super("bmp_moire", "Bitmap Moiré",
               "Overlapping circle patterns creating interference illusions");
+    }
+
+    private void ensureSqrtTable(int w, int h) {
+        // Max possible squared distance: a center can be at most ~0.25*dim from buffer center,
+        // so max dist from corner to farthest center is roughly diagonal + orbit offset.
+        // Use generous bound: (w + h)^2 covers all cases.
+        int needed = (w + h) * (w + h) + 1;
+        if (sqrtTable != null && sqrtTableSize >= needed) return;
+
+        sqrtTableSize = needed;
+        sqrtTable = new float[sqrtTableSize];
+        for (int i = 0; i < sqrtTableSize; i++) {
+            sqrtTable[i] = (float) Math.sqrt(i);
+        }
     }
 
     @Override
@@ -24,6 +42,8 @@ public class BitmapMoire extends BitmapPattern {
         int h = buffer.getHeight();
         double cx = w / 2.0;
         double cy = h / 2.0;
+
+        ensureSqrtTable(w, h);
 
         double bass = audio.getBass();
         double mid = audio.getMid();
@@ -44,19 +64,37 @@ public class BitmapMoire extends BitmapPattern {
 
         // Ring spacing varies with bass
         double spacing = 2.5 + bass * 1.5;
+        double piOverSpacing = Math.PI / spacing;
+        double piOverSpacing08 = Math.PI * 0.8 / spacing;
 
         float hueShift = (float) (time * 10);
 
         for (int y = 0; y < h; y++) {
+            double dy1 = y - c1y;
+            double dy2 = y - c2y;
+            double dy3 = y - c3y;
+            double dy1Sq = dy1 * dy1;
+            double dy2Sq = dy2 * dy2;
+            double dy3Sq = dy3 * dy3;
+
             for (int x = 0; x < w; x++) {
-                double d1 = Math.sqrt((x - c1x) * (x - c1x) + (y - c1y) * (y - c1y));
-                double d2 = Math.sqrt((x - c2x) * (x - c2x) + (y - c2y) * (y - c2y));
-                double d3 = Math.sqrt((x - c3x) * (x - c3x) + (y - c3y) * (y - c3y));
+                double dx1 = x - c1x;
+                double dx2 = x - c2x;
+                double dx3 = x - c3x;
+
+                // Use sqrt lookup table with integer squared distance
+                int distSq1 = (int) (dx1 * dx1 + dy1Sq);
+                int distSq2 = (int) (dx2 * dx2 + dy2Sq);
+                int distSq3 = (int) (dx3 * dx3 + dy3Sq);
+
+                float d1 = sqrtTable[Math.min(distSq1, sqrtTableSize - 1)];
+                float d2 = sqrtTable[Math.min(distSq2, sqrtTableSize - 1)];
+                float d3 = sqrtTable[Math.min(distSq3, sqrtTableSize - 1)];
 
                 // Concentric ring patterns (0 or 1 alternating)
-                double v1 = Math.sin(d1 / spacing * Math.PI);
-                double v2 = Math.sin(d2 / spacing * Math.PI);
-                double v3 = Math.sin(d3 / spacing * Math.PI * 0.8);
+                double v1 = Math.sin(d1 * piOverSpacing);
+                double v2 = Math.sin(d2 * piOverSpacing);
+                double v3 = Math.sin(d3 * piOverSpacing08);
 
                 // Interference: multiply patterns
                 double moireVal = (v1 * v2 + v1 * v3 + v2 * v3) / 3.0;
