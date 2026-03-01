@@ -9,7 +9,9 @@ import com.audioviz.bitmap.patterns.*;
 import com.audioviz.bitmap.text.*;
 import com.audioviz.bitmap.transitions.TransitionManager;
 import com.audioviz.patterns.AudioState;
+import com.audioviz.zones.VisualizationZone;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.scheduler.BukkitTask;
 
 import com.google.gson.JsonObject;
@@ -224,6 +226,15 @@ public class BitmapPatternManager {
         BitmapFrameBuffer buffer = new BitmapFrameBuffer(width, height);
         zoneStates.put(zoneName.toLowerCase(), new ZoneState(pattern, buffer));
         asyncRenderer.registerZone(zoneName, width, height);
+
+        // Auto-configure MinimapPattern center from zone origin
+        if (pattern instanceof MinimapPattern minimap) {
+            VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+            if (zone != null) {
+                Location origin = zone.getOrigin();
+                minimap.setCenter(origin.getX(), origin.getZ());
+            }
+        }
 
         plugin.getLogger().info("Bitmap zone '" + zoneName + "' activated with pattern '"
             + pattern.getId() + "' (" + width + "x" + height + ")");
