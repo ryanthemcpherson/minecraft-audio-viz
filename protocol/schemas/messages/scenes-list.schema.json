@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scenes-list.schema.json",
+  "title": "ScenesListMessage",
+  "description": "Server sends the list of saved scenes to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "scenes_list"
+    },
+    "v": {
+      "type": "string"
+    },
+    "scenes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of saved scene names."
+    }
+  },
+  "required": ["type", "scenes"]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "heartbeat-ack.schema.json",
+  "title": "HeartbeatAckMessage",
+  "description": "Server acknowledges a DJ heartbeat, echoing the timestamp for RTT calculation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "heartbeat_ack"
+    },
+    "v": {
+      "type": "string"
+    },
+    "server_time": {
+      "type": "number",
+      "description": "Server timestamp when the ack was sent."
+    },
+    "echo_ts": {
+      "type": "number",
+      "description": "Echoed DJ timestamp from the heartbeat for RTT calculation."
+    }
+  },
+  "required": ["type", "server_time"]
+}

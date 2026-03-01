@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "connect-code-generated.schema.json",
+  "title": "ConnectCodeGeneratedMessage",
+  "description": "Server confirms a new connect code was generated.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "connect_code_generated"
+    },
+    "v": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string",
+      "description": "The generated WORD-XXXX connect code."
+    },
+    "expires_at": {
+      "type": "number",
+      "description": "Expiry timestamp (seconds since epoch)."
+    },
+    "ttl_minutes": {
+      "type": "integer",
+      "description": "Time-to-live in minutes."
+    }
+  },
+  "required": ["type", "code", "expires_at", "ttl_minutes"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "parity-check-result.schema.json",
+  "title": "ParityCheckResultMessage",
+  "description": "Server reports results of a Minecraft-VJ state parity check.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "parity_check_result"
+    },
+    "v": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether all zones are in sync."
+    },
+    "zones": {
+      "type": "object",
+      "description": "Per-zone parity check details."
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if the check could not complete."
+    }
+  },
+  "required": ["type", "ok"]
+}

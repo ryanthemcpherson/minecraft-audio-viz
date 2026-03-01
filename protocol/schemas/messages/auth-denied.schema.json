@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "auth-denied.schema.json",
+  "title": "AuthDeniedMessage",
+  "description": "Server denies a DJ's connection request.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "auth_denied"
+    },
+    "v": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string",
+      "description": "Reason for denial."
+    }
+  },
+  "required": ["type"]
+}

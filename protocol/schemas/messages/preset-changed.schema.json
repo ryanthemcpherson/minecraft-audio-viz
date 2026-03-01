@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "preset-changed.schema.json",
+  "title": "PresetChangedMessage",
+  "description": "Server broadcasts preset change to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "preset_changed"
+    },
+    "v": {
+      "type": "string"
+    },
+    "preset": {
+      "type": "string",
+      "description": "Preset name (e.g. auto, edm, chill, custom)."
+    },
+    "settings": {
+      "type": "object",
+      "description": "Full preset settings dict."
+    }
+  },
+  "required": ["type", "preset"]
+}

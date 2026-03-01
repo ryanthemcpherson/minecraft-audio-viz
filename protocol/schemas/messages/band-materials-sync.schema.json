@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "band-materials-sync.schema.json",
+  "title": "BandMaterialsSyncMessage",
+  "description": "Server broadcasts per-band block material overrides to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "band_materials_sync"
+    },
+    "v": {
+      "type": "string"
+    },
+    "materials": {
+      "type": "array",
+      "items": { "type": ["string", "null"] },
+      "description": "Per-band block materials (5 elements, null for default)."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["default", "dj_palette", "admin"],
+      "description": "Source of the current materials."
+    }
+  },
+  "required": ["type", "materials", "source"]
+}

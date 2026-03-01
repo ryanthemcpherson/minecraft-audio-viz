@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-info.schema.json",
+  "title": "DjInfoMessage",
+  "description": "Server sends current DJ info to Minecraft plugin for stage decorators.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_info"
+    },
+    "v": {
+      "type": "string"
+    },
+    "dj_name": {
+      "type": "string"
+    },
+    "dj_id": {
+      "type": "string"
+    },
+    "bpm": {
+      "type": "number",
+      "minimum": 0
+    },
+    "is_active": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type", "dj_name", "dj_id", "is_active"]
+}

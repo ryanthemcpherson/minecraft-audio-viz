@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config-update.schema.json",
+  "title": "ConfigUpdateMessage",
+  "description": "Server broadcasts config changes to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "config_update"
+    },
+    "v": {
+      "type": "string"
+    },
+    "entity_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "zone": {
+      "type": "string"
+    },
+    "current_pattern": {
+      "type": "string"
+    }
+  },
+  "required": ["type"]
+}
