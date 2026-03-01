@@ -1,3 +1,4 @@
+## Status: COMPLETED
 # Bitmap Preview 1:1 Parity Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
