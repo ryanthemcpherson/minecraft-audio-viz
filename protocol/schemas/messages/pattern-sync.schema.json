@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pattern-sync.schema.json",
+  "title": "PatternSyncMessage",
+  "description": "Server broadcasts the current pattern and configuration to DJ clients (for direct mode).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "pattern_sync"
+    },
+    "v": {
+      "type": "string"
+    },
+    "pattern": {
+      "type": "string",
+      "description": "Active pattern name."
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "entity_count": { "type": "integer", "minimum": 0 },
+        "zone_size": { "type": "number" },
+        "beat_boost": { "type": "number" },
+        "base_scale": { "type": "number" },
+        "max_scale": { "type": "number" }
+      },
+      "description": "Pattern configuration parameters."
+    },
+    "scripts": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map of pattern name to Lua script source."
+    }
+  },
+  "required": ["type", "pattern"]
+}

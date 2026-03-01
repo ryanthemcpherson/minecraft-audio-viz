@@ -178,7 +178,7 @@ impl ClockSyncResponse {
     pub fn new(recv_time: f64) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs_f64();
 
         Self {

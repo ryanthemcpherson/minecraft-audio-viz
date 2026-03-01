@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clock-sync-response.schema.json",
+  "title": "ClockSyncResponseMessage",
+  "description": "DJ responds to a clock sync request with its local timestamps for NTP-style skew calculation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "clock_sync_response"
+    },
+    "v": {
+      "type": "string"
+    },
+    "dj_recv_time": {
+      "type": "number",
+      "description": "DJ local timestamp when the sync request was received."
+    },
+    "dj_send_time": {
+      "type": "number",
+      "description": "DJ local timestamp when this response was sent."
+    }
+  },
+  "required": ["type", "dj_recv_time", "dj_send_time"]
+}
