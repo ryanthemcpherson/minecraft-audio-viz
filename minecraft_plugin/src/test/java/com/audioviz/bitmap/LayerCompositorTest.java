@@ -228,4 +228,147 @@ class LayerCompositorTest {
             assertEquals(BLUE, bottom.getPixel(0, 0), "Bottom should be overwritten");
         }
     }
+
+    @Nested
+    @DisplayName("Blend Mode Math")
+    class BlendModeMath {
+        @Test
+        void additiveOverflowClamps() {
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(BitmapFrameBuffer.packARGB(255, 200, 200, 200));
+            top.fill(BitmapFrameBuffer.packARGB(255, 200, 200, 200));
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.ADDITIVE, 1.0);
+            int pixel = output.getPixel(0, 0);
+            // 200 + 200 = 400, clamped to 255
+            assertEquals(255, (pixel >> 16) & 0xFF, "R clamped");
+            assertEquals(255, (pixel >> 8) & 0xFF, "G clamped");
+            assertEquals(255, pixel & 0xFF, "B clamped");
+        }
+
+        @Test
+        void multiplyFormula() {
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(BitmapFrameBuffer.packARGB(255, 100, 100, 100));
+            top.fill(BitmapFrameBuffer.packARGB(255, 200, 200, 200));
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.MULTIPLY, 1.0);
+            int pixel = output.getPixel(0, 0);
+            // (100 * 200) / 255 = 78
+            int expected = (100 * 200) / 255;
+            assertEquals(expected, (pixel >> 16) & 0xFF, "R = (100*200)/255");
+        }
+
+        @Test
+        void screenFormula() {
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(BitmapFrameBuffer.packARGB(255, 100, 100, 100));
+            top.fill(BitmapFrameBuffer.packARGB(255, 200, 200, 200));
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.SCREEN, 1.0);
+            int pixel = output.getPixel(0, 0);
+            // 255 - ((255-100) * (255-200)) / 255 = 255 - (155 * 55) / 255 = 255 - 33 = 222
+            int expected = 255 - ((255 - 100) * (255 - 200)) / 255;
+            assertEquals(expected, (pixel >> 16) & 0xFF, "Screen formula");
+        }
+
+        @Test
+        void overlayDarkBase() {
+            // base < 128: result = (2 * base * top) / 255
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(BitmapFrameBuffer.packARGB(255, 64, 64, 64));
+            top.fill(BitmapFrameBuffer.packARGB(255, 128, 128, 128));
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.OVERLAY, 1.0);
+            int pixel = output.getPixel(0, 0);
+            int expected = (2 * 64 * 128) / 255;
+            assertEquals(expected, (pixel >> 16) & 0xFF, "Overlay dark: (2*64*128)/255");
+        }
+
+        @Test
+        void overlayBrightBase() {
+            // base >= 128: result = 255 - (2 * (255-base) * (255-top)) / 255
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(BitmapFrameBuffer.packARGB(255, 200, 200, 200));
+            top.fill(BitmapFrameBuffer.packARGB(255, 128, 128, 128));
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.OVERLAY, 1.0);
+            int pixel = output.getPixel(0, 0);
+            int expected = 255 - (2 * (255 - 200) * (255 - 128)) / 255;
+            assertEquals(expected, (pixel >> 16) & 0xFF, "Overlay bright");
+        }
+
+        @Test
+        void overlayBoundaryAtExactly128() {
+            // base == 128: falls into else branch (>=128)
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(BitmapFrameBuffer.packARGB(255, 128, 128, 128));
+            top.fill(BitmapFrameBuffer.packARGB(255, 128, 128, 128));
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.OVERLAY, 1.0);
+            int pixel = output.getPixel(0, 0);
+            // else branch: 255 - (2 * 127 * 127) / 255 = 255 - 126 = 129
+            int expected = 255 - (2 * (255 - 128) * (255 - 128)) / 255;
+            assertEquals(expected, (pixel >> 16) & 0xFF, "Overlay at boundary 128");
+        }
+    }
+
+    @Nested
+    @DisplayName("Opacity Edge Cases")
+    class OpacityEdgeCases {
+        @Test
+        void opacityZeroKeepsBottom() {
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(0xFFAA0000);
+            top.fill(0xFF00BB00);
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.NORMAL, 0.0);
+            assertEquals(0xFFAA0000, output.getPixel(0, 0));
+        }
+
+        @Test
+        void opacityNegativeClampsToZero() {
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(0xFFAA0000);
+            top.fill(0xFF00BB00);
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.NORMAL, -1.0);
+            assertEquals(0xFFAA0000, output.getPixel(0, 0));
+        }
+
+        @Test
+        void opacityAboveOneClampsToOne() {
+            BitmapFrameBuffer bottom = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer top = new BitmapFrameBuffer(1, 1);
+            BitmapFrameBuffer output = new BitmapFrameBuffer(1, 1);
+            bottom.fill(0xFFAA0000);
+            top.fill(0xFF00BB00);
+            LayerCompositor.blend(bottom, top, output, LayerCompositor.BlendMode.NORMAL, 2.0);
+            assertEquals(0xFF00BB00, output.getPixel(0, 0));
+        }
+    }
+
+    @Nested
+    @DisplayName("Buffer Size Handling")
+    class BufferSizes {
+        @Test
+        void mismatchedBuffersUsesMinLength() {
+            BitmapFrameBuffer small = new BitmapFrameBuffer(2, 2);  // 4 pixels
+            BitmapFrameBuffer large = new BitmapFrameBuffer(4, 4);  // 16 pixels
+            BitmapFrameBuffer output = new BitmapFrameBuffer(2, 2); // 4 pixels
+            small.fill(0xFFFF0000);
+            large.fill(0xFF00FF00);
+            // Should not crash — blends min(4, 16, 4) = 4 pixels
+            assertDoesNotThrow(() ->
+                LayerCompositor.blend(small, large, output, LayerCompositor.BlendMode.NORMAL, 1.0));
+        }
+    }
 }

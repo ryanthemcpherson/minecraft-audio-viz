@@ -153,6 +153,136 @@ class ColorPaletteTest {
     }
 
     @Nested
+    @DisplayName("Map Edge Cases")
+    class MapEdgeCases {
+        @Test
+        void mapNanClamps() {
+            int[] lut = new int[256];
+            lut[0] = 0xFF000000;
+            ColorPalette palette = new ColorPalette("test", "Test", lut);
+            // NaN should clamp — Math.max(0, NaN) returns NaN, Math.min(1, NaN) returns NaN
+            // (int)(NaN * 255) = 0 in Java, so index 0
+            int result = palette.map(Double.NaN);
+            assertEquals(lut[0], result);
+        }
+
+        @Test
+        void mapNegativeInfinity() {
+            int[] lut = new int[256];
+            lut[0] = 0xFFAA0000;
+            ColorPalette palette = new ColorPalette("test", "Test", lut);
+            assertEquals(lut[0], palette.map(Double.NEGATIVE_INFINITY));
+        }
+
+        @Test
+        void mapPositiveInfinity() {
+            int[] lut = new int[256];
+            lut[255] = 0xFF00AA00;
+            ColorPalette palette = new ColorPalette("test", "Test", lut);
+            assertEquals(lut[255], palette.map(Double.POSITIVE_INFINITY));
+        }
+    }
+
+    @Nested
+    @DisplayName("Smooth Mapping")
+    class SmoothMapping {
+        @Test
+        void smoothMidpointInterpolates() {
+            // Two-color palette: black at 0, white at 255
+            ColorPalette palette = ColorPalette.fromGradient("test", "Test",
+                0xFF000000, 0xFFFFFFFF);
+            int smooth = palette.mapSmooth(0.5);
+            int r = (smooth >> 16) & 0xFF;
+            // Should be roughly 128 (interpolated)
+            assertTrue(r >= 120 && r <= 135, "Smooth midpoint R=" + r + " should be ~128");
+        }
+
+        @Test
+        void smoothEndpointsMatchDirect() {
+            ColorPalette palette = ColorPalette.fromGradient("test", "Test",
+                0xFF000000, 0xFFFFFFFF);
+            assertEquals(palette.map(0.0), palette.mapSmooth(0.0));
+            // At 1.0: map uses index 255, mapSmooth uses lerp(254, 255, frac=0)
+            // Both should return lut[254] or close to lut[255]
+            int directMax = palette.map(1.0);
+            int smoothMax = palette.mapSmooth(1.0);
+            // They should be very close (within 1-2 per channel)
+            int dr = Math.abs(((directMax >> 16) & 0xFF) - ((smoothMax >> 16) & 0xFF));
+            assertTrue(dr <= 2, "Direct vs smooth at 1.0 should be close: delta=" + dr);
+        }
+    }
+
+    @Nested
+    @DisplayName("Gradient Generation Edge Cases")
+    class GradientEdgeCases {
+        @Test
+        void fromGradientLessThanTwoColorsThrows() {
+            assertThrows(IllegalArgumentException.class,
+                () -> ColorPalette.fromGradient("test", "Test", 0xFF000000));
+        }
+
+        @Test
+        void fromGradientExactlyTwoColors() {
+            ColorPalette palette = ColorPalette.fromGradient("test", "Test",
+                0xFF000000, 0xFFFFFFFF);
+            // Index 0 = black, index 255 = white
+            assertEquals(0xFF000000, palette.map(0.0));
+            assertEquals(0xFFFFFFFF, palette.map(1.0));
+        }
+
+        @Test
+        void fromGradientThreeColorsEvenSplit() {
+            ColorPalette palette = ColorPalette.fromGradient("test", "Test",
+                0xFFFF0000, 0xFF00FF00, 0xFF0000FF);
+            // At 0.0: red, at 0.5: green, at 1.0: blue
+            int atZero = palette.map(0.0);
+            assertEquals(255, (atZero >> 16) & 0xFF, "Red at 0.0");
+
+            int atHalf = palette.map(0.5);
+            int g = (atHalf >> 8) & 0xFF;
+            assertTrue(g > 200, "Green at 0.5: " + g);
+
+            int atOne = palette.map(1.0);
+            assertEquals(255, (atOne) & 0xFF, "Blue at 1.0");
+        }
+
+        @Test
+        void lutLengthMismatchThrows() {
+            assertThrows(IllegalArgumentException.class,
+                () -> new ColorPalette("bad", "Bad", new int[100]));
+        }
+    }
+
+    @Nested
+    @DisplayName("Apply To Buffer")
+    class ApplyToBufferExtended {
+        @Test
+        void pureWhiteMapsToBrightest() {
+            ColorPalette palette = ColorPalette.fromGradient("test", "Test",
+                0xFF000000, 0xFFFF0000);
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(2, 2);
+            buf.fill(0xFFFFFFFF); // White = max brightness
+            palette.applyToBuffer(buf);
+            int pixel = buf.getPixel(0, 0);
+            // Should map to near the end of the LUT (red)
+            int r = (pixel >> 16) & 0xFF;
+            assertTrue(r > 200, "White pixel should map to high-intensity: R=" + r);
+        }
+
+        @Test
+        void pureBlackMapsToLowest() {
+            ColorPalette palette = ColorPalette.fromGradient("test", "Test",
+                0xFF000000, 0xFFFF0000);
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(2, 2);
+            buf.fill(0xFF000000); // Black = zero brightness
+            palette.applyToBuffer(buf);
+            int pixel = buf.getPixel(0, 0);
+            int r = (pixel >> 16) & 0xFF;
+            assertTrue(r < 5, "Black pixel should map to low-intensity: R=" + r);
+        }
+    }
+
+    @Nested
     @DisplayName("Built-in Palettes")
     class BuiltIn {
         @Test

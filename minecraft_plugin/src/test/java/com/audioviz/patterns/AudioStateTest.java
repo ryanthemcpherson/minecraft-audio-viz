@@ -1,5 +1,6 @@
 package com.audioviz.patterns;
 
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -145,5 +146,76 @@ class AudioStateTest {
         AudioState state = new AudioState(new double[5], 0.4, false, 0.1, 0.88, 0.34, 9L);
         assertEquals(0.88, state.getTempoConfidence(), 1e-10);
         assertEquals(0.34, state.getBeatPhase(), 1e-10);
+    }
+
+    @Nested
+    @DisplayName("Boundary Values")
+    class BoundaryValues {
+        @Test
+        void nanBandsReturnAsIs() {
+            double[] bands = {Double.NaN, 0.5, 0.5, 0.5, 0.5};
+            AudioState state = new AudioState(bands, 0.5, false, 0.0, 1);
+            assertTrue(Double.isNaN(state.getBand(0)), "NaN bands should be returned as-is");
+        }
+
+        @Test
+        void negativeBandIndex() {
+            AudioState state = AudioState.silent();
+            assertEquals(0.0, state.getBand(-1));
+        }
+
+        @Test
+        void bandIndexBeyondLength() {
+            AudioState state = AudioState.silent();
+            assertEquals(0.0, state.getBand(5));
+            assertEquals(0.0, state.getBand(100));
+        }
+
+        @Test
+        void silentFactoryInvariants() {
+            AudioState s = AudioState.silent();
+            assertEquals(5, s.getBands().length);
+            assertEquals(0.0, s.getAmplitude());
+            assertFalse(s.isBeat());
+            assertEquals(0.0, s.getBeatIntensity());
+            assertEquals(0, s.getFrame());
+            assertEquals(0.0, s.getTempoConfidence());
+            assertEquals(0.0, s.getBeatPhase());
+        }
+
+        @Test
+        void forTestWithBeat() {
+            AudioState s = AudioState.forTest(100, true);
+            assertTrue(s.isBeat());
+            assertEquals(0.8, s.getBeatIntensity(), 0.001);
+            assertEquals(100, s.getFrame());
+        }
+
+        @Test
+        void forTestWithoutBeat() {
+            AudioState s = AudioState.forTest(50, false);
+            assertFalse(s.isBeat());
+            assertEquals(0.0, s.getBeatIntensity(), 0.001);
+        }
+
+        @Test
+        void extendedConstructor() {
+            AudioState state = new AudioState(
+                new double[]{0.1, 0.2, 0.3, 0.4, 0.5},
+                0.75, true, 0.9, 0.85, 0.42, 999);
+            assertEquals(0.85, state.getTempoConfidence(), 0.001);
+            assertEquals(0.42, state.getBeatPhase(), 0.001);
+            assertEquals(999, state.getFrame());
+        }
+
+        @Test
+        void namedBandAccessors() {
+            double[] bands = {0.1, 0.2, 0.3, 0.4, 0.5};
+            AudioState state = new AudioState(bands, 0.5, false, 0.0, 1);
+            assertEquals(0.1, state.getBass(), 0.001);
+            assertEquals(0.3, state.getMid(), 0.001);
+            assertEquals(0.4, state.getHighMid(), 0.001);
+            assertEquals(0.5, state.getHigh(), 0.001);
+        }
     }
 }
