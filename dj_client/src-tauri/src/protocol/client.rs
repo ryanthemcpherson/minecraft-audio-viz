@@ -293,7 +293,7 @@ impl DjClient {
                             "clock_sync_request" => {
                                 let now = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
+                                    .unwrap_or_default()
                                     .as_secs_f64();
                                 let response = ClockSyncResponse::new(now);
                                 let json = serde_json::to_string(&response)
@@ -586,7 +586,7 @@ async fn handle_server_message(
             // Respond to clock sync
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs_f64();
 
             let response = ClockSyncResponse::new(now);
@@ -603,7 +603,7 @@ async fn handle_server_message(
             // Calculate latency: prefer RTT from echoed heartbeat timestamp.
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs_f64();
 
             let latency = if let Some(echo_ts) = ack.echo_ts {

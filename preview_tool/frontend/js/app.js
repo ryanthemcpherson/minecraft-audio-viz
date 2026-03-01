@@ -738,6 +738,8 @@ function connectWebSocket() {
                     if (data.zone_entities) {
                         zoneEntitiesData = data.zone_entities;
                     }
+                } else {
+                    console.debug('[WS] Unhandled message type:', data.type);
                 }
             } catch (e) {
                 console.error('Parse error:', e);
