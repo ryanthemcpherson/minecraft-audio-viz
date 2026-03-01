@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pattern-changed.schema.json",
+  "title": "PatternChangedMessage",
+  "description": "Server broadcasts pattern change to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "pattern_changed"
+    },
+    "v": {
+      "type": "string"
+    },
+    "pattern": {
+      "type": "string",
+      "description": "New active pattern name."
+    },
+    "patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Full list of available patterns."
+    },
+    "transitioning": {
+      "type": "boolean",
+      "description": "Whether a transition animation is active."
+    },
+    "transition_duration": {
+      "type": "number",
+      "description": "Transition duration in seconds (0 if not transitioning)."
+    },
+    "zone_patterns": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map of zone name to active pattern."
+    }
+  },
+  "required": ["type", "pattern"]
+}

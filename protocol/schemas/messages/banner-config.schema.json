@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "banner-config.schema.json",
+  "title": "BannerConfigMessage",
+  "description": "Server sends banner configuration for the active DJ to Minecraft.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "type": {
+      "const": "banner_config"
+    },
+    "v": {
+      "type": "string"
+    },
+    "banner_mode": {
+      "type": "string",
+      "description": "Display mode (text, image, etc.)."
+    },
+    "text_style": {
+      "type": "string"
+    },
+    "text_color_mode": {
+      "type": "string"
+    },
+    "text_fixed_color": {
+      "type": "string"
+    },
+    "text_format": {
+      "type": "string"
+    },
+    "grid_width": {
+      "type": "integer"
+    },
+    "grid_height": {
+      "type": "integer"
+    },
+    "image_pixels": {
+      "type": "array",
+      "description": "Pixel data for image banner mode."
+    }
+  },
+  "required": ["type"]
+}

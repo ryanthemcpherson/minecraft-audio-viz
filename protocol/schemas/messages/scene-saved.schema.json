@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scene-saved.schema.json",
+  "title": "SceneSavedMessage",
+  "description": "Server confirms a scene was saved successfully.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "scene_saved"
+    },
+    "v": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "Name of the saved scene."
+    }
+  },
+  "required": ["type", "name"]
+}

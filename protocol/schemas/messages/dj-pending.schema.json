@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-pending.schema.json",
+  "title": "DjPendingMessage",
+  "description": "Server notifies browser clients that a new DJ is waiting for approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_pending"
+    },
+    "v": {
+      "type": "string"
+    },
+    "dj": {
+      "type": "object",
+      "properties": {
+        "dj_id": { "type": "string" },
+        "dj_name": { "type": "string" },
+        "waiting_since": { "type": "number" },
+        "direct_mode": { "type": "boolean" }
+      },
+      "required": ["dj_id", "dj_name"]
+    }
+  },
+  "required": ["type", "dj"]
+}

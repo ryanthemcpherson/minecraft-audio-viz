@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scene-deleted.schema.json",
+  "title": "SceneDeletedMessage",
+  "description": "Server confirms a scene was deleted successfully.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "scene_deleted"
+    },
+    "v": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "Name of the deleted scene."
+    }
+  },
+  "required": ["type", "name"]
+}

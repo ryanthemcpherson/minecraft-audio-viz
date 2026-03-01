@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scene-loaded.schema.json",
+  "title": "SceneLoadedMessage",
+  "description": "Server confirms a scene was loaded successfully.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "scene_loaded"
+    },
+    "v": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "Name of the loaded scene."
+    }
+  },
+  "required": ["type", "name"]
+}

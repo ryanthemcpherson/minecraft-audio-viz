@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "effect-triggered.schema.json",
+  "title": "EffectTriggeredMessage",
+  "description": "Server notifies clients that a VJ effect has been triggered.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "effect_triggered"
+    },
+    "v": {
+      "type": "string"
+    },
+    "effect": {
+      "type": "string",
+      "description": "Effect type that was triggered."
+    }
+  },
+  "required": ["type", "effect"]
+}

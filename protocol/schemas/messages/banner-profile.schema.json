@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "banner-profile.schema.json",
+  "title": "BannerProfileMessage",
+  "description": "Server sends a DJ's banner profile to a requesting client.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "banner_profile"
+    },
+    "v": {
+      "type": "string"
+    },
+    "dj_id": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "object",
+      "description": "Banner profile settings (has_image, banner_mode, text_style, etc.)."
+    }
+  },
+  "required": ["type", "dj_id", "profile"]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "auth-pending.schema.json",
+  "title": "AuthPendingMessage",
+  "description": "Server tells a DJ their connection is pending VJ approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "auth_pending"
+    },
+    "v": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable status message."
+    },
+    "dj_id": {
+      "type": "string",
+      "description": "Assigned DJ ID for the pending connection."
+    }
+  },
+  "required": ["type", "message", "dj_id"]
+}

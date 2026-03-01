@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "link-status.schema.json",
+  "title": "LinkStatusMessage",
+  "description": "Server broadcasts Ableton Link status to admin panel.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "link_status"
+    },
+    "v": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "peers": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of connected Link peers."
+    },
+    "tempo": {
+      "type": "number",
+      "description": "Current Link tempo in BPM."
+    }
+  },
+  "required": ["type", "enabled"]
+}

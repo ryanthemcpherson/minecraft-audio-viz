@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-my-palette.schema.json",
+  "title": "SetMyPaletteMessage",
+  "description": "DJ declares their preferred per-band block palette. Stored by the VJ server and applied when the DJ is active.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_my_palette"
+    },
+    "v": {
+      "type": "string"
+    },
+    "palette": {
+      "type": "array",
+      "items": { "type": ["string", "null"] },
+      "minItems": 5,
+      "maxItems": 5,
+      "description": "Per-band block materials (5 elements, null for default)."
+    }
+  },
+  "required": ["type", "palette"]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "connect-codes.schema.json",
+  "title": "ConnectCodesMessage",
+  "description": "Server sends list of active connect codes to admin clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "connect_codes"
+    },
+    "v": {
+      "type": "string"
+    },
+    "codes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "created_at": { "type": "number" },
+          "expires_at": { "type": "number" },
+          "used": { "type": "boolean" }
+        },
+        "required": ["code"]
+      }
+    }
+  },
+  "required": ["type", "codes"]
+}

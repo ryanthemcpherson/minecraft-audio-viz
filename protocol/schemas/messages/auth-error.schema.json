@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "auth-error.schema.json",
+  "title": "AuthErrorMessage",
+  "description": "Server rejects authentication with an error message.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "auth_error"
+    },
+    "v": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string",
+      "description": "Human-readable error description."
+    }
+  },
+  "required": ["type", "error"]
+}

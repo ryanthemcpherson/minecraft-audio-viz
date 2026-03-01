@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "voice-config.schema.json",
+  "title": "VoiceConfigMessage",
+  "description": "Client sends voice configuration to the VJ server.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "type": {
+      "const": "voice_config"
+    },
+    "v": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether voice streaming is enabled."
+    },
+    "codec": {
+      "type": "string",
+      "enum": ["pcm", "opus"]
+    },
+    "sample_rate": {
+      "type": "integer"
+    },
+    "channels": {
+      "type": "integer"
+    }
+  },
+  "required": ["type"]
+}
