@@ -309,4 +309,175 @@ class EffectsProcessorTest {
                 "Should be half-bright white after palette + brightness: " + r);
         }
     }
+
+    @Nested
+    @DisplayName("RGB Split Effect")
+    class RgbSplit {
+        @Test
+        void rgbSplitSeparatesChannels() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setRgbSplitEnabled(true);
+            proc.setRgbSplitOffset(1);
+
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(4, 1);
+            // Set pixel at (1,0) to white; others black
+            buf.setPixel(1, 0, 0xFFFFFFFF);
+            proc.process(buf, null, 0);
+
+            // Red channel shifts: pixel(2,0) gets red from x-1=1 (white)
+            int right = buf.getPixel(2, 0);
+            int rRight = (right >> 16) & 0xFF;
+            assertEquals(255, rRight, "Red should appear at x+offset from source");
+
+            // Blue channel shifts: pixel(0,0) gets blue from x+1=1 (white)
+            int left = buf.getPixel(0, 0);
+            int bLeft = left & 0xFF;
+            assertEquals(255, bLeft, "Blue should appear at x-offset from source");
+        }
+
+        @Test
+        void rgbSplitDisabledNoChange() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setRgbSplitEnabled(false);
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(4, 1);
+            buf.setPixel(1, 0, 0xFFFFFFFF);
+            int before = buf.getPixel(0, 0);
+            proc.process(buf, null, 0);
+            assertEquals(before, buf.getPixel(0, 0), "Disabled RGB split should not modify");
+        }
+    }
+
+    @Nested
+    @DisplayName("Bit Crush Effect")
+    class BitCrush {
+        @Test
+        void colorQuantization() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setBitCrushEnabled(true);
+            proc.setBitCrushColorLevels(2); // Only 0 or 255
+            proc.setBitCrushPixelSize(1);   // No spatial downsampling
+
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(1, 1);
+            buf.fill(BitmapFrameBuffer.packARGB(255, 100, 200, 50));
+            proc.process(buf, null, 0);
+
+            int pixel = buf.getPixel(0, 0);
+            // With 2 levels: each channel rounds to 0 or 255
+            int r = (pixel >> 16) & 0xFF;
+            int g = (pixel >> 8) & 0xFF;
+            int b = pixel & 0xFF;
+            assertTrue(r == 0 || r == 255, "R should be quantized to 0 or 255: " + r);
+            assertTrue(g == 0 || g == 255, "G should be quantized to 0 or 255: " + g);
+            assertTrue(b == 0 || b == 255, "B should be quantized to 0 or 255: " + b);
+        }
+
+        @Test
+        void spatialDownsampling() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setBitCrushEnabled(true);
+            proc.setBitCrushColorLevels(256); // No color change
+            proc.setBitCrushPixelSize(2);
+
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(4, 4);
+            buf.setPixel(0, 0, 0xFFFF0000);
+            buf.setPixel(1, 0, 0xFF00FF00);
+            buf.setPixel(0, 1, 0xFF0000FF);
+            buf.setPixel(1, 1, 0xFFFFFFFF);
+            proc.process(buf, null, 0);
+
+            // In a 2x2 block, all should match the leader (0,0)
+            assertEquals(buf.getPixel(0, 0), buf.getPixel(1, 0), "Block should match leader");
+            assertEquals(buf.getPixel(0, 0), buf.getPixel(0, 1), "Block should match leader");
+            assertEquals(buf.getPixel(0, 0), buf.getPixel(1, 1), "Block should match leader");
+        }
+    }
+
+    @Nested
+    @DisplayName("Edge Flash Effect")
+    class EdgeFlash {
+        @Test
+        void edgeFlashAffectsEdgesOnly() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setEdgeFlashEnabled(true);
+            proc.setEdgeFlashColor(0xFFFFFFFF);
+            proc.setEdgeFlashWidth(1);
+
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(8, 8);
+            buf.fill(0xFF000000); // All black
+
+            // Simulate beat to trigger edge flash
+            AudioState beat = new AudioState(new double[5], 0.5, true, 0.8, 1);
+            proc.process(buf, beat, 0);
+
+            // Edge pixel should be modified (blended toward white)
+            int edge = buf.getPixel(0, 0);
+            assertTrue(((edge >> 16) & 0xFF) > 0, "Edge should be brightened");
+
+            // Center pixel should still be black (distance from edge = 3)
+            int center = buf.getPixel(4, 4);
+            assertEquals(0xFF000000, center, "Center should be unaffected");
+        }
+    }
+
+    @Nested
+    @DisplayName("Strobe Decay")
+    class StrobeDecay {
+        @Test
+        void strobeDecaysAcrossFrames() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setStrobeEnabled(true);
+            // Use divisor > 1 so the strobe doesn't re-trigger on every frame
+            // divisor=2: fires when strobeBeatCount % 2 == 0
+            // After 2 beats, count=2, 2%2=0 triggers. After that, no more beats so count stays 2 and re-triggers.
+            // Instead: just use default divisor=1, trigger once, then check the decay value via pixel brightness.
+            // Since divisor=1 always re-triggers: to test decay, we compare the *accumulated* flash on a non-zero buffer.
+            // Alternative: verify strobe produces visible output, then disable strobe and check decay stops.
+
+            // Approach: fire one beat to start strobe, then measure decay by capturing strobeDecay
+            // through the pixel output on subsequent frames with strobe disabled between frames.
+
+            // Simplest approach that works with the production code:
+            // 1) Process with beat (strobeDecay set to 1.0, then *= 0.7 = 0.7 after flash)
+            // 2) Disable strobe before next frame so it doesn't re-trigger
+            // 3) Process without beat — strobeDecay > 0.01 still applies flash but weaker
+
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(1, 1);
+            AudioState beat = new AudioState(new double[5], 0.5, true, 0.8, 1);
+
+            buf.fill(0xFF000000);
+            proc.process(buf, beat, 0);
+            int flash1 = buf.getPixel(0, 0);
+
+            // Disable strobe so it won't re-trigger strobeDecay=1.0
+            proc.setStrobeEnabled(false);
+
+            // Second frame — no beat, strobe disabled so won't re-trigger, but residual decay still applies
+            buf.fill(0xFF000000);
+            AudioState noBeat = new AudioState(new double[5], 0.5, false, 0.0, 2);
+            proc.process(buf, noBeat, 1);
+            int flash2 = buf.getPixel(0, 0);
+
+            int brightness1 = ((flash1 >> 16) & 0xFF) + ((flash1 >> 8) & 0xFF) + (flash1 & 0xFF);
+            int brightness2 = ((flash2 >> 16) & 0xFF) + ((flash2 >> 8) & 0xFF) + (flash2 & 0xFF);
+            assertTrue(brightness2 < brightness1, "Strobe should decay: " + brightness2 + " >= " + brightness1);
+        }
+    }
+
+    @Nested
+    @DisplayName("Null Audio Safety")
+    class NullAudio {
+        @Test
+        void processWithNullAudioDoesNotCrash() {
+            EffectsProcessor proc = new EffectsProcessor();
+            proc.setStrobeEnabled(true);
+            proc.setBeatFlashEnabled(true);
+            proc.setEdgeFlashEnabled(true);
+            proc.setRgbSplitEnabled(true);
+            proc.setBitCrushEnabled(true);
+
+            BitmapFrameBuffer buf = new BitmapFrameBuffer(4, 4);
+            buf.fill(0xFFFFFFFF);
+            assertDoesNotThrow(() -> proc.process(buf, null, 0));
+        }
+    }
 }
