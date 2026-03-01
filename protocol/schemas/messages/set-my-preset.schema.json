@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "set-my-preset.schema.json",
+  "title": "SetMyPresetMessage",
+  "description": "DJ declares their preferred audio preset. Stored by the VJ server and restored when the DJ becomes active.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "set_my_preset"
+    },
+    "v": {
+      "type": "string"
+    },
+    "preset": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Named preset (e.g. auto, edm, chill, rock, hiphop, classical)"
+    }
+  },
+  "required": ["type", "preset"]
+}

@@ -390,6 +390,8 @@ pub struct StreamRouteMessage {
     pub pattern_scripts: Option<HashMap<String, String>>,
     #[serde(default)]
     pub band_sensitivity: Option<Vec<f32>>,
+    #[serde(default)]
+    pub preset: Option<String>,
 }
 
 /// Voice status update from server
