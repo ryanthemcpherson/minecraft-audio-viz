@@ -3,9 +3,10 @@
  * Professional Three.js visualization with particles and block indicators
  */
 
-// Configuration
+// Configuration — port can be overridden via ?port=XXXX URL parameter
+const _urlParams = new URLSearchParams(window.location.search);
 const CONFIG = {
-    wsPort: 8766,
+    wsPort: parseInt(_urlParams.get('port'), 10) || 8766,
     entityCount: 16,
     gridSize: 4,
     blockSize: 0.8,

@@ -1,4 +1,5 @@
-// TODO: incrementally add unsafe blocks inside unsafe fns, then remove this allow
+// All unsafe fns are COM callbacks / FFI wrappers in audio::platform::windows
+// where the entire body is inherently unsafe — blanket allow is appropriate.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 //! MCAV DJ Client Library
