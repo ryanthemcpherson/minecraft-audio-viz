@@ -43,6 +43,9 @@ public class CompositionManager {
     /** Game state modulator (optional). */
     private GameStateModulator gameStateModulator = null;
 
+    /** Reusable output map (cleared each tick instead of reallocated). */
+    private final Map<String, BitmapFrameBuffer> tickOutputs = new LinkedHashMap<>();
+
     /** Sync mode for multi-zone coordination. */
     private SyncMode syncMode = SyncMode.INDEPENDENT;
 
@@ -72,7 +75,8 @@ public class CompositionManager {
     // ========== Composition Tick ==========
 
     public Map<String, BitmapFrameBuffer> tick(AudioState audio, double time) {
-        Map<String, BitmapFrameBuffer> outputs = new LinkedHashMap<>();
+        tickOutputs.clear();
+        Map<String, BitmapFrameBuffer> outputs = tickOutputs;
 
         if (gameStateModulator != null) {
             gameStateModulator.refreshWorldState();

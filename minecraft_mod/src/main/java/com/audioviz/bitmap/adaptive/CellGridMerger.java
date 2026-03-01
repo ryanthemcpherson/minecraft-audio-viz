@@ -52,6 +52,32 @@ public final class CellGridMerger {
     }
 
     /**
+     * Build a cell grid into pre-allocated parallel arrays (zero-allocation).
+     *
+     * @param pixels      row-major ARGB pixel array
+     * @param pixelWidth  logical pixel width
+     * @param pixelHeight logical pixel height
+     * @param topARGB     pre-allocated output array for top pixel ARGB (length >= pixelWidth * cellGridHeight)
+     * @param bottomARGB  pre-allocated output array for bottom pixel ARGB (same length)
+     */
+    public static void buildCellGridInto(int[] pixels, int pixelWidth, int pixelHeight,
+                                          int[] topARGB, int[] bottomARGB) {
+        int cellHeight = cellGridHeight(pixelHeight);
+
+        for (int cy = 0; cy < cellHeight; cy++) {
+            int topRow = cy * 2;
+            int bottomRow = topRow + 1;
+            boolean hasBottom = bottomRow < pixelHeight;
+
+            for (int cx = 0; cx < pixelWidth; cx++) {
+                int idx = cy * pixelWidth + cx;
+                topARGB[idx] = pixels[topRow * pixelWidth + cx];
+                bottomARGB[idx] = hasBottom ? pixels[bottomRow * pixelWidth + cx] : 0;
+            }
+        }
+    }
+
+    /**
      * Build cell grid and merge uniform rectangular regions.
      *
      * <p>Algorithm (row-first greedy scan):
@@ -74,8 +100,13 @@ public final class CellGridMerger {
     public static List<MergedRect> merge(int[] pixels, int pixelWidth, int pixelHeight) {
         int cellWidth = pixelWidth;
         int cellHeight = cellGridHeight(pixelHeight);
-        HalfBlockCell[] cells = buildCellGrid(pixels, pixelWidth, pixelHeight);
-        boolean[] consumed = new boolean[cells.length];
+        int cellCount = cellWidth * cellHeight;
+
+        // Use parallel primitive arrays to avoid per-cell object allocation
+        int[] topColors = new int[cellCount];
+        int[] bottomColors = new int[cellCount];
+        buildCellGridInto(pixels, pixelWidth, pixelHeight, topColors, bottomColors);
+        boolean[] consumed = new boolean[cellCount];
 
         List<MergedRect> result = new ArrayList<>();
 
@@ -84,13 +115,16 @@ public final class CellGridMerger {
                 int idx = cy * cellWidth + cx;
                 if (consumed[idx]) continue;
 
-                HalfBlockCell ref = cells[idx];
+                int refTop = topColors[idx];
+                int refBottom = bottomColors[idx];
 
                 // Extend right
                 int runW = 1;
                 while (cx + runW < cellWidth) {
                     int nextIdx = cy * cellWidth + (cx + runW);
-                    if (consumed[nextIdx] || !cells[nextIdx].equals(ref)) break;
+                    if (consumed[nextIdx]
+                        || topColors[nextIdx] != refTop
+                        || bottomColors[nextIdx] != refBottom) break;
                     runW++;
                 }
 
@@ -100,7 +134,9 @@ public final class CellGridMerger {
                 while (cy + runH < cellHeight) {
                     for (int dx = 0; dx < runW; dx++) {
                         int belowIdx = (cy + runH) * cellWidth + (cx + dx);
-                        if (consumed[belowIdx] || !cells[belowIdx].equals(ref)) break outer;
+                        if (consumed[belowIdx]
+                            || topColors[belowIdx] != refTop
+                            || bottomColors[belowIdx] != refBottom) break outer;
                     }
                     runH++;
                 }
@@ -112,7 +148,7 @@ public final class CellGridMerger {
                     }
                 }
 
-                result.add(new MergedRect(cx, cy, runW, runH, ref.topARGB(), ref.bottomARGB()));
+                result.add(new MergedRect(cx, cy, runW, runH, refTop, refBottom));
             }
         }
 
@@ -131,13 +167,17 @@ public final class CellGridMerger {
     public static List<MergedRect> asCellRects(int[] pixels, int pixelWidth, int pixelHeight) {
         int cellWidth = pixelWidth;
         int cellHeight = cellGridHeight(pixelHeight);
-        HalfBlockCell[] cells = buildCellGrid(pixels, pixelWidth, pixelHeight);
-        List<MergedRect> result = new ArrayList<>(cells.length);
+        int cellCount = cellWidth * cellHeight;
+
+        int[] topColors = new int[cellCount];
+        int[] bottomColors = new int[cellCount];
+        buildCellGridInto(pixels, pixelWidth, pixelHeight, topColors, bottomColors);
+        List<MergedRect> result = new ArrayList<>(cellCount);
 
         for (int cy = 0; cy < cellHeight; cy++) {
             for (int cx = 0; cx < cellWidth; cx++) {
-                HalfBlockCell cell = cells[cy * cellWidth + cx];
-                result.add(new MergedRect(cx, cy, 1, 1, cell.topARGB(), cell.bottomARGB()));
+                int idx = cy * cellWidth + cx;
+                result.add(new MergedRect(cx, cy, 1, 1, topColors[idx], bottomColors[idx]));
             }
         }
         return result;

@@ -21,6 +21,14 @@ public class AdaptiveEntityAssigner {
     private final boolean[] slotActive;
     private int lastActiveCount = 0;
 
+    // Pre-allocated slot ID strings (avoids "bmp_" + i concatenation per frame)
+    private final String[] slotIds;
+
+    // Reusable lists (cleared each frame instead of reallocated)
+    private final List<GeometryUpdate> geoUpdates = new ArrayList<>();
+    private final List<BackgroundUpdate> bgUpdates = new ArrayList<>();
+    private final List<TextUpdate> txtUpdates = new ArrayList<>();
+
     public AdaptiveEntityAssigner(int maxSlots) {
         this.maxSlots = maxSlots;
         this.lastX = new float[maxSlots];
@@ -30,6 +38,11 @@ public class AdaptiveEntityAssigner {
         this.lastTopARGB = new int[maxSlots];
         this.lastBottomARGB = new int[maxSlots];
         this.slotActive = new boolean[maxSlots];
+
+        this.slotIds = new String[maxSlots];
+        for (int i = 0; i < maxSlots; i++) {
+            slotIds[i] = "bmp_" + i;
+        }
     }
 
     /**
@@ -43,13 +56,13 @@ public class AdaptiveEntityAssigner {
         int assignCount = Math.min(rects.size(), maxSlots);
         boolean exhausted = rects.size() > maxSlots;
 
-        List<GeometryUpdate> geoUpdates = new ArrayList<>();
-        List<BackgroundUpdate> bgUpdates = new ArrayList<>();
-        List<TextUpdate> txtUpdates = new ArrayList<>();
+        geoUpdates.clear();
+        bgUpdates.clear();
+        txtUpdates.clear();
 
         for (int i = 0; i < assignCount; i++) {
             MergedRect rect = rects.get(i);
-            String entityId = "bmp_" + i;
+            String entityId = slotIds[i];
 
             // Compute geometry
             float x = rect.x() * pixelScale;

@@ -77,6 +77,9 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     private BeatEventManager beatEventManager;
     private AmbientLightManager ambientLightManager;
 
+    /** Reusable list for batch_update entity parsing (cleared each call). */
+    private final List<VirtualEntityPool.EntityUpdate> batchUpdateList = new ArrayList<>();
+
     @Override
     public void onInitializeServer() {
         instance = this;
@@ -436,7 +439,8 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             if (entities == null || entities.isEmpty()) return null;
 
             Vec3d origin = vizZone.getOriginVec3d();
-            List<VirtualEntityPool.EntityUpdate> updates = new ArrayList<>();
+            batchUpdateList.clear();
+            List<VirtualEntityPool.EntityUpdate> updates = batchUpdateList;
 
             for (var jsonEl : entities) {
                 JsonObject e = jsonEl.getAsJsonObject();
