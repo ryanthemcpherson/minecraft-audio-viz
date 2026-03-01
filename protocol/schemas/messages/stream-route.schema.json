@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "stream-route.schema.json",
+  "title": "StreamRouteMessage",
+  "description": "Routing policy sent from VJ server to DJ clients, indicating how audio should be streamed and what configuration to use.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "stream_route"
+    },
+    "v": {
+      "type": "string"
+    },
+    "route_mode": {
+      "type": "string",
+      "enum": ["relay", "dual"],
+      "description": "relay: DJ sends audio to VJ only. dual: DJ sends to VJ and directly to Minecraft."
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether this DJ is the currently active DJ."
+    },
+    "minecraft_host": {
+      "type": "string",
+      "description": "Minecraft server hostname for direct connections."
+    },
+    "minecraft_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Minecraft WebSocket port for direct connections."
+    },
+    "zone": {
+      "type": "string",
+      "description": "Active visualization zone name."
+    },
+    "entity_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of display entities in the active zone."
+    },
+    "current_pattern": {
+      "type": "string",
+      "description": "Currently active visualization pattern name."
+    },
+    "pattern_config": {
+      "type": "object",
+      "properties": {
+        "entity_count": { "type": "integer", "minimum": 0 },
+        "zone_size": { "type": "number" },
+        "beat_boost": { "type": "number" },
+        "base_scale": { "type": "number" },
+        "max_scale": { "type": "number" }
+      },
+      "description": "Pattern configuration parameters."
+    },
+    "pattern_scripts": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map of pattern name to Lua script source."
+    },
+    "band_sensitivity": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Per-band sensitivity multipliers."
+    },
+    "preset": {
+      "type": "string",
+      "description": "Currently active audio preset name (e.g. auto, edm, chill)."
+    },
+    "relay_fallback": {
+      "type": "boolean",
+      "description": "Whether relay mode is available as fallback."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason for the routing decision."
+    }
+  },
+  "required": ["type", "route_mode"]
+}

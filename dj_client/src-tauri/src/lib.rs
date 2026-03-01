@@ -952,6 +952,17 @@ fn set_preset(state: State<'_, AppStateWrapper>, name: String) -> Result<String,
         capture.analyzer().lock().apply_preset(&preset);
     }
     app_state.active_preset = preset.name.clone();
+
+    // Send preferred preset to VJ server so it persists across DJ swaps
+    if let Some(tx) = app_state.client.as_ref().and_then(|c| c.get_tx_clone()) {
+        if let Ok(json) = serde_json::to_string(&serde_json::json!({
+            "type": "set_my_preset",
+            "preset": &preset.name
+        })) {
+            let _ = tx.try_send(Message::Text(json.into()));
+        }
+    }
+
     Ok(preset.name)
 }
 

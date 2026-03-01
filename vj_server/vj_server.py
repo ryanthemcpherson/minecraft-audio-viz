@@ -829,6 +829,8 @@ class VJServer:
             None,
         ]  # Per-band block overrides
         self._dj_palettes: Dict[str, list] = {}  # dj_id -> 5-element block palette
+        self._dj_presets: Dict[str, str] = {}  # dj_id -> preset name (e.g. "edm")
+        self._current_preset_name: str = "auto"  # Currently active preset name
         self._band_materials_source: str = "default"  # "default" | "dj_palette" | "admin"
         # Visual-state shaping for snappier motion with less low-level wobble.
         self._visual_band_state = [0.0] * 5
@@ -1163,6 +1165,7 @@ class VJServer:
                     "color_palette": dj.color_palette,
                     "block_palette": dj.block_palette,
                     "slug": dj.slug,
+                    "preset": self._dj_presets.get(dj_id),
                 }
             )
         # Sort by queue position (respects manual reordering)
@@ -1849,6 +1852,21 @@ class VJServer:
                         else:
                             logger.warning(f"Invalid set_my_palette from DJ {dj.dj_id}")
 
+                    elif msg_type == "set_my_preset":
+                        preset_name = data.get("preset")
+                        if isinstance(preset_name, str) and preset_name.lower() in AUDIO_PRESETS:
+                            preset_name = preset_name.lower()
+                            self._dj_presets[dj.dj_id] = preset_name
+                            logger.info(f"DJ {dj.dj_name} set preferred preset: {preset_name}")
+                            # If this DJ is currently active, apply immediately
+                            if dj.dj_id == self._active_dj_id:
+                                preset_dict = self._apply_named_preset(preset_name)
+                                await self._broadcast_preset_to_djs(preset_dict, preset_name)
+                        else:
+                            logger.warning(
+                                f"Invalid set_my_preset from DJ {dj.dj_id}: {preset_name}"
+                            )
+
                     elif msg_type == "going_offline":
                         logger.info(
                             f"[DJ GOING OFFLINE] {dj.dj_name} ({dj.dj_id}) going offline gracefully"
@@ -1883,6 +1901,7 @@ class VJServer:
                         _left_dj_name = self._djs[dj_id].dj_name
                         del self._djs[dj_id]
                         self._dj_palettes.pop(dj_id, None)
+                        self._dj_presets.pop(dj_id, None)
                         if dj_id in self._dj_queue:
                             self._dj_queue.remove(dj_id)
                         logger.info(f"[DJ DISCONNECT] {_left_dj_name} ({dj_id})")
@@ -2257,6 +2276,13 @@ class VJServer:
             self._band_materials = [None, None, None, None, None]
             self._band_materials_source = "default"
 
+        # Restore DJ's preferred audio preset, or reset to "auto" if none stored
+        stored_preset = self._dj_presets.get(dj_id)
+        if not stored_preset or stored_preset not in AUDIO_PRESETS:
+            stored_preset = "auto"
+        stored_preset_dict = self._apply_named_preset(stored_preset)
+        logger.info(f"Preset '{stored_preset}' for DJ {self._djs[dj_id].dj_name}")
+
         logger.info(f"Active DJ: {self._djs[dj_id].dj_name}")
 
         # Take snapshot for notification (release lock during network IO)
@@ -2289,8 +2315,25 @@ class VJServer:
             )
         )
 
+        # Broadcast preset to all DJs + browsers after DJ switch
+        await self._broadcast_preset_to_djs(stored_preset_dict, stored_preset)
+
         # Send dj_info to Minecraft for stage decorators (billboard, transitions)
         await self._send_dj_info_to_minecraft(dj_id)
+
+    def _apply_named_preset(self, preset_name: str) -> dict:
+        """Apply a named audio preset to server state.
+
+        Updates pattern_config, band_sensitivity, and current_preset_name.
+        Returns the preset as a dict for broadcasting.
+        """
+        config = AUDIO_PRESETS[preset_name]
+        self._pattern_config.attack = config.attack
+        self._pattern_config.release = config.release
+        self._pattern_config.beat_threshold = config.beat_threshold
+        self._band_sensitivity = list(config.band_sensitivity)
+        self._current_preset_name = preset_name
+        return config.to_dict()
 
     def _build_stream_route_message(self, dj_id: str, dj: DJConnection) -> dict:
         """Build stream routing policy for a DJ client.
@@ -2320,6 +2363,7 @@ class VJServer:
             },
             "pattern_scripts": self._get_pattern_scripts(),
             "band_sensitivity": list(self._band_sensitivity),
+            "preset": self._current_preset_name,
             "relay_fallback": True,
             "reason": "active_direct_dj" if route_mode == "dual" else "standby_or_relay_mode",
         }
@@ -2637,6 +2681,7 @@ class VJServer:
         # Sync audio settings to DJs
         preset_name = scene_data.get("preset", "auto")
         if preset_name in AUDIO_PRESETS:
+            self._current_preset_name = preset_name
             config = AUDIO_PRESETS[preset_name]
             await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
 
@@ -3076,13 +3121,12 @@ class VJServer:
                             # Admin panel sends preset name (e.g., "edm", "chill")
                             preset_name = preset.lower()
                             if preset_name in AUDIO_PRESETS:
-                                config = AUDIO_PRESETS[preset_name]
-                                self._pattern_config.attack = config.attack
-                                self._pattern_config.release = config.release
-                                self._pattern_config.beat_threshold = config.beat_threshold
-                                self._band_sensitivity = list(config.band_sensitivity)
+                                preset_dict = self._apply_named_preset(preset_name)
+                                # Store for active DJ so it restores on swap
+                                if self._active_dj_id:
+                                    self._dj_presets[self._active_dj_id] = preset_name
                                 # Broadcast settings to DJs
-                                await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
+                                await self._broadcast_preset_to_djs(preset_dict, preset_name)
                                 logger.info(f"Preset applied: {preset_name}")
                             else:
                                 logger.warning(f"Unknown preset: {preset_name}")
@@ -4219,7 +4263,10 @@ class VJServer:
 
     async def _broadcast_preset_to_djs(self, preset: dict, preset_name: str = None):
         """Broadcast preset changes (attack/release/threshold) to all DJs."""
-        message = _json_str({"type": "preset_sync", "preset": preset})
+        payload = dict(preset)
+        if preset_name:
+            payload["name"] = preset_name
+        message = _json_str({"type": "preset_sync", "preset": payload})
 
         for dj in list(self._djs.values()):
             try:
