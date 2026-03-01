@@ -24,9 +24,13 @@ import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
 import com.audioviz.zones.ZoneSelectionManager;
+import com.audioviz.bitmap.BitmapPattern;
+import com.audioviz.bitmap.text.ChatWallPattern;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -302,6 +306,19 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
                 getLogger().info("World '" + worldName + "' unloading, cleaning up zone '" + zone.getName() + "'");
                 entityPoolManager.cleanupZoneSync(zone.getName());
             }
+        }
+    }
+
+    /**
+     * Route player chat messages to the ChatWallPattern for LED wall display.
+     * Runs at MONITOR priority so cancellation by other plugins is respected.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerChat(AsyncPlayerChatEvent event) {
+        if (bitmapPatternManager == null) return;
+        BitmapPattern pattern = bitmapPatternManager.getPattern("bmp_chat_wall");
+        if (pattern instanceof ChatWallPattern chatWall) {
+            chatWall.addMessage(event.getPlayer().getName(), event.getMessage());
         }
     }
 
