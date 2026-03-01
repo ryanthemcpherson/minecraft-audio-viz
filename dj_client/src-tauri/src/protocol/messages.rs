@@ -70,6 +70,9 @@ pub struct AudioFrameMessage {
     /// Instant kick detected by bass lane
     pub i_kick: bool,
     pub ts: f64,
+    /// Whether this DJ is using direct Minecraft connection mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_mode: Option<bool>,
 }
 
 impl AudioFrameMessage {
@@ -100,8 +103,9 @@ impl AudioFrameMessage {
             i_kick: instant_kick,
             ts: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs_f64(),
+            direct_mode: None,
         }
     }
 }
