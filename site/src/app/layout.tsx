@@ -78,6 +78,27 @@ export default function RootLayout({
         >
           Skip to content
         </a>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              name: "MCAV",
+              alternateName: "Minecraft Audio Visualizer",
+              applicationCategory: "MultimediaApplication",
+              operatingSystem: "Windows, macOS, Linux",
+              url: "https://mcav.live",
+              description:
+                "Real-time audio visualization in Minecraft using Display Entities. Capture system audio, process with FFT analysis, and render reactive 3D structures.",
+              offers: {
+                "@type": "Offer",
+                price: "0",
+                priceCurrency: "USD",
+              },
+            }),
+          }}
+        />
         <AuthProvider>
           <Navbar />
           <main id="main-content">{children}</main>
