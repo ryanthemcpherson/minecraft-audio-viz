@@ -323,7 +323,7 @@ public class StageEditorMenu implements Menu {
                 "&7Save this stage layout",
                 "&7as a custom template.",
                 "",
-                "&eComing soon"
+                "&eClick to save"
             )
             .build());
 
@@ -538,6 +538,12 @@ public class StageEditorMenu implements Menu {
                     player.closeInventory();
                     requestTag(player);
                 }
+            }
+
+            case SLOT_SAVE_TEMPLATE -> {
+                playClickSound(player);
+                player.closeInventory();
+                requestTemplateName(player);
             }
 
             case SLOT_DELETE -> {
@@ -809,6 +815,34 @@ public class StageEditorMenu implements Menu {
                     stage.setTag(tag);
                     plugin.getStageManager().saveStages();
                     player.sendMessage(ChatColor.GREEN + "Tag set to: " + tag);
+                }
+                menuManager.openMenu(player, new StageEditorMenu(plugin, menuManager, stage));
+            });
+        });
+    }
+
+    // ==================== Template Save ====================
+
+    private void requestTemplateName(Player player) {
+        player.sendMessage("");
+        player.sendMessage(ChatColor.GOLD + "=== Save as Template ===");
+        player.sendMessage(ChatColor.YELLOW + "Enter a name for this template.");
+        player.sendMessage(ChatColor.GRAY + "Use letters, numbers, underscores, and hyphens.");
+        player.sendMessage(ChatColor.GRAY + "Type 'cancel' to cancel.");
+        player.sendMessage("");
+
+        plugin.getChatInputManager().requestInput(player, ChatInputManager.InputType.GENERAL, input -> {
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                if (input != null) {
+                    String templateName = input.trim().toLowerCase()
+                        .replaceAll("[^a-z0-9_-]", "_");
+                    if (templateName.isEmpty() || templateName.length() > 32) {
+                        player.sendMessage(ChatColor.RED + "Invalid template name. Must be 1-32 characters.");
+                    } else if (plugin.getStageManager().saveAsTemplate(stage, templateName)) {
+                        player.sendMessage(ChatColor.GREEN + "Template saved as: " + templateName);
+                    } else {
+                        player.sendMessage(ChatColor.RED + "Failed to save template. Check console for details.");
+                    }
                 }
                 menuManager.openMenu(player, new StageEditorMenu(plugin, menuManager, stage));
             });

@@ -384,6 +384,123 @@ public class StageManager {
     // ========== Templates ==========
 
     /**
+     * Save the current stage layout as a reusable custom template.
+     * Serializes zone roles, size/offset overrides, entity counts, patterns, and render modes
+     * to {@code plugins/AudioViz/templates/<name>.yml}.
+     *
+     * @param stage        the stage to capture
+     * @param templateName the template name (alphanumeric + underscores/hyphens)
+     * @return true if saved successfully
+     */
+    public boolean saveAsTemplate(Stage stage, String templateName) {
+        String key = templateName.toLowerCase();
+
+        // Prevent overwriting built-in templates
+        if (StageTemplate.getBuiltin(key) != null) {
+            plugin.getLogger().warning("Cannot overwrite built-in template: " + templateName);
+            return false;
+        }
+
+        File templatesDir = new File(plugin.getDataFolder(), "templates");
+        if (!templatesDir.exists() && !templatesDir.mkdirs()) {
+            plugin.getLogger().severe("Failed to create templates directory");
+            return false;
+        }
+
+        File templateFile = new File(templatesDir, key + ".yml");
+        FileConfiguration config = new YamlConfiguration();
+
+        config.set("name", templateName);
+        config.set("description", "Custom template from stage '" + stage.getName() + "'");
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            String zoneName = entry.getValue();
+            String rolePath = "roles." + role.name();
+
+            config.set(rolePath + ".enabled", true);
+
+            // Save zone size from the actual zone
+            VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
+            if (zone != null) {
+                org.bukkit.util.Vector size = zone.getSize();
+                config.set(rolePath + ".size.x", (int) size.getX());
+                config.set(rolePath + ".size.y", (int) size.getY());
+                config.set(rolePath + ".size.z", (int) size.getZ());
+
+                // Save offset relative to stage anchor
+                Location zoneOrigin = zone.getOrigin();
+                Location anchor = stage.getAnchor();
+                config.set(rolePath + ".offset.x", zoneOrigin.getX() - anchor.getX());
+                config.set(rolePath + ".offset.y", zoneOrigin.getY() - anchor.getY());
+                config.set(rolePath + ".offset.z", zoneOrigin.getZ() - anchor.getZ());
+            }
+
+            // Save zone config (pattern, entity count, render mode, block type)
+            StageZoneConfig zoneConfig = stage.getZoneConfigs().get(role);
+            if (zoneConfig != null) {
+                config.set(rolePath + ".config.pattern", zoneConfig.getPattern());
+                config.set(rolePath + ".config.entity_count", zoneConfig.getEntityCount());
+                config.set(rolePath + ".config.render_mode", zoneConfig.getRenderMode());
+                config.set(rolePath + ".config.block_type", zoneConfig.getBlockType());
+                config.set(rolePath + ".config.brightness", zoneConfig.getBrightness());
+                config.set(rolePath + ".config.glow_on_beat", zoneConfig.isGlowOnBeat());
+                config.set(rolePath + ".config.intensity_multiplier", zoneConfig.getIntensityMultiplier());
+            }
+        }
+
+        try {
+            config.save(templateFile);
+        } catch (IOException e) {
+            plugin.getLogger().severe("Failed to save template '" + templateName + "': " + e.getMessage());
+            return false;
+        }
+
+        // Register as a custom template so it's immediately available
+        StageTemplate.Builder builder = StageTemplate.builder(key)
+            .description("Custom template from stage '" + stage.getName() + "'")
+            .icon(org.bukkit.Material.WRITABLE_BOOK);
+
+        for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
+            StageZoneRole role = entry.getKey();
+            builder.role(role);
+
+            VisualizationZone zone = plugin.getZoneManager().getZone(entry.getValue());
+            if (zone != null) {
+                builder.sizeOverride(role, zone.getSize().clone());
+
+                Location zoneOrigin = zone.getOrigin();
+                Location anchor = stage.getAnchor();
+                builder.offsetOverride(role, new org.bukkit.util.Vector(
+                    zoneOrigin.getX() - anchor.getX(),
+                    zoneOrigin.getY() - anchor.getY(),
+                    zoneOrigin.getZ() - anchor.getZ()
+                ));
+            }
+
+            StageZoneConfig zoneConfig = stage.getZoneConfigs().get(role);
+            if (zoneConfig != null) {
+                StageZoneConfig configCopy = new StageZoneConfig(zoneConfig);
+                builder.configOverride(role, cfg -> {
+                    cfg.setPattern(configCopy.getPattern());
+                    cfg.setEntityCount(configCopy.getEntityCount());
+                    cfg.setRenderMode(configCopy.getRenderMode());
+                    cfg.setBlockType(configCopy.getBlockType());
+                    cfg.setBrightness(configCopy.getBrightness());
+                    cfg.setGlowOnBeat(configCopy.isGlowOnBeat());
+                    cfg.setIntensityMultiplier(configCopy.getIntensityMultiplier());
+                });
+            }
+        }
+
+        customTemplates.put(key, builder.build());
+
+        plugin.getLogger().info("Saved custom template '" + templateName + "' with "
+            + stage.getRoleToZone().size() + " zones to " + templateFile.getPath());
+        return true;
+    }
+
+    /**
      * Get a template by name (checks built-in first, then custom).
      */
     public StageTemplate getTemplate(String name) {
