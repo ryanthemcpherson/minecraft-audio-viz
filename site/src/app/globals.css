@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "../../../shared/tokens.css";
+@import "../tokens.css";
 
 @theme {
   --color-bg-primary: var(--mcav-bg-primary);
