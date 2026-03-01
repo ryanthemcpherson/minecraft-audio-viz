@@ -88,6 +88,10 @@ async def role_sync(
     _secret: None = Depends(_verify_secret),
     session: AsyncSession = Depends(get_session),
 ) -> UserRolesResponse:
+    """Receive role changes from the Discord community bot and merge them
+    into the user's coordinator roles (union merge).  Authenticated via
+    ``X-Webhook-Secret`` header.
+    """
     user = await _get_user_by_discord_id(session, body.discord_id)
 
     existing_roles = await _get_user_roles(session, user.id)
@@ -124,6 +128,9 @@ async def delete_role(
     _secret: None = Depends(_verify_secret),
     session: AsyncSession = Depends(get_session),
 ) -> UserRolesResponse:
+    """Remove a specific role from a user (by Discord ID) when the role is
+    removed in Discord.  Authenticated via ``X-Webhook-Secret`` header.
+    """
     user = await _get_user_by_discord_id(session, discord_id)
 
     result = await session.execute(
@@ -152,6 +159,9 @@ async def get_user_by_discord_id(
     _secret: None = Depends(_verify_secret),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    """Look up a coordinator user by Discord ID and return their profile
+    and roles.  Authenticated via ``X-Webhook-Secret`` header.
+    """
     user = await _get_user_by_discord_id(session, discord_id)
     roles = await _get_user_roles(session, user.id)
 

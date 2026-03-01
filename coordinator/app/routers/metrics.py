@@ -26,7 +26,9 @@ def _escape_label_value(value: str) -> str:
 
 @router.get("/metrics", response_class=PlainTextResponse, summary="Prometheus metrics")
 async def metrics_endpoint() -> PlainTextResponse:
-    """Expose in-process counters in Prometheus text format."""
+    """Expose in-process counters and HTTP latency histograms in Prometheus
+    text exposition format.  No authentication required.
+    """
     counters = metrics_snapshot()
     latencies = snapshot_http_latency()
     lines: list[str] = []

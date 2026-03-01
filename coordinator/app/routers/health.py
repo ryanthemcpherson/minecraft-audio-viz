@@ -23,8 +23,9 @@ router = APIRouter(tags=["health"])
 async def health_check(
     session: AsyncSession = Depends(get_session),
 ) -> HealthResponse | JSONResponse:
-    """Return service health status along with aggregate counts of active
-    servers and shows.
+    """Return service health status with aggregate counts of active servers
+    and shows.  Returns 503 with ``status: degraded`` if the database is
+    unreachable.
     """
     try:
         # Active servers

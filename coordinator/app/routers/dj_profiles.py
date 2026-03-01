@@ -104,6 +104,10 @@ async def create_profile(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> DJProfileResponse:
+    """Create a DJ profile for the authenticated user.  Each user may have
+    at most one profile.  Returns 409 if a profile already exists or the
+    slug is taken.
+    """
     existing = (
         await session.execute(select(DJProfile).where(DJProfile.user_id == user.id))
     ).scalar_one_or_none()
@@ -143,6 +147,9 @@ async def get_own_profile(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> DJProfileResponse:
+    """Return the authenticated user's DJ profile.  Returns 404 if no profile
+    has been created yet.
+    """
     profile = (
         await session.execute(select(DJProfile).where(DJProfile.user_id == user.id))
     ).scalar_one_or_none()
@@ -163,6 +170,9 @@ async def update_profile(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> DJProfileResponse:
+    """Update the authenticated user's DJ profile.  Only provided fields are
+    updated.  Returns 409 if the new slug is already taken.
+    """
     profile = (
         await session.execute(select(DJProfile).where(DJProfile.user_id == user.id))
     ).scalar_one_or_none()
@@ -211,6 +221,9 @@ async def check_slug(
     slug: str,
     session: AsyncSession = Depends(get_session),
 ) -> SlugCheckResponse:
+    """Check if a DJ profile slug is available.  Public endpoint, no auth
+    required.
+    """
     available = await _check_slug_unique(session, slug)
     return SlugCheckResponse(available=available)
 
@@ -224,6 +237,9 @@ async def get_profile_by_slug(
     slug: str,
     session: AsyncSession = Depends(get_session),
 ) -> DJProfileResponse:
+    """Look up a public DJ profile by its URL slug.  Returns 404 if not
+    found or profile is private.
+    """
     profile = (
         await session.execute(
             select(DJProfile).where(DJProfile.slug == slug, DJProfile.is_public.is_(True))
@@ -245,6 +261,9 @@ async def get_public_profile(
     user_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
 ) -> DJProfileResponse:
+    """Look up a public DJ profile by user ID.  Returns 404 if not found
+    or profile is private.
+    """
     profile = (
         await session.execute(
             select(DJProfile).where(DJProfile.user_id == user_id, DJProfile.is_public.is_(True))
