@@ -30,6 +30,20 @@ public class BitmapFireflies extends BitmapPattern {
 
     private static final int MAX_FIREFLIES = 40;
 
+    /** Pre-computed 5x5 glow falloff table (distance-based, constant geometry). */
+    private static final float[][] GLOW_FALLOFF = new float[5][5];
+    static {
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                double dist = Math.sqrt(dx * dx + dy * dy);
+                float falloff = (dist <= 2.5 && !(dx == 0 && dy == 0))
+                    ? (float) (1.0 - dist / 2.5)
+                    : 0f;
+                GLOW_FALLOFF[dy + 2][dx + 2] = falloff;
+            }
+        }
+    }
+
     // Firefly state arrays
     private final double[] flyX = new double[MAX_FIREFLIES];
     private final double[] flyY = new double[MAX_FIREFLIES];
@@ -203,16 +217,15 @@ public class BitmapFireflies extends BitmapPattern {
         }
     }
 
-    /** Draw a 5x5 soft glow centered at (cx, cy) with falloff. */
+    /** Draw a 5x5 soft glow centered at (cx, cy) with falloff (uses pre-computed table). */
     private void drawGlow5x5(BitmapFrameBuffer buffer, int cx, int cy,
                               float hue, float sat, float brightness) {
         for (int dy = -2; dy <= 2; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
-                if (dx == 0 && dy == 0) continue;
-                double dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist > 2.5) continue;
+                float baseFalloff = GLOW_FALLOFF[dy + 2][dx + 2];
+                if (baseFalloff <= 0f) continue;
 
-                float falloff = (float) (1.0 - dist / 2.5) * brightness * 0.35f;
+                float falloff = baseFalloff * brightness * 0.35f;
                 if (falloff < 0.02f) continue;
 
                 int glowColor = BitmapFrameBuffer.fromHSB(hue, sat * 0.7f, falloff);

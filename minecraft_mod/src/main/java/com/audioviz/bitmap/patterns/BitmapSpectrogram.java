@@ -49,9 +49,13 @@ public class BitmapSpectrogram extends BitmapPattern {
             initialized = true;
         }
 
-        // Write current audio frame into the newest column
+        // Write current audio frame into the newest column — reuse ring buffer slot
         double[] bands = audio.getBands();
-        double[] column = new double[h];
+        double[] column = history[writeHead];
+        if (column == null || column.length != h) {
+            column = new double[h];
+            history[writeHead] = column;
+        }
 
         // Generate per-row noise for sub-band texture
         // Uses smoothed noise so adjacent rows correlate (looks like real frequency detail)
@@ -91,7 +95,6 @@ public class BitmapSpectrogram extends BitmapPattern {
             column[row] = Math.max(0, Math.min(1.0, value));
         }
 
-        history[writeHead] = column;
         writeHead = (writeHead + 1) % w;
 
         // Render: read history from oldest to newest, left to right
