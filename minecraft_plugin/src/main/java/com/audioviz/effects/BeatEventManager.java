@@ -209,10 +209,16 @@ public class BeatEventManager {
 
         @Override
         public void trigger(Location location, VisualizationZone zone, double intensity, Collection<Player> viewers) {
-            // TODO: Implement a less invasive camera shake effect.
-            // player.setVelocity() was removed because it conflicts with anti-cheat plugins
-            // and is too aggressive. Consider using title packets with short duration,
-            // world border warning effects, or subtle particle-based visual cues instead.
+            // Subtle screen-shake via a blank title with very short fade-in/out.
+            // The rapid title transition creates a slight visual pulse without
+            // moving the player (which conflicts with anti-cheat plugins).
+            int fadeInTicks = 0;
+            int stayTicks = 1;
+            int fadeOutTicks = (int) Math.max(1, 3 * intensity);
+
+            for (Player player : viewers) {
+                player.sendTitle(" ", " ", fadeInTicks, stayTicks, fadeOutTicks);
+            }
         }
     }
 

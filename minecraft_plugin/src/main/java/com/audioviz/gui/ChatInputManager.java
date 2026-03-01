@@ -6,11 +6,12 @@ import com.audioviz.gui.menus.ZoneManagementMenu;
 import com.audioviz.zones.VisualizationZone;
 import org.bukkit.ChatColor;
 import org.bukkit.Sound;
+import io.papermc.paper.event.player.AsyncChatEvent;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.Map;
@@ -122,11 +123,8 @@ public class ChatInputManager implements Listener {
         }
     }
 
-    // TODO: Migrate to Paper's modern AsyncChatEvent (io.papermc.paper.event.player.AsyncChatEvent)
-    //       when dropping support for older Paper builds.
-    @SuppressWarnings("deprecation")
     @EventHandler(priority = EventPriority.LOWEST)
-    public void onChat(AsyncPlayerChatEvent event) {
+    public void onChat(AsyncChatEvent event) {
         Player player = event.getPlayer();
         PendingInput pending = pendingInputs.remove(player.getUniqueId());
 
@@ -137,7 +135,8 @@ public class ChatInputManager implements Listener {
         // Cancel the chat event
         event.setCancelled(true);
 
-        String message = event.getMessage().trim();
+        String message = PlainTextComponentSerializer.plainText()
+                .serialize(event.message()).trim();
 
         // Check for cancel
         if (message.equalsIgnoreCase("cancel")) {
