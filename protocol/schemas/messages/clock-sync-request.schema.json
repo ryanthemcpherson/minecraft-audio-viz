@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clock-sync-request.schema.json",
+  "title": "ClockSyncRequestMessage",
+  "description": "Server requests clock synchronization from a DJ client. Uses NTP-style algorithm to measure clock skew.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "clock_sync_request"
+    },
+    "v": {
+      "type": "string"
+    },
+    "server_time": {
+      "type": "number",
+      "description": "Server timestamp (seconds since epoch) when the request was sent."
+    }
+  },
+  "required": ["type", "server_time"]
+}

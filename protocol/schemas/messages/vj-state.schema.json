@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vj-state.schema.json",
+  "title": "VjStateMessage",
+  "description": "Full server state broadcast sent to browser clients on connection.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "type": {
+      "const": "vj_state"
+    },
+    "v": {
+      "type": "string"
+    },
+    "patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Available pattern names."
+    },
+    "current_pattern": {
+      "type": "string",
+      "description": "Currently active pattern."
+    },
+    "entity_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "zone": {
+      "type": "string"
+    },
+    "zone_patterns": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map of zone name to active pattern."
+    },
+    "dj_roster": {
+      "type": "array",
+      "description": "Current DJ roster entries."
+    },
+    "active_dj": {
+      "type": ["string", "null"],
+      "description": "Active DJ ID, or null if none."
+    },
+    "minecraft_connected": {
+      "type": "boolean"
+    },
+    "pending_djs": {
+      "type": "array",
+      "description": "DJs waiting for approval."
+    },
+    "band_materials": {
+      "type": "array",
+      "description": "Per-band block material overrides."
+    },
+    "band_materials_source": {
+      "type": "string",
+      "enum": ["default", "dj_palette", "admin"]
+    },
+    "bloom_enabled": {
+      "type": "boolean"
+    },
+    "bloom_strength": {
+      "type": "number"
+    },
+    "bloom_threshold": {
+      "type": "number"
+    },
+    "ambient_lights_enabled": {
+      "type": "boolean"
+    }
+  },
+  "required": ["type"]
+}

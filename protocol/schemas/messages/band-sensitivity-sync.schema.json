@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "band-sensitivity-sync.schema.json",
+  "title": "BandSensitivitySyncMessage",
+  "description": "Server broadcasts per-band sensitivity multipliers to DJ clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "band_sensitivity_sync"
+    },
+    "v": {
+      "type": "string"
+    },
+    "sensitivity": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Per-band sensitivity multipliers (5 bands: bass, low-mid, mid, high-mid, high)."
+    }
+  },
+  "required": ["type", "sensitivity"]
+}

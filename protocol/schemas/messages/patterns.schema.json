@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "patterns.schema.json",
+  "title": "PatternsMessage",
+  "description": "Server broadcasts the available pattern list and current pattern to browser clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "patterns"
+    },
+    "v": {
+      "type": "string"
+    },
+    "patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Available pattern names."
+    },
+    "current_pattern": {
+      "type": "string",
+      "description": "Currently active pattern name."
+    }
+  },
+  "required": ["type", "patterns"]
+}

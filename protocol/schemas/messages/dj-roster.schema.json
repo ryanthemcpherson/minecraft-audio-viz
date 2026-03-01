@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dj-roster.schema.json",
+  "title": "DjRosterMessage",
+  "description": "Server broadcasts the current DJ roster to browser clients and DJ clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "dj_roster"
+    },
+    "v": {
+      "type": "string"
+    },
+    "roster": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dj_id": { "type": "string" },
+          "dj_name": { "type": "string" },
+          "queue_position": { "type": "integer" },
+          "is_active": { "type": "boolean" },
+          "color_palette": { "type": "array" },
+          "block_palette": { "type": "array" },
+          "slug": { "type": ["string", "null"] },
+          "preset": { "type": ["string", "null"] }
+        }
+      },
+      "description": "Full roster (sent to browser clients)."
+    },
+    "djs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dj_id": { "type": "string" },
+          "dj_name": { "type": "string" },
+          "queue_position": { "type": "integer" },
+          "is_active": { "type": "boolean" }
+        }
+      },
+      "description": "Compact roster (sent to DJ clients)."
+    },
+    "active_dj": {
+      "type": ["string", "null"],
+      "description": "Active DJ ID (browser variant)."
+    },
+    "active_dj_id": {
+      "type": ["string", "null"],
+      "description": "Active DJ ID (DJ client variant)."
+    },
+    "your_position": {
+      "type": "integer",
+      "description": "Receiving DJ's queue position (DJ client variant)."
+    }
+  },
+  "required": ["type"]
+}

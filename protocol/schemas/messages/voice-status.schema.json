@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "voice-status.schema.json",
+  "title": "VoiceStatusMessage",
+  "description": "Server notifies clients of voice chat availability and status.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "voice_status"
+    },
+    "v": {
+      "type": "string"
+    },
+    "available": {
+      "type": "boolean",
+      "description": "Whether voice chat is available on the server."
+    },
+    "streaming": {
+      "type": "boolean",
+      "description": "Whether voice is currently streaming."
+    },
+    "channel_type": {
+      "type": "string",
+      "description": "Voice channel type (e.g. proximity, global)."
+    },
+    "connected_players": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of players connected to voice chat."
+    }
+  },
+  "required": ["type"]
+}

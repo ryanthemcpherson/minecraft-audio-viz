@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "preset-sync.schema.json",
+  "title": "PresetSyncMessage",
+  "description": "Server broadcasts audio preset changes to DJ clients.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "preset_sync"
+    },
+    "v": {
+      "type": "string"
+    },
+    "preset": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Preset name (e.g. auto, edm, chill)." },
+        "attack": { "type": "number", "minimum": 0, "maximum": 1 },
+        "release": { "type": "number", "minimum": 0, "maximum": 1 },
+        "beat_threshold": { "type": "number", "minimum": 0 },
+        "min_db": { "type": "number" },
+        "max_db": { "type": "number" },
+        "band_sensitivity": {
+          "type": "array",
+          "items": { "type": "number" }
+        }
+      },
+      "description": "Preset settings dict with optional name field."
+    }
+  },
+  "required": ["type", "preset"]
+}
