@@ -43,7 +43,11 @@ public class BitmapSpectrogram extends BitmapPattern {
 
         // Write current audio frame into the newest column
         double[] bands = audio.getBands();
-        double[] column = new double[h];
+        double[] column = history[writeHead];
+        if (column == null || column.length != h) {
+            column = new double[h];
+            history[writeHead] = column;
+        }
 
         // Interpolate 5 bands across the full height
         for (int row = 0; row < h; row++) {
@@ -63,8 +67,6 @@ public class BitmapSpectrogram extends BitmapPattern {
 
             column[row] = value;
         }
-
-        history[writeHead] = column;
         writeHead = (writeHead + 1) % w;
 
         // Render: read history from oldest to newest, left to right

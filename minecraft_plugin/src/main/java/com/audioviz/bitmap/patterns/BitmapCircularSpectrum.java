@@ -15,6 +15,31 @@ public class BitmapCircularSpectrum extends BitmapPattern {
     private final double[] smoothBands = new double[5];
     private double beatPulse = 0;
 
+    private float[] distTable;
+    private float[] angleTable;
+    private int cachedWidth = -1;
+    private int cachedHeight = -1;
+
+    private void ensureLookupTables(int w, int h) {
+        if (w == cachedWidth && h == cachedHeight) return;
+        double cx = w / 2.0;
+        double cy = h / 2.0;
+        int size = w * h;
+        distTable = new float[size];
+        angleTable = new float[size];
+        for (int y = 0; y < h; y++) {
+            double dy = y - cy;
+            for (int x = 0; x < w; x++) {
+                double dx = x - cx;
+                int idx = y * w + x;
+                distTable[idx] = (float) Math.sqrt(dx * dx + dy * dy);
+                angleTable[idx] = (float) Math.atan2(dy, dx);
+            }
+        }
+        cachedWidth = w;
+        cachedHeight = h;
+    }
+
     // Band colors: bass(red) → high(blue)
     private static final int[] BAND_COLORS = {
         BitmapFrameBuffer.rgb(255, 40, 40),
@@ -40,6 +65,8 @@ public class BitmapCircularSpectrum extends BitmapPattern {
 
         buffer.clear();
 
+        ensureLookupTables(w, h);
+
         // Smooth bands
         double[] bands = audio.getBands();
         for (int i = 0; i < 5; i++) {
@@ -63,9 +90,8 @@ public class BitmapCircularSpectrum extends BitmapPattern {
         // Draw bars as angular wedges
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                double dx = x - cx;
-                double dy = y - cy;
-                double dist = Math.sqrt(dx * dx + dy * dy);
+                int idx = y * w + x;
+                double dist = distTable[idx];
 
                 if (dist < innerR - 1 || dist > maxR) continue;
 
@@ -78,7 +104,7 @@ public class BitmapCircularSpectrum extends BitmapPattern {
                     continue;
                 }
 
-                double angle = Math.atan2(dy, dx);
+                double angle = angleTable[idx];
                 if (angle < 0) angle += Math.PI * 2;
 
                 // Which bar does this angle fall in?
