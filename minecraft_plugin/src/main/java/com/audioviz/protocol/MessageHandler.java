@@ -1158,6 +1158,16 @@ public class MessageHandler {
             plugin.getDecoratorManager().updateDJInfo(djInfo);
         }
 
+        // Notify players of DJ status change
+        var listener = plugin.getConnectionStateListener();
+        if (listener != null) {
+            if (isActive && !djName.isEmpty()) {
+                listener.onDjActive(djName);
+            } else {
+                listener.onDjInactive();
+            }
+        }
+
         plugin.getLogger().info("DJ info received: " + djName + " (BPM: " + String.format("%.0f", bpm) + ")");
 
         JsonObject response = new JsonObject();

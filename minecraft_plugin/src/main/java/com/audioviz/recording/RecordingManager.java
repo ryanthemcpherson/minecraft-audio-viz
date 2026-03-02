@@ -121,6 +121,14 @@ public class RecordingManager {
                 bpm.updateAudioState(audio);
             }
 
+            // Also feed particle effects and decorator (matches MessageQueue normal flow)
+            if (plugin.getParticleVisualizationManager() != null) {
+                plugin.getParticleVisualizationManager().updateAudioState(audio);
+            }
+            if (plugin.getDecoratorManager() != null) {
+                plugin.getDecoratorManager().updateAudioState(audio);
+            }
+
             playbackTickIndex++;
         }, 1L, 1L);
 

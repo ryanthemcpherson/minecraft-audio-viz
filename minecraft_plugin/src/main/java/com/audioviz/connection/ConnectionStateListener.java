@@ -53,22 +53,34 @@ public class ConnectionStateListener {
         }
     }
 
-    /** Called by VizWebSocketServer when a DJ client connects. */
+    /** Called by VizWebSocketServer when a client connects (VJ server or DJ). */
     public void onDjConnect(String info) {
         djConnected = true;
         stale = false;
-        logger.info("DJ connected: " + info);
+        logger.info("WebSocket client connected: " + info);
         Bukkit.getScheduler().runTask(plugin, () -> {
             startBrightnessRamp(1.0);
-            broadcastActionBar(Component.text("DJ connected", NamedTextColor.GREEN));
+        });
+    }
+
+    /** Called by VizWebSocketServer when a client disconnects. */
+    public void onDjDisconnect(String reason) {
+        djConnected = false;
+        logger.info("WebSocket client disconnected: " + reason);
+    }
+
+    /** Called by MessageHandler when a DJ becomes active (from dj_info message). */
+    public void onDjActive(String djName) {
+        logger.info("DJ active: " + djName);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            broadcastActionBar(Component.text(djName + " on the decks!", NamedTextColor.GREEN));
             spawnConnectionParticles(true);
         });
     }
 
-    /** Called by VizWebSocketServer when a DJ client disconnects. */
-    public void onDjDisconnect(String reason) {
-        djConnected = false;
-        logger.info("DJ disconnected: " + reason);
+    /** Called by MessageHandler when no DJ is active (from dj_info message). */
+    public void onDjInactive() {
+        logger.info("DJ inactive");
         Bukkit.getScheduler().runTask(plugin, () -> {
             broadcastActionBar(Component.text("DJ disconnected", NamedTextColor.RED));
             spawnConnectionParticles(false);
