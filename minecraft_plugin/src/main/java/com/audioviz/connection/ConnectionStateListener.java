@@ -57,18 +57,22 @@ public class ConnectionStateListener {
     public void onDjConnect(String info) {
         djConnected = true;
         stale = false;
-        startBrightnessRamp(1.0);
-        broadcastActionBar(Component.text("DJ connected", NamedTextColor.GREEN));
-        spawnConnectionParticles(true);
         logger.info("DJ connected: " + info);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            startBrightnessRamp(1.0);
+            broadcastActionBar(Component.text("DJ connected", NamedTextColor.GREEN));
+            spawnConnectionParticles(true);
+        });
     }
 
     /** Called by VizWebSocketServer when a DJ client disconnects. */
     public void onDjDisconnect(String reason) {
         djConnected = false;
-        broadcastActionBar(Component.text("DJ disconnected", NamedTextColor.RED));
-        spawnConnectionParticles(false);
         logger.info("DJ disconnected: " + reason);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            broadcastActionBar(Component.text("DJ disconnected", NamedTextColor.RED));
+            spawnConnectionParticles(false);
+        });
     }
 
     /** Called by BitmapPatternManager when an audio frame is received. */
@@ -76,8 +80,10 @@ public class ConnectionStateListener {
         lastFrameMs = System.currentTimeMillis();
         if (stale) {
             stale = false;
-            startBrightnessRamp(1.0);
-            broadcastActionBar(Component.text("Audio signal restored", NamedTextColor.GREEN));
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                startBrightnessRamp(1.0);
+                broadcastActionBar(Component.text("Audio signal restored", NamedTextColor.GREEN));
+            });
         }
     }
 
