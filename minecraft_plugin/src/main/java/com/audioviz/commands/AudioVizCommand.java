@@ -604,6 +604,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handleMetricsCommand(CommandSender sender) {
+        if (!sender.hasPermission("audioviz.metrics") && !sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to view metrics.");
+            return;
+        }
         if (!(sender instanceof Player player)) {
             sender.sendMessage(ChatColor.RED + "Only players can use this command.");
             return;
@@ -619,6 +623,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handleSequenceCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("audioviz.sequence") && !sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to manage sequences.");
+            return;
+        }
         var sm = plugin.getSequenceManager();
         if (sm == null) {
             sender.sendMessage(ChatColor.RED + "Sequence manager not available.");
