@@ -92,8 +92,12 @@ public class ConnectionStateListener {
     private void tick() {
         long now = System.currentTimeMillis();
 
+        // Skip staleness detection during recording playback
+        var recorder = plugin.getRecordingManager();
+        boolean playingBack = recorder != null && recorder.isReplaying();
+
         // Check staleness
-        if (djConnected && !stale && lastFrameMs > 0 && isStale(lastFrameMs, now, STALE_THRESHOLD_MS)) {
+        if (djConnected && !stale && !playingBack && lastFrameMs > 0 && isStale(lastFrameMs, now, STALE_THRESHOLD_MS)) {
             stale = true;
             startBrightnessRamp(DIM_BRIGHTNESS);
             broadcastActionBar(Component.text("Audio signal lost", NamedTextColor.YELLOW));

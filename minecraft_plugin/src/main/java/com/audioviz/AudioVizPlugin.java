@@ -4,6 +4,7 @@ import com.audioviz.bedrock.BedrockPlayerListener;
 import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.beatsync.BeatSyncManager;
 import com.audioviz.latency.LatencyTracker;
+import com.audioviz.recording.RecordingManager;
 import com.audioviz.bitmap.BitmapPatternManager;
 import com.audioviz.bitmap.BitmapRendererBackend;
 import com.audioviz.bitmap.composition.CompositionManager;
@@ -70,6 +71,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private SequenceManager sequenceManager;
     private BeatSyncManager beatSyncManager;
     private LatencyTracker latencyTracker;
+    private RecordingManager recordingManager;
 
     @Override
     public void onEnable() {
@@ -130,6 +132,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
         // Initialize latency tracker (pure Java, no Bukkit deps)
         this.latencyTracker = new LatencyTracker();
+
+        // Initialize recording manager (record & replay audio sessions)
+        this.recordingManager = new RecordingManager(this);
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -272,6 +277,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Shutdown bitmap pattern manager
         if (bitmapPatternManager != null) {
             bitmapPatternManager.shutdown();
+        }
+
+        // Stop recording manager
+        if (recordingManager != null) {
+            recordingManager.stop();
         }
 
         // Save beat sync config
@@ -479,6 +489,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public LatencyTracker getLatencyTracker() {
         return latencyTracker;
+    }
+
+    public RecordingManager getRecordingManager() {
+        return recordingManager;
     }
 
     /**
