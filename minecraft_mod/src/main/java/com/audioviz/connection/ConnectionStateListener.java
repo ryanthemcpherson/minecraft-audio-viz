@@ -60,24 +60,39 @@ public class ConnectionStateListener {
         applyBrightnessRamp();
     }
 
-    /** Called by VizWebSocketServer when a DJ client connects. */
+    /** Called by VizWebSocketServer when a client connects (VJ server or DJ). */
     public void onDjConnect(String info) {
         djConnected = true;
         stale = false;
-        LOGGER.info("DJ connected: {}", info);
+        LOGGER.info("WebSocket client connected: {}", info);
         var server = getServer();
         if (server != null) {
             server.execute(() -> {
                 startBrightnessRamp(1.0);
-                broadcastActionBar(Text.literal("DJ connected").formatted(Formatting.GREEN));
             });
         }
     }
 
-    /** Called by VizWebSocketServer when a DJ client disconnects. */
+    /** Called by VizWebSocketServer when a client disconnects. */
     public void onDjDisconnect(String reason) {
         djConnected = false;
-        LOGGER.info("DJ disconnected: {}", reason);
+        LOGGER.info("WebSocket client disconnected: {}", reason);
+    }
+
+    /** Called by MessageHandler when a DJ becomes active (from dj_info message). */
+    public void onDjActive(String djName) {
+        LOGGER.info("DJ active: {}", djName);
+        var server = getServer();
+        if (server != null) {
+            server.execute(() -> {
+                broadcastActionBar(Text.literal(djName + " on the decks!").formatted(Formatting.GREEN));
+            });
+        }
+    }
+
+    /** Called by MessageHandler when no DJ is active (from dj_info message). */
+    public void onDjInactive() {
+        LOGGER.info("DJ inactive");
         var server = getServer();
         if (server != null) {
             server.execute(() -> {

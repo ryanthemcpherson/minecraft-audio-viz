@@ -6,13 +6,13 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Getting Started - MCAV",
   description:
-    "Set up MCAV on your Minecraft server in minutes. Download the plugin, install the VJ server, and start visualizing music in real-time.",
+    "Set up MCAV on your Minecraft server in minutes. Install the Fabric mod or Paper plugin, set up the VJ server, and start visualizing music in real-time.",
 };
 
 const tocItems = [
   { id: "prerequisites", label: "Prerequisites" },
   { id: "server-setup", label: "Server Owners / VJ Operators" },
-  { id: "install-plugin", label: "Install the Plugin", indent: true },
+  { id: "install-plugin", label: "Choose Platform", indent: true },
   { id: "install-processor", label: "Install VJ Server", indent: true },
   { id: "start-vj-server", label: "Start the VJ Server", indent: true },
   { id: "in-game-setup", label: "In-Game Setup", indent: true },
@@ -54,7 +54,7 @@ export default function GettingStartedPage() {
                 <h3 className="font-bold text-lg">Server Owner</h3>
               </div>
               <p className="text-sm text-text-secondary">
-                Set up the Minecraft plugin and VJ server to host audio visualization shows.
+                Set up the Minecraft mod or plugin and VJ server to host audio visualization shows.
               </p>
             </a>
 
@@ -121,10 +121,11 @@ export default function GettingStartedPage() {
                         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
                       </svg>
                     </div>
-                    <h3 className="font-semibold">Paper Server 1.21.1+</h3>
+                    <h3 className="font-semibold">MC Server 1.21.1+</h3>
                   </div>
                   <p className="text-sm text-text-secondary">
-                    Minecraft server with Display Entity support. Paper or Spigot.
+                    Fabric (with Fabric API, SGUI, Polymer) or Paper/Spigot. See{" "}
+                    <a href="#install-plugin" className="text-disc-cyan hover:underline">Step 1</a> for comparison.
                   </p>
                 </div>
 
@@ -173,68 +174,183 @@ export default function GettingStartedPage() {
                   For Server Owners / VJ Operators
                 </h2>
                 <p className="mt-3 text-text-secondary max-w-2xl">
-                  Set up the Minecraft plugin and VJ server to host visualization shows on your server.
+                  Choose between Fabric mod or Paper plugin, install the VJ server, and start hosting visualization shows.
                 </p>
               </div>
 
-              {/* Step 1: Install Plugin */}
+              {/* Step 1: Choose Platform */}
               <div id="install-plugin" className="mb-16">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-cyan to-disc-blue text-white font-bold text-sm">
                     01
                   </div>
-                  <h3 className="text-xl font-bold">Install the Minecraft Plugin</h3>
+                  <h3 className="text-xl font-bold">Choose Your Server Platform</h3>
                 </div>
 
                 <div className="space-y-6 pl-0 sm:pl-16">
-                  <div>
-                    <h4 className="font-semibold mb-3 text-disc-cyan">
-                      Option A: Download Pre-Built JAR (Recommended)
-                    </h4>
-                    <p className="text-text-secondary mb-4">
-                      Download the latest plugin JAR from GitHub Releases. No build tools required.
-                    </p>
-                    <a
-                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-all hover:border-white/20 hover:bg-white/10 mb-4"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
+                  <p className="text-text-secondary">
+                    MCAV ships two server-side JARs with full feature parity. Pick whichever fits your server.
+                    Both render the same visualizations — no client mods needed for players.
+                  </p>
+
+                  {/* Comparison cards */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="glass-card rounded-xl p-6 border border-disc-cyan/20">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-disc-cyan/10 text-disc-cyan font-bold text-lg">F</div>
+                        <div>
+                          <h4 className="font-bold text-lg">Fabric Mod</h4>
+                          <p className="text-xs text-text-secondary">audioviz-mod.jar</p>
+                        </div>
+                      </div>
+                      <ul className="space-y-2 text-sm mb-4">
+                        <li className="flex gap-2">
+                          <span className="text-emerald-400 shrink-0">+</span>
+                          <span className="text-text-secondary">Map-based bitmap rendering — true pixel-level resolution (128x128 per tile)</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-emerald-400 shrink-0">+</span>
+                          <span className="text-text-secondary">Better performance — direct access to Minecraft internals</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-emerald-400 shrink-0">+</span>
+                          <span className="text-text-secondary">No client mods needed — uses Polymer for vanilla compatibility</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-amber-400 shrink-0">&minus;</span>
+                          <span className="text-text-secondary">Requires Fabric API + SGUI + Polymer dependencies</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-amber-400 shrink-0">&minus;</span>
+                          <span className="text-text-secondary">Smaller mod ecosystem than Paper/Spigot</span>
+                        </li>
+                      </ul>
+                      <a
+                        href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg border border-disc-cyan/30 bg-disc-cyan/5 px-4 py-2 text-sm font-semibold text-disc-cyan transition-all hover:bg-disc-cyan/10"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Download Fabric Mod
+                      </a>
+                    </div>
+
+                    <div className="glass-card rounded-xl p-6 border border-disc-blue/20">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-disc-blue/10 text-disc-blue font-bold text-lg">P</div>
+                        <div>
+                          <h4 className="font-bold text-lg">Paper Plugin</h4>
+                          <p className="text-xs text-text-secondary">audioviz-plugin.jar</p>
+                        </div>
+                      </div>
+                      <ul className="space-y-2 text-sm mb-4">
+                        <li className="flex gap-2">
+                          <span className="text-emerald-400 shrink-0">+</span>
+                          <span className="text-text-secondary">Zero dependencies — single self-contained JAR</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-emerald-400 shrink-0">+</span>
+                          <span className="text-text-secondary">Works with the huge Paper/Spigot plugin ecosystem</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-emerald-400 shrink-0">+</span>
+                          <span className="text-text-secondary">Hot-reload support — <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-xs">/reload</code> without restart</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-amber-400 shrink-0">&minus;</span>
+                          <span className="text-text-secondary">Lower resolution bitmaps — uses Display Entities (1 entity per pixel) instead of maps</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-amber-400 shrink-0">&minus;</span>
+                          <span className="text-text-secondary">Slightly higher overhead from Bukkit API abstraction layer</span>
+                        </li>
+                      </ul>
+                      <a
+                        href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg border border-disc-blue/30 bg-disc-blue/5 px-4 py-2 text-sm font-semibold text-disc-blue transition-all hover:bg-disc-blue/10"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Download Paper Plugin
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Install instructions */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <h4 className="font-semibold mb-3 text-disc-cyan text-sm">Fabric Install</h4>
+                      <CodeBlock
+                        title="Terminal"
+                        code={`# Drop into mods/ folder
+cp audioviz-mod-*.jar /path/to/server/mods/
+
+# Also install these Fabric mods:
+# - Fabric API
+# - SGUI
+# - Polymer`}
+                      />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-3 text-disc-blue text-sm">Paper Install</h4>
+                      <CodeBlock
+                        title="Terminal"
+                        code={`# Drop into plugins/ folder
+cp audioviz-plugin-*.jar /path/to/server/plugins/
+
+# No other dependencies needed!
+# Restart the server.`}
+                      />
+                    </div>
+                  </div>
+
+                  <details className="glass-card rounded-xl overflow-hidden">
+                    <summary className="flex items-center justify-between p-5 text-sm font-semibold cursor-pointer">
+                      Build from source instead
+                      <svg className="faq-chevron h-4 w-4 text-text-secondary transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9" />
                       </svg>
-                      Download from GitHub Releases
-                    </a>
-                    <p className="text-sm text-text-secondary">
-                      Copy the <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">audioviz-plugin-*.jar</code> file
-                      into your server&apos;s <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">plugins/</code> directory
-                      and restart the server.
-                    </p>
-                  </div>
-
-                  <div className="border-t border-white/5 pt-6">
-                    <h4 className="font-semibold mb-3 text-text-secondary">
-                      Option B: Build from Source
-                    </h4>
-                    <p className="text-sm text-text-secondary mb-4">
-                      Requires Java 21 and Maven installed.
-                    </p>
-                    <CodeBlock
-                      title="Terminal"
-                      code={`git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-cd minecraft-audio-viz/minecraft_plugin
-mvn package
-
-# Copy the built JAR to your server
-cp target/audioviz-plugin-*.jar /path/to/server/plugins/`}
-                    />
-                  </div>
+                    </summary>
+                    <div className="border-t border-white/5 px-5 pb-5 pt-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-text-secondary mb-3">Requires Java 21 + Gradle</p>
+                          <CodeBlock
+                            title="Fabric Mod"
+                            code={`cd minecraft_mod
+./gradlew build
+cp build/libs/audioviz-mod-*.jar \\
+  /path/to/server/mods/`}
+                          />
+                        </div>
+                        <div>
+                          <p className="text-xs text-text-secondary mb-3">Requires Java 21 + Maven</p>
+                          <CodeBlock
+                            title="Paper Plugin"
+                            code={`cd minecraft_plugin
+./mvnw package
+cp target/audioviz-plugin-*.jar \\
+  /path/to/server/plugins/`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </details>
 
                   <div className="callout-tip text-sm text-text-secondary">
-                    <strong className="text-white">Note:</strong> The plugin requires Paper or Spigot 1.21.1+ for Display Entity support.
-                    Any vanilla Minecraft client can see the visualizations — no client mods needed.
+                    <strong className="text-white">Both platforms have full feature parity</strong> — bitmap rendering, entity pools,
+                    particle effects, recording/playback, stage management, beat sync, Simple Voice Chat integration,
+                    and the admin panel all work identically. Players see the same visualizations regardless of which platform you choose.
                   </div>
                 </div>
               </div>
@@ -320,31 +436,31 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
 
                 <div className="space-y-6 pl-0 sm:pl-16">
                   <p className="text-text-secondary">
-                    Once the plugin is installed and the VJ server is running, initialize the visualization zone in-game.
+                    Once the mod is installed and the VJ server is running, create a visualization zone in-game.
                   </p>
 
                   <CodeBlock
                     title="Minecraft Console"
                     language="minecraft"
-                    code={`# Initialize a visualization zone with 16 display entities
-/audioviz pool init main 16
+                    code={`# Create a visualization zone
+/audioviz zone create main
 
-# Set a visualization pattern
-/audioviz pattern set spiral
+# Open the interactive control menu
+/audioviz menu
 
-# Open the control menu
-/audioviz menu`}
+# Check connection status
+/audioviz status`}
                   />
 
                   <p className="text-sm text-text-secondary">
-                    The <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">16</code> is the number of Display Entities to spawn.
-                    More entities means more detailed visualizations but higher server load. Start with 16 and adjust as needed.
+                    Use the in-game menu to manage zones, select patterns, adjust sizes, and configure stages.
+                    Zone entity pools are initialized automatically when you create or place a zone.
                   </p>
 
                   <div className="callout-tip text-sm text-text-secondary">
                     <strong className="text-white">Tip:</strong> Use{" "}
                     <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz test main wave</code>{" "}
-                    to run a test animation without audio connected. Great for verifying the plugin is working.
+                    to run a test animation without audio connected. Great for verifying the mod is working.
                   </div>
                 </div>
               </div>
@@ -510,8 +626,8 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                     <ul className="list-disc pl-5 space-y-2">
                       <li>Verify the server IP address and port are correct</li>
                       <li>Check that port <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">8765</code> (Minecraft WebSocket) and <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">9000</code> (VJ server) are open in your firewall</li>
-                      <li>Run <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz status</code> in Minecraft to check the plugin status</li>
-                      <li>Make sure the Minecraft plugin loaded successfully — check server logs for errors</li>
+                      <li>Run <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz status</code> in Minecraft to check the mod status</li>
+                      <li>Make sure the Minecraft mod loaded successfully — check server logs for errors</li>
                     </ul>
                   </div>
                 </details>
@@ -525,9 +641,9 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                   </summary>
                   <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>Make sure you&apos;ve initialized the entity pool: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz pool init main 16</code></li>
-                      <li>Stand near the visualization zone — entities spawn at your location when initialized</li>
-                      <li>Check that a pattern is set: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz pattern set bars</code></li>
+                      <li>Make sure you&apos;ve created a zone: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz zone create main</code></li>
+                      <li>Stand near the visualization zone — entities spawn at your location</li>
+                      <li>Open the menu to check status: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz menu</code></li>
                       <li>Try the test animation: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz test main wave</code></li>
                     </ul>
                   </div>
@@ -579,7 +695,7 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                   </div>
                   <h3 className="font-bold mb-2">Pattern Gallery</h3>
                   <p className="text-sm text-text-secondary">
-                    Explore 29 visualization patterns — spirals, auroras, galaxies, and more.
+                    Explore 55+ visualization patterns — spirals, auroras, galaxies, and more.
                   </p>
                 </a>
 
