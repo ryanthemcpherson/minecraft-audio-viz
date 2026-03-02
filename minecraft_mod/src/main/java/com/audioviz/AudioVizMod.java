@@ -1,16 +1,22 @@
 package com.audioviz;
 
+import com.audioviz.beatsync.BeatSyncManager;
 import com.audioviz.bitmap.BitmapPatternManager;
+import com.audioviz.connection.ConnectionStateListener;
 import com.audioviz.decorators.DecoratorEntityManager;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
 import com.audioviz.effects.BeatType;
 import com.audioviz.gui.MenuManager;
+import com.audioviz.latency.LatencyTracker;
 import com.audioviz.lighting.AmbientLightManager;
+import com.audioviz.metrics.MetricsDisplay;
 import com.audioviz.particles.ParticleEffectManager;
 import com.audioviz.patterns.AudioState;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
+import com.audioviz.recording.RecordingManager;
+import com.audioviz.sequence.SequenceManager;
 import com.audioviz.render.BitmapToEntityBridge;
 import com.audioviz.render.MapRendererBackend;
 import com.audioviz.render.VirtualEntityRendererBackend;
@@ -76,6 +82,12 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     private ParticleEffectManager particleEffectManager;
     private BeatEventManager beatEventManager;
     private AmbientLightManager ambientLightManager;
+    private ConnectionStateListener connectionStateListener;
+    private MetricsDisplay metricsDisplay;
+    private SequenceManager sequenceManager;
+    private BeatSyncManager beatSyncManager;
+    private LatencyTracker latencyTracker;
+    private RecordingManager recordingManager;
 
     /** Reusable list for batch_update entity parsing (cleared each call). */
     private final List<VirtualEntityPool.EntityUpdate> batchUpdateList = new ArrayList<>();
@@ -161,6 +173,9 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             if (menuManager != null) {
                 menuManager.removeSession(uuid);
             }
+            if (metricsDisplay != null) {
+                metricsDisplay.handleDisconnect(uuid);
+            }
         });
     }
 
@@ -221,6 +236,16 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             voicechatIntegration = null;
         }
 
+        // Initialize batch 1 + batch 2 features
+        connectionStateListener = new ConnectionStateListener();
+        metricsDisplay = new MetricsDisplay();
+        latencyTracker = new LatencyTracker();
+        beatSyncManager = new BeatSyncManager(configDir);
+        beatSyncManager.load();
+        sequenceManager = new SequenceManager(this);
+        sequenceManager.loadSequences();
+        recordingManager = new RecordingManager(configDir);
+
         // Initialize WebSocket protocol
         messageHandler = new MessageHandler(this);
         messageHandler.setBatchUpdateHandler(this::handleBatchUpdateRendering);
@@ -260,6 +285,29 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         // 3. Feed audio state to subsystems and tick bitmap pattern engine
         AudioState audio = messageHandler.getLatestAudioState();
         if (audio == null) audio = AudioState.silent();
+
+        // During recording playback, override live audio
+        if (recordingManager != null && recordingManager.isReplaying()) {
+            AudioState playbackAudio = recordingManager.tickPlayback();
+            if (playbackAudio != null) {
+                audio = playbackAudio;
+            }
+        }
+
+        // Apply beat sync overrides
+        if (beatSyncManager != null) {
+            audio = beatSyncManager.applyOverrides(audio);
+        }
+
+        // Notify connection state listener of audio frames
+        if (connectionStateListener != null && audio.getAmplitude() > 0) {
+            connectionStateListener.onAudioFrame();
+        }
+
+        // Capture frame for recording
+        if (recordingManager != null) {
+            recordingManager.captureFrame(audio);
+        }
 
         if (bitmapPatternManager != null) {
             bitmapPatternManager.tick(audio);
@@ -332,6 +380,21 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         // 11. Tick zone selection manager (look-at raycasting)
         if (zoneSelectionManager != null) {
             zoneSelectionManager.tick();
+        }
+
+        // 12. Tick connection state listener (staleness detection + brightness ramp)
+        if (connectionStateListener != null) {
+            connectionStateListener.tick();
+        }
+
+        // 13. Tick sequence manager (pattern rotation)
+        if (sequenceManager != null) {
+            sequenceManager.tick();
+        }
+
+        // 14. Tick metrics display (action bar updates)
+        if (metricsDisplay != null) {
+            metricsDisplay.tick();
         }
     }
 
@@ -409,12 +472,29 @@ public class AudioVizMod implements DedicatedServerModInitializer {
             }
         }
 
+        // Shutdown batch 1 + batch 2 features
+        if (recordingManager != null) {
+            recordingManager.stop();
+        }
+        if (sequenceManager != null) {
+            sequenceManager.stop();
+        }
+        if (metricsDisplay != null) {
+            metricsDisplay.stop();
+        }
+        if (beatSyncManager != null) {
+            beatSyncManager.save();
+        }
+
         // Save state
         if (stageManager != null) {
             stageManager.saveStages();
         }
         if (zoneManager != null) {
             zoneManager.saveZones();
+        }
+        if (sequenceManager != null) {
+            sequenceManager.saveSequences();
         }
 
         LOGGER.info("AudioViz stopped");
@@ -570,4 +650,10 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     public ParticleEffectManager getParticleEffectManager() { return particleEffectManager; }
     public BeatEventManager getBeatEventManager() { return beatEventManager; }
     public AmbientLightManager getAmbientLightManager() { return ambientLightManager; }
+    public ConnectionStateListener getConnectionStateListener() { return connectionStateListener; }
+    public MetricsDisplay getMetricsDisplay() { return metricsDisplay; }
+    public SequenceManager getSequenceManager() { return sequenceManager; }
+    public BeatSyncManager getBeatSyncManager() { return beatSyncManager; }
+    public LatencyTracker getLatencyTracker() { return latencyTracker; }
+    public RecordingManager getRecordingManager() { return recordingManager; }
 }
