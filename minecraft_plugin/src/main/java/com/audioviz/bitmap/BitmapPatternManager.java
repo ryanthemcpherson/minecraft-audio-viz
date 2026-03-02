@@ -110,6 +110,10 @@ public class BitmapPatternManager {
      */
     public void updateAudioState(AudioState audio) {
         this.latestAudioState = audio;
+        var listener = plugin.getConnectionStateListener();
+        if (listener != null) {
+            listener.onAudioFrame();
+        }
     }
 
     // ========== Pattern Registry ==========
