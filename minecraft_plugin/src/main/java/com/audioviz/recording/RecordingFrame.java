@@ -24,6 +24,10 @@ public record RecordingFrame(
     double beatPhase,
     int tickIndex
 ) {
+    public RecordingFrame {
+        bands = bands != null ? bands.clone() : new double[5];
+    }
+
     public static final int BYTE_SIZE = 5 * 8 + 8 + 1 + 8 + 8 + 8 + 4;  // 77 bytes
 
     public byte[] toBytes() {

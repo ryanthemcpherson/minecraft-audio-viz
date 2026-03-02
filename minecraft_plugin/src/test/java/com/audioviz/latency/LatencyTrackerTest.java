@@ -113,6 +113,15 @@ class LatencyTrackerTest {
     class Segments {
 
         @Test
+        @DisplayName("processing latency recorded")
+        void processingLatency() {
+            var tracker = new LatencyTracker();
+            tracker.recordProcessingLatency(5.0);
+            tracker.recordProcessingLatency(10.0);
+            assertEquals(7.5, tracker.getProcessingStats().getAvg(), 0.001);
+        }
+
+        @Test
         @DisplayName("total latency sums segments")
         void totalLatency() {
             var tracker = new LatencyTracker();
