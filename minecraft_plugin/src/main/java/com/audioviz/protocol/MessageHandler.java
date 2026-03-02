@@ -381,6 +381,15 @@ public class MessageHandler {
             plugin.getBitmapPatternManager().updateAudioState(audioState);
         }
 
+        // Record network latency if timestamp present
+        if (message.has("ts")) {
+            double remoteTs = message.get("ts").getAsDouble();
+            var latencyTracker = plugin.getLatencyTracker();
+            if (latencyTracker != null) {
+                latencyTracker.recordNetworkLatency(remoteTs, System.currentTimeMillis());
+            }
+        }
+
         JsonObject response = new JsonObject();
         response.addProperty("type", "batch_updated");
         response.addProperty("zone", zoneName);
@@ -1117,6 +1126,15 @@ public class MessageHandler {
             // Update bitmap audio state (pattern manager self-ticks at 20 TPS)
             if (plugin.getBitmapPatternManager() != null) {
                 plugin.getBitmapPatternManager().updateAudioState(audioState);
+            }
+        }
+
+        // Record network latency if timestamp present
+        if (message.has("ts")) {
+            double remoteTs = message.get("ts").getAsDouble();
+            var latencyTracker = plugin.getLatencyTracker();
+            if (latencyTracker != null) {
+                latencyTracker.recordNetworkLatency(remoteTs, System.currentTimeMillis());
             }
         }
 

@@ -3,6 +3,7 @@ package com.audioviz;
 import com.audioviz.bedrock.BedrockPlayerListener;
 import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.beatsync.BeatSyncManager;
+import com.audioviz.latency.LatencyTracker;
 import com.audioviz.bitmap.BitmapPatternManager;
 import com.audioviz.bitmap.BitmapRendererBackend;
 import com.audioviz.bitmap.composition.CompositionManager;
@@ -68,6 +69,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private MetricsDisplay metricsDisplay;
     private SequenceManager sequenceManager;
     private BeatSyncManager beatSyncManager;
+    private LatencyTracker latencyTracker;
 
     @Override
     public void onEnable() {
@@ -125,6 +127,9 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Initialize beat sync manager
         this.beatSyncManager = new BeatSyncManager(this);
         this.beatSyncManager.load();
+
+        // Initialize latency tracker (pure Java, no Bukkit deps)
+        this.latencyTracker = new LatencyTracker();
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -470,6 +475,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public BeatSyncManager getBeatSyncManager() {
         return beatSyncManager;
+    }
+
+    public LatencyTracker getLatencyTracker() {
+        return latencyTracker;
     }
 
     /**
