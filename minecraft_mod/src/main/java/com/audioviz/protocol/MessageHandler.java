@@ -143,6 +143,16 @@ public class MessageHandler {
 
         latestAudioState = new AudioState(bands, amplitude, isBeat, beatIntensity,
             tempoConfidence, beatPhase, frame);
+
+        // Record network latency if timestamp is present
+        if (message.has("ts")) {
+            double ts = message.get("ts").getAsDouble();
+            var lt = mod.getLatencyTracker();
+            if (lt != null) {
+                lt.recordNetworkLatency(ts, System.currentTimeMillis());
+            }
+        }
+
         return null; // No response needed
     }
 
@@ -220,6 +230,13 @@ public class MessageHandler {
         // Extract embedded audio state from batch_update (VJ server sends it here, not as separate message)
         if (message.has("bands")) {
             handleAudioState(message);
+        } else if (message.has("ts")) {
+            // Record network latency even if no audio state embedded
+            double ts = message.get("ts").getAsDouble();
+            var lt = mod.getLatencyTracker();
+            if (lt != null) {
+                lt.recordNetworkLatency(ts, System.currentTimeMillis());
+            }
         }
 
         if (batchUpdateHandler != null) {
