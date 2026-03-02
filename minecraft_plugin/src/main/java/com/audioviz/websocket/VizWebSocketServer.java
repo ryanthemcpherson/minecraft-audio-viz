@@ -88,6 +88,11 @@ public class VizWebSocketServer extends WebSocketServer {
 
         plugin.getLogger().info("WebSocket client connected: " + info.address);
 
+        var connectListener = plugin.getConnectionStateListener();
+        if (connectListener != null) {
+            connectListener.onDjConnect(conn.getRemoteSocketAddress().toString());
+        }
+
         // Send welcome message
         JsonObject welcome = new JsonObject();
         welcome.addProperty("type", "connected");
@@ -110,6 +115,11 @@ public class VizWebSocketServer extends WebSocketServer {
         plugin.getLogger().info("Client " + address + " disconnected: code=" + code +
             ", reason=" + (reason != null && !reason.isEmpty() ? reason : "none") +
             ", duration=" + durationStr);
+
+        var disconnectListener = plugin.getConnectionStateListener();
+        if (disconnectListener != null && clients.isEmpty()) {
+            disconnectListener.onDjDisconnect(reason != null ? reason : "connection closed");
+        }
     }
 
     // Maximum incoming message size (256KB - generous for any valid message)
