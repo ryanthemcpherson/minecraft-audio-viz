@@ -19,7 +19,7 @@ public class LatencyTracker {
      * @param remoteTimestampSec timestamp from DJ client (Unix seconds, double)
      * @param localReceiveMs local receive time (System.currentTimeMillis())
      */
-    public void recordNetworkLatency(double remoteTimestampSec, long localReceiveMs) {
+    public synchronized void recordNetworkLatency(double remoteTimestampSec, long localReceiveMs) {
         long remoteMs = (long) (remoteTimestampSec * 1000);
 
         if (!clockOffsetInitialized) {
@@ -65,20 +65,20 @@ public class LatencyTracker {
             this.samples = new double[capacity];
         }
 
-        public void record(double value) {
+        public synchronized void record(double value) {
             samples[writeIndex] = value;
             writeIndex = (writeIndex + 1) % capacity;
             if (count < capacity) count++;
         }
 
-        public double getAvg() {
+        public synchronized double getAvg() {
             if (count == 0) return 0.0;
             double sum = 0;
             for (int i = 0; i < count; i++) sum += samples[i];
             return sum / count;
         }
 
-        public double getP95() {
+        public synchronized double getP95() {
             if (count == 0) return 0.0;
             double[] sorted = new double[count];
             System.arraycopy(samples, 0, sorted, 0, count);
@@ -87,7 +87,7 @@ public class LatencyTracker {
             return sorted[Math.max(0, index)];
         }
 
-        public double getMax() {
+        public synchronized double getMax() {
             if (count == 0) return 0.0;
             double max = samples[0];
             for (int i = 1; i < count; i++) {
@@ -96,7 +96,7 @@ public class LatencyTracker {
             return max;
         }
 
-        public double getJitter() {
+        public synchronized double getJitter() {
             if (count < 2) return 0.0;
             double avg = getAvg();
             double sumSqDiff = 0;
@@ -107,6 +107,6 @@ public class LatencyTracker {
             return Math.sqrt(sumSqDiff / count);
         }
 
-        public int getCount() { return count; }
+        public synchronized int getCount() { return count; }
     }
 }

@@ -8,6 +8,7 @@ import org.bukkit.scheduler.BukkitTask;
 import java.io.*;
 import java.util.*;
 import java.util.logging.Level;
+import java.util.regex.Pattern;
 
 /**
  * Manages recording sessions and playback of recorded audio state.
@@ -28,6 +29,7 @@ public class RecordingManager {
     private boolean replaying = false;
 
     private static final int TICK_RATE = 20;
+    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_\\-]{1,64}$");
 
     public RecordingManager(AudioVizPlugin plugin) {
         this.plugin = plugin;
@@ -41,6 +43,7 @@ public class RecordingManager {
 
     public boolean startRecording(String name) {
         if (activeRecording != null) return false;
+        if (!SAFE_NAME.matcher(name).matches()) return false;
 
         // BitmapPatternManager doesn't expose active zone names publicly,
         // so we store an empty map. Zone/pattern context can be added later
@@ -86,6 +89,7 @@ public class RecordingManager {
 
     public boolean startPlayback(String name) {
         if (replaying) return false;
+        if (!SAFE_NAME.matcher(name).matches()) return false;
 
         File file = new File(recordingsDir, name + ".mcavrec");
         if (!file.exists()) return false;
@@ -150,6 +154,7 @@ public class RecordingManager {
     }
 
     public boolean deleteRecording(String name) {
+        if (!SAFE_NAME.matcher(name).matches()) return false;
         File file = new File(recordingsDir, name + ".mcavrec");
         return file.exists() && file.delete();
     }
