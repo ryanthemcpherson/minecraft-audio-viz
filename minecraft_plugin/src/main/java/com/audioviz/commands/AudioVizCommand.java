@@ -51,6 +51,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             case "metrics" -> handleMetricsCommand(sender);
             case "sequence", "seq" -> handleSequenceCommand(sender, args);
             case "beatsync", "bs" -> handleBeatSyncCommand(sender, args);
+            case "latency", "lat" -> handleLatencyCommand(sender);
             case "bedrock" -> handleBedrockCommand(sender);
             case "test" -> handleTestCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "help" -> sendHelp(sender);
@@ -868,6 +869,30 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleLatencyCommand(CommandSender sender) {
+        if (!sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to view latency.");
+            return;
+        }
+        var lt = plugin.getLatencyTracker();
+        if (lt == null) {
+            sender.sendMessage(ChatColor.RED + "Latency tracker not available.");
+            return;
+        }
+        var net = lt.getNetworkStats();
+        var proc = lt.getProcessingStats();
+
+        sender.sendMessage(ChatColor.AQUA + "--- MCAV Latency ---");
+        sender.sendMessage(ChatColor.WHITE + "Network:    " +
+            ChatColor.AQUA + String.format("%.0fms avg / %.0fms p95", net.getAvg(), net.getP95()));
+        sender.sendMessage(ChatColor.WHITE + "Processing: " +
+            ChatColor.AQUA + String.format("%.1fms avg / %.1fms p95", proc.getAvg(), proc.getP95()));
+        sender.sendMessage(ChatColor.WHITE + "Total:      " +
+            ChatColor.AQUA + String.format("%.0fms avg", lt.getTotalAvgMs()));
+        sender.sendMessage(ChatColor.WHITE + "Jitter:     " +
+            ChatColor.AQUA + String.format("±%.0fms", net.getJitter()));
+    }
+
     private void sendHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "=== AudioViz Commands ===");
         sender.sendMessage(ChatColor.AQUA + "/audioviz menu" + ChatColor.WHITE + " - Open the control menu");
@@ -893,6 +918,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/audioviz metrics" + ChatColor.GRAY + " - Toggle performance metrics sidebar");
         sender.sendMessage(ChatColor.AQUA + "/av sequence <start|stop|skip|list|reload>" + ChatColor.GRAY + " - Pattern sequencing");
         sender.sendMessage(ChatColor.AQUA + "/av beatsync <bpm|phase|sensitivity|status>" + ChatColor.GRAY + " - Beat sync controls");
+        sender.sendMessage(ChatColor.AQUA + "/av latency" + ChatColor.GRAY + " - Show pipeline latency stats");
         sender.sendMessage(ChatColor.AQUA + "/audioviz bedrock" + ChatColor.WHITE + " - Show Bedrock/Geyser support status");
     }
 
@@ -901,7 +927,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "metrics", "sequence", "seq", "beatsync", "bs", "bedrock", "test", "help"));
+            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "metrics", "sequence", "seq", "beatsync", "bs", "latency", "lat", "bedrock", "test", "help"));
         } else if (args.length == 2) {
             switch (args[0].toLowerCase()) {
                 case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info", "boundaries"));
