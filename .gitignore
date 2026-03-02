@@ -141,3 +141,4 @@ pytest-cache-files-*/
 
 # Community bot
 community_bot/.venv/
+.worktrees/
