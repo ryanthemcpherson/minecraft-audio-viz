@@ -73,6 +73,7 @@ public class MetricsDisplay {
         String renderTime = collectRenderTime();
         String sequences = collectSequences();
         String latency = collectLatency();
+        String recordingStatus = collectRecordingStatus();
 
         for (UUID uuid : new ArrayList<>(activeViewers)) {
             Player player = Bukkit.getPlayer(uuid);
@@ -81,13 +82,13 @@ public class MetricsDisplay {
                 playerScoreboards.remove(uuid);
                 continue;
             }
-            updateScoreboard(player, djStatus, entities, activeZones, renderTime, sequences, latency);
+            updateScoreboard(player, djStatus, entities, activeZones, renderTime, sequences, latency, recordingStatus);
         }
     }
 
     private void updateScoreboard(Player player, String djStatus, String entities,
                                    String activeZones, String renderTime, String sequences,
-                                   String latency) {
+                                   String latency, String recordingStatus) {
         Scoreboard board = playerScoreboards.computeIfAbsent(player.getUniqueId(), k -> {
             Scoreboard sb = Bukkit.getScoreboardManager().getNewScoreboard();
             player.setScoreboard(sb);
@@ -101,12 +102,15 @@ public class MetricsDisplay {
             Criteria.DUMMY, Component.text("MCAV Metrics", NamedTextColor.AQUA));
         obj.setDisplaySlot(DisplaySlot.SIDEBAR);
 
-        obj.getScore("DJ: " + djStatus).setScore(7);
-        obj.getScore("Entities: " + entities).setScore(6);
-        obj.getScore("Zones: " + activeZones).setScore(5);
-        obj.getScore("Render: " + renderTime).setScore(4);
-        obj.getScore("Latency: " + latency).setScore(3);
-        obj.getScore("Sequences: " + sequences).setScore(2);
+        obj.getScore("DJ: " + djStatus).setScore(8);
+        obj.getScore("Entities: " + entities).setScore(7);
+        obj.getScore("Zones: " + activeZones).setScore(6);
+        obj.getScore("Render: " + renderTime).setScore(5);
+        obj.getScore("Latency: " + latency).setScore(4);
+        obj.getScore("Sequences: " + sequences).setScore(3);
+        if (recordingStatus != null) {
+            obj.getScore("Recording: " + recordingStatus).setScore(2);
+        }
     }
 
     private void removeScoreboard(Player player) {
@@ -171,6 +175,14 @@ public class MetricsDisplay {
     private String collectSequences() {
         var sm = plugin.getSequenceManager();
         return sm != null ? String.valueOf(sm.getActiveCount()) : "0";
+    }
+
+    private String collectRecordingStatus() {
+        var rm = plugin.getRecordingManager();
+        if (rm == null) return null;
+        if (rm.isRecording()) return "REC";
+        if (rm.isReplaying()) return "PLAY";
+        return null;
     }
 
     // ========== Pure Formatting (testable) ==========
