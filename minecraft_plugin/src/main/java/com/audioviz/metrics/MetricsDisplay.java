@@ -160,8 +160,8 @@ public class MetricsDisplay {
     }
 
     private String collectSequences() {
-        // Will be wired to SequenceManager in Feature C
-        return "0";
+        var sm = plugin.getSequenceManager();
+        return sm != null ? String.valueOf(sm.getActiveCount()) : "0";
     }
 
     // ========== Pure Formatting (testable) ==========

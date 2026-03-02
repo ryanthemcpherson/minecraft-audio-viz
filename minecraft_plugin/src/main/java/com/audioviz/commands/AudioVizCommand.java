@@ -49,6 +49,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             case "pool" -> handlePoolCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "status" -> handleStatusCommand(sender);
             case "metrics" -> handleMetricsCommand(sender);
+            case "sequence", "seq" -> handleSequenceCommand(sender, args);
             case "bedrock" -> handleBedrockCommand(sender);
             case "test" -> handleTestCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "help" -> sendHelp(sender);
@@ -617,6 +618,66 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             (nowShowing ? ChatColor.GREEN + "enabled" : ChatColor.RED + "disabled"));
     }
 
+    private void handleSequenceCommand(CommandSender sender, String[] args) {
+        var sm = plugin.getSequenceManager();
+        if (sm == null) {
+            sender.sendMessage(ChatColor.RED + "Sequence manager not available.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.AQUA + "Usage: /av sequence <start|stop|skip|list|reload>");
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "start" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /av sequence start <name> [slot]");
+                    return;
+                }
+                String seqName = args[2];
+                String slot = args.length > 3 ? args[3] : "default";
+                if (sm.startSequence(seqName, slot)) {
+                    sender.sendMessage(ChatColor.GREEN + "Started sequence '" + seqName + "' on slot '" + slot + "'");
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Sequence '" + seqName + "' not found or empty.");
+                }
+            }
+            case "stop" -> {
+                String slot = args.length > 2 ? args[2] : "default";
+                sm.stopSequence(slot);
+                sender.sendMessage(ChatColor.GREEN + "Stopped sequence on slot '" + slot + "'");
+            }
+            case "skip" -> {
+                String slot = args.length > 2 ? args[2] : "default";
+                var t = sm.skipStep(slot);
+                if (t != null) {
+                    sender.sendMessage(ChatColor.GREEN + "Skipped to next step");
+                } else {
+                    sender.sendMessage(ChatColor.RED + "No active sequence on slot '" + slot + "'");
+                }
+            }
+            case "list" -> {
+                var names = sm.getSequenceNames();
+                if (names.isEmpty()) {
+                    sender.sendMessage(ChatColor.YELLOW + "No sequences defined. Edit sequences.yml to create one.");
+                } else {
+                    sender.sendMessage(ChatColor.AQUA + "Sequences (" + names.size() + "):");
+                    for (var name : names) {
+                        var seq = sm.getSequence(name);
+                        String playing = sm.isPlaying(name) ? ChatColor.GREEN + " [PLAYING]" : "";
+                        sender.sendMessage(ChatColor.GRAY + "  " + name +
+                            " (" + seq.getSteps().size() + " steps, " + seq.getMode() + ")" + playing);
+                    }
+                }
+            }
+            case "reload" -> {
+                sm.reloadSequences();
+                sender.sendMessage(ChatColor.GREEN + "Reloaded " + sm.getSequenceNames().size() + " sequences");
+            }
+            default -> sender.sendMessage(ChatColor.RED + "Unknown: /av sequence " + args[1]);
+        }
+    }
+
     private void handleBedrockCommand(CommandSender sender) {
         if (!sender.hasPermission("audioviz.admin")) {
             sender.sendMessage(ChatColor.RED + "You don't have permission to view Bedrock status.");
@@ -748,6 +809,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/audioviz test <zone> <animation>" + ChatColor.WHITE + " - Test animation");
         sender.sendMessage(ChatColor.AQUA + "/audioviz status" + ChatColor.WHITE + " - Show plugin status");
         sender.sendMessage(ChatColor.AQUA + "/audioviz metrics" + ChatColor.GRAY + " - Toggle performance metrics sidebar");
+        sender.sendMessage(ChatColor.AQUA + "/av sequence <start|stop|skip|list|reload>" + ChatColor.GRAY + " - Pattern sequencing");
         sender.sendMessage(ChatColor.AQUA + "/audioviz bedrock" + ChatColor.WHITE + " - Show Bedrock/Geyser support status");
     }
 
@@ -756,12 +818,13 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "metrics", "bedrock", "test", "help"));
+            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "metrics", "sequence", "seq", "bedrock", "test", "help"));
         } else if (args.length == 2) {
             switch (args[0].toLowerCase()) {
                 case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info", "boundaries"));
                 case "stage" -> completions.addAll(Arrays.asList("create", "delete", "list", "info", "activate", "deactivate", "move", "rotate", "pin", "tag", "search"));
                 case "pool" -> completions.addAll(Arrays.asList("init", "cleanup"));
+                case "sequence", "seq" -> completions.addAll(Arrays.asList("start", "stop", "skip", "list", "reload"));
                 case "test" -> completions.addAll(plugin.getZoneManager().getZoneNames());
             }
         } else if (args.length == 3) {
@@ -784,6 +847,11 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     }
                 }
                 case "pool" -> completions.addAll(plugin.getZoneManager().getZoneNames());
+                case "sequence", "seq" -> {
+                    if (args[1].equalsIgnoreCase("start")) {
+                        completions.addAll(plugin.getSequenceManager().getSequenceNames());
+                    }
+                }
                 case "test" -> completions.addAll(Arrays.asList("wave", "pulse", "random"));
             }
         } else if (args.length == 4) {
