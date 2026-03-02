@@ -7,6 +7,7 @@ import com.audioviz.bitmap.BitmapRendererBackend;
 import com.audioviz.bitmap.composition.CompositionManager;
 import com.audioviz.bitmap.effects.EffectsProcessor;
 import com.audioviz.commands.AudioVizCommand;
+import com.audioviz.connection.ConnectionStateListener;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
 import com.audioviz.entities.EntityPoolManager;
@@ -60,6 +61,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private BitmapPatternManager bitmapPatternManager;
     private CompositionManager compositionManager;
     private AmbientLightManager ambientLightManager;
+    private ConnectionStateListener connectionStateListener;
 
     @Override
     public void onEnable() {
@@ -100,6 +102,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.bitmapPatternManager = new BitmapPatternManager(this, bitmapRenderer);
         this.bitmapPatternManager.start();
         this.compositionManager = new CompositionManager();
+
+        // Initialize connection state listener (DJ connect/disconnect + audio staleness)
+        this.connectionStateListener = new ConnectionStateListener(this);
+        this.connectionStateListener.start();
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -242,6 +248,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Shutdown bitmap pattern manager
         if (bitmapPatternManager != null) {
             bitmapPatternManager.shutdown();
+        }
+
+        // Stop connection state listener
+        if (connectionStateListener != null) {
+            connectionStateListener.stop();
         }
 
         // Shutdown voice chat integration before WebSocket server
@@ -408,6 +419,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public AmbientLightManager getAmbientLightManager() {
         return ambientLightManager;
+    }
+
+    public ConnectionStateListener getConnectionStateListener() {
+        return connectionStateListener;
     }
 
     /**
