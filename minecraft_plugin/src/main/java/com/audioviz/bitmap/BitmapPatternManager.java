@@ -109,6 +109,10 @@ public class BitmapPatternManager {
      * Called from message handlers when audio data arrives.
      */
     public void updateAudioState(AudioState audio) {
+        var bsm = plugin.getBeatSyncManager();
+        if (bsm != null) {
+            audio = bsm.applyOverrides(audio);
+        }
         this.latestAudioState = audio;
         var listener = plugin.getConnectionStateListener();
         if (listener != null) {

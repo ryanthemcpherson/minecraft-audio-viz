@@ -2,6 +2,7 @@ package com.audioviz;
 
 import com.audioviz.bedrock.BedrockPlayerListener;
 import com.audioviz.bedrock.BedrockSupport;
+import com.audioviz.beatsync.BeatSyncManager;
 import com.audioviz.bitmap.BitmapPatternManager;
 import com.audioviz.bitmap.BitmapRendererBackend;
 import com.audioviz.bitmap.composition.CompositionManager;
@@ -66,6 +67,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private ConnectionStateListener connectionStateListener;
     private MetricsDisplay metricsDisplay;
     private SequenceManager sequenceManager;
+    private BeatSyncManager beatSyncManager;
 
     @Override
     public void onEnable() {
@@ -119,6 +121,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.sequenceManager = new SequenceManager(this);
         this.sequenceManager.loadSequences();
         this.sequenceManager.start();
+
+        // Initialize beat sync manager
+        this.beatSyncManager = new BeatSyncManager(this);
+        this.beatSyncManager.load();
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -261,6 +267,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Shutdown bitmap pattern manager
         if (bitmapPatternManager != null) {
             bitmapPatternManager.shutdown();
+        }
+
+        // Save beat sync config
+        if (beatSyncManager != null) {
+            beatSyncManager.save();
         }
 
         // Stop sequence manager and save state
@@ -455,6 +466,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public SequenceManager getSequenceManager() {
         return sequenceManager;
+    }
+
+    public BeatSyncManager getBeatSyncManager() {
+        return beatSyncManager;
     }
 
     /**
