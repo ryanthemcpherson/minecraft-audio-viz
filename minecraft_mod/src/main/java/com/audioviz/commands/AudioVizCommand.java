@@ -8,6 +8,7 @@ import com.audioviz.gui.menus.StageListMenu;
 import com.audioviz.stages.Stage;
 import com.audioviz.zones.VisualizationZone;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -152,10 +153,144 @@ public class AudioVizCommand {
                     .executes(ctx -> toggleBeats(ctx, mod))))
             .then(CommandManager.literal("status")
                 .executes(ctx -> showStatus(ctx, mod)))
+            .then(CommandManager.literal("metrics")
+                .executes(ctx -> toggleMetrics(ctx, mod)))
+            .then(CommandManager.literal("beatsync")
+                .then(CommandManager.literal("bpm")
+                    .then(CommandManager.literal("auto")
+                        .executes(ctx -> beatSyncBpmAuto(ctx, mod)))
+                    .then(CommandManager.argument("value", DoubleArgumentType.doubleArg(1, 300))
+                        .executes(ctx -> beatSyncBpm(ctx, mod))))
+                .then(CommandManager.literal("phase")
+                    .then(CommandManager.argument("offset", DoubleArgumentType.doubleArg(-0.5, 0.5))
+                        .executes(ctx -> beatSyncPhase(ctx, mod))))
+                .then(CommandManager.literal("sensitivity")
+                    .then(CommandManager.argument("multiplier", DoubleArgumentType.doubleArg(0.1, 5.0))
+                        .executes(ctx -> beatSyncSensitivity(ctx, mod))))
+                .then(CommandManager.literal("status")
+                    .executes(ctx -> beatSyncStatus(ctx, mod)))
+                .executes(ctx -> beatSyncStatus(ctx, mod)))
+            .then(CommandManager.literal("bs")
+                .then(CommandManager.literal("bpm")
+                    .then(CommandManager.literal("auto")
+                        .executes(ctx -> beatSyncBpmAuto(ctx, mod)))
+                    .then(CommandManager.argument("value", DoubleArgumentType.doubleArg(1, 300))
+                        .executes(ctx -> beatSyncBpm(ctx, mod))))
+                .then(CommandManager.literal("phase")
+                    .then(CommandManager.argument("offset", DoubleArgumentType.doubleArg(-0.5, 0.5))
+                        .executes(ctx -> beatSyncPhase(ctx, mod))))
+                .then(CommandManager.literal("sensitivity")
+                    .then(CommandManager.argument("multiplier", DoubleArgumentType.doubleArg(0.1, 5.0))
+                        .executes(ctx -> beatSyncSensitivity(ctx, mod))))
+                .then(CommandManager.literal("status")
+                    .executes(ctx -> beatSyncStatus(ctx, mod)))
+                .executes(ctx -> beatSyncStatus(ctx, mod)))
+            .then(CommandManager.literal("latency")
+                .executes(ctx -> showLatency(ctx, mod)))
+            .then(CommandManager.literal("lat")
+                .executes(ctx -> showLatency(ctx, mod)))
+            .then(CommandManager.literal("recording")
+                .then(CommandManager.literal("start")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .executes(ctx -> recordingStart(ctx, mod))))
+                .then(CommandManager.literal("stop")
+                    .executes(ctx -> recordingStop(ctx, mod)))
+                .then(CommandManager.literal("play")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(recordingNames(mod))
+                        .executes(ctx -> recordingPlay(ctx, mod))))
+                .then(CommandManager.literal("list")
+                    .executes(ctx -> recordingList(ctx, mod)))
+                .then(CommandManager.literal("delete")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(recordingNames(mod))
+                        .executes(ctx -> recordingDelete(ctx, mod)))))
+            .then(CommandManager.literal("rec")
+                .then(CommandManager.literal("start")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .executes(ctx -> recordingStart(ctx, mod))))
+                .then(CommandManager.literal("stop")
+                    .executes(ctx -> recordingStop(ctx, mod)))
+                .then(CommandManager.literal("play")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(recordingNames(mod))
+                        .executes(ctx -> recordingPlay(ctx, mod))))
+                .then(CommandManager.literal("list")
+                    .executes(ctx -> recordingList(ctx, mod)))
+                .then(CommandManager.literal("delete")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(recordingNames(mod))
+                        .executes(ctx -> recordingDelete(ctx, mod)))))
+            .then(CommandManager.literal("sequence")
+                .then(CommandManager.literal("start")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(sequenceNames(mod))
+                        .executes(ctx -> sequenceStart(ctx, mod, "default"))
+                        .then(CommandManager.argument("slot", StringArgumentType.word())
+                            .executes(ctx -> sequenceStartSlot(ctx, mod)))))
+                .then(CommandManager.literal("stop")
+                    .executes(ctx -> sequenceStop(ctx, mod, "default"))
+                    .then(CommandManager.argument("slot", StringArgumentType.word())
+                        .executes(ctx -> sequenceStopSlot(ctx, mod))))
+                .then(CommandManager.literal("skip")
+                    .executes(ctx -> sequenceSkip(ctx, mod, "default"))
+                    .then(CommandManager.argument("slot", StringArgumentType.word())
+                        .executes(ctx -> sequenceSkipSlot(ctx, mod))))
+                .then(CommandManager.literal("list")
+                    .executes(ctx -> sequenceList(ctx, mod)))
+                .then(CommandManager.literal("reload")
+                    .executes(ctx -> sequenceReload(ctx, mod))))
+            .then(CommandManager.literal("seq")
+                .then(CommandManager.literal("start")
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .suggests(sequenceNames(mod))
+                        .executes(ctx -> sequenceStart(ctx, mod, "default"))
+                        .then(CommandManager.argument("slot", StringArgumentType.word())
+                            .executes(ctx -> sequenceStartSlot(ctx, mod)))))
+                .then(CommandManager.literal("stop")
+                    .executes(ctx -> sequenceStop(ctx, mod, "default"))
+                    .then(CommandManager.argument("slot", StringArgumentType.word())
+                        .executes(ctx -> sequenceStopSlot(ctx, mod))))
+                .then(CommandManager.literal("skip")
+                    .executes(ctx -> sequenceSkip(ctx, mod, "default"))
+                    .then(CommandManager.argument("slot", StringArgumentType.word())
+                        .executes(ctx -> sequenceSkipSlot(ctx, mod))))
+                .then(CommandManager.literal("list")
+                    .executes(ctx -> sequenceList(ctx, mod)))
+                .then(CommandManager.literal("reload")
+                    .executes(ctx -> sequenceReload(ctx, mod))))
             .then(CommandManager.literal("help")
                 .executes(ctx -> showHelp(ctx)))
             .executes(ctx -> showHelp(ctx))
         );
+    }
+
+    // ========== Suggestion Providers for new commands ==========
+
+    private static SuggestionProvider<ServerCommandSource> recordingNames(AudioVizMod mod) {
+        return (ctx, builder) -> {
+            var rm = mod.getRecordingManager();
+            if (rm != null) {
+                for (String name : rm.listRecordings()) {
+                    if (name.toLowerCase().startsWith(builder.getRemaining().toLowerCase()))
+                        builder.suggest(name);
+                }
+            }
+            return builder.buildFuture();
+        };
+    }
+
+    private static SuggestionProvider<ServerCommandSource> sequenceNames(AudioVizMod mod) {
+        return (ctx, builder) -> {
+            var sm = mod.getSequenceManager();
+            if (sm != null) {
+                for (String name : sm.getSequenceNames()) {
+                    if (name.toLowerCase().startsWith(builder.getRemaining().toLowerCase()))
+                        builder.suggest(name);
+                }
+            }
+            return builder.buildFuture();
+        };
     }
 
     private static int createZone(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
@@ -299,6 +434,31 @@ public class AudioVizCommand {
         boolean beatsActive = mod.getBeatEventManager() != null;
         s.sendFeedback(() -> Text.literal("  Beat effects: " + (beatsActive ? "ready" : "n/a"))
             .formatted(beatsActive ? Formatting.GREEN : Formatting.GRAY), false);
+
+        // Batch 1 + 2 features
+        var conn = mod.getConnectionStateListener();
+        boolean djConnected = conn != null && conn.isDjConnected();
+        s.sendFeedback(() -> Text.literal("  DJ: " + (djConnected ? "connected" : "disconnected"))
+            .formatted(djConnected ? Formatting.GREEN : Formatting.GRAY), false);
+        var lt = mod.getLatencyTracker();
+        if (lt != null && lt.getNetworkStats().getCount() > 0) {
+            s.sendFeedback(() -> Text.literal("  Latency: " + String.format("%.0fms avg", lt.getTotalAvgMs()))
+                .formatted(Formatting.WHITE), false);
+        }
+        var sm = mod.getSequenceManager();
+        if (sm != null) {
+            int seqCount = sm.getSequenceNames().size();
+            int activeSeq = sm.getActiveCount();
+            s.sendFeedback(() -> Text.literal("  Sequences: " + seqCount + " (" + activeSeq + " active)")
+                .formatted(Formatting.WHITE), false);
+        }
+        var rm = mod.getRecordingManager();
+        if (rm != null && (rm.isRecording() || rm.isReplaying())) {
+            String recStatus = rm.isRecording() ? "Recording" : "Playing";
+            s.sendFeedback(() -> Text.literal("  Recording: " + recStatus)
+                .formatted(Formatting.YELLOW), false);
+        }
+
         return 1;
     }
 
@@ -619,6 +779,273 @@ public class AudioVizCommand {
         return 1;
     }
 
+    // ==================== Metrics Commands ====================
+
+    private static int toggleMetrics(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        ServerPlayerEntity player = ctx.getSource().getPlayer();
+        if (player == null) {
+            ctx.getSource().sendError(Text.literal("Only players can use metrics"));
+            return 0;
+        }
+        var display = mod.getMetricsDisplay();
+        if (display == null) {
+            ctx.getSource().sendError(Text.literal("Metrics display not available"));
+            return 0;
+        }
+        boolean nowShowing = display.toggle(player);
+        ctx.getSource().sendFeedback(() -> Text.literal("Metrics display " +
+            (nowShowing ? "enabled" : "disabled"))
+            .formatted(nowShowing ? Formatting.GREEN : Formatting.YELLOW), false);
+        return 1;
+    }
+
+    // ==================== Beat Sync Commands ====================
+
+    private static int beatSyncBpmAuto(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var bsm = mod.getBeatSyncManager();
+        if (bsm == null) { ctx.getSource().sendError(Text.literal("Beat sync not available")); return 0; }
+        bsm.getGlobalConfig().setManualBpm(0);
+        ctx.getSource().sendFeedback(() -> Text.literal("BPM set to auto-detect")
+            .formatted(Formatting.GREEN), false);
+        return 1;
+    }
+
+    private static int beatSyncBpm(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var bsm = mod.getBeatSyncManager();
+        if (bsm == null) { ctx.getSource().sendError(Text.literal("Beat sync not available")); return 0; }
+        double bpm = DoubleArgumentType.getDouble(ctx, "value");
+        bsm.getGlobalConfig().setManualBpm(bpm);
+        ctx.getSource().sendFeedback(() -> Text.literal("BPM set to " + bsm.getGlobalConfig().getManualBpm())
+            .formatted(Formatting.GREEN), false);
+        return 1;
+    }
+
+    private static int beatSyncPhase(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var bsm = mod.getBeatSyncManager();
+        if (bsm == null) { ctx.getSource().sendError(Text.literal("Beat sync not available")); return 0; }
+        double offset = DoubleArgumentType.getDouble(ctx, "offset");
+        bsm.getGlobalConfig().setPhaseOffset(offset);
+        ctx.getSource().sendFeedback(() -> Text.literal("Phase offset set to " + bsm.getGlobalConfig().getPhaseOffset())
+            .formatted(Formatting.GREEN), false);
+        return 1;
+    }
+
+    private static int beatSyncSensitivity(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var bsm = mod.getBeatSyncManager();
+        if (bsm == null) { ctx.getSource().sendError(Text.literal("Beat sync not available")); return 0; }
+        double mult = DoubleArgumentType.getDouble(ctx, "multiplier");
+        bsm.getGlobalConfig().setBeatThresholdMultiplier(mult);
+        ctx.getSource().sendFeedback(() -> Text.literal("Sensitivity set to " + bsm.getGlobalConfig().getBeatThresholdMultiplier())
+            .formatted(Formatting.GREEN), false);
+        return 1;
+    }
+
+    private static int beatSyncStatus(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var bsm = mod.getBeatSyncManager();
+        if (bsm == null) { ctx.getSource().sendError(Text.literal("Beat sync not available")); return 0; }
+        var config = bsm.getGlobalConfig();
+        var s = ctx.getSource();
+        s.sendFeedback(() -> Text.literal("--- Beat Sync ---").formatted(Formatting.AQUA), false);
+        s.sendFeedback(() -> Text.literal("BPM: " + (config.isAutoBpm() ? "Auto" : String.valueOf(config.getManualBpm())))
+            .formatted(config.isAutoBpm() ? Formatting.GREEN : Formatting.YELLOW), false);
+        s.sendFeedback(() -> Text.literal("Phase Offset: " + config.getPhaseOffset())
+            .formatted(Formatting.AQUA), false);
+        s.sendFeedback(() -> Text.literal("Sensitivity: " + config.getBeatThresholdMultiplier() + "x")
+            .formatted(Formatting.AQUA), false);
+        s.sendFeedback(() -> Text.literal("Projection: " + (config.isProjectionEnabled() ? "Enabled" : "Disabled"))
+            .formatted(config.isProjectionEnabled() ? Formatting.GREEN : Formatting.RED), false);
+        return 1;
+    }
+
+    // ==================== Latency Commands ====================
+
+    private static int showLatency(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var lt = mod.getLatencyTracker();
+        if (lt == null) {
+            ctx.getSource().sendError(Text.literal("Latency tracker not available"));
+            return 0;
+        }
+        var net = lt.getNetworkStats();
+        var proc = lt.getProcessingStats();
+        var s = ctx.getSource();
+        s.sendFeedback(() -> Text.literal("--- MCAV Latency ---").formatted(Formatting.AQUA), false);
+        s.sendFeedback(() -> Text.literal("Network:    " +
+            String.format("%.0fms avg / %.0fms p95", net.getAvg(), net.getP95()))
+            .formatted(Formatting.WHITE), false);
+        s.sendFeedback(() -> Text.literal("Processing: " +
+            String.format("%.1fms avg / %.1fms p95", proc.getAvg(), proc.getP95()))
+            .formatted(Formatting.WHITE), false);
+        s.sendFeedback(() -> Text.literal("Total:      " +
+            String.format("%.0fms avg", lt.getTotalAvgMs()))
+            .formatted(Formatting.WHITE), false);
+        s.sendFeedback(() -> Text.literal("Jitter:     " +
+            String.format("±%.0fms", net.getJitter()))
+            .formatted(Formatting.WHITE), false);
+        return 1;
+    }
+
+    // ==================== Recording Commands ====================
+
+    private static int recordingStart(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var rm = mod.getRecordingManager();
+        if (rm == null) { ctx.getSource().sendError(Text.literal("Recording manager not available")); return 0; }
+        String name = StringArgumentType.getString(ctx, "name");
+        if (rm.startRecording(name)) {
+            ctx.getSource().sendFeedback(() -> Text.literal("Recording started: " + name)
+                .formatted(Formatting.GREEN), true);
+            return 1;
+        }
+        ctx.getSource().sendError(Text.literal("Already recording or invalid name"));
+        return 0;
+    }
+
+    private static int recordingStop(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var rm = mod.getRecordingManager();
+        if (rm == null) { ctx.getSource().sendError(Text.literal("Recording manager not available")); return 0; }
+        if (rm.isRecording()) {
+            rm.stopRecording();
+            ctx.getSource().sendFeedback(() -> Text.literal("Recording saved")
+                .formatted(Formatting.GREEN), true);
+        } else if (rm.isReplaying()) {
+            rm.stopPlayback();
+            ctx.getSource().sendFeedback(() -> Text.literal("Playback stopped")
+                .formatted(Formatting.GREEN), true);
+        } else {
+            ctx.getSource().sendFeedback(() -> Text.literal("Nothing to stop")
+                .formatted(Formatting.YELLOW), false);
+        }
+        return 1;
+    }
+
+    private static int recordingPlay(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var rm = mod.getRecordingManager();
+        if (rm == null) { ctx.getSource().sendError(Text.literal("Recording manager not available")); return 0; }
+        String name = StringArgumentType.getString(ctx, "name");
+        if (rm.startPlayback(name)) {
+            ctx.getSource().sendFeedback(() -> Text.literal("Playing: " + name)
+                .formatted(Formatting.GREEN), true);
+            return 1;
+        }
+        ctx.getSource().sendError(Text.literal("Recording '" + name + "' not found or already playing"));
+        return 0;
+    }
+
+    private static int recordingList(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var rm = mod.getRecordingManager();
+        if (rm == null) { ctx.getSource().sendError(Text.literal("Recording manager not available")); return 0; }
+        var names = rm.listRecordings();
+        if (names.isEmpty()) {
+            ctx.getSource().sendFeedback(() -> Text.literal("No recordings saved")
+                .formatted(Formatting.YELLOW), false);
+        } else {
+            ctx.getSource().sendFeedback(() -> Text.literal("Recordings (" + names.size() + "):")
+                .formatted(Formatting.AQUA), false);
+            for (var name : names) {
+                ctx.getSource().sendFeedback(() -> Text.literal("  " + name)
+                    .formatted(Formatting.GRAY), false);
+            }
+        }
+        return 1;
+    }
+
+    private static int recordingDelete(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var rm = mod.getRecordingManager();
+        if (rm == null) { ctx.getSource().sendError(Text.literal("Recording manager not available")); return 0; }
+        String name = StringArgumentType.getString(ctx, "name");
+        if (rm.deleteRecording(name)) {
+            ctx.getSource().sendFeedback(() -> Text.literal("Deleted: " + name)
+                .formatted(Formatting.GREEN), true);
+            return 1;
+        }
+        ctx.getSource().sendError(Text.literal("Recording '" + name + "' not found"));
+        return 0;
+    }
+
+    // ==================== Sequence Commands ====================
+
+    private static int sequenceStart(CommandContext<ServerCommandSource> ctx, AudioVizMod mod, String slot) {
+        var sm = mod.getSequenceManager();
+        if (sm == null) { ctx.getSource().sendError(Text.literal("Sequence manager not available")); return 0; }
+        String name = StringArgumentType.getString(ctx, "name");
+        if (sm.startSequence(name, slot)) {
+            ctx.getSource().sendFeedback(() -> Text.literal("Started sequence '" + name + "' on slot '" + slot + "'")
+                .formatted(Formatting.GREEN), true);
+            return 1;
+        }
+        ctx.getSource().sendError(Text.literal("Sequence '" + name + "' not found or empty"));
+        return 0;
+    }
+
+    private static int sequenceStartSlot(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        String slot = StringArgumentType.getString(ctx, "slot");
+        return sequenceStart(ctx, mod, slot);
+    }
+
+    private static int sequenceStop(CommandContext<ServerCommandSource> ctx, AudioVizMod mod, String slot) {
+        var sm = mod.getSequenceManager();
+        if (sm == null) { ctx.getSource().sendError(Text.literal("Sequence manager not available")); return 0; }
+        sm.stopSequence(slot);
+        ctx.getSource().sendFeedback(() -> Text.literal("Stopped sequence on slot '" + slot + "'")
+            .formatted(Formatting.GREEN), true);
+        return 1;
+    }
+
+    private static int sequenceStopSlot(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        String slot = StringArgumentType.getString(ctx, "slot");
+        return sequenceStop(ctx, mod, slot);
+    }
+
+    private static int sequenceSkip(CommandContext<ServerCommandSource> ctx, AudioVizMod mod, String slot) {
+        var sm = mod.getSequenceManager();
+        if (sm == null) { ctx.getSource().sendError(Text.literal("Sequence manager not available")); return 0; }
+        var t = sm.skipStep(slot);
+        if (t != null) {
+            ctx.getSource().sendFeedback(() -> Text.literal("Skipped to next step")
+                .formatted(Formatting.GREEN), false);
+        } else {
+            ctx.getSource().sendError(Text.literal("No active sequence on slot '" + slot + "'"));
+        }
+        return 1;
+    }
+
+    private static int sequenceSkipSlot(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        String slot = StringArgumentType.getString(ctx, "slot");
+        return sequenceSkip(ctx, mod, slot);
+    }
+
+    private static int sequenceList(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var sm = mod.getSequenceManager();
+        if (sm == null) { ctx.getSource().sendError(Text.literal("Sequence manager not available")); return 0; }
+        var names = sm.getSequenceNames();
+        if (names.isEmpty()) {
+            ctx.getSource().sendFeedback(() -> Text.literal("No sequences defined. Edit sequences.json to create one.")
+                .formatted(Formatting.YELLOW), false);
+        } else {
+            ctx.getSource().sendFeedback(() -> Text.literal("Sequences (" + names.size() + "):")
+                .formatted(Formatting.AQUA), false);
+            for (var name : names) {
+                var seq = sm.getSequence(name);
+                boolean playing = sm.isPlaying(name);
+                ctx.getSource().sendFeedback(() -> Text.literal("  " + name +
+                    " (" + seq.getSteps().size() + " steps, " + seq.getMode() + ")" +
+                    (playing ? " [PLAYING]" : ""))
+                    .formatted(playing ? Formatting.GREEN : Formatting.GRAY), false);
+            }
+        }
+        return 1;
+    }
+
+    private static int sequenceReload(CommandContext<ServerCommandSource> ctx, AudioVizMod mod) {
+        var sm = mod.getSequenceManager();
+        if (sm == null) { ctx.getSource().sendError(Text.literal("Sequence manager not available")); return 0; }
+        sm.reloadSequences();
+        ctx.getSource().sendFeedback(() -> Text.literal("Reloaded " + sm.getSequenceNames().size() + " sequences")
+            .formatted(Formatting.GREEN), true);
+        return 1;
+    }
+
+    // ==================== Help ====================
+
     private static int showHelp(CommandContext<ServerCommandSource> ctx) {
         ServerCommandSource s = ctx.getSource();
         s.sendFeedback(() -> Text.literal("AudioViz Commands:").formatted(Formatting.AQUA, Formatting.BOLD), false);
@@ -639,6 +1066,16 @@ public class AudioVizCommand {
         s.sendFeedback(() -> Text.literal("  /audioviz cancel").formatted(Formatting.WHITE)
             .append(Text.literal(" - Cancel zone placement").formatted(Formatting.GRAY)), false);
         s.sendFeedback(() -> Text.literal("  /audioviz status").formatted(Formatting.WHITE), false);
+        s.sendFeedback(() -> Text.literal("  /audioviz metrics").formatted(Formatting.WHITE)
+            .append(Text.literal(" - Toggle performance metrics").formatted(Formatting.GRAY)), false);
+        s.sendFeedback(() -> Text.literal("  /audioviz beatsync <bpm|phase|sensitivity|status>").formatted(Formatting.WHITE)
+            .append(Text.literal(" - Beat sync controls").formatted(Formatting.GRAY)), false);
+        s.sendFeedback(() -> Text.literal("  /audioviz latency").formatted(Formatting.WHITE)
+            .append(Text.literal(" - Show pipeline latency stats").formatted(Formatting.GRAY)), false);
+        s.sendFeedback(() -> Text.literal("  /audioviz recording <start|stop|play|list|delete>").formatted(Formatting.WHITE)
+            .append(Text.literal(" - Record and replay sessions").formatted(Formatting.GRAY)), false);
+        s.sendFeedback(() -> Text.literal("  /audioviz sequence <start|stop|skip|list|reload>").formatted(Formatting.WHITE)
+            .append(Text.literal(" - Pattern sequencing").formatted(Formatting.GRAY)), false);
         return 1;
     }
 }
