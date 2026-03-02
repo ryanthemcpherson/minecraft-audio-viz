@@ -52,6 +52,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             case "sequence", "seq" -> handleSequenceCommand(sender, args);
             case "beatsync", "bs" -> handleBeatSyncCommand(sender, args);
             case "latency", "lat" -> handleLatencyCommand(sender);
+            case "recording", "rec" -> handleRecordingCommand(sender, args);
             case "bedrock" -> handleBedrockCommand(sender);
             case "test" -> handleTestCommand(sender, Arrays.copyOfRange(args, 1, args.length));
             case "help" -> sendHelp(sender);
@@ -893,6 +894,80 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
             ChatColor.AQUA + String.format("±%.0fms", net.getJitter()));
     }
 
+    private void handleRecordingCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("audioviz.recording") && !sender.hasPermission("audioviz.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to manage recordings.");
+            return;
+        }
+        var rm = plugin.getRecordingManager();
+        if (rm == null) {
+            sender.sendMessage(ChatColor.RED + "Recording manager not available.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.AQUA + "Usage: /av recording <start|stop|play|list|delete>");
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "start" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /av recording start <name>");
+                    return;
+                }
+                if (rm.startRecording(args[2])) {
+                    sender.sendMessage(ChatColor.GREEN + "Recording started: " + args[2]);
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Already recording.");
+                }
+            }
+            case "stop" -> {
+                if (rm.isRecording()) {
+                    rm.stopRecording();
+                    sender.sendMessage(ChatColor.GREEN + "Recording saved.");
+                } else if (rm.isReplaying()) {
+                    rm.stopPlayback();
+                    sender.sendMessage(ChatColor.GREEN + "Playback stopped.");
+                } else {
+                    sender.sendMessage(ChatColor.YELLOW + "Nothing to stop.");
+                }
+            }
+            case "play" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /av recording play <name>");
+                    return;
+                }
+                if (rm.startPlayback(args[2])) {
+                    sender.sendMessage(ChatColor.GREEN + "Playing: " + args[2]);
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Recording '" + args[2] + "' not found or already playing.");
+                }
+            }
+            case "list" -> {
+                var names = rm.listRecordings();
+                if (names.isEmpty()) {
+                    sender.sendMessage(ChatColor.YELLOW + "No recordings saved.");
+                } else {
+                    sender.sendMessage(ChatColor.AQUA + "Recordings (" + names.size() + "):");
+                    for (var name : names) {
+                        sender.sendMessage(ChatColor.GRAY + "  " + name);
+                    }
+                }
+            }
+            case "delete" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /av recording delete <name>");
+                    return;
+                }
+                if (rm.deleteRecording(args[2])) {
+                    sender.sendMessage(ChatColor.GREEN + "Deleted: " + args[2]);
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Recording '" + args[2] + "' not found.");
+                }
+            }
+            default -> sender.sendMessage(ChatColor.RED + "Unknown: /av recording " + args[1]);
+        }
+    }
+
     private void sendHelp(CommandSender sender) {
         sender.sendMessage(ChatColor.GOLD + "=== AudioViz Commands ===");
         sender.sendMessage(ChatColor.AQUA + "/audioviz menu" + ChatColor.WHITE + " - Open the control menu");
@@ -919,6 +994,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.AQUA + "/av sequence <start|stop|skip|list|reload>" + ChatColor.GRAY + " - Pattern sequencing");
         sender.sendMessage(ChatColor.AQUA + "/av beatsync <bpm|phase|sensitivity|status>" + ChatColor.GRAY + " - Beat sync controls");
         sender.sendMessage(ChatColor.AQUA + "/av latency" + ChatColor.GRAY + " - Show pipeline latency stats");
+        sender.sendMessage(ChatColor.AQUA + "/av recording <start|stop|play|list|delete>" + ChatColor.GRAY + " - Record and replay sessions");
         sender.sendMessage(ChatColor.AQUA + "/audioviz bedrock" + ChatColor.WHITE + " - Show Bedrock/Geyser support status");
     }
 
@@ -927,7 +1003,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "metrics", "sequence", "seq", "beatsync", "bs", "latency", "lat", "bedrock", "test", "help"));
+            completions.addAll(Arrays.asList("menu", "zone", "stage", "pool", "status", "metrics", "sequence", "seq", "beatsync", "bs", "latency", "lat", "recording", "rec", "bedrock", "test", "help"));
         } else if (args.length == 2) {
             switch (args[0].toLowerCase()) {
                 case "zone" -> completions.addAll(Arrays.asList("create", "delete", "list", "setsize", "setrotation", "info", "boundaries"));
@@ -935,6 +1011,7 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                 case "pool" -> completions.addAll(Arrays.asList("init", "cleanup"));
                 case "sequence", "seq" -> completions.addAll(Arrays.asList("start", "stop", "skip", "list", "reload"));
                 case "beatsync", "bs" -> completions.addAll(Arrays.asList("bpm", "phase", "sensitivity", "status"));
+                case "recording", "rec" -> completions.addAll(Arrays.asList("start", "stop", "play", "list", "delete"));
                 case "test" -> completions.addAll(plugin.getZoneManager().getZoneNames());
             }
         } else if (args.length == 3) {
@@ -965,6 +1042,14 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                 case "beatsync", "bs" -> {
                     if (args[1].equalsIgnoreCase("bpm")) {
                         completions.add("auto");
+                    }
+                }
+                case "recording", "rec" -> {
+                    if (args[1].equalsIgnoreCase("play") || args[1].equalsIgnoreCase("delete")) {
+                        var rm = plugin.getRecordingManager();
+                        if (rm != null) {
+                            completions.addAll(rm.listRecordings());
+                        }
                     }
                 }
                 case "test" -> completions.addAll(Arrays.asList("wave", "pulse", "random"));

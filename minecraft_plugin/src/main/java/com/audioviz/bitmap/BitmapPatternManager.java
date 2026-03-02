@@ -101,6 +101,11 @@ public class BitmapPatternManager {
             if (!zoneStates.isEmpty()) {
                 tick(latestAudioState);
             }
+            // Capture frame for recording (even if no zones, records audio state)
+            var recorder = plugin.getRecordingManager();
+            if (recorder != null) {
+                recorder.captureFrame(latestAudioState);
+            }
         }, 1L, 1L); // Every tick (50ms = 20 TPS)
     }
 
