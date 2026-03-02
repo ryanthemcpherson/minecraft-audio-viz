@@ -6,10 +6,10 @@ package com.audioviz.beatsync;
  */
 public class BeatSyncConfig {
 
-    private double manualBpm = 0.0;              // 0 = auto (use DJ client value)
-    private double phaseOffset = 0.0;            // -0.5 to 0.5
-    private double beatThresholdMultiplier = 1.0; // 0.1 to 5.0
-    private boolean projectionEnabled = true;
+    private volatile double manualBpm = 0.0;              // 0 = auto (use DJ client value)
+    private volatile double phaseOffset = 0.0;            // -0.5 to 0.5
+    private volatile double beatThresholdMultiplier = 1.0; // 0.1 to 5.0
+    private volatile boolean projectionEnabled = true;
 
     public double getManualBpm() { return manualBpm; }
     public double getPhaseOffset() { return phaseOffset; }
