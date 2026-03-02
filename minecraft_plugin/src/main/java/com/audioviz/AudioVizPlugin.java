@@ -18,6 +18,7 @@ import com.audioviz.gui.ChatInputManager;
 import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererRegistry;
+import com.audioviz.sequence.SequenceManager;
 import com.audioviz.stages.StageManager;
 import com.audioviz.stages.StageZonePlacementManager;
 import com.audioviz.voice.VoicechatIntegration;
@@ -64,6 +65,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private AmbientLightManager ambientLightManager;
     private ConnectionStateListener connectionStateListener;
     private MetricsDisplay metricsDisplay;
+    private SequenceManager sequenceManager;
 
     @Override
     public void onEnable() {
@@ -112,6 +114,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Initialize performance metrics display (scoreboard sidebar)
         this.metricsDisplay = new MetricsDisplay(this);
         this.metricsDisplay.start();
+
+        // Initialize pattern sequence manager
+        this.sequenceManager = new SequenceManager(this);
+        this.sequenceManager.loadSequences();
+        this.sequenceManager.start();
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -254,6 +261,12 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Shutdown bitmap pattern manager
         if (bitmapPatternManager != null) {
             bitmapPatternManager.shutdown();
+        }
+
+        // Stop sequence manager and save state
+        if (sequenceManager != null) {
+            sequenceManager.stop();
+            sequenceManager.saveSequences();
         }
 
         // Stop metrics display
@@ -438,6 +451,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public MetricsDisplay getMetricsDisplay() {
         return metricsDisplay;
+    }
+
+    public SequenceManager getSequenceManager() {
+        return sequenceManager;
     }
 
     /**
