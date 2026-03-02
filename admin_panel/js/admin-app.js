@@ -56,6 +56,7 @@ class AdminApp {
             pendingDJs: [],
             // Service status
             minecraftConnected: false,
+            minecraftServerType: null,  // 'paper' or 'fabric'
             // Connect codes state
             connectCodes: [],
             // Stage data
@@ -1127,6 +1128,9 @@ class AdminApp {
                 // Handle initial MC status from vj_state
                 if (data.minecraft_connected !== undefined) {
                     this.state.minecraftConnected = data.minecraft_connected;
+                    if (data.minecraft_server_type) {
+                        this.state.minecraftServerType = data.minecraft_server_type;
+                    }
                     this._updateServiceIndicators();
                     this._updateMCDependentControls();
                     // Auto-fetch bitmap data when Minecraft is connected
@@ -3669,18 +3673,32 @@ class AdminApp {
         if (mcEl) {
             mcEl.classList.toggle('connected', this.state.minecraftConnected);
             mcEl.classList.toggle('disconnected', !this.state.minecraftConnected);
+            const label = mcEl.querySelector('.svc-label');
+            if (label) {
+                const serverType = this.state.minecraftServerType;
+                label.textContent = serverType
+                    ? `MC · ${serverType.charAt(0).toUpperCase() + serverType.slice(1)}`
+                    : 'Minecraft';
+            }
         }
     }
 
     _handleMinecraftStatus(data) {
         const wasConnected = this.state.minecraftConnected;
         this.state.minecraftConnected = data.connected;
+        if (data.server_type) {
+            this.state.minecraftServerType = data.server_type;
+        }
+        if (!data.connected) {
+            this.state.minecraftServerType = null;
+        }
         this._updateServiceIndicators();
         this._updateMCDependentControls();
 
         // Notify on status change
         if (data.connected && !wasConnected) {
-            this._showToast('Minecraft connected', 'success');
+            const typeLabel = data.server_type ? ` (${data.server_type})` : '';
+            this._showToast(`Minecraft connected${typeLabel}`, 'success');
             // Auto-fetch bitmap data when Minecraft reconnects
             if (!this.state.bitmap.dataFetched) {
                 this._fetchBitmapData();

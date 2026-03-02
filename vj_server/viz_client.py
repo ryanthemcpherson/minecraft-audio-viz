@@ -60,6 +60,9 @@ class VizClient:
         # Fallback queue for responses without a seq (e.g. welcome message)
         self._unmatched_responses: asyncio.Queue = asyncio.Queue(maxsize=50)
 
+        # Server type reported by Minecraft (paper/fabric), set from welcome message
+        self.server_type: Optional[str] = None
+
         # Logging flags for batch_update_fast
         self._audio_logged: bool = False
         self._last_fast_error: float = 0.0
@@ -126,14 +129,20 @@ class VizClient:
                     welcome = await asyncio.wait_for(
                         self._unmatched_responses.get(), timeout=self.connect_timeout
                     )
-                    logger.info(f"Connected to AudioViz: {welcome.get('message', 'OK')}")
+                    self.server_type = welcome.get("server_type")
+                    logger.info(
+                        f"Connected to AudioViz: {welcome.get('message', 'OK')} (server_type={self.server_type})"
+                    )
                 except asyncio.TimeoutError:
                     logger.warning("No welcome message received, but connection is up")
             else:
                 # Without heartbeat, read welcome directly (no receive loop conflict)
                 response = await self.ws.recv()
                 data = mjson.decode(response)
-                logger.info(f"Connected to AudioViz: {data.get('message', 'OK')}")
+                self.server_type = data.get("server_type")
+                logger.info(
+                    f"Connected to AudioViz: {data.get('message', 'OK')} (server_type={self.server_type})"
+                )
 
             return True
 

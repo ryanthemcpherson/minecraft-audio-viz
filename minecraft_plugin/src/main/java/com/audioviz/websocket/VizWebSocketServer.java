@@ -98,6 +98,7 @@ public class VizWebSocketServer extends WebSocketServer {
         welcome.addProperty("type", "connected");
         welcome.addProperty("message", "Connected to AudioViz server");
         welcome.addProperty("version", plugin.getDescription().getVersion());
+        welcome.addProperty("server_type", "paper");
         conn.send(gson.toJson(welcome));
         totalMessagesSent.incrementAndGet();
     }
@@ -153,9 +154,14 @@ public class VizWebSocketServer extends WebSocketServer {
                 JsonObject json = JsonParser.parseString(message).getAsJsonObject();
                 String type = json.has("type") ? json.get("type").getAsString() : "unknown";
 
+                // Echo correlation ID (_seq) from request to response so the
+                // VJ server can match responses to the correct caller.
+                final int seq = json.has("_seq") ? json.get("_seq").getAsInt() : -1;
+
                 // Handle metrics request
                 if ("get_ws_metrics".equals(type)) {
                     JsonObject response = getMetrics();
+                    if (seq >= 0) response.addProperty("_seq", seq);
                     conn.send(gson.toJson(response));
                     totalMessagesSent.incrementAndGet();
                     return;
@@ -166,6 +172,7 @@ public class VizWebSocketServer extends WebSocketServer {
 
                 // Send response if any
                 if (response != null) {
+                    if (seq >= 0) response.addProperty("_seq", seq);
                     conn.send(gson.toJson(response));
                     totalMessagesSent.incrementAndGet();
                 }

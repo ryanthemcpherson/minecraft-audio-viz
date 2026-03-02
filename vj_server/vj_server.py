@@ -2817,6 +2817,9 @@ class VJServer:
                     "active_dj": self._active_dj_id,
                     "health_stats": self.get_health_stats(),
                     "minecraft_connected": mc_connected,
+                    "minecraft_server_type": (
+                        getattr(self.viz_client, "server_type", None) if self.viz_client else None
+                    ),
                     "pending_djs": pending_list,
                     "band_materials": self._band_materials,
                     "band_materials_source": self._band_materials_source,
@@ -2895,6 +2898,11 @@ class VJServer:
                                     "active_dj": self._active_dj_id,
                                     "health_stats": self.get_health_stats(),
                                     "minecraft_connected": mc_status,
+                                    "minecraft_server_type": (
+                                        getattr(self.viz_client, "server_type", None)
+                                        if self.viz_client
+                                        else None
+                                    ),
                                     "pending_djs": pending,
                                     "band_materials": self._band_materials,
                                     "band_materials_source": self._band_materials_source,
@@ -3937,15 +3945,17 @@ class VJServer:
         mc_connected = self.viz_client is not None and self.viz_client.connected
         if mc_connected != self._last_mc_connected:
             self._last_mc_connected = mc_connected
-            await self._broadcast_to_browsers(
-                _json_str(
-                    {
-                        "type": "minecraft_status",
-                        "connected": mc_connected,
-                    }
-                )
+            server_type = getattr(self.viz_client, "server_type", None) if self.viz_client else None
+            msg = {
+                "type": "minecraft_status",
+                "connected": mc_connected,
+            }
+            if server_type:
+                msg["server_type"] = server_type
+            await self._broadcast_to_browsers(_json_str(msg))
+            logger.info(
+                f"[MC STATUS] Broadcasting minecraft_connected={mc_connected} server_type={server_type}"
             )
-            logger.info(f"[MC STATUS] Broadcasting minecraft_connected={mc_connected}")
 
     async def _approve_pending_dj(self, dj_id: str):
         """Approve a pending DJ and move them to the active DJ list."""

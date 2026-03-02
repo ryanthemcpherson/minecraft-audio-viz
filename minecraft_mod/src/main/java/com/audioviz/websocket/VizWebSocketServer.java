@@ -138,6 +138,7 @@ public class VizWebSocketServer extends WebSocketServer {
         welcome.addProperty("type", "connected");
         welcome.addProperty("message", "Connected to AudioViz server");
         welcome.addProperty("version", "1.0.0");
+        welcome.addProperty("server_type", "fabric");
         conn.send(gson.toJson(welcome));
         totalMessagesSent.incrementAndGet();
     }

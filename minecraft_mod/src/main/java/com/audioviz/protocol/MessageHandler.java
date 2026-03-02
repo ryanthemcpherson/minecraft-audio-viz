@@ -605,13 +605,27 @@ public class MessageHandler {
     }
 
     private JsonObject handleDjInfo(JsonObject message) {
-        var sdm = mod.getStageDecoratorManager();
-        if (sdm == null) return null;
         String djName = message.has("dj_name") ? message.get("dj_name").getAsString() : "";
         String djId = message.has("dj_id") ? message.get("dj_id").getAsString() : "";
         double bpm = message.has("bpm") ? message.get("bpm").getAsDouble() : 0.0;
-        boolean active = message.has("active") && message.get("active").getAsBoolean();
-        sdm.updateDJInfo(new DJInfo(djName, djId, bpm, active, System.currentTimeMillis()));
+        boolean isActive = message.has("is_active") ? message.get("is_active").getAsBoolean() : true;
+
+        var sdm = mod.getStageDecoratorManager();
+        if (sdm != null) {
+            sdm.updateDJInfo(new DJInfo(djName, djId, bpm, isActive, System.currentTimeMillis()));
+        }
+
+        // Notify players of DJ status change
+        var listener = mod.getConnectionStateListener();
+        if (listener != null) {
+            if (isActive && !djName.isEmpty()) {
+                listener.onDjActive(djName);
+            } else {
+                listener.onDjInactive();
+            }
+        }
+
+        LOGGER.info("DJ info received: {} (BPM: {})", djName, String.format("%.0f", bpm));
         return null;
     }
 
