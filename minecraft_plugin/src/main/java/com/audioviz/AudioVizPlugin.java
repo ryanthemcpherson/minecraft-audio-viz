@@ -8,6 +8,7 @@ import com.audioviz.bitmap.composition.CompositionManager;
 import com.audioviz.bitmap.effects.EffectsProcessor;
 import com.audioviz.commands.AudioVizCommand;
 import com.audioviz.connection.ConnectionStateListener;
+import com.audioviz.metrics.MetricsDisplay;
 import com.audioviz.decorators.StageDecoratorManager;
 import com.audioviz.effects.BeatEventManager;
 import com.audioviz.entities.EntityPoolManager;
@@ -62,6 +63,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private CompositionManager compositionManager;
     private AmbientLightManager ambientLightManager;
     private ConnectionStateListener connectionStateListener;
+    private MetricsDisplay metricsDisplay;
 
     @Override
     public void onEnable() {
@@ -106,6 +108,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Initialize connection state listener (DJ connect/disconnect + audio staleness)
         this.connectionStateListener = new ConnectionStateListener(this);
         this.connectionStateListener.start();
+
+        // Initialize performance metrics display (scoreboard sidebar)
+        this.metricsDisplay = new MetricsDisplay(this);
+        this.metricsDisplay.start();
 
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
@@ -248,6 +254,11 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         // Shutdown bitmap pattern manager
         if (bitmapPatternManager != null) {
             bitmapPatternManager.shutdown();
+        }
+
+        // Stop metrics display
+        if (metricsDisplay != null) {
+            metricsDisplay.stop();
         }
 
         // Stop connection state listener
@@ -423,6 +434,10 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
     public ConnectionStateListener getConnectionStateListener() {
         return connectionStateListener;
+    }
+
+    public MetricsDisplay getMetricsDisplay() {
+        return metricsDisplay;
     }
 
     /**
