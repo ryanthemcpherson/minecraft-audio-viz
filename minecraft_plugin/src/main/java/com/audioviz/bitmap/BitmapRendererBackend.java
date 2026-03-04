@@ -155,11 +155,7 @@ public class BitmapRendererBackend implements RendererBackend {
                         entity.setPersistent(false);
 
                         entity.setTransformation(new Transformation(
-                            new Vector3f(
-                                (-0.1f + 0.5f) * scale,
-                                (-0.5f + 0.5f) * scale,
-                                0f
-                            ),
+                            new Vector3f(0.1f * scale, 0f, 0f),
                             new AxisAngle4f(0, 0, 0, 1),
                             new Vector3f(scale * 8.0f, scale * 4.0f, 1f),
                             new AxisAngle4f(0, 0, 0, 1)

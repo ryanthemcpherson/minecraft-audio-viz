@@ -303,9 +303,23 @@ public class MessageHandler {
                         : InputSanitizer.sanitizeScale(entity.get("scale").getAsFloat());
                     float rotation = InputSanitizer.sanitizeRotation(
                         entity.has("rotation") ? entity.get("rotation").getAsFloat() : 0);
-                    float pivotOffset = (1.0f - scale) * 0.5f;
+                    // Center block visual on entity position: T = -scale/2
+                    float halfScale = scale * 0.5f;
+                    float pivotX, pivotY, pivotZ;
+                    if (rotation == 0f) {
+                        pivotX = -halfScale;
+                        pivotY = -halfScale;
+                        pivotZ = -halfScale;
+                    } else {
+                        float rotRad = (float) Math.toRadians(rotation);
+                        float cosR = (float) Math.cos(rotRad);
+                        float sinR = (float) Math.sin(rotRad);
+                        pivotX = -halfScale * cosR + halfScale * sinR;
+                        pivotY = -halfScale;
+                        pivotZ = -halfScale * sinR - halfScale * cosR;
+                    }
                     builder.transformation(new Transformation(
-                        new Vector3f(pivotOffset, pivotOffset, pivotOffset),
+                        new Vector3f(pivotX, pivotY, pivotZ),
                         new AxisAngle4f((float) Math.toRadians(rotation), 0, 1, 0),
                         new Vector3f(scale, scale, scale),
                         new AxisAngle4f(0, 0, 0, 1)
