@@ -1,6 +1,6 @@
 const features = [
   {
-    title: "30+ Visualization Patterns",
+    title: "55+ Visualization Patterns",
     description:
       "From spirals and auroras to DNA helixes and wave terrain. Switch patterns live during a set with instant transitions.",
     icon: (

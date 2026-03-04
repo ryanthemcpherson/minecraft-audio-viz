@@ -2,13 +2,13 @@
 #
 # Quick start: docker compose -f docker-compose.demo.yml up
 # Then open in your browser:
-#   - http://localhost:8080 - 3D Preview (Three.js visualization)
-#   - http://localhost:8081 - Admin Panel (DJ controls)
+#   - http://localhost:8080 - Admin Panel (DJ controls, served by VJ server)
+#   - http://localhost:8081 - 3D Preview (Three.js visualization, served by nginx)
 #
 # This demo runs:
 #   1. VJ Server - Pattern engine and WebSocket hub (no-auth mode)
 #   2. Audio Simulator - Sends simulated DJ audio frames at 128 BPM
-#   3. Nginx - Serves preview tool and admin panel
+#   3. Nginx - Serves 3D preview tool
 #
 # The visualization runs entirely in your browser with simulated audio.
 # For Minecraft integration, see README.md
