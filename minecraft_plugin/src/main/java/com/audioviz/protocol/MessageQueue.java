@@ -305,10 +305,12 @@ public class MessageQueue {
             // Fast path: no rotation (common case - many patterns don't rotate entities)
             if (rotationY == 0f) {
                 rotRad = 0f;
-                float pivotOffset = 0.5f - halfScale;
-                pivotX = pivotOffset;
-                pivotY = pivotOffset;
-                pivotZ = pivotOffset;
+                // Center the block visual on the entity position:
+                // Block model occupies (0,0,0)→(1,1,1), scaled by S, so visual center
+                // is at T + S/2. Setting T = -S/2 places the visual center at entity pos.
+                pivotX = -halfScale;
+                pivotY = -halfScale;
+                pivotZ = -halfScale;
             } else {
                 rotRad = (float) Math.toRadians(rotationY);
                 // Lookup cos/sin from per-tick cache, keyed by float bit pattern.
@@ -325,9 +327,11 @@ public class MessageQueue {
                     trigCache.put(rotBits,
                         ((long) Float.floatToRawIntBits(cosR) << 32) | (Float.floatToRawIntBits(sinR) & 0xFFFFFFFFL));
                 }
-                pivotX = 0.5f - halfScale * (cosR + sinR);
-                pivotY = 0.5f - halfScale;
-                pivotZ = 0.5f - halfScale * (cosR - sinR);
+                // Rotation-aware centering pivot: rotate the -halfScale offset
+                // by the entity's Y rotation so the block stays centered after rotation.
+                pivotX = -halfScale * cosR + halfScale * sinR;
+                pivotY = -halfScale;
+                pivotZ = -halfScale * sinR - halfScale * cosR;
             }
 
             // Create transformation using scratch JOML objects (Transformation copies internally).

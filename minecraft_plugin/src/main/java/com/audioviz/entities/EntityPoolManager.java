@@ -760,30 +760,28 @@ public class EntityPoolManager {
     }
 
     /**
-     * Offset translation so scaling happens around block center instead of a corner.
+     * Translation for scaled block display — centers the block visual on the entity position.
+     * Block model occupies (0,0,0)→(1,1,1) in local space; with scale S the visual extends
+     * S blocks from the entity position. Offset by -S/2 so the visual center = entity position.
      */
     private Vector3f centeredScaleTranslation(float tx, float ty, float tz, float scale) {
-        float pivotOffset = (1.0f - scale) * 0.5f;
-        return new Vector3f(tx + pivotOffset, ty + pivotOffset, tz + pivotOffset);
+        float offset = -scale * 0.5f;
+        return new Vector3f(tx + offset, ty + offset, tz + offset);
     }
 
     /**
-     * Rotation-aware pivot: compute translation that keeps the scaled+rotated
-     * block centered at (0.5, 0.5, 0.5) within its unit cell.
-     * LeftRotation rotates the scaled model around (0,0,0), shifting its center;
-     * this compensates so the visual center stays put.
+     * Rotation-aware translation for scaled block display.
+     * Applies the -scale/2 centering offset rotated by the entity's Y rotation.
      */
     private Vector3f centeredScaleTranslation(float tx, float ty, float tz, float scale, float rotationRadians) {
-        if (rotationRadians == 0f) {
-            return centeredScaleTranslation(tx, ty, tz, scale);
-        }
         float halfScale = scale * 0.5f;
         float cosR = (float) Math.cos(rotationRadians);
         float sinR = (float) Math.sin(rotationRadians);
-        float px = 0.5f - halfScale * (cosR + sinR);
-        float py = 0.5f - halfScale;
-        float pz = 0.5f - halfScale * (cosR - sinR);
-        return new Vector3f(tx + px, ty + py, tz + pz);
+        return new Vector3f(
+            tx - halfScale * cosR + halfScale * sinR,
+            ty - halfScale,
+            tz - halfScale * sinR - halfScale * cosR
+        );
     }
 
     // === Display Entity Feature Methods ===
