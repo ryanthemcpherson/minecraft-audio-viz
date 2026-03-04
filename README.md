@@ -46,10 +46,10 @@
 
 - **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
 - **Real-time FFT Analysis** — 5-band frequency processing with ultra-low latency (~20ms)
-- **80+ Visualization Patterns** — 41 Lua 3D patterns + 42 Java bitmap patterns, from Spectrum Bars to Galaxy Spirals, Auroras, Plasma, and more
+- **55+ Visualization Patterns** — 41 Lua 3D patterns + 14 bitmap 2D patterns, from Spectrum Bars to Galaxy Spirals, Auroras, Plasma, and more
 - **Dual Render Backends** — high-res map tile displays (128x128 per tile) and virtual entity LED walls, switchable per zone
 - **6 Audio Presets** — auto, edm, chill, rock, hiphop, classical
-- **Minecraft Rendering** — Fabric mod with SGUI menus, Polymer virtual entities, beat-reactive particles, and ambient lighting
+- **Minecraft Rendering** — Fabric mod (primary) with SGUI menus, Polymer virtual entities, beat-reactive particles, and ambient lighting. Paper/Spigot plugin also available as an alternative
 - **3D Browser Preview** — WebGL scene with full Minecraft rendering parity
 - **Admin Control Panel** — VJ-style control surface with live meters, effects, and zone controls
 - **DJ Client** — cross-platform Tauri desktop app (Rust) for remote DJ sessions
@@ -76,8 +76,8 @@ docker compose -f docker-compose.demo.yml up
 ```
 
 Then open:
-- **http://localhost:8080** - Admin Panel
-- **http://localhost:8081** - 3D Preview
+- **http://localhost:8080** - Admin Panel (VJ server)
+- **http://localhost:8081** - 3D Preview (nginx)
 
 See [`demo/README.md`](demo/README.md) for full details.
 
@@ -106,8 +106,8 @@ pip install -e vj_server/     # Install VJ server package
 audioviz-vj                   # Starts on port 9000
 
 # 3. Open in browser
-#    3D Preview:   http://localhost:8080
-#    Admin Panel:  http://localhost:8081
+#    Admin Panel:  http://localhost:8080
+#    Browser WS:   ws://localhost:8766 (used by 3D preview)
 ```
 
 ### Minecraft Mod Setup (Optional)
@@ -120,6 +120,8 @@ cd minecraft_mod && ./gradlew build
 # Requires: Fabric Loader, Fabric API, SGUI, Polymer
 # Configure VJ server: audioviz-vj --minecraft-host your-mc-server
 ```
+
+> **Alternative:** A Paper/Spigot plugin is also available at `minecraft_plugin/`. Build with `cd minecraft_plugin && mvn package`, then copy the JAR to your server's `plugins/` folder. The Fabric mod is recommended for better performance.
 
 ---
 
@@ -216,7 +218,7 @@ DJ Client 3 ---+         |
 | BPM Strobe | `bpm_strobe` | BPM-synced strobe effect |
 | Strobe | `strobe` | Classic strobe effect |
 
-### Bitmap Patterns (42)
+### Bitmap Patterns (14)
 
 Flat 2D pixel-grid patterns rendered in-mod via map tile displays (128x128 per tile, glow item frames) or virtual entity LED walls. Includes effects processing, transitions, and layer compositing.
 
@@ -225,45 +227,19 @@ Flat 2D pixel-grid patterns rendered in-mod via map tile displays (128x128 per t
 | Spectrum Bars | `bmp_spectrum_bars` | Classic LED bar graph with color mapping |
 | Spectrogram | `bmp_spectrogram` | Scrolling frequency x time heat map |
 | Plasma | `bmp_plasma` | Audio-reactive plasma shader |
-| Waveform | `bmp_waveform` | Oscilloscope-style waveform display |
-| VU Meter | `bmp_vu_meter` | Stereo VU meter with peak hold |
+| Circular Spectrum | `bmp_circular` | Radial spectrum analyzer |
 | Fire | `bmp_fire` | Fluid fire simulation |
-| Kaleidoscope | `bmp_kaleidoscope` | Symmetrical kaleidoscope effect |
 | Matrix Rain | `bmp_matrix_rain` | Digital rain cascade |
 | Starfield | `bmp_starfield` | Warp-speed starfield |
-| Circular Spectrum | `bmp_circular` | Radial spectrum analyzer |
-| Aurora | `bmp_aurora` | Northern lights effect |
-| Checkerboard Flash | `bmp_checkerboard` | Beat-synced checkerboard |
-| Color Wash | `bmp_color_wash` | Smooth color gradient sweep |
 | Concentric Rings | `bmp_rings` | Expanding ring visualization |
-| Data Mosh | `bmp_datamosh` | Glitch art data corruption |
-| Digital Noise | `bmp_noise` | Audio-reactive digital noise |
-| Fireflies | `bmp_fireflies` | Glowing particle swarm |
-| Fractal Zoom | `bmp_fractal` | Mandelbrot zoom animation |
-| Galaxy | `bmp_galaxy` | Spiral galaxy with star particles |
-| Grid Warp | `bmp_grid_warp` | Audio-warped grid mesh |
-| Hex Grid | `bmp_hex_grid` | Hexagonal grid visualization |
-| Ink Drop | `bmp_ink_drop` | Fluid ink drop simulation |
-| Lightning | `bmp_lightning` | Beat-triggered lightning bolts |
-| Moire | `bmp_moire` | Interference pattern animation |
-| Particle Rain | `bmp_particle_rain` | Falling particle systems |
-| Pixel Sort | `bmp_pixel_sort` | Glitch-art pixel sorting |
-| Radial Burst | `bmp_radial_burst` | Explosive radial pattern |
-| Ripple | `bmp_ripple` | Water ripple propagation |
-| Rotating Geometry | `bmp_geometry` | Rotating 3D wireframes |
-| Scan Lines | `bmp_scan_lines` | Retro scan line effect |
-| Terrain | `bmp_terrain` | Audio-reactive terrain mesh |
+| Aurora | `bmp_aurora` | Northern lights effect |
 | Tunnel Zoom | `bmp_tunnel` | Infinite tunnel zoom |
-| Wave Propagation | `bmp_wave` | Wave interference patterns |
-| Marquee | `bmp_marquee` | Scrolling text with reactive colors |
-| Track Display | `bmp_track_display` | Now-playing artist/title overlay |
-| Countdown | `bmp_countdown` | Event countdown timer |
-| Chat Wall | `bmp_chat_wall` | Live player chat messages |
-| Crowd Cam | `bmp_crowd_cam` | Spotlight frames for nearby players |
-| Minimap | `bmp_minimap` | Overhead map with pulsing player dots |
-| Fireworks | `bmp_firework` | Interactive firework particle system |
-| DJ Logo | `bmp_dj_logo` | Custom DJ logo display |
-| Image | `bmp_image` | Static/animated image display |
+| Kaleidoscope | `bmp_kaleidoscope` | Symmetrical kaleidoscope effect |
+| Galaxy | `bmp_galaxy` | Spiral galaxy with star particles |
+| Lightning | `bmp_lightning` | Beat-triggered lightning bolts |
+| Rotating Geometry | `bmp_geometry` | Rotating 3D wireframes |
+
+> The Paper/Spigot plugin (`minecraft_plugin/`) includes additional bitmap patterns beyond those listed here.
 
 ---
 
@@ -402,7 +378,8 @@ MINECRAFT_HOST=mc.example.com docker-compose up -d
 minecraft-audio-viz/
 +-- dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
 +-- vj_server/             # VJ Server (Python, Lua pattern engine + routing)
-+-- minecraft_mod/         # Fabric mod (Java 21, MC 1.21.1)
++-- minecraft_mod/         # Fabric mod (Java 21, MC 1.21.1) — primary
++-- minecraft_plugin/      # Paper/Spigot plugin (Java 21) — alternative
 +-- admin_panel/           # Web control panel (VJ interface)
 +-- preview_tool/          # 3D browser preview (Three.js)
 +-- site/                  # Landing page (Next.js 15, mcav.live)
