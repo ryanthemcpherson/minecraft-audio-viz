@@ -1399,3 +1399,11 @@ kbd {
   color: var(--success);
   font-size: 0.65rem;
 }
+
+/* Frequency Strip (compact horizontal meter) */
+.frequency-strip {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+}
