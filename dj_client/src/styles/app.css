@@ -41,8 +41,14 @@ body,
 body {
   margin: 0;
   color: var(--text-primary);
-  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg-0);
+}
+
+.dj-label,
+.welcome-modal h2,
+.auth-heading {
+  font-family: 'Space Grotesk', var(--font-sans);
 }
 
 .app {
@@ -152,6 +158,8 @@ body {
   align-items: center;
   gap: 8px;
   min-height: 44px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 6px 0;
 }
 
 .bottom-bar .audio-source-select {
@@ -251,6 +259,7 @@ body {
   background: rgba(0, 204, 255, 0.12);
   border-color: rgba(0, 204, 255, 0.3);
   color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 204, 255, 0.2);
 }
 
 .preset-chip:hover:not(.active) {
@@ -543,8 +552,8 @@ kbd {
 
 /* Beat Indicator */
 .beat-indicator {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   position: relative;
 }
 
@@ -1193,6 +1202,8 @@ kbd {
 
 .queue-dj.active {
   color: var(--success);
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
 }
 
 .queue-avatar {
