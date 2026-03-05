@@ -90,7 +90,7 @@ function App() {
 
   // Audio preset state
   const [activePreset, setActivePreset] = useState(() => localStorage.getItem('mcav.preset') || 'auto');
-  const PRESETS = ['auto', 'edm', 'chill', 'rock', 'hiphop', 'classical'];
+  const PRESETS = ['auto', 'edm', 'chill', 'rock', 'folk', 'hiphop', 'classical'];
 
   // Voice streaming state
   const [voiceEnabled, setVoiceEnabled] = useState(false);
