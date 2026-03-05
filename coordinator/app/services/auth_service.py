@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import secrets
 import uuid
@@ -30,9 +31,18 @@ class AuthResult:
     expires_in: int  # seconds
 
 
-def _hash_refresh_token(value: str) -> str:
-    """SHA-256 hash of a refresh token for storage (fast lookup + not stored in clear)."""
-    return hashlib.sha256(value.encode()).hexdigest()
+def _hash_refresh_token(value: str, *, secret: str) -> str:
+    """HMAC-SHA256 hash of a refresh token for storage.
+
+    Uses the JWT secret as the HMAC key so that token hashes are bound to the
+    deployment's secret material — a leaked DB alone is not enough to forge a
+    valid hash.
+
+    NOTE: This is a breaking change. Existing refresh tokens stored with plain
+    SHA-256 hashes will no longer match and will be effectively invalidated.
+    This is acceptable for a security improvement.
+    """
+    return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
 
 
 async def _issue_tokens(
@@ -56,7 +66,7 @@ async def _issue_tokens(
     refresh_row = RefreshToken(
         id=uuid.uuid4(),
         user_id=user.id,
-        token_hash=_hash_refresh_token(refresh_value),
+        token_hash=_hash_refresh_token(refresh_value, secret=jwt_secret),
         expires_at=datetime.now(timezone.utc) + timedelta(days=refresh_expiry_days),
         user_agent=user_agent[:500] if user_agent else None,
         ip_address=ip_address[:45] if ip_address else None,
@@ -367,7 +377,7 @@ async def refresh_access_token(
 
     The old refresh token is revoked (rotation).
     """
-    token_hash = _hash_refresh_token(refresh_token_value)
+    token_hash = _hash_refresh_token(refresh_token_value, secret=jwt_secret)
 
     stmt = select(RefreshToken).where(
         RefreshToken.token_hash == token_hash,
@@ -411,9 +421,10 @@ async def revoke_refresh_token(
     *,
     refresh_token_value: str,
     session: AsyncSession,
+    jwt_secret: str,
 ) -> None:
     """Revoke a refresh token (logout)."""
-    token_hash = _hash_refresh_token(refresh_token_value)
+    token_hash = _hash_refresh_token(refresh_token_value, secret=jwt_secret)
     stmt = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
     row = (await session.execute(stmt)).scalar_one_or_none()
     if row is not None:

@@ -50,7 +50,7 @@ def configure_logging() -> None:
     In production: structured JSON logs to stdout
     In development: human-readable logs to stdout
     """
-    env = os.environ.get("MCAV_ENV", "development").lower()
+    env = os.environ.get("MCAV_ENV", "production").lower()
     is_production = env in ("production", "prod", "staging")
 
     # Root logger configuration

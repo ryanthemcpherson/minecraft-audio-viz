@@ -36,8 +36,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Disable potentially dangerous browser features
         headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
 
+        # Content Security Policy — restrictive default for an API server
+        headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'none'; object-src 'none'; frame-ancestors 'none'"
+        )
+
         # Add HSTS only in production
-        env = os.environ.get("MCAV_ENV", "development").lower()
+        env = os.environ.get("MCAV_ENV", "production").lower()
         if env in ("production", "prod", "staging"):
             headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 

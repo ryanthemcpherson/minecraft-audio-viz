@@ -100,7 +100,7 @@ async def reset_full(
 
     Only available in development/testing environments.
     """
-    env = os.environ.get("MCAV_ENV", "development").lower()
+    env = os.environ.get("MCAV_ENV", "production").lower()
     if env in ("production", "prod", "staging"):
         raise HTTPException(
             status_code=403,
