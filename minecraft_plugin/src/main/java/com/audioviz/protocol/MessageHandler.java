@@ -2497,9 +2497,20 @@ public class MessageHandler {
             }
             case "load_file" -> {
                 String path = message.get("path").getAsString();
+                java.io.File base = plugin.getDataFolder();
+                java.io.File file = new java.io.File(base, path);
+                try {
+                    if (!file.getCanonicalFile().toPath().startsWith(base.getCanonicalFile().toPath())) {
+                        plugin.getLogger().warning("Path traversal blocked: " + path);
+                        break;
+                    }
+                } catch (java.io.IOException e) {
+                    plugin.getLogger().warning("Invalid path: " + path);
+                    break;
+                }
                 BitmapFrameBuffer buf = patternMgr.getFrameBuffer(zone);
                 if (buf != null) {
-                    imagePattern.loadFromFile(new java.io.File(path), buf.getWidth(), buf.getHeight());
+                    imagePattern.loadFromFile(file, buf.getWidth(), buf.getHeight());
                     if (patternMgr.isActive(zone)) {
                         patternMgr.setPattern(zone, "bmp_image");
                     }
@@ -2535,10 +2546,16 @@ public class MessageHandler {
         switch (action) {
             case "load_file" -> {
                 String path = message.get("path").getAsString();
-                java.io.File file = new java.io.File(path);
-                // Resolve relative paths against plugin data folder
-                if (!file.isAbsolute()) {
-                    file = new java.io.File(plugin.getDataFolder(), path);
+                java.io.File base = plugin.getDataFolder();
+                java.io.File file = new java.io.File(base, path);
+                try {
+                    if (!file.getCanonicalFile().toPath().startsWith(base.getCanonicalFile().toPath())) {
+                        plugin.getLogger().warning("Path traversal blocked: " + path);
+                        break;
+                    }
+                } catch (java.io.IOException e) {
+                    plugin.getLogger().warning("Invalid path: " + path);
+                    break;
                 }
                 BitmapFrameBuffer buf = patternMgr.getFrameBuffer(zone);
                 if (buf != null) {
