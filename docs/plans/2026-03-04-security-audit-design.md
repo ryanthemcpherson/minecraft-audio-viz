@@ -16,7 +16,7 @@
 ## Critical Findings
 
 ### C1 — Live Resend API Key Committed (`coordinator/.env`)
-A live Resend API key (`re_DosoF1XX_...`) is committed in `coordinator/.env`. Must be rotated immediately. Ensure `coordinator/.env` is gitignored.
+A live Resend API key was found in `coordinator/.env`. Must be rotated immediately. Ensure `coordinator/.env` is gitignored.
 
 ### C2 — Unauthenticated `/disconnect/{dj_session_id}` (`coordinator/app/routers/connect.py:280-324`)
 Any caller who knows/guesses a UUID can disconnect DJs and decrement show counts. No auth required.
