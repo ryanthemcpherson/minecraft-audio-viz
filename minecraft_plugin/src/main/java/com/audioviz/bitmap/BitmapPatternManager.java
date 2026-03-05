@@ -169,6 +169,14 @@ public class BitmapPatternManager {
         register(new BitmapDigitalNoise());
         register(new BitmapRotatingGeometry());
 
+        // Tier 4: Psychedelic / immersive — Sphere-inspired
+        register(new BitmapMetaballs());
+        register(new BitmapReactionDiffusion());
+        register(new BitmapFluid());
+        register(new BitmapVoronoiShatter());
+        register(new BitmapSacredSpiral());
+        register(new BitmapFeedbackLoop());
+
         // Text patterns (Phase 3)
         register(new MarqueePattern());
         register(new TrackDisplayPattern());
