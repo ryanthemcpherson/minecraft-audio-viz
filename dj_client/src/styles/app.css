@@ -1310,3 +1310,92 @@ kbd {
   background: rgba(255, 103, 103, 0.22);
   border-color: rgba(255, 103, 103, 0.55);
 }
+
+/* Status Strip (compact mode) */
+.status-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.status-strip--live {
+  border-color: rgba(47, 224, 152, 0.3);
+  box-shadow: 0 0 12px rgba(47, 224, 152, 0.08);
+}
+
+.status-strip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.status-strip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-strip-dot.connected {
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(47, 224, 152, 0.7);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.status-strip-dot.disconnected {
+  background: var(--danger);
+}
+
+.status-strip-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #032718;
+  background: var(--success);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.status-strip-standby {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.status-strip-show {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-strip-meta {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  gap: 12px;
+}
+
+.status-strip-bpm {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.status-strip-latency {
+  margin-left: auto;
+}
+
+.status-strip-mc {
+  font-weight: 700;
+  color: var(--success);
+  font-size: 0.65rem;
+}
