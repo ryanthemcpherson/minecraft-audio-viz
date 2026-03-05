@@ -43,6 +43,7 @@ export default function FrequencyStrip({ audioRef }: FrequencyStripProps) {
         canvas.height = h;
       }
 
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, w, h);
       ctx.scale(dpr, dpr);
       const cw = rect.width;
@@ -97,7 +98,6 @@ export default function FrequencyStrip({ audioRef }: FrequencyStripProps) {
         ctx.fillText(BAND_LABELS[i], x + barWidth / 2, ch - 1);
       }
 
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
       animFrameRef.current = requestAnimationFrame(draw);
     };
 

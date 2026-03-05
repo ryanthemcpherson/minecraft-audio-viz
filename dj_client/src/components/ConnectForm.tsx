@@ -10,8 +10,8 @@ interface AudioSource {
 interface ConnectFormProps {
   connectCode: string;
   onConnectCodeChange: (code: string) => void;
-  selectedSource: string;
-  onSourceChange: (source: string) => void;
+  selectedSource: string | null;
+  onSourceChange: (source: string | null) => void;
   audioSources: AudioSource[];
   onRefreshSources: () => void;
   directConnect: boolean;
