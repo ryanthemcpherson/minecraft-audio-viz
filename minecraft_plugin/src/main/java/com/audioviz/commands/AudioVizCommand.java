@@ -23,11 +23,23 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class AudioVizCommand implements CommandExecutor, TabCompleter {
 
     private final AudioVizPlugin plugin;
+
+    /** Valid zone/stage name: 1-64 alphanumeric characters, underscores, and hyphens. */
+    private static final Pattern VALID_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
+    private static final int MAX_NAME_LENGTH = 64;
+
+    private static boolean isValidName(String name) {
+        return name != null
+            && !name.isEmpty()
+            && name.length() <= MAX_NAME_LENGTH
+            && VALID_NAME_PATTERN.matcher(name).matches();
+    }
 
     public AudioVizCommand(AudioVizPlugin plugin) {
         this.plugin = plugin;
@@ -102,6 +114,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 String zoneName = args[1];
+                if (!isValidName(zoneName)) {
+                    sender.sendMessage(ChatColor.RED + "Invalid zone name. Use 1-64 alphanumeric characters, underscores, or hyphens.");
+                    return;
+                }
                 if (plugin.getZoneManager().zoneExists(zoneName)) {
                     sender.sendMessage(ChatColor.RED + "Zone '" + zoneName + "' already exists!");
                     return;
@@ -151,6 +167,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 String zoneName = args[1];
+                if (!isValidName(zoneName)) {
+                    sender.sendMessage(ChatColor.RED + "Invalid zone name.");
+                    return;
+                }
                 if (plugin.getZoneManager().deleteZone(zoneName)) {
                     sender.sendMessage(ChatColor.GREEN + "Deleted zone '" + zoneName + "'");
                 } else {
@@ -179,6 +199,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 String zoneName = args[1];
+                if (!isValidName(zoneName)) {
+                    sender.sendMessage(ChatColor.RED + "Invalid zone name.");
+                    return;
+                }
                 VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
                 if (zone == null) {
                     sender.sendMessage(ChatColor.RED + "Zone '" + zoneName + "' not found.");
@@ -202,6 +226,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 String zoneName = args[1];
+                if (!isValidName(zoneName)) {
+                    sender.sendMessage(ChatColor.RED + "Invalid zone name.");
+                    return;
+                }
                 VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
                 if (zone == null) {
                     sender.sendMessage(ChatColor.RED + "Zone '" + zoneName + "' not found.");
@@ -223,6 +251,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 String zoneName = args[1];
+                if (!isValidName(zoneName)) {
+                    sender.sendMessage(ChatColor.RED + "Invalid zone name.");
+                    return;
+                }
                 VisualizationZone zone = plugin.getZoneManager().getZone(zoneName);
                 if (zone == null) {
                     sender.sendMessage(ChatColor.RED + "Zone '" + zoneName + "' not found.");
@@ -262,6 +294,10 @@ public class AudioVizCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.YELLOW + "All zone boundaries hidden.");
                 } else {
                     // Treat as zone name
+                    if (!isValidName(target)) {
+                        sender.sendMessage(ChatColor.RED + "Invalid zone name.");
+                        return;
+                    }
                     if (!plugin.getZoneManager().zoneExists(target)) {
                         sender.sendMessage(ChatColor.RED + "Zone '" + args[1] + "' not found.");
                         return;

@@ -172,8 +172,10 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        // Handle pong responses for heartbeat
-        if (message.contains("\"type\":\"pong\"") || message.contains("\"type\": \"pong\"")) {
+        // Handle pong responses for heartbeat (check only prefix to avoid
+        // crafted messages with "pong" buried in payload data)
+        String prefix = message.substring(0, Math.min(64, message.length()));
+        if (prefix.contains("\"type\":\"pong\"") || prefix.contains("\"type\": \"pong\"")) {
             lastPongTime.put(conn, System.currentTimeMillis());
             return;
         }
