@@ -19,6 +19,7 @@ public class BitmapFluid extends BitmapPattern {
     private double[] density0;   // Previous density
     private double[] densityG, densityG0; // Green channel
     private double[] densityB, densityB0; // Blue channel
+    private double[] projDiv, projP; // Scratch arrays for project()
     private int simW, simH, simSize;
     private int cachedW = -1, cachedH = -1;
     private double beatPulse = 0;
@@ -46,6 +47,7 @@ public class BitmapFluid extends BitmapPattern {
         density = new double[simSize]; density0 = new double[simSize];
         densityG = new double[simSize]; densityG0 = new double[simSize];
         densityB = new double[simSize]; densityB0 = new double[simSize];
+        projDiv = new double[simSize]; projP = new double[simSize];
     }
 
     @Override
@@ -241,8 +243,8 @@ public class BitmapFluid extends BitmapPattern {
     }
 
     private void project(double[] u, double[] v) {
-        double[] div = density0; // Reuse temporarily
-        double[] p = densityG0; // Reuse temporarily
+        double[] div = projDiv;
+        double[] p = projP;
         double h = 1.0 / Math.max(simW - 2, simH - 2);
 
         for (int j = 1; j < simH - 1; j++) {
