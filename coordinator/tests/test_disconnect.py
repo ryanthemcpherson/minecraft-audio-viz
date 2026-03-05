@@ -82,6 +82,7 @@ class TestDisconnectIdempotent:
         fake_id = str(uuid.uuid4())
         resp = await client.post(
             f"/api/v1/disconnect/{fake_id}",
+            headers={"Authorization": "Bearer disc1-key"},
         )
         assert resp.status_code == 204
 
@@ -99,14 +100,45 @@ class TestDisconnectIdempotent:
         # First disconnect
         resp1 = await client.post(
             f"/api/v1/disconnect/{session_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         assert resp1.status_code == 204
 
         # Second disconnect (already disconnected)
         resp2 = await client.post(
             f"/api/v1/disconnect/{session_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         assert resp2.status_code == 204
+
+    async def test_disconnect_without_auth_returns_422(self, client: AsyncClient) -> None:
+        """Disconnecting without server auth should be rejected."""
+        fake_id = str(uuid.uuid4())
+        resp = await client.post(f"/api/v1/disconnect/{fake_id}")
+        assert resp.status_code == 422  # Missing required Authorization header
+
+    async def test_disconnect_wrong_server_returns_403(self, client: AsyncClient) -> None:
+        """Disconnecting a session belonging to another server should return 403."""
+        show_id, connect_code, api_key = await _setup_show(
+            client, "disc5@example.com", "disc5-key", 9305
+        )
+        # Register a second server
+        user_token2 = await _get_user_token(client, "disc5b@example.com")
+        await _register_server(
+            client, user_token2, "Other Server", "ws://localhost:9306", "other-key"
+        )
+
+        # Connect a DJ to the first server's show
+        resolve_resp = await client.post(f"/api/v1/connect/{connect_code}/join")
+        assert resolve_resp.status_code == 200
+        session_id = _extract_session_id(resolve_resp.json()["token"])
+
+        # Try to disconnect using the wrong server's key
+        resp = await client.post(
+            f"/api/v1/disconnect/{session_id}",
+            headers={"Authorization": "Bearer other-key"},
+        )
+        assert resp.status_code == 403
 
 
 class TestDisconnectDJCount:
@@ -134,6 +166,7 @@ class TestDisconnectDJCount:
         # Disconnect DJ #1
         disc_resp = await client.post(
             f"/api/v1/disconnect/{session_id_1}",
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         assert disc_resp.status_code == 204
 
@@ -158,11 +191,13 @@ class TestDisconnectDJCount:
         # Disconnect once (1 -> 0)
         await client.post(
             f"/api/v1/disconnect/{session_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
         )
 
         # Disconnect again (already disconnected, count should stay at 0)
         await client.post(
             f"/api/v1/disconnect/{session_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
         )
 
         detail = await client.get(
