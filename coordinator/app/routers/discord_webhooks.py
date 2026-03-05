@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -34,7 +35,9 @@ async def _verify_secret(
     """Verify X-Webhook-Secret header matches the configured secret."""
     if not settings.discord_webhook_secret:
         raise HTTPException(status_code=503, detail="Webhook secret not configured")
-    if not x_webhook_secret or x_webhook_secret != settings.discord_webhook_secret:
+    if not x_webhook_secret or not hmac.compare_digest(
+        x_webhook_secret, settings.discord_webhook_secret
+    ):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
 
 
