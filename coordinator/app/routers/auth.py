@@ -303,7 +303,7 @@ async def discord_callback(
 
     # Verify redirect_uri matches to prevent authorization code injection
     state_redirect = state_payload.get("redirect_uri", "")
-    if state_redirect and state_redirect != settings.discord_redirect_uri:
+    if state_redirect != settings.discord_redirect_uri:
         raise HTTPException(status_code=400, detail="OAuth redirect_uri mismatch")
 
     try:
@@ -466,7 +466,7 @@ async def google_callback(
 
     # Verify redirect_uri matches to prevent authorization code injection
     state_redirect = state_payload.get("redirect_uri", "")
-    if state_redirect and state_redirect != settings.google_redirect_uri:
+    if state_redirect != settings.google_redirect_uri:
         raise HTTPException(status_code=400, detail="OAuth redirect_uri mismatch")
 
     try:
