@@ -18,6 +18,7 @@ public class BitmapFeedbackLoop extends BitmapPattern {
     private double rotation = 0;
     private double beatPulse = 0;
     private int beatCount = 0;
+    private final float[] hsbWork = new float[3];
 
     public BitmapFeedbackLoop() {
         super("bmp_feedback", "Bitmap Feedback Loop",
@@ -139,16 +140,16 @@ public class BitmapFeedbackLoop extends BitmapPattern {
         System.arraycopy(pixels, 0, previousFrame, 0, pixels.length);
     }
 
-    private static int shiftHue(int argb, double degrees) {
+    private int shiftHue(int argb, double degrees) {
         int r = (argb >> 16) & 0xFF;
         int g = (argb >> 8) & 0xFF;
         int b = argb & 0xFF;
         if (r == 0 && g == 0 && b == 0) return argb;
 
-        float[] hsb = java.awt.Color.RGBtoHSB(r, g, b, null);
-        hsb[0] = (float) ((hsb[0] + degrees / 360.0) % 1.0);
-        if (hsb[0] < 0) hsb[0] += 1.0f;
-        int rgb = java.awt.Color.HSBtoRGB(hsb[0], hsb[1], hsb[2]);
+        java.awt.Color.RGBtoHSB(r, g, b, hsbWork);
+        hsbWork[0] = (float) ((hsbWork[0] + degrees / 360.0) % 1.0);
+        if (hsbWork[0] < 0) hsbWork[0] += 1.0f;
+        int rgb = java.awt.Color.HSBtoRGB(hsbWork[0], hsbWork[1], hsbWork[2]);
         return 0xFF000000 | (rgb & 0x00FFFFFF);
     }
 
