@@ -6437,7 +6437,9 @@ async def main():
         default="configs/dj_auth.json",
         help="Path to DJ auth config",
     )
-    parser.add_argument("--require-auth", action="store_true", help="Require DJ authentication")
+    parser.add_argument(
+        "--no-auth", action="store_true", help="Disable DJ authentication (demo/dev only)"
+    )
     parser.add_argument("--no-minecraft", action="store_true", help="Run without Minecraft")
     parser.add_argument(
         "--no-spectrograph", action="store_true", help="Disable terminal spectrograph"
@@ -6458,7 +6460,7 @@ async def main():
         logger.info(
             f"Loaded auth config: {len(auth_config.djs)} DJs, {len(auth_config.vj_operators)} VJs"
         )
-    elif args.require_auth:
+    elif not args.no_auth:
         logger.error(f"Auth config not found: {args.config}")
         sys.exit(1)
 
@@ -6472,7 +6474,7 @@ async def main():
         zone=args.zone,
         entity_count=args.entities,
         auth_config=auth_config,
-        require_auth=args.require_auth,
+        require_auth=not args.no_auth,
         show_spectrograph=sys.stdout.isatty() and not args.no_spectrograph,
     )
 
