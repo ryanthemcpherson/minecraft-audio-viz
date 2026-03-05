@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { check, type Update } from '@tauri-apps/plugin-updater';
-import ConnectCode from './components/ConnectCode';
 import AudioSourceSelect from './components/AudioSourceSelect';
 import ConnectForm from './components/ConnectForm';
 import TopBar from './components/TopBar';
