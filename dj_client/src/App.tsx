@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import ConnectCode from './components/ConnectCode';
 import AudioSourceSelect from './components/AudioSourceSelect';
+import ConnectForm from './components/ConnectForm';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
 import QueuePanel from './components/QueuePanel';
@@ -719,57 +720,24 @@ function App() {
             </div>
           </div>
 
-          <div className="connect-form">
-            <div className="connect-row">
-              <div className="field-group">
-                <label className="field-label">Code</label>
-                <ConnectCode value={connectCode} onChange={setConnectCode} />
-              </div>
-              <div className="field-group">
-                <label className="field-label">Audio</label>
-                <AudioSourceSelect
-                  sources={audioSources}
-                  value={selectedSource}
-                  onChange={setSelectedSource}
-                  onRefresh={loadAudioSources}
-                />
-              </div>
-            </div>
-
-            <label className="checkbox-label">
-              <input type="checkbox" checked={directConnect} onChange={e => setDirectConnect(e.target.checked)} />
-              Direct connect (self-hosted)
-            </label>
-
-            {directConnect && (
-              <div className="direct-connect-row">
-                <input
-                  type="text"
-                  className="input input-sm"
-                  value={serverHost}
-                  onChange={e => setServerHost(e.target.value)}
-                  placeholder="Host"
-                />
-                <input
-                  type="number"
-                  className="input input-sm input-port"
-                  value={serverPort}
-                  onChange={e => setServerPort(parseInt(e.target.value, 10) || 9000)}
-                  placeholder="Port"
-                />
-              </div>
-            )}
-
-            {status.error && <div className="error-message">{status.error}</div>}
-
-            <button
-              className="btn btn-connect full-width"
-              onClick={handleConnect}
-              disabled={isConnecting || connectCode.length !== 8 || !djName.trim()}
-            >
-              {isConnecting ? 'Connecting...' : 'Connect'}
-            </button>
-          </div>
+          <ConnectForm
+            connectCode={connectCode}
+            onConnectCodeChange={setConnectCode}
+            selectedSource={selectedSource}
+            onSourceChange={setSelectedSource}
+            audioSources={audioSources}
+            onRefreshSources={loadAudioSources}
+            directConnect={directConnect}
+            onDirectConnectChange={setDirectConnect}
+            serverHost={serverHost}
+            onServerHostChange={setServerHost}
+            serverPort={serverPort}
+            onServerPortChange={setServerPort}
+            error={status.error}
+            isConnecting={isConnecting}
+            djName={djName}
+            onConnect={handleConnect}
+          />
         </div>
       ) : (
         <div className="dashboard connected">
