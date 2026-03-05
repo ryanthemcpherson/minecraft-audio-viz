@@ -213,6 +213,8 @@ public class MessageHandler {
         }
         int count = message.has("count") ? message.get("count").getAsInt() :
             plugin.getConfig().getInt("defaults.entity_count", 16);
+        int maxEntities = plugin.getConfig().getInt("max-entities-per-zone", 1000);
+        count = Math.max(0, Math.min(count, maxEntities));
         String materialName = message.has("material") ? message.get("material").getAsString() : "GLOWSTONE";
 
         Material material = Material.matchMaterial(materialName);
@@ -363,12 +365,19 @@ public class MessageHandler {
             // that previously caused 2-frame flicker.
         }
 
-        // Process particle effects
+        // Process particle effects (with aggregate cap to prevent lag spikes)
         if (message.has("particles")) {
             JsonArray particles = message.getAsJsonArray("particles");
+            int totalParticles = 0;
+            final int MAX_PARTICLES_PER_TICK = 2000;
 
             for (JsonElement elem : particles) {
                 JsonObject particle = elem.getAsJsonObject();
+                int particleCount = Math.min(particle.has("count") ? particle.get("count").getAsInt() : 10, 200);
+                totalParticles += particleCount;
+                if (totalParticles > MAX_PARTICLES_PER_TICK) {
+                    break; // Stop spawning more particles this tick
+                }
                 spawnParticle(zone, particle);
             }
         }
