@@ -10,6 +10,8 @@ import PresetBar, { PRESETS } from './components/PresetBar';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
 import QueuePanel from './components/QueuePanel';
+import StatusStrip from './components/StatusStrip';
+import FrequencyStrip from './components/FrequencyStrip';
 import AuthModal from './components/AuthModal';
 import { useAuth } from './hooks/useAuth';
 import * as api from './lib/api';
@@ -724,15 +726,35 @@ function App() {
         <div className="dashboard connected">
           <TopBar djName={djName} showName={showName} isBeat={isBeatForUI && status.connected} isConnected={true} user={auth.user} isSignedIn={auth.isSignedIn} onSignOut={auth.signOut} onSignIn={() => setShowAuthModal(true)} />
 
-          <div className="main-grid">
-            <div className="col-left">
-              <FrequencyMeter audioRef={audioRef} />
+          <div className="main-content">
+            {/* Compact layout (<720px) */}
+            <div className="compact-only">
+              <StatusStrip
+                connected={status.connected}
+                isActive={status.is_active}
+                showName={showName}
+                queuePosition={status.queue_position}
+                totalDjs={status.total_djs}
+                activeDjName={status.active_dj_name}
+                latencyMs={status.latency_ms}
+                mcConnected={status.mc_connected}
+                bpm={audioRef.current.bpm}
+              />
+              <FrequencyStrip audioRef={audioRef} />
               <PresetBar active={activePreset} onChange={handlePresetChange} />
+              <QueuePanel roster={roster} />
             </div>
 
-            <div className="col-right">
-              <StatusPanel status={status} />
-              <QueuePanel roster={roster} />
+            {/* Expanded layout (>720px) */}
+            <div className="expanded-only">
+              <div className="col-left">
+                <FrequencyMeter audioRef={audioRef} />
+                <PresetBar active={activePreset} onChange={handlePresetChange} />
+              </div>
+              <div className="col-right">
+                <StatusPanel status={status} />
+                <QueuePanel roster={roster} />
+              </div>
             </div>
           </div>
 
