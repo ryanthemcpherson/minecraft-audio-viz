@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from app.config import Settings, get_settings
 from app.services.metrics import snapshot as metrics_snapshot
 from app.services.metrics import snapshot_http_latency
 
@@ -24,10 +25,27 @@ def _escape_label_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+async def _verify_metrics_token(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Check Bearer token on /metrics when metrics_token is configured and env != development."""
+    if settings.metrics_token is None:
+        return
+    if settings.mcav_env.lower() == "development":
+        return
+
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer ") or auth[7:] != settings.metrics_token:
+        raise HTTPException(status_code=401, detail="Invalid or missing metrics token")
+
+
 @router.get("/metrics", response_class=PlainTextResponse, summary="Prometheus metrics")
-async def metrics_endpoint() -> PlainTextResponse:
+async def metrics_endpoint(
+    _auth: None = Depends(_verify_metrics_token),
+) -> PlainTextResponse:
     """Expose in-process counters and HTTP latency histograms in Prometheus
-    text exposition format.  No authentication required.
+    text exposition format.
     """
     counters = metrics_snapshot()
     latencies = snapshot_http_latency()

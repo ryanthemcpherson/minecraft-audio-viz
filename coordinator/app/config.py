@@ -100,7 +100,14 @@ class Settings(BaseSettings):
     base_url: str = "https://mcav.live"
     coordinator_url: str = "https://api.mcav.live"
 
-    # Rate limiting
+    # Metrics
+    metrics_token: str | None = None
+
+    # Environment
+    mcav_env: str = "development"
+
+    # Proxy / rate limiting
+    trusted_proxies: list[str] = ["127.0.0.1", "::1"]
     rate_limit_resolve_per_minute: int = 10
     rate_limit_register_per_hour: int = 5
     rate_limit_auth_per_minute: int = 20
