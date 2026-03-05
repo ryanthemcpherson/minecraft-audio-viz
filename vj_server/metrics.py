@@ -154,14 +154,14 @@ async def _handle_metrics(writer: asyncio.StreamWriter, server: "VJServer") -> N
 async def start_metrics_server(
     server: "VJServer",
     port: int,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
 ) -> asyncio.Server:
     """Start the metrics HTTP server.
 
     Args:
         server: VJServer instance to expose metrics for
         port: Port to listen on
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to (default: 127.0.0.1)
 
     Returns:
         asyncio.Server instance
