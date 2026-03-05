@@ -17,6 +17,15 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/fengari-browser.js",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },

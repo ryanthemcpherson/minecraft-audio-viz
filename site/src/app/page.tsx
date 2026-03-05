@@ -1,6 +1,6 @@
 import Hero from "@/components/Hero";
 import HowItWorks from "@/components/HowItWorks";
-import PatternCarousel from "@/components/PatternCarousel";
+import LazyPatternCarousel from "@/components/LazyPatternCarousel";
 import Features from "@/components/Features";
 import DemoVideo from "@/components/DemoVideo";
 import Community from "@/components/Community";
@@ -11,7 +11,7 @@ export default function Home() {
     <>
       <Hero />
       <HowItWorks />
-      <PatternCarousel />
+      <LazyPatternCarousel />
       <Features />
       <DemoVideo />
       <Community />

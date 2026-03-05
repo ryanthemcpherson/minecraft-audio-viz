@@ -720,10 +720,13 @@ body {
 
 .meter-fill {
     height: 100%;
-    width: 0%;
+    width: 100%;
     border-radius: var(--border-radius-xs);
-    transition: width 0.05s ease-out;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.05s ease-out;
     position: relative;
+    will-change: transform;
 }
 
 /* Band-specific meter colors with gradients */
