@@ -7,6 +7,9 @@ websocket:
   # Port for the WebSocket server
   port: 8765
 
+# Shared secret for WebSocket authentication. Leave empty to disable (not recommended for production).
+ws-secret: ""
+
 # Default visualization settings
 defaults:
   # Default entity count when initializing pools (covers all pattern recommendations)
