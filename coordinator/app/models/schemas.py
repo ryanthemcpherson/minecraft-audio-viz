@@ -252,7 +252,8 @@ class SessionInfo(BaseModel):
 
 
 class DeleteAccountRequest(BaseModel):
-    password: str = Field(..., min_length=1, max_length=200)
+    password: str = Field("", max_length=200)
+    confirm_delete: bool = False
 
 
 class OAuthAuthorizeResponse(BaseModel):
