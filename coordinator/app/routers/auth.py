@@ -65,7 +65,11 @@ async def _cleanup_expired_exchange_codes(session: AsyncSession) -> None:
 
 
 def _create_oauth_state(
-    jwt_secret: str, *, desktop: bool = False, provider: str = "discord"
+    jwt_secret: str,
+    *,
+    desktop: bool = False,
+    provider: str = "discord",
+    redirect_uri: str = "",
 ) -> str:
     """Create a self-validating OAuth state token as a signed JWT."""
     now = int(time.time())
@@ -74,6 +78,7 @@ def _create_oauth_state(
         "iat": now,
         "exp": now + _OAUTH_STATE_TTL,
         "provider": provider,
+        "redirect_uri": redirect_uri,
     }
     if desktop:
         payload["desktop"] = True
@@ -249,7 +254,12 @@ async def discord_authorize(
     if not settings.discord_client_id:
         raise HTTPException(status_code=501, detail="Discord OAuth not configured")
 
-    state = _create_oauth_state(settings.user_jwt_secret, desktop=desktop, provider="discord")
+    state = _create_oauth_state(
+        settings.user_jwt_secret,
+        desktop=desktop,
+        provider="discord",
+        redirect_uri=settings.discord_redirect_uri,
+    )
     url = discord_oauth.get_authorize_url(
         client_id=settings.discord_client_id,
         redirect_uri=settings.discord_redirect_uri,
@@ -290,6 +300,11 @@ async def discord_callback(
     state_payload = _validate_oauth_state(state, settings.user_jwt_secret)
     if not state_payload:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    # Verify redirect_uri matches to prevent authorization code injection
+    state_redirect = state_payload.get("redirect_uri", "")
+    if state_redirect and state_redirect != settings.discord_redirect_uri:
+        raise HTTPException(status_code=400, detail="OAuth redirect_uri mismatch")
 
     try:
         access_token = await discord_oauth.exchange_code(
@@ -402,7 +417,12 @@ async def google_authorize(
     if not settings.google_client_id:
         raise HTTPException(status_code=501, detail="Google OAuth not configured")
 
-    state = _create_oauth_state(settings.user_jwt_secret, desktop=desktop, provider="google")
+    state = _create_oauth_state(
+        settings.user_jwt_secret,
+        desktop=desktop,
+        provider="google",
+        redirect_uri=settings.google_redirect_uri,
+    )
     url = google_oauth.get_authorize_url(
         client_id=settings.google_client_id,
         redirect_uri=settings.google_redirect_uri,
@@ -443,6 +463,11 @@ async def google_callback(
     state_payload = _validate_oauth_state(state, settings.user_jwt_secret)
     if not state_payload:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    # Verify redirect_uri matches to prevent authorization code injection
+    state_redirect = state_payload.get("redirect_uri", "")
+    if state_redirect and state_redirect != settings.google_redirect_uri:
+        raise HTTPException(status_code=400, detail="OAuth redirect_uri mismatch")
 
     try:
         access_token = await google_oauth.exchange_code(
@@ -884,8 +909,9 @@ async def delete_account(
         if not verify_password(body.password, user.password_hash):
             raise HTTPException(status_code=400, detail="Incorrect password")
     else:
-        # OAuth-only users: password field is ignored but required by schema
-        pass
+        # OAuth-only users must explicitly confirm deletion
+        if not getattr(body, "confirm_delete", False):
+            raise HTTPException(status_code=400, detail="OAuth users must set confirm_delete=true")
 
     # Soft-delete: deactivate user
     user.is_active = False
