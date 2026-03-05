@@ -244,6 +244,9 @@ body {
 }
 
 .preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 4px 10px;
   border-radius: 12px;
   font-size: 0.75rem;
@@ -253,6 +256,19 @@ body {
   cursor: pointer;
   transition: all 0.15s;
   text-transform: capitalize;
+}
+
+.preset-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.preset-chip.active .preset-dot {
+  opacity: 1;
+  box-shadow: 0 0 4px currentColor;
 }
 
 .preset-chip.active {
