@@ -100,6 +100,16 @@ PRESETS: Dict[str, AudioConfig] = {
         band_sensitivity=[1.4, 0.9, 1.0, 1.1, 0.9],  # Heavy bass
         auto_calibrate=False,
     ),
+    "folk": AudioConfig(
+        attack=0.3,  # Smooth response for acoustic instruments
+        release=0.06,  # Slow decay — let notes ring out
+        beat_threshold=1.5,  # Detect strum pulse, not every pick
+        agc_max_gain=6.0,
+        beat_sensitivity=0.8,  # Gentle breathing rhythm
+        bass_weight=0.45,  # Acoustic guitar body is low-mid, not sub-bass
+        band_sensitivity=[0.8, 1.3, 1.4, 1.2, 0.9],  # Vocals + guitar mids
+        auto_calibrate=False,
+    ),
     "classical": AudioConfig(
         attack=0.2,  # Very smooth
         release=0.04,
