@@ -28,7 +28,7 @@ If output shows it WAS committed, run `git log --all -- coordinator/.env` to che
 **Step 2: Rotate the Resend API key**
 
 1. Log into Resend dashboard
-2. Revoke key `***REDACTED_RESEND_KEY***`
+2. Revoke the compromised Resend API key (see coordinator/.env)
 3. Generate new key
 4. Update `coordinator/.env` locally with new key
 
