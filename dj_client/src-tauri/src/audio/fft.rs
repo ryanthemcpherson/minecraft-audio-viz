@@ -61,6 +61,14 @@ pub fn get_presets() -> Vec<AudioPreset> {
             band_sensitivity: [1.4, 0.9, 1.0, 1.1, 0.9],
         },
         AudioPreset {
+            name: "folk".to_string(),
+            attack: 0.3,
+            release: 0.06,
+            beat_threshold: 1.5,
+            bass_weight: 0.45,
+            band_sensitivity: [0.8, 1.3, 1.4, 1.2, 0.9],
+        },
+        AudioPreset {
             name: "classical".to_string(),
             attack: 0.2,
             release: 0.04,
