@@ -22,9 +22,9 @@
     "direct_mode": {
       "type": "boolean"
     },
-    "token": {
+    "dj_session_id": {
       "type": "string",
-      "description": "Coordinator JWT for profile lookup (optional)"
+      "description": "Coordinator DJ session ID for profile lookup (optional)"
     }
   },
   "required": ["type", "code", "dj_name"]

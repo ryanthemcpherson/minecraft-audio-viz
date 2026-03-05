@@ -455,7 +455,7 @@ function App() {
 
       let connHost: string;
       let connPort: number;
-      let coordinatorToken: string | null = null;
+      let djSessionId: string | null = null;
 
       if (directConnect) {
         // Direct connection — use user-provided server host/port
@@ -471,7 +471,7 @@ function App() {
         connHost = wsUrl.hostname;
         connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
         setShowName(resolved.show_name);
-        coordinatorToken = resolved.token ?? null;
+        djSessionId = resolved.dj_session_id ?? null;
       }
 
       await invoke('connect_with_code', {
@@ -480,7 +480,7 @@ function App() {
         serverHost: connHost,
         serverPort: connPort,
         blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
-        coordinatorToken,
+        djSessionId,
       });
 
       // Start audio capture
