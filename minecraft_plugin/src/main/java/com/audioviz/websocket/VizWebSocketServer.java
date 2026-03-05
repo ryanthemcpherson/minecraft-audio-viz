@@ -88,6 +88,21 @@ public class VizWebSocketServer extends WebSocketServer {
 
         plugin.getLogger().info("WebSocket client connected: " + info.address);
 
+        // If ws-secret is not configured, treat all connections as authenticated
+        String secret = plugin.getConfig().getString("ws-secret", "");
+        if (secret.isEmpty()) {
+            info.authenticated = true;
+        } else {
+            // Schedule auth timeout: close if not authenticated within 5 seconds
+            plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                ClientInfo ci = clients.get(conn);
+                if (ci != null && !ci.authenticated) {
+                    plugin.getLogger().warning("Authentication timeout for " + ci.address);
+                    conn.close(4002, "Authentication timeout");
+                }
+            }, 100L); // 5 seconds = 100 ticks
+        }
+
         var connectListener = plugin.getConnectionStateListener();
         if (connectListener != null) {
             connectListener.onDjConnect(conn.getRemoteSocketAddress().toString());
@@ -129,6 +144,26 @@ public class VizWebSocketServer extends WebSocketServer {
     @Override
     public void onMessage(WebSocket conn, String message) {
         totalMessagesReceived.incrementAndGet();
+
+        // Enforce WebSocket authentication if ws-secret is configured
+        ClientInfo authInfo = clients.get(conn);
+        String wsSecret = plugin.getConfig().getString("ws-secret", "");
+        if (!wsSecret.isEmpty() && authInfo != null && !authInfo.authenticated) {
+            try {
+                JsonObject msg = JsonParser.parseString(message).getAsJsonObject();
+                if ("auth".equals(msg.has("type") ? msg.get("type").getAsString() : null)) {
+                    String token = msg.has("token") ? msg.get("token").getAsString() : "";
+                    if (wsSecret.equals(token)) {
+                        authInfo.authenticated = true;
+                        conn.send("{\"type\":\"auth_ok\"}");
+                        totalMessagesSent.incrementAndGet();
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+            conn.close(4001, "Authentication failed");
+            return;
+        }
 
         // Reject oversized messages to prevent memory exhaustion
         if (message.length() > MAX_MESSAGE_SIZE) {
@@ -466,10 +501,12 @@ public class VizWebSocketServer extends WebSocketServer {
     private static class ClientInfo {
         final String address;
         final long connectedAt;
+        volatile boolean authenticated;
 
         ClientInfo(String address) {
             this.address = address;
             this.connectedAt = System.currentTimeMillis();
+            this.authenticated = false;
         }
     }
 }
