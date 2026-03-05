@@ -1661,11 +1661,16 @@ class VJServer:
                 await websocket.close(4003, "Expected dj_auth or code_auth message")
                 return
 
-            # Check for duplicate connection (with lock)
+            # Check for duplicate connection and capacity (with lock)
+            MAX_DJ_CONNECTIONS = 10
             async with self._dj_lock:
                 if dj_id in self._djs:
                     logger.warning(f"DJ {dj_id} already connected, rejecting duplicate")
                     await websocket.close(4005, "Already connected")
+                    return
+
+                if len(self._djs) >= MAX_DJ_CONNECTIONS:
+                    await websocket.close(4003, "DJ connection limit reached")
                     return
 
                 # Check if DJ is using direct mode
@@ -2447,9 +2452,14 @@ class VJServer:
             with open(path, "r") as f:
                 profiles = json.load(f)
 
+            banners_dir = Path("configs/banners").resolve()
             for dj_id, profile in profiles.items():
                 if profile.get("has_image"):
-                    pixel_path = Path(f"configs/banners/{dj_id}_pixels.bin")
+                    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", dj_id)
+                    pixel_path = Path(f"configs/banners/{safe_id}_pixels.bin")
+                    if not pixel_path.resolve().is_relative_to(banners_dir):
+                        logger.warning("Blocked path traversal in banner for dj_id: %s", dj_id)
+                        continue
                     if pixel_path.exists():
                         import struct
 
@@ -2788,6 +2798,11 @@ class VJServer:
         }
         _cmd_rate_tokens = 10.0
         _cmd_rate_last_refill = time.time()
+
+        MAX_BROWSER_CLIENTS = 50
+        if len(self._broadcast_clients) >= MAX_BROWSER_CLIENTS:
+            await websocket.close(4003, "Connection limit reached")
+            return
 
         self._broadcast_clients.add(websocket)
         self._browser_connects += 1
@@ -3968,6 +3983,11 @@ class VJServer:
             ws = info["websocket"]
             if dj_id in self._djs:
                 logger.warning(f"DJ {dj_id} already in active list")
+                return
+
+            MAX_DJ_CONNECTIONS = 10
+            if len(self._djs) >= MAX_DJ_CONNECTIONS:
+                logger.warning(f"DJ connection limit reached, cannot approve {dj_id}")
                 return
 
             dj = DJConnection(
@@ -6214,12 +6234,12 @@ class VJServer:
         )
         logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
 
-        # Start browser broadcast server (10MB - stage block scan responses can be large)
+        # Start browser broadcast server (64KB — browsers only receive viz data)
         broadcast_server = await ws_serve(
             self._handle_browser_client,
             "0.0.0.0",
             self.broadcast_port,
-            max_size=10 * 1024 * 1024,
+            max_size=65_536,
         )
         logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
 

@@ -164,10 +164,16 @@ class LuaPattern(VisualizationPattern):
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 
         # Sandbox: remove dangerous globals before loading any pattern code
+        # NOTE: LuaRuntime is not thread-safe, so we cannot use a thread-based
+        # timeout for calculate(). If a pattern infinite-loops, it will block
+        # the event loop. TODO: investigate signal-based or instruction-count
+        # hooks for Lua execution timeout.
         self._lua.execute("""
             os = nil; io = nil; debug = nil; package = nil
             require = nil; load = nil; loadfile = nil; dofile = nil
             collectgarbage = nil; rawget = nil; rawset = nil
+            pcall = nil; xpcall = nil; rawequal = nil; rawlen = nil
+            string.dump = nil; string.rep = nil
         """)
 
         # Load lib.lua (prefer pre-loaded cache, fall back to disk)
