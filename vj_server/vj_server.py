@@ -4776,11 +4776,12 @@ class VJServer:
                 zs.bitmap_initialized = False
                 zs.bitmap_width = 0
                 zs.bitmap_height = 0
-                target_count = (
-                    explicit_count
-                    if explicit_count is not None
-                    else get_recommended_entity_count(str(pattern_name), zs.entity_count)
-                )
+                if explicit_count is not None:
+                    target_count = explicit_count
+                elif zs.pattern_name:
+                    target_count = zs.entity_count  # Keep current count
+                else:
+                    target_count = get_recommended_entity_count(str(pattern_name), zs.entity_count)
                 zs.entity_count = target_count
                 zs.config.entity_count = target_count
                 zs.pattern_name = str(pattern_name)
@@ -5280,11 +5281,16 @@ class VJServer:
             return
 
         old_count = zone_state.entity_count
-        target_count = (
-            max(1, int(explicit_entity_count))
-            if explicit_entity_count is not None
-            else get_recommended_entity_count(pattern_name, old_count)
-        )
+        if explicit_entity_count is not None:
+            target_count = max(1, int(explicit_entity_count))
+        elif zone_state.pattern_name:
+            # Zone already has a pattern — keep current entity count to avoid
+            # constant resize churn when auto-rotating between patterns with
+            # different recommended_entities values.
+            target_count = old_count
+        else:
+            # First pattern assignment — use the pattern's recommended count.
+            target_count = get_recommended_entity_count(pattern_name, old_count)
         if target_count != zone_state.entity_count:
             zone_state.entity_count = target_count
             zone_state.config.entity_count = target_count
