@@ -59,6 +59,11 @@ public class EffectsProcessor {
     private int edgeFlashColor = 0xFFFFFFFF;
     private int edgeFlashWidth = 2;
 
+    // ========== Trail / Persistence ==========
+    private boolean trailEnabled = false;
+    private double trailDecay = 0.85;          // 0 = no trail, 0.99 = long trails
+    private int[] trailPreviousFrame = new int[0];
+
     private int[] rgbSplitSnapshot = new int[0];
 
     /**
@@ -66,6 +71,25 @@ public class EffectsProcessor {
      * Modifies the buffer in-place.
      */
     public void process(BitmapFrameBuffer buffer, AudioState audio, double time) {
+        // 0. Trail persistence: blend previous frame into current
+        if (trailEnabled && trailPreviousFrame.length == buffer.getRawPixels().length) {
+            int[] pixels = buffer.getRawPixels();
+            float decay = (float) trailDecay;
+            for (int i = 0; i < pixels.length; i++) {
+                // Blend: output = max(current, previous * decay)
+                // Using LIGHTEN blend so trails don't dim the active pattern
+                int prev = trailPreviousFrame[i];
+                int pr = (int) (((prev >> 16) & 0xFF) * decay);
+                int pg = (int) (((prev >> 8) & 0xFF) * decay);
+                int pb = (int) ((prev & 0xFF) * decay);
+                int cr = (pixels[i] >> 16) & 0xFF;
+                int cg = (pixels[i] >> 8) & 0xFF;
+                int cb = pixels[i] & 0xFF;
+                pixels[i] = BitmapFrameBuffer.packARGB(255,
+                    Math.max(cr, pr), Math.max(cg, pg), Math.max(cb, pb));
+            }
+        }
+
         // Beat tracking
         if (audio != null && audio.isBeat()) {
             strobeBeatCount++;
@@ -136,6 +160,15 @@ public class EffectsProcessor {
         // 9. Global brightness (last — affects everything)
         if (brightness < 0.99) {
             applyBrightness(buffer, brightness);
+        }
+
+        // Snapshot for trail persistence (after all effects)
+        if (trailEnabled) {
+            int[] pixels = buffer.getRawPixels();
+            if (trailPreviousFrame.length != pixels.length) {
+                trailPreviousFrame = new int[pixels.length];
+            }
+            System.arraycopy(pixels, 0, trailPreviousFrame, 0, pixels.length);
         }
     }
 
@@ -232,6 +265,13 @@ public class EffectsProcessor {
     public boolean isEdgeFlashEnabled() { return edgeFlashEnabled; }
     public void setEdgeFlashColor(int argb) { this.edgeFlashColor = argb; }
     public void setEdgeFlashWidth(int pixels) { this.edgeFlashWidth = Math.max(1, Math.min(10, pixels)); }
+
+    // ========== Trail Controls ==========
+
+    public void setTrailEnabled(boolean enabled) { this.trailEnabled = enabled; }
+    public boolean isTrailEnabled() { return trailEnabled; }
+    public void setTrailDecay(double decay) { this.trailDecay = Math.max(0, Math.min(0.99, decay)); }
+    public double getTrailDecay() { return trailDecay; }
 
     // ========== Effect Implementations ==========
 
@@ -380,6 +420,9 @@ public class EffectsProcessor {
         bitCrushPixelSize = 1;
         edgeFlashEnabled = false;
         edgeFlashIntensity = 0;
+        trailEnabled = false;
+        trailDecay = 0.85;
+        trailPreviousFrame = new int[0];
         rgbSplitSnapshot = new int[0];
     }
 }
