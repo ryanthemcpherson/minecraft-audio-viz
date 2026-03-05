@@ -96,9 +96,10 @@ async def test_capacity_enforcement_with_disconnect(client: AsyncClient) -> None
     decoded = pyjwt.decode(token1, options={"verify_signature": False})
     dj_session_id = decoded["sub"]
 
-    # Disconnect DJ #1
+    # Disconnect DJ #1 (requires server auth)
     disc_resp = await client.post(
         f"/api/v1/disconnect/{dj_session_id}",
+        headers={"Authorization": "Bearer cap-key-1"},
     )
     assert disc_resp.status_code == 204
 

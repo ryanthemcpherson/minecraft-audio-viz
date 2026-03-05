@@ -20,6 +20,7 @@ from app.config import Settings, get_settings
 from app.database import get_session
 from app.models.db import DJSession, Show, VJServer
 from app.models.schemas import ConnectCodeResponse, ConnectResolveResponse
+from app.routers.servers import _authenticate_server
 from app.services.code_generator import normalise_code
 from app.services.jwt_service import create_token
 from app.services.metrics import incr as metrics_incr
@@ -286,9 +287,14 @@ async def _join_connect_code_inner(
 async def disconnect_dj(
     dj_session_id: uuid.UUID,
     request: Request,
+    server: "VJServer" = Depends(_authenticate_server),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Record DJ disconnect and decrement the show's current_djs counter."""
+    """Record DJ disconnect and decrement the show's current_djs counter.
+
+    Requires server API-key authentication. The session must belong to a show
+    owned by the authenticated server.
+    """
     metrics_incr("connect.disconnect.attempt")
     stmt = select(DJSession).where(
         DJSession.id == dj_session_id,
@@ -298,6 +304,12 @@ async def disconnect_dj(
     if dj_session_row is None:
         metrics_incr("connect.disconnect.noop")
         return Response(status_code=204)  # Already disconnected or not found — idempotent
+
+    # Verify the session belongs to a show owned by the authenticated server
+    show_stmt = select(Show).where(Show.id == dj_session_row.show_id)
+    show_row = (await session.execute(show_stmt)).scalar_one_or_none()
+    if show_row is None or show_row.server_id != server.id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this server")
 
     dj_session_row.disconnected_at = datetime.now(timezone.utc)
 
