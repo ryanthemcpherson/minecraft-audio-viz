@@ -47,6 +47,7 @@ services:
     environment:
       - MCAV_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcav}
       - MCAV_JWT_DEFAULT_EXPIRY_MINUTES=15
+      - MCAV_USER_JWT_SECRET=${MCAV_USER_JWT_SECRET:?JWT secret must be set}
       - MCAV_CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
       - PORT=8090
     depends_on:
