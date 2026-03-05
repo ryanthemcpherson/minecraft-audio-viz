@@ -5,12 +5,11 @@ import { check, type Update } from '@tauri-apps/plugin-updater';
 import ConnectCode from './components/ConnectCode';
 import AudioSourceSelect from './components/AudioSourceSelect';
 import ConnectForm from './components/ConnectForm';
+import TopBar from './components/TopBar';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
 import QueuePanel from './components/QueuePanel';
-import BeatIndicator from './components/BeatIndicator';
 import AuthModal from './components/AuthModal';
-import ProfileChip from './components/ProfileChip';
 import { useAuth } from './hooks/useAuth';
 import * as api from './lib/api';
 
@@ -700,25 +699,7 @@ function App() {
 
       {!status.connected ? (
         <div className="dashboard disconnected">
-          <div className="top-bar">
-            <input
-              type="text"
-              className="input dj-name-input"
-              value={djName}
-              onChange={e => setDjName(e.target.value)}
-              placeholder="DJ Name"
-              maxLength={32}
-            />
-            <div className="top-bar-right">
-              {auth.isSignedIn && auth.user ? (
-                <ProfileChip user={auth.user} onSignOut={auth.signOut} />
-              ) : (
-                <button className="btn-signin" onClick={() => setShowAuthModal(true)} type="button">
-                  Sign In
-                </button>
-              )}
-            </div>
-          </div>
+          <TopBar djName={djName} onDjNameChange={setDjName} showName={null} isBeat={false} isConnected={false} user={auth.user} isSignedIn={auth.isSignedIn} onSignOut={auth.signOut} onSignIn={() => setShowAuthModal(true)} />
 
           <ConnectForm
             connectCode={connectCode}
@@ -741,16 +722,7 @@ function App() {
         </div>
       ) : (
         <div className="dashboard connected">
-          <div className="top-bar">
-            <span className="dj-label">{djName}</span>
-            {showName && <span className="show-label">{showName}</span>}
-            <div className="top-bar-right">
-              {auth.isSignedIn && auth.user ? (
-                <ProfileChip user={auth.user} onSignOut={auth.signOut} />
-              ) : null}
-              <BeatIndicator active={isBeatForUI && status.connected} />
-            </div>
-          </div>
+          <TopBar djName={djName} showName={showName} isBeat={isBeatForUI && status.connected} isConnected={true} user={auth.user} isSignedIn={auth.isSignedIn} onSignOut={auth.signOut} onSignIn={() => setShowAuthModal(true)} />
 
           <div className="main-grid">
             <div className="col-left">
