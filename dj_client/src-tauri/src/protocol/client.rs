@@ -54,8 +54,8 @@ pub struct DjClientConfig {
     /// DJ key (for credential auth)
     pub dj_key: Option<String>,
 
-    /// Coordinator JWT token (passed to VJ server in code_auth message)
-    pub coordinator_token: Option<String>,
+    /// DJ session ID from coordinator (passed to VJ server in code_auth message for profile lookup)
+    pub dj_session_id: Option<String>,
 
     /// Reconnection attempts
     pub max_reconnect_attempts: u32,
@@ -76,7 +76,7 @@ impl Default for DjClientConfig {
             connect_code: None,
             dj_id: None,
             dj_key: None,
-            coordinator_token: None,
+            dj_session_id: None,
             max_reconnect_attempts: 10,
             reconnect_delay: 2.0,
             heartbeat_interval: 2.0,
@@ -223,7 +223,7 @@ impl DjClient {
             serde_json::to_string(&CodeAuthMessage::new(
                 code.clone(),
                 self.config.dj_name.clone(),
-                self.config.coordinator_token.clone(),
+                self.config.dj_session_id.clone(),
             ))
             .map_err(|e| ClientError::SendError(format!("Failed to serialize auth message: {}", e)))?
         } else if let (Some(id), Some(key)) = (&self.config.dj_id, &self.config.dj_key) {

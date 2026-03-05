@@ -150,7 +150,7 @@ async fn connect_with_code(
     server_host: String,
     server_port: u16,
     block_palette: Option<Vec<Option<String>>>,
-    coordinator_token: Option<String>,
+    dj_session_id: Option<String>,
 ) -> Result<(), String> {
     content_filter::validate_no_slurs(&dj_name, "DJ name")?;
 
@@ -159,7 +159,7 @@ async fn connect_with_code(
         server_port,
         dj_name: dj_name.clone(),
         connect_code: Some(code.clone()),
-        coordinator_token,
+        dj_session_id,
         ..Default::default()
     };
 

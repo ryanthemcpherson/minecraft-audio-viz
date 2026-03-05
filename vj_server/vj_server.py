@@ -17,7 +17,6 @@ Architecture:
 
 import argparse
 import asyncio
-import base64
 import bisect
 import http.server
 import json
@@ -1085,40 +1084,33 @@ class VJServer:
             "genres": dj.genres,
         }
 
-    async def _hydrate_dj_profile(self, dj: DJConnection, coordinator_token: str) -> None:
+    async def _hydrate_dj_profile(self, dj: DJConnection, dj_session_id: str) -> None:
         """Fetch DJ profile from coordinator and populate DJConnection fields.
 
-        Decodes the coordinator JWT (without signature verification — the
-        session ID is only used to call the coordinator's authenticated internal
-        API, so a forged ID would simply get a 404) to extract dj_session_id,
-        then fetches the profile. Never raises — logs warnings on failure.
+        Takes the dj_session_id directly (from the code_auth message) and
+        calls the coordinator's internal API. Never raises — logs warnings
+        on failure.
         """
         try:
-            payload_b64 = coordinator_token.split(".")[1]
-            payload_b64 += "=" * (4 - len(payload_b64) % 4)
-            payload = mjson.decode(base64.urlsafe_b64decode(payload_b64))
-            dj_session_id = payload.get("sub")
-
-            if dj_session_id:
-                profile = await asyncio.wait_for(
-                    self._coordinator.fetch_dj_profile(str(dj_session_id)),
-                    timeout=5.0,
+            profile = await asyncio.wait_for(
+                self._coordinator.fetch_dj_profile(dj_session_id),
+                timeout=5.0,
+            )
+            if profile:
+                dj.dj_name = profile.get("dj_name", dj.dj_name)
+                dj.avatar_url = profile.get("avatar_url")
+                dj.color_palette = profile.get("color_palette")
+                dj.block_palette = profile.get("block_palette")
+                dj.slug = profile.get("slug")
+                dj.bio = profile.get("bio")
+                dj.genres = profile.get("genres")
+                logger.info(
+                    "[DJ PROFILE] Loaded profile for %s: slug=%s, %d colors, %d blocks",
+                    dj.dj_name,
+                    dj.slug,
+                    len(dj.color_palette) if dj.color_palette else 0,
+                    len(dj.block_palette) if dj.block_palette else 0,
                 )
-                if profile:
-                    dj.dj_name = profile.get("dj_name", dj.dj_name)
-                    dj.avatar_url = profile.get("avatar_url")
-                    dj.color_palette = profile.get("color_palette")
-                    dj.block_palette = profile.get("block_palette")
-                    dj.slug = profile.get("slug")
-                    dj.bio = profile.get("bio")
-                    dj.genres = profile.get("genres")
-                    logger.info(
-                        "[DJ PROFILE] Loaded profile for %s: slug=%s, %d colors, %d blocks",
-                        dj.dj_name,
-                        dj.slug,
-                        len(dj.color_palette) if dj.color_palette else 0,
-                        len(dj.block_palette) if dj.block_palette else 0,
-                    )
         except Exception as exc:
             logger.warning("[DJ PROFILE] Failed to load profile for %s: %s", dj.dj_id, exc)
 
@@ -1439,7 +1431,7 @@ class VJServer:
                     "direct_mode": direct_mode,
                     "priority": priority,
                     "code": code,
-                    "coordinator_token": data.get("token"),  # Coordinator JWT for profile lookup
+                    "dj_session_id": data.get("dj_session_id"),  # For profile lookup
                 }
                 self._pending_djs[dj_id] = pending_info
 
@@ -1694,9 +1686,9 @@ class VJServer:
             self._dj_connects += 1
 
             # Fetch DJ profile from coordinator (non-blocking, best-effort)
-            coordinator_token = data.get("token")
-            if coordinator_token and self._coordinator:
-                await self._hydrate_dj_profile(dj, coordinator_token)
+            dj_session_id = data.get("dj_session_id")
+            if dj_session_id and self._coordinator:
+                await self._hydrate_dj_profile(dj, dj_session_id)
                 dj_name = dj.dj_name  # Update local var for auth_response
 
             # Build auth success response
@@ -4004,9 +3996,9 @@ class VJServer:
         logger.info(f"[DJ APPROVED] {info['dj_name']} ({dj_id})")
 
         # Fetch DJ profile from coordinator (non-blocking, best-effort)
-        coordinator_token = info.get("coordinator_token")
-        if coordinator_token and self._coordinator:
-            await self._hydrate_dj_profile(dj, coordinator_token)
+        dj_session_id = info.get("dj_session_id")
+        if dj_session_id and self._coordinator:
+            await self._hydrate_dj_profile(dj, dj_session_id)
 
         # Send auth_success to the DJ (same type as dj_auth path,
         # so the Rust client handles it via the existing ServerMessage enum)
