@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import EmailVerificationToken, PasswordResetToken, RefreshToken, User
 from app.services.password import hash_password, verify_password
 from app.services.user_jwt import create_refresh_token_value, create_user_token
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -210,7 +213,8 @@ async def login_discord(
     user = (await session.execute(stmt)).scalar_one_or_none()
 
     if user is None:
-        # Check if a user with this email already exists (link Discord to existing account)
+        # Check if a user with this email already exists
+        email_conflict = False
         if discord_email:
             existing_by_email = (
                 await session.execute(
@@ -218,27 +222,17 @@ async def login_discord(
                 )
             ).scalar_one_or_none()
             if existing_by_email is not None:
-                # Link Discord ID to the existing account
-                existing_by_email.discord_id = discord_id
-                existing_by_email.discord_username = discord_username
-                existing_by_email.email_verified = True
-                existing_by_email.last_login_at = datetime.now(timezone.utc)
-                if discord_avatar:
-                    existing_by_email.avatar_url = (
-                        f"https://cdn.discordapp.com/avatars/{discord_id}/{discord_avatar}.png"
-                    )
-                user = existing_by_email
-                await session.flush()
-
-                return await _issue_tokens(
-                    user=user,
-                    session=session,
-                    jwt_secret=jwt_secret,
-                    expiry_minutes=expiry_minutes,
-                    refresh_expiry_days=refresh_expiry_days,
-                    user_agent=user_agent,
-                    ip_address=ip_address,
+                # Existing account already has Discord linked — this shouldn't happen
+                # (would have been found by discord_id lookup above). Don't auto-merge;
+                # create the new Discord account without the conflicting email.
+                logger.warning(
+                    "Discord OAuth email conflict: discord_id=%s email=%s matches "
+                    "existing user_id=%s. Creating separate account without email.",
+                    discord_id,
+                    discord_email,
+                    existing_by_email.id,
                 )
+                email_conflict = True
 
         # New user — create (email verified by Discord)
         avatar_url = (
@@ -250,7 +244,7 @@ async def login_discord(
             id=uuid.uuid4(),
             discord_id=discord_id,
             discord_username=discord_username,
-            email=discord_email.lower().strip() if discord_email else None,
+            email=discord_email.lower().strip() if discord_email and not email_conflict else None,
             display_name=discord_username,
             avatar_url=avatar_url,
             email_verified=True,
@@ -302,7 +296,8 @@ async def login_google(
     user = (await session.execute(stmt)).scalar_one_or_none()
 
     if user is None:
-        # Check if a user with this email already exists (link Google to existing account)
+        # Check if a user with this email already exists
+        email_conflict = False
         if google_email:
             existing_by_email = (
                 await session.execute(
@@ -310,29 +305,22 @@ async def login_google(
                 )
             ).scalar_one_or_none()
             if existing_by_email is not None:
-                existing_by_email.google_id = google_id
-                existing_by_email.email_verified = True
-                existing_by_email.last_login_at = datetime.now(timezone.utc)
-                if google_picture:
-                    existing_by_email.avatar_url = google_picture
-                user = existing_by_email
-                await session.flush()
-
-                return await _issue_tokens(
-                    user=user,
-                    session=session,
-                    jwt_secret=jwt_secret,
-                    expiry_minutes=expiry_minutes,
-                    refresh_expiry_days=refresh_expiry_days,
-                    user_agent=user_agent,
-                    ip_address=ip_address,
+                # Don't auto-merge — create the new Google account without the
+                # conflicting email to prevent account takeover.
+                logger.warning(
+                    "Google OAuth email conflict: google_id=%s email=%s matches "
+                    "existing user_id=%s. Creating separate account without email.",
+                    google_id,
+                    google_email,
+                    existing_by_email.id,
                 )
+                email_conflict = True
 
         # New user — create (email verified by Google)
         user = User(
             id=uuid.uuid4(),
             google_id=google_id,
-            email=google_email.lower().strip() if google_email else None,
+            email=google_email.lower().strip() if google_email and not email_conflict else None,
             display_name=google_name or google_email or "User",
             avatar_url=google_picture,
             email_verified=True,
