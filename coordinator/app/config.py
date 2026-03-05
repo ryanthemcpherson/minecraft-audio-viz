@@ -58,7 +58,7 @@ class Settings(BaseSettings):
             'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
         )
 
-        env = os.environ.get("MCAV_ENV", "development").lower()
+        env = os.environ.get("MCAV_ENV", "production").lower()
         if env in ("production", "prod", "staging"):
             raise ValueError(f"Insecure JWT secret in {env}! {hint}")
 

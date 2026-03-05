@@ -121,7 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.exception_handler(Exception)
     async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Catch unhandled exceptions and return a clean JSON error response."""
-        env = os.environ.get("MCAV_ENV", "development").lower()
+        env = os.environ.get("MCAV_ENV", "production").lower()
         is_production = env in ("production", "prod", "staging")
 
         # Log the full traceback

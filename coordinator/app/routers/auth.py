@@ -955,12 +955,15 @@ async def logout(
     request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     """Revoke a specific refresh token, ending that session.  The token must
     belong to the authenticated user.  Returns 404 if not found.
     """
     # Verify the refresh token belongs to the authenticated user before revoking
-    token_hash = auth_service._hash_refresh_token(body.refresh_token)
+    token_hash = auth_service._hash_refresh_token(
+        body.refresh_token, secret=settings.user_jwt_secret
+    )
     stmt = select(RefreshTokenModel).where(
         RefreshTokenModel.token_hash == token_hash,
         RefreshTokenModel.user_id == user.id,
