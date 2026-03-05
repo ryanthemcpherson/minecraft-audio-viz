@@ -6,6 +6,7 @@ import ConnectCode from './components/ConnectCode';
 import AudioSourceSelect from './components/AudioSourceSelect';
 import ConnectForm from './components/ConnectForm';
 import TopBar from './components/TopBar';
+import PresetBar, { PRESETS } from './components/PresetBar';
 import FrequencyMeter from './components/FrequencyMeter';
 import StatusPanel from './components/StatusPanel';
 import QueuePanel from './components/QueuePanel';
@@ -90,7 +91,6 @@ function App() {
 
   // Audio preset state
   const [activePreset, setActivePreset] = useState(() => localStorage.getItem('mcav.preset') || 'auto');
-  const PRESETS = ['auto', 'edm', 'chill', 'rock', 'folk', 'hiphop', 'classical'];
 
   // Voice streaming state
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -727,16 +727,7 @@ function App() {
           <div className="main-grid">
             <div className="col-left">
               <FrequencyMeter audioRef={audioRef} />
-              <div className="preset-row">
-                {PRESETS.map(name => (
-                  <button
-                    key={name}
-                    className={`preset-chip ${activePreset === name ? 'active' : ''}`}
-                    onClick={() => handlePresetChange(name)}
-                    type="button"
-                  >{name}</button>
-                ))}
-              </div>
+              <PresetBar active={activePreset} onChange={handlePresetChange} />
             </div>
 
             <div className="col-right">
