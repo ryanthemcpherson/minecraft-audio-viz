@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from app.config import get_settings
 from app.services.rate_limiter import InMemoryRateLimiter
 
 # A single shared rate-limiter instance for the /api/v1/connect endpoint.
@@ -36,11 +37,41 @@ def get_write_limiter() -> InMemoryRateLimiter:
     return _write_limiter
 
 
+def _get_client_ip(request: Request) -> str:
+    """Extract the real client IP, respecting trusted proxy headers.
+
+    When ``request.client.host`` is in the configured ``trusted_proxies`` list,
+    reads ``X-Forwarded-For`` (rightmost untrusted IP) or ``X-Real-IP`` as
+    fallbacks before returning ``client.host``.
+    """
+    settings = get_settings()
+    raw_ip = request.client.host if request.client else "unknown"
+
+    if raw_ip not in settings.trusted_proxies:
+        return raw_ip
+
+    # X-Forwarded-For: client, proxy1, proxy2 — walk from the right to find
+    # the first IP not in trusted_proxies.
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        for ip in reversed(parts):
+            if ip not in settings.trusted_proxies:
+                return ip
+
+    # Fallback: X-Real-IP
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+
+    return raw_ip
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Apply per-IP rate limiting to public endpoints."""
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = _get_client_ip(request)
 
         # Rate-limit the public code-resolution endpoint
         if request.url.path.startswith("/api/v1/connect/"):
