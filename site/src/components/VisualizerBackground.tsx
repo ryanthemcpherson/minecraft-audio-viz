@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, useEffect, useState, useCallback } from "react";
+import { useRef, useMemo, useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
@@ -322,9 +322,23 @@ function VisualizerCanvas({ isVisible }: { isVisible: boolean }) {
 }
 
 // --- Exported component (rendered client-side only) ---
+const reducedMotionQuery = "(prefers-reduced-motion: reduce)";
+const subscribeReducedMotion = (cb: () => void) => {
+  const mq = window.matchMedia(reducedMotionQuery);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
+const getReducedMotion = () => window.matchMedia(reducedMotionQuery).matches;
+const getReducedMotionServer = () => false;
+
 export default function VisualizerBackground() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(true);
+  const prefersReducedMotion = useSyncExternalStore(
+    subscribeReducedMotion,
+    getReducedMotion,
+    getReducedMotionServer,
+  );
 
   useEffect(() => {
     const el = containerRef.current;
@@ -340,7 +354,7 @@ export default function VisualizerBackground() {
 
   return (
     <div ref={containerRef} className="absolute inset-0 z-0" aria-hidden="true">
-      <VisualizerCanvas isVisible={isVisible} />
+      {!prefersReducedMotion && <VisualizerCanvas isVisible={isVisible} />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useMemo, useCallback, Suspense } from "react";
+import React, { useRef, useMemo, useCallback, useEffect, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import type { RootState } from "@react-three/fiber";
 import * as THREE from "three";
@@ -40,6 +40,20 @@ export default function CarouselCard({ meta, index }: CarouselCardProps) {
   const pattern = useMemo(() => meta.createPattern(), [meta]);
   const phaseOffset = useMemo(() => index * 1.7 + index * 0.3, [index]);
 
+  const dpr = useMemo(() => {
+    if (typeof window === "undefined") return 1;
+    return Math.min(window.devicePixelRatio, 1.5);
+  }, []);
+
+  // Dispose WebGL context and pattern on unmount
+  useEffect(() => {
+    return () => {
+      glRef.current?.dispose();
+      glRef.current = null;
+      pattern.dispose?.();
+    };
+  }, [pattern]);
+
   const handleCreated = useCallback((state: RootState) => {
     glRef.current = state.gl;
     state.gl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -75,7 +89,7 @@ export default function CarouselCard({ meta, index }: CarouselCardProps) {
             }
           >
             <Canvas
-              dpr={typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 1.5) : 1}
+              dpr={dpr}
               gl={{
                 antialias: true,
                 alpha: true,

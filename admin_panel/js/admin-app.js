@@ -297,6 +297,10 @@ class AdminApp {
         this._frameCount = 0;
         this._lastFpsUpdate = Date.now();
 
+        // Hot-path elements (cached to avoid per-frame lookups)
+        this.elements.header = document.getElementById('header');
+        this.elements.previewStatFps = document.getElementById('preview-stat-fps');
+
         // Audio meter update throttling
         this._meterUpdatePending = false;
 
@@ -2432,7 +2436,7 @@ class AdminApp {
         for (let i = 0; i < 5; i++) {
             const value = Math.min(100, Math.max(0, bands[i] * 100));
             if (this.elements.meters[i]) {
-                this.elements.meters[i].style.width = `${value}%`;
+                this.elements.meters[i].style.transform = `scaleX(${value / 100})`;
             }
             if (this.elements.meterValues[i]) {
                 this.elements.meterValues[i].textContent = `${Math.round(value)}%`;
@@ -2442,7 +2446,7 @@ class AdminApp {
         // Master meter (average)
         const masterValue = this.state.amplitude * 100;
         if (this.elements.meterMaster) {
-            this.elements.meterMaster.style.width = `${masterValue}%`;
+            this.elements.meterMaster.style.transform = `scaleX(${masterValue / 100})`;
         }
         if (this.elements.meterMasterValue) {
             this.elements.meterMasterValue.textContent = `${Math.round(masterValue)}%`;
@@ -2455,8 +2459,8 @@ class AdminApp {
             el.classList.add('active');
             setTimeout(() => el.classList.remove('active'), 100);
 
-            // Beat-reactive header glow
-            const header = document.getElementById('header');
+            // Beat-reactive header glow (cached element)
+            const header = this.elements.header;
             if (header) {
                 header.classList.add('beat-pulse');
                 setTimeout(() => header.classList.remove('beat-pulse'), 120);
@@ -4118,6 +4122,9 @@ class AdminApp {
             this._previewScene.background = new THREE.Color(0x0a0a0f);
             this._previewScene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
 
+            // Reusable spherical for camera math (avoids per-frame allocation)
+            this._previewSpherical = new THREE.Spherical();
+
             // Camera
             const width = Math.max(1, wrapper.clientWidth);
             const height = Math.max(1, wrapper.clientHeight);
@@ -4654,7 +4661,7 @@ class AdminApp {
             const deltaX = e.clientX - previousMousePosition.x;
             const deltaY = e.clientY - previousMousePosition.y;
 
-            const spherical = new THREE.Spherical();
+            const spherical = this._previewSpherical;
             spherical.setFromVector3(this._previewCamera.position);
             spherical.theta -= deltaX * 0.01;
             spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + deltaY * 0.01));
@@ -4733,7 +4740,7 @@ class AdminApp {
                 this._previewFps = this._previewFrameCount;
                 this._previewFrameCount = 0;
                 this._previewLastFpsUpdate = now;
-                const fpsEl = document.getElementById('preview-stat-fps');
+                const fpsEl = this.elements.previewStatFps;
                 if (fpsEl) fpsEl.textContent = this._previewFps;
             }
 
@@ -4782,7 +4789,7 @@ class AdminApp {
 
             // Auto rotate camera
             if (this._previewAutoRotate && this._previewCamera) {
-                const spherical = new THREE.Spherical();
+                const spherical = this._previewSpherical;
                 spherical.setFromVector3(this._previewCamera.position);
                 spherical.theta += 0.0005;
                 this._previewCamera.position.setFromSpherical(spherical);
