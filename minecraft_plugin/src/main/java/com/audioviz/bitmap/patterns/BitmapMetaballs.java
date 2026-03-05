@@ -4,6 +4,8 @@ import com.audioviz.bitmap.BitmapFrameBuffer;
 import com.audioviz.bitmap.BitmapPattern;
 import com.audioviz.patterns.AudioState;
 
+import java.util.Random;
+
 /**
  * Lava lamp / mercury metaball effect.
  *
@@ -22,6 +24,7 @@ public class BitmapMetaballs extends BitmapPattern {
     private double[][] blobs;
     private int totalSlots;
     private double beatPulse = 0;
+    private final Random rng = new Random(7);
 
     public BitmapMetaballs() {
         super("bmp_metaballs", "Bitmap Metaballs",
@@ -33,11 +36,11 @@ public class BitmapMetaballs extends BitmapPattern {
         totalSlots = BASE_BLOB_COUNT + MAX_EXTRA_BLOBS;
         blobs = new double[totalSlots][7];
         for (int i = 0; i < BASE_BLOB_COUNT; i++) {
-            blobs[i][0] = 0.2 + Math.random() * 0.6; // x
-            blobs[i][1] = 0.2 + Math.random() * 0.6; // y
-            blobs[i][2] = (Math.random() - 0.5) * 0.3; // vx
-            blobs[i][3] = (Math.random() - 0.5) * 0.3; // vy
-            blobs[i][4] = 0.08 + Math.random() * 0.06; // radius
+            blobs[i][0] = 0.2 + rng.nextDouble() * 0.6; // x
+            blobs[i][1] = 0.2 + rng.nextDouble() * 0.6; // y
+            blobs[i][2] = (rng.nextDouble() - 0.5) * 0.3; // vx
+            blobs[i][3] = (rng.nextDouble() - 0.5) * 0.3; // vy
+            blobs[i][4] = 0.08 + rng.nextDouble() * 0.06; // radius
             blobs[i][5] = i % 5; // band index
             blobs[i][6] = -1; // permanent
         }
@@ -63,12 +66,12 @@ public class BitmapMetaballs extends BitmapPattern {
             // Spawn a temporary blob
             for (int i = BASE_BLOB_COUNT; i < totalSlots; i++) {
                 if (blobs[i][6] <= 0) {
-                    blobs[i][0] = 0.3 + Math.random() * 0.4;
-                    blobs[i][1] = 0.3 + Math.random() * 0.4;
-                    blobs[i][2] = (Math.random() - 0.5) * 0.5;
-                    blobs[i][3] = (Math.random() - 0.5) * 0.5;
+                    blobs[i][0] = 0.3 + rng.nextDouble() * 0.4;
+                    blobs[i][1] = 0.3 + rng.nextDouble() * 0.4;
+                    blobs[i][2] = (rng.nextDouble() - 0.5) * 0.5;
+                    blobs[i][3] = (rng.nextDouble() - 0.5) * 0.5;
                     blobs[i][4] = 0.06 + audio.getBeatIntensity() * 0.04;
-                    blobs[i][5] = (int) (Math.random() * 5);
+                    blobs[i][5] = rng.nextInt(5);
                     blobs[i][6] = 1.0; // life
                     break;
                 }

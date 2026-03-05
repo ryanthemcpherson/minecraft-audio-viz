@@ -36,10 +36,10 @@ public class BitmapVoronoiShatter extends BitmapPattern {
         totalSlots = BASE_SEEDS + MAX_SHATTER_SEEDS;
         seeds = new double[totalSlots][7];
         for (int i = 0; i < BASE_SEEDS; i++) {
-            seeds[i][0] = Math.random();       // x
-            seeds[i][1] = Math.random();       // y
-            seeds[i][2] = (Math.random() - 0.5) * 0.2; // vx
-            seeds[i][3] = (Math.random() - 0.5) * 0.2; // vy
+            seeds[i][0] = rng.nextDouble();       // x
+            seeds[i][1] = rng.nextDouble();       // y
+            seeds[i][2] = (rng.nextDouble() - 0.5) * 0.2; // vx
+            seeds[i][3] = (rng.nextDouble() - 0.5) * 0.2; // vy
             seeds[i][4] = i % 5;               // band index
             seeds[i][5] = i * (360.0 / BASE_SEEDS); // hue offset
             seeds[i][6] = -1;                  // permanent
