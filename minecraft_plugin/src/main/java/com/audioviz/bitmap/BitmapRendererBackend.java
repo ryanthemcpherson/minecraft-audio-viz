@@ -66,7 +66,7 @@ public class BitmapRendererBackend implements RendererBackend {
 
     public int[] initializeBitmapGrid(VisualizationZone zone) {
         int pixelsPerBlock = plugin.getConfig().getInt("bitmap.pixels_per_block", 3);
-        int maxPixels = plugin.getConfig().getInt("bitmap.max_pixels_per_zone", 500);
+        int maxPixels = plugin.getConfig().getInt("bitmap.max_pixels_per_zone", 2000);
 
         double zoneW = zone.getSize().getX();
         double zoneH = zone.getSize().getY();
@@ -91,7 +91,7 @@ public class BitmapRendererBackend implements RendererBackend {
         width = Math.max(1, Math.min(MAX_BITMAP_WIDTH, width));
         height = Math.max(1, Math.min(MAX_BITMAP_HEIGHT, height));
 
-        int maxPixels = plugin.getConfig().getInt("bitmap.max_pixels_per_zone", 500);
+        int maxPixels = plugin.getConfig().getInt("bitmap.max_pixels_per_zone", 2000);
         if (width * height > maxPixels) {
             plugin.getLogger().warning("Bitmap " + width + "x" + height + " = " +
                 (width * height) + " exceeds bitmap.max_pixels_per_zone (" + maxPixels +
