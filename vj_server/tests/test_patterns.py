@@ -170,6 +170,7 @@ def _lua_instruction_hooks_work() -> bool:
 
     LuaJIT's JIT compiler can skip debug.sethook instruction hooks for
     compiled traces, making infinite-loop tests hang instead of erroring.
+    Uses a bounded loop (not while-true) so the probe itself never hangs.
     """
     try:
         from lupa import LuaRuntime
@@ -177,6 +178,8 @@ def _lua_instruction_hooks_work() -> bool:
         return False
     try:
         lua = LuaRuntime(unpack_returned_tuples=True)
+        # Use a large but bounded loop — if hook fires and errors, it works.
+        # If it completes without error, hooks aren't firing.
         lua.execute("""
             _hook_fired = false
             debug.sethook(function()
@@ -185,10 +188,16 @@ def _lua_instruction_hooks_work() -> bool:
             end, "", 100)
         """)
         try:
-            lua.execute("while true do end")
+            lua.execute("for i = 1, 1000000 do end")
         except Exception:
             pass
-        return bool(lua.globals()["_hook_fired"])
+        result = bool(lua.globals()["_hook_fired"])
+        # Clean up: remove hook
+        try:
+            lua.execute("debug.sethook()")
+        except Exception:
+            pass
+        return result
     except Exception:
         return False
 
