@@ -625,6 +625,22 @@ public class MessageHandler {
             if (material == null || !material.isBlock()) material = Material.SEA_LANTERN;
 
             plugin.getEntityPoolManager().initializeBlockPool(zoneName, entityCount, material);
+
+            // Persist to stage config so changes survive MC restarts
+            Stage stage = plugin.getStageManager().findStageForZone(zoneName);
+            if (stage != null) {
+                StageZoneRole role = stage.getRoleForZone(zoneName);
+                if (role != null) {
+                    StageZoneConfig stageConfig = stage.getOrCreateConfig(role);
+                    if (config.has("entity_count")) {
+                        stageConfig.setEntityCount(entityCount);
+                    }
+                    if (config.has("block_type")) {
+                        stageConfig.setBlockType(blockType);
+                    }
+                    plugin.getStageManager().saveStages();
+                }
+            }
         }
 
         // Update display properties
