@@ -1,5 +1,8 @@
-# Root pyproject.toml - tool configuration for pre-commit hooks
+# Root pyproject.toml - workspace configuration and shared tool settings
 # Package configs are in vj_server/pyproject.toml and coordinator/pyproject.toml
+
+[tool.uv.workspace]
+members = ["vj_server"]
 
 [tool.ruff]
 line-length = 100
