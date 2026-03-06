@@ -5,7 +5,7 @@
 # VJServer.__init__ starts servers, we instead import and test the logic
 # through a lightweight approach: import the module and call the unbound method.
 import vj_server.vj_server as vj_mod
-from vj_server.vj_server import _clamp_finite, _sanitize_audio_frame
+from vj_server.models import _clamp_finite, _sanitize_audio_frame
 
 # ── conftest helpers ──
 from .conftest import FakeDJConnection, make_audio_frame
