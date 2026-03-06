@@ -199,3 +199,91 @@ class TestLuaTimeout:
         audio = self._make_audio()
         entities = pat.calculate_entities(audio)
         assert entities == [], "Infinite loop should return empty entities, not hang"
+
+    def test_auto_disable_after_consecutive_timeouts(self):
+        """After MAX_CONSECUTIVE_TIMEOUTS consecutive timeouts, the pattern
+        should auto-disable (set _calculate to None)."""
+        from vj_server.patterns import MAX_CONSECUTIVE_TIMEOUTS
+
+        config = PatternConfig(entity_count=16)
+        pat = LuaPattern("spectrum", config)
+        if pat._lua is None:
+            pytest.skip("lupa not installed")
+
+        # Inject infinite loop
+        pat._lua.execute("""
+            function calculate(audio, config, dt)
+                while true do end
+            end
+        """)
+        pat._calculate = pat._lua.globals()["calculate"]
+        pat._flat_mode = None
+
+        audio = self._make_audio()
+
+        # Each call should return empty (timeout caught)
+        for i in range(MAX_CONSECUTIVE_TIMEOUTS):
+            entities = pat.calculate_entities(audio)
+            assert entities == [], f"Call {i + 1} should return empty"
+
+        # After MAX_CONSECUTIVE_TIMEOUTS, pattern should be disabled
+        assert pat._calculate is None, "Pattern should be auto-disabled"
+
+    def test_successful_call_resets_timeout_counter(self):
+        """A successful calculate() should reset the consecutive timeout counter."""
+        config = PatternConfig(entity_count=8)
+        pat = LuaPattern("spectrum", config)
+        if pat._lua is None:
+            pytest.skip("lupa not installed")
+
+        audio = self._make_audio()
+
+        # Normal call should work
+        entities = pat.calculate_entities(audio)
+        assert len(entities) == 8
+
+        # Verify internal counter is 0 (no timeouts)
+        assert pat._consecutive_timeouts == 0
+
+    def test_success_between_timeouts_resets_counter(self):
+        """A successful call between timeouts should reset the counter,
+        preventing auto-disable from accumulating across non-consecutive failures."""
+        from vj_server.patterns import MAX_CONSECUTIVE_TIMEOUTS
+
+        config = PatternConfig(entity_count=8)
+        pat = LuaPattern("spectrum", config)
+        if pat._lua is None:
+            pytest.skip("lupa not installed")
+
+        audio = self._make_audio()
+        good_calculate = pat._calculate
+        good_flat_mode = pat._flat_mode
+
+        # Inject infinite loop
+        pat._lua.execute("""
+            function _bad_calc(audio, config, dt)
+                while true do end
+            end
+        """)
+        bad_calculate = pat._lua.globals()["_bad_calc"]
+
+        # Timeout twice (just under the limit)
+        pat._calculate = bad_calculate
+        pat._flat_mode = None
+        for _ in range(MAX_CONSECUTIVE_TIMEOUTS - 1):
+            pat.calculate_entities(audio)
+
+        assert pat._consecutive_timeouts == MAX_CONSECUTIVE_TIMEOUTS - 1
+
+        # One successful call should reset the counter
+        pat._calculate = good_calculate
+        pat._flat_mode = good_flat_mode
+        entities = pat.calculate_entities(audio)
+        assert len(entities) == 8
+        assert pat._consecutive_timeouts == 0
+
+        # Now timeout again — should NOT disable (counter was reset)
+        pat._calculate = bad_calculate
+        pat._flat_mode = None
+        pat.calculate_entities(audio)
+        assert pat._calculate is not None, "Should not be disabled after non-consecutive timeouts"

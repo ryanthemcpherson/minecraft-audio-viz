@@ -156,6 +156,7 @@ class LuaPattern(VisualizationPattern):
         self._bands_table = None
         self._config_table = None
         self._reset_hook = None
+        self._consecutive_timeouts = 0
         self._entity_state = {}
         self._position_deadband = 0.0015
         self._load_lua(pattern_key)
@@ -602,9 +603,27 @@ class LuaPattern(VisualizationPattern):
                 stale = [eid for eid in self._entity_state.keys() if eid not in seen_ids]
                 for eid in stale:
                     del self._entity_state[eid]
+            self._consecutive_timeouts = 0
             return entities
         except Exception as e:
-            logger.error(f"Lua pattern error ({self._pattern_key}): {e}")
+            is_timeout = "instruction limit" in str(e)
+            if is_timeout:
+                self._consecutive_timeouts += 1
+                logger.warning(
+                    "Lua pattern timeout (%s): %d/%d consecutive",
+                    self._pattern_key,
+                    self._consecutive_timeouts,
+                    MAX_CONSECUTIVE_TIMEOUTS,
+                )
+                if self._consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS:
+                    logger.error(
+                        "Lua pattern auto-disabled (%s): exceeded instruction limit %d consecutive times",
+                        self._pattern_key,
+                        MAX_CONSECUTIVE_TIMEOUTS,
+                    )
+                    self._calculate = None
+            else:
+                logger.error("Lua pattern error (%s): %s", self._pattern_key, e)
             return []
 
 
