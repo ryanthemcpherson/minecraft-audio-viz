@@ -144,7 +144,8 @@ Examples:
     args = parser.parse_args()
 
     # Import and run VJ server
-    from vj_server.vj_server import DJAuthConfig, VJServer
+    from vj_server.models import DJAuthConfig
+    from vj_server.vj_server import VJServer
 
     # Handle --hash-passwords: hash plaintext entries in-place and exit
     if args.hash_passwords:

@@ -146,7 +146,7 @@ class TestAudioFrameSanitization:
     """Supplement test_audio_pipeline.py with edge cases for required key rejection."""
 
     def test_completely_empty_frame(self):
-        from vj_server.vj_server import _sanitize_audio_frame
+        from vj_server.models import _sanitize_audio_frame
 
         result = _sanitize_audio_frame({})
         assert result["bands"] == [0.0] * 5
@@ -155,7 +155,7 @@ class TestAudioFrameSanitization:
         assert result["seq"] == 0
 
     def test_missing_peak_defaults(self):
-        from vj_server.vj_server import _sanitize_audio_frame
+        from vj_server.models import _sanitize_audio_frame
 
         frame = make_audio_frame()
         del frame["peak"]
@@ -163,7 +163,7 @@ class TestAudioFrameSanitization:
         assert result["peak"] == 0.0
 
     def test_missing_bpm_defaults_to_120(self):
-        from vj_server.vj_server import _sanitize_audio_frame
+        from vj_server.models import _sanitize_audio_frame
 
         frame = make_audio_frame()
         del frame["bpm"]
@@ -171,7 +171,7 @@ class TestAudioFrameSanitization:
         assert result["bpm"] == 120.0
 
     def test_none_values_for_all_numeric_fields(self):
-        from vj_server.vj_server import _sanitize_audio_frame
+        from vj_server.models import _sanitize_audio_frame
 
         frame = {
             "bands": None,
