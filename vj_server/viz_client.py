@@ -608,7 +608,11 @@ class VizClient:
     # ========== Bitmap Rendering Methods ==========
 
     async def init_bitmap(
-        self, zone_name: str, width: int = 32, height: int = 16, pattern: str = "bmp_spectrum"
+        self,
+        zone_name: str,
+        width: int | None = None,
+        height: int | None = None,
+        pattern: str = "bmp_spectrum",
     ) -> Optional[dict]:
         """Initialize a bitmap (LED wall) display in a zone.
 
@@ -617,24 +621,26 @@ class VizClient:
 
         Args:
             zone_name: Zone to initialize bitmap in.
-            width: Grid width in pixels (2-128).
-            height: Grid height in pixels (2-64).
+            width: Grid width in pixels (2-128). None = auto-size from zone geometry.
+            height: Grid height in pixels (2-64). None = auto-size from zone geometry.
             pattern: Initial pattern ID (e.g. 'bmp_spectrum', 'bmp_plasma').
 
         Returns:
             Response dict with grid info, or None on failure.
         """
-        response = await self.send(
-            {
-                "type": "init_bitmap",
-                "zone": zone_name,
-                "width": width,
-                "height": height,
-                "pattern": pattern,
-            }
-        )
+        msg: dict = {
+            "type": "init_bitmap",
+            "zone": zone_name,
+            "pattern": pattern,
+        }
+        if width is not None and height is not None:
+            msg["width"] = width
+            msg["height"] = height
+        response = await self.send(msg)
         if response and response.get("type") == "bitmap_initialized":
-            logger.info(f"Bitmap initialized: {zone_name} ({width}x{height}, pattern={pattern})")
+            w = response.get("width", width)
+            h = response.get("height", height)
+            logger.info(f"Bitmap initialized: {zone_name} ({w}x{h}, pattern={pattern})")
             return response
         return None
 
