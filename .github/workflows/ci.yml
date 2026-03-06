@@ -223,7 +223,7 @@ jobs:
           pip install -e "vj_server/[full]" pytest pytest-asyncio pytest-timeout
 
       - name: Run VJ server tests
-        run: pytest vj_server/tests -v --tb=short --timeout=60 -p no:cacheprovider
+        run: pytest vj_server/tests -v --tb=short --timeout=60 --timeout-method=signal -p no:cacheprovider
 
   # ---------------------------------------------------------------------------
   # DJ Client: Rust tests + web build
