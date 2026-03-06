@@ -186,6 +186,8 @@ class TestLuaTimeout:
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
+        if pat._reset_hook is None:
+            pytest.skip("instruction hook not available (LuaJIT?)")
 
         # Inject an infinite-loop calculate function
         pat._lua.execute("""
@@ -209,6 +211,8 @@ class TestLuaTimeout:
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
+        if pat._reset_hook is None:
+            pytest.skip("instruction hook not available (LuaJIT?)")
 
         # Inject infinite loop
         pat._lua.execute("""
@@ -254,6 +258,8 @@ class TestLuaTimeout:
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
+        if pat._reset_hook is None:
+            pytest.skip("instruction hook not available (LuaJIT?)")
 
         audio = self._make_audio()
         good_calculate = pat._calculate
