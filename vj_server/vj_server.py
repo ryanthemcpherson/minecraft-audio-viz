@@ -821,11 +821,11 @@ class VJServer:
         self._active_effects = {}  # Active effects with end times
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
         self._band_materials: List[Optional[str]] = [
-            None,
-            None,
-            None,
-            None,
-            None,
+            "SEA_LANTERN",  # Bass: cyan glow
+            "VERDANT_FROGLIGHT",  # Low-mid: green-blue glow
+            "PEARLESCENT_FROGLIGHT",  # Mid: purple glow
+            "SHROOMLIGHT",  # High-mid: orange glow
+            "GLOWSTONE",  # High: amber glow
         ]  # Per-band block overrides
         self._dj_palettes: Dict[str, list] = {}  # dj_id -> 5-element block palette
         self._dj_presets: Dict[str, str] = {}  # dj_id -> preset name (e.g. "edm")
