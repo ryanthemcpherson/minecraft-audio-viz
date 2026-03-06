@@ -16,8 +16,12 @@ public class BitmapFractalZoom extends BitmapPattern {
     private double centerX = -0.5;
     private double centerY = 0.0;
     private double beatPulse = 0;
+    private double lastCRe = -0.7;
+    private double lastCIm = 0.27;
 
     private static final int MAX_ITER = 24;
+    private static final int BOUNDARY_SEARCH_GRID = 15;
+    private static final int BOUNDARY_REFINE_STEPS = 8;
 
     public BitmapFractalZoom() {
         super("bmp_fractal", "Bitmap Fractal Zoom",
@@ -38,17 +42,25 @@ public class BitmapFractalZoom extends BitmapPattern {
         }
         beatPulse *= 0.9;
 
+        // Julia c parameter (time-varying)
+        double cRe = -0.7 + Math.sin(time * 0.15) * 0.15 + mid * 0.05;
+        double cIm = 0.27 + Math.cos(time * 0.12) * 0.1 + bass * 0.03;
+        lastCRe = cRe;
+        lastCIm = cIm;
+
         // Continuous zoom
         zoom *= 1.0 + (0.002 + bass * 0.01 + beatPulse * 0.05);
         if (zoom > 1000) {
-            zoom = 1.0; // Reset when too deep
-            centerX = -0.5 + Math.sin(time * 0.1) * 0.3;
-            centerY = Math.cos(time * 0.13) * 0.3;
+            zoom = 1.0;
+            // Pick a new center that sits on a fractal edge
+            double seedX = -0.5 + Math.sin(time * 0.1) * 0.3;
+            double seedY = Math.cos(time * 0.13) * 0.3;
+            double[] edgeCenter = findBoundaryPoint(seedX, seedY, cRe, cIm, 3.0);
+            centerX = edgeCenter[0];
+            centerY = edgeCenter[1];
         }
 
         // Precompute time-dependent values outside pixel loops
-        double cRe = -0.7 + Math.sin(time * 0.15) * 0.15 + mid * 0.05;
-        double cIm = 0.27 + Math.cos(time * 0.12) * 0.1 + bass * 0.03;
         double scale = 3.0 / zoom;
         double hueShift = time * 20;
         double halfW = w / 2.0;
@@ -81,6 +93,78 @@ public class BitmapFractalZoom extends BitmapPattern {
                 }
             }
         }
+    }
+
+    /**
+     * Find a point on the fractal boundary near the seed position.
+     * Samples a grid, picks the point closest to the boundary (iteration
+     * count near MAX_ITER/2), then refines with binary search between
+     * an interior and exterior neighbor.
+     */
+    private double[] findBoundaryPoint(double seedX, double seedY,
+                                        double cRe, double cIm, double viewScale) {
+        int targetIter = MAX_ITER / 2;
+        double bestX = seedX, bestY = seedY;
+        int bestDist = MAX_ITER;
+        double step = viewScale / BOUNDARY_SEARCH_GRID;
+
+        // Coarse grid search around seed
+        double interiorX = seedX, interiorY = seedY;
+        double exteriorX = seedX, exteriorY = seedY;
+        boolean foundInterior = false, foundExterior = false;
+
+        for (int gy = -BOUNDARY_SEARCH_GRID; gy <= BOUNDARY_SEARCH_GRID; gy++) {
+            for (int gx = -BOUNDARY_SEARCH_GRID; gx <= BOUNDARY_SEARCH_GRID; gx++) {
+                double px = seedX + gx * step;
+                double py = seedY + gy * step;
+                int iter = juliaIter(px, py, cRe, cIm);
+                int dist = Math.abs(iter - targetIter);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestX = px;
+                    bestY = py;
+                }
+                if (iter == MAX_ITER && !foundInterior) {
+                    interiorX = px; interiorY = py; foundInterior = true;
+                }
+                if (iter < MAX_ITER && iter > 0 && !foundExterior) {
+                    exteriorX = px; exteriorY = py; foundExterior = true;
+                }
+            }
+        }
+
+        // Refine with binary search between interior and exterior points
+        if (foundInterior && foundExterior) {
+            double ax = interiorX, ay = interiorY;
+            double bx = exteriorX, by = exteriorY;
+            for (int i = 0; i < BOUNDARY_REFINE_STEPS; i++) {
+                double mx = (ax + bx) * 0.5;
+                double my = (ay + by) * 0.5;
+                int iter = juliaIter(mx, my, cRe, cIm);
+                if (iter == MAX_ITER) {
+                    ax = mx; ay = my;
+                } else {
+                    bx = mx; by = my;
+                }
+            }
+            bestX = (ax + bx) * 0.5;
+            bestY = (ay + by) * 0.5;
+        }
+
+        return new double[]{bestX, bestY};
+    }
+
+    /** Compute Julia set iteration count for a single point. */
+    private int juliaIter(double x0, double y0, double cRe, double cIm) {
+        double zr = x0, zi = y0;
+        int iter = 0;
+        while (iter < MAX_ITER && zr * zr + zi * zi < 4.0) {
+            double tmp = zr * zr - zi * zi + cRe;
+            zi = 2.0 * zr * zi + cIm;
+            zr = tmp;
+            iter++;
+        }
+        return iter;
     }
 
     @Override
