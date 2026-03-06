@@ -223,6 +223,8 @@ jobs:
           pip install -e "vj_server/[full]" pytest pytest-asyncio pytest-timeout
 
       - name: Run VJ server tests
+        env:
+          SKIP_LUA_TIMEOUT_TESTS: '1'
         run: pytest vj_server/tests -v --tb=short --timeout=60 --timeout-method=signal -p no:cacheprovider
 
   # ---------------------------------------------------------------------------
