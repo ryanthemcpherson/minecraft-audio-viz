@@ -23,6 +23,13 @@ if sys.platform == "win32" and sys.version_info >= (3, 13):
 
 logger = logging.getLogger(__name__)
 
+# Lua execution timeout protection: instruction-count hook fires every
+# LUA_HOOK_INTERVAL instructions. If total count exceeds LUA_INSTRUCTION_LIMIT
+# in a single calculate() call, a Lua error is raised.
+LUA_HOOK_INTERVAL = 1000
+LUA_INSTRUCTION_LIMIT = 1_000_000
+MAX_CONSECUTIVE_TIMEOUTS = 3
+
 
 # ============================================================================
 # Data Classes
@@ -148,6 +155,7 @@ class LuaPattern(VisualizationPattern):
         self._audio_table = None
         self._bands_table = None
         self._config_table = None
+        self._reset_hook = None
         self._entity_state = {}
         self._position_deadband = 0.0015
         self._load_lua(pattern_key)
@@ -163,11 +171,28 @@ class LuaPattern(VisualizationPattern):
 
         self._lua = LuaRuntime(unpack_returned_tuples=True)
 
+        # Install instruction-count hook BEFORE sandbox removes debug.
+        # This prevents infinite-loop patterns from blocking the event loop.
+        # Uses do-end block so count/limit are upvalues, not globals —
+        # patterns cannot tamper with them even before debug is removed.
+        self._lua.execute(f"""
+            do
+                local _count = 0
+                local _limit = {LUA_INSTRUCTION_LIMIT}
+                debug.sethook(function()
+                    _count = _count + 1
+                    if _count > _limit then
+                        error("pattern exceeded instruction limit")
+                    end
+                end, "", {LUA_HOOK_INTERVAL})
+                function __reset_hook()
+                    _count = 0
+                end
+            end
+        """)
+        self._reset_hook = self._lua.globals()["__reset_hook"]
+
         # Sandbox: remove dangerous globals before loading any pattern code
-        # NOTE: LuaRuntime is not thread-safe, so we cannot use a thread-based
-        # timeout for calculate(). If a pattern infinite-loops, it will block
-        # the event loop. TODO: investigate signal-based or instruction-count
-        # hooks for Lua execution timeout.
         self._lua.execute("""
             os = nil; io = nil; debug = nil; package = nil
             require = nil; load = nil; loadfile = nil; dofile = nil
@@ -499,6 +524,10 @@ class LuaPattern(VisualizationPattern):
             config_table["beat_boost"] = self.config.beat_boost
             config_table["base_scale"] = self.config.base_scale
             config_table["max_scale"] = self.config.max_scale
+
+            # Reset instruction counter before each Lua call
+            if self._reset_hook is not None:
+                self._reset_hook()
 
             result = self._calculate(audio_table, config_table, dt)
 
