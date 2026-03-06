@@ -125,30 +125,30 @@ public class StageTemplate {
         BUILTIN_TEMPLATES.put("concert", builder("concert")
             .description("Standard concert with wings, skybox, and audience")
             .icon(Material.JUKEBOX)
-            .defaultEntityCount(16)
+            .defaultEntityCount(64)
             .role(StageZoneRole.MAIN_STAGE)
                 .configOverride(StageZoneRole.MAIN_STAGE, config -> {
-                    config.setEntityCount(32);
+                    config.setEntityCount(64);
                     config.setPattern("spectrum");
                 })
             .role(StageZoneRole.LEFT_WING)
                 .configOverride(StageZoneRole.LEFT_WING, config -> {
-                    config.setEntityCount(16);
+                    config.setEntityCount(64);
                     config.setPattern("laser");
                 })
             .role(StageZoneRole.RIGHT_WING)
                 .configOverride(StageZoneRole.RIGHT_WING, config -> {
-                    config.setEntityCount(16);
+                    config.setEntityCount(64);
                     config.setPattern("laser");
                 })
             .role(StageZoneRole.SKYBOX)
                 .configOverride(StageZoneRole.SKYBOX, config -> {
-                    config.setEntityCount(16);
+                    config.setEntityCount(64);
                     config.setPattern("aurora");
                 })
             .role(StageZoneRole.AUDIENCE)
                 .configOverride(StageZoneRole.AUDIENCE, config -> {
-                    config.setEntityCount(16);
+                    config.setEntityCount(64);
                     config.setPattern("wave");
                 })
             .build());
