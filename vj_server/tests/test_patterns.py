@@ -158,3 +158,44 @@ class TestPatternPadding:
         pat = LuaPattern("spectrum", config)
         entities = pat.calculate_entities(self._make_audio())
         assert entities == []
+
+
+# ============================================================================
+# Lua timeout protection
+# ============================================================================
+
+
+class TestLuaTimeout:
+    """Tests for instruction-count-based Lua timeout protection."""
+
+    def _make_audio(self) -> AudioState:
+        return AudioState(
+            bands=[0.5, 0.4, 0.3, 0.2, 0.1],
+            amplitude=0.5,
+            is_beat=False,
+            beat_intensity=0.0,
+            frame=1,
+            bpm=128.0,
+            beat_phase=0.0,
+        )
+
+    def test_infinite_loop_returns_empty_entities(self):
+        """A pattern with an infinite loop should be caught by the instruction
+        limit and return an empty entity list instead of hanging forever."""
+        config = PatternConfig(entity_count=16)
+        pat = LuaPattern("spectrum", config)
+        if pat._lua is None:
+            pytest.skip("lupa not installed")
+
+        # Inject an infinite-loop calculate function
+        pat._lua.execute("""
+            function calculate(audio, config, dt)
+                while true do end
+            end
+        """)
+        pat._calculate = pat._lua.globals()["calculate"]
+        pat._flat_mode = None  # Disable flat_pack wrapper
+
+        audio = self._make_audio()
+        entities = pat.calculate_entities(audio)
+        assert entities == [], "Infinite loop should return empty entities, not hang"
