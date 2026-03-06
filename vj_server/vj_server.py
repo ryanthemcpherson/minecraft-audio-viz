@@ -18,6 +18,7 @@ Architecture:
 import argparse
 import asyncio
 import bisect
+import json
 import logging
 import math
 import os
@@ -1071,50 +1072,63 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             self._link_task = asyncio.create_task(self._link_sync_loop())
             logger.info("Ableton Link sync loop started")
 
+        # Register signal handlers for graceful shutdown
+        import signal as _signal
+
+        loop = asyncio.get_running_loop()
+        for sig in (_signal.SIGINT, _signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, self.stop)
+            except NotImplementedError:
+                # Windows doesn't support add_signal_handler for all signals
+                pass
+
         try:
             await self._main_loop()
         finally:
-            # Cancel reconnect task
-            if self._mc_reconnect_task:
-                self._mc_reconnect_task.cancel()
-                try:
-                    await self._mc_reconnect_task
-                except asyncio.CancelledError:
-                    pass
-            # Cancel browser heartbeat task
-            if self._browser_heartbeat_task:
-                self._browser_heartbeat_task.cancel()
-                try:
-                    await self._browser_heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-            # Cancel pattern hot-reload task
-            if self._pattern_hot_reload_task:
-                self._pattern_hot_reload_task.cancel()
-                try:
-                    await self._pattern_hot_reload_task
-                except asyncio.CancelledError:
-                    pass
-            # Cancel coordinator heartbeat task
-            if self._coordinator_heartbeat_task:
-                self._coordinator_heartbeat_task.cancel()
-                try:
-                    await self._coordinator_heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-            # Cancel Link sync task
-            if self._link_task:
-                self._link_task.cancel()
-                try:
-                    await self._link_task
-                except asyncio.CancelledError:
-                    pass
-            # Disable Link
+            # Notify all connected clients of shutdown
+            logger.info("Shutting down VJ server...")
+            shutdown_msg = json.dumps({"type": "server_shutdown"})
+            drain_tasks = []
+            for ws in list(self._broadcast_clients):
+                drain_tasks.append(asyncio.wait_for(ws.send(shutdown_msg), timeout=2.0))
+            async with self._dj_lock:
+                for dj in self._djs.values():
+                    if dj.websocket:
+                        drain_tasks.append(
+                            asyncio.wait_for(dj.websocket.send(shutdown_msg), timeout=2.0)
+                        )
+            if drain_tasks:
+                await asyncio.gather(*drain_tasks, return_exceptions=True)
+                logger.info("Notified %d clients of shutdown", len(drain_tasks))
+
+            # Cancel all background tasks with timeout
+            bg_tasks = [
+                t
+                for t in [
+                    self._mc_reconnect_task,
+                    self._browser_heartbeat_task,
+                    getattr(self, "_pattern_hot_reload_task", None),
+                    self._coordinator_heartbeat_task,
+                    self._link_task,
+                    getattr(self, "_health_log_task", None),
+                ]
+                if t is not None and not t.done()
+            ]
+            for task in bg_tasks:
+                task.cancel()
+            if bg_tasks:
+                await asyncio.wait(bg_tasks, timeout=5.0)
+                logger.info("Cancelled %d background tasks", len(bg_tasks))
+
+            # Disable Ableton Link
             if self._link is not None:
                 try:
                     self._link.enabled = False
                 except Exception:
                     pass
+
+            # Close WebSocket servers
             dj_server.close()
             broadcast_server.close()
             if metrics_server:
@@ -1122,6 +1136,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 await metrics_server.wait_closed()
             await dj_server.wait_closed()
             await broadcast_server.wait_closed()
+            logger.info("VJ server shutdown complete")
 
     def stop(self):
         """Stop the server."""
