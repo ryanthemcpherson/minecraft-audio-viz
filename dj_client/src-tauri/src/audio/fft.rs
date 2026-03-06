@@ -810,11 +810,11 @@ mod tests {
     }
 
     #[test]
-    fn get_presets_returns_six_presets() {
+    fn get_presets_returns_all_presets() {
         let presets = get_presets();
-        assert_eq!(presets.len(), 6);
+        assert_eq!(presets.len(), 7);
         let names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["auto", "edm", "chill", "rock", "hiphop", "classical"]);
+        assert_eq!(names, ["auto", "edm", "chill", "rock", "hiphop", "folk", "classical"]);
     }
 
     #[test]

@@ -12,6 +12,7 @@ from typing import AsyncIterator
 
 # Prevent noisy warning from default insecure secret when app.main imports create_app().
 os.environ.setdefault("MCAV_USER_JWT_SECRET", "test-user-jwt-env-secret-for-pytest-32+chars")
+os.environ.setdefault("MCAV_ENV", "development")
 
 import pytest
 import pytest_asyncio
