@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcav-vj-server"
@@ -32,5 +32,6 @@ dev = [
     "pytest-timeout>=2.0",
 ]
 
-[tool.hatch.build.targets.wheel]
-packages = ["vj_server"]
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["vj_server*"]
