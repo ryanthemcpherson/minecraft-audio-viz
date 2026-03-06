@@ -165,6 +165,37 @@ class TestPatternPadding:
 # ============================================================================
 
 
+def _lua_instruction_hooks_work() -> bool:
+    """Probe whether the Lua runtime's instruction-count hooks actually fire.
+
+    LuaJIT's JIT compiler can skip debug.sethook instruction hooks for
+    compiled traces, making infinite-loop tests hang instead of erroring.
+    """
+    try:
+        from lupa import LuaRuntime
+    except ImportError:
+        return False
+    try:
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute("""
+            _hook_fired = false
+            debug.sethook(function()
+                _hook_fired = true
+                error("hook test")
+            end, "", 100)
+        """)
+        try:
+            lua.execute("while true do end")
+        except Exception:
+            pass
+        return bool(lua.globals()["_hook_fired"])
+    except Exception:
+        return False
+
+
+_HOOKS_WORK = _lua_instruction_hooks_work()
+
+
 class TestLuaTimeout:
     """Tests for instruction-count-based Lua timeout protection."""
 
@@ -179,6 +210,7 @@ class TestLuaTimeout:
             beat_phase=0.0,
         )
 
+    @pytest.mark.skipif(not _HOOKS_WORK, reason="Lua instruction hooks not supported (LuaJIT?)")
     def test_infinite_loop_returns_empty_entities(self):
         """A pattern with an infinite loop should be caught by the instruction
         limit and return an empty entity list instead of hanging forever."""
@@ -186,8 +218,6 @@ class TestLuaTimeout:
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
-        if pat._reset_hook is None:
-            pytest.skip("instruction hook not available (LuaJIT?)")
 
         # Inject an infinite-loop calculate function
         pat._lua.execute("""
@@ -202,6 +232,7 @@ class TestLuaTimeout:
         entities = pat.calculate_entities(audio)
         assert entities == [], "Infinite loop should return empty entities, not hang"
 
+    @pytest.mark.skipif(not _HOOKS_WORK, reason="Lua instruction hooks not supported (LuaJIT?)")
     def test_auto_disable_after_consecutive_timeouts(self):
         """After MAX_CONSECUTIVE_TIMEOUTS consecutive timeouts, the pattern
         should auto-disable (set _calculate to None)."""
@@ -211,8 +242,6 @@ class TestLuaTimeout:
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
-        if pat._reset_hook is None:
-            pytest.skip("instruction hook not available (LuaJIT?)")
 
         # Inject infinite loop
         pat._lua.execute("""
@@ -249,6 +278,7 @@ class TestLuaTimeout:
         # Verify internal counter is 0 (no timeouts)
         assert pat._consecutive_timeouts == 0
 
+    @pytest.mark.skipif(not _HOOKS_WORK, reason="Lua instruction hooks not supported (LuaJIT?)")
     def test_success_between_timeouts_resets_counter(self):
         """A successful call between timeouts should reset the counter,
         preventing auto-disable from accumulating across non-consecutive failures."""
@@ -258,8 +288,6 @@ class TestLuaTimeout:
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
-        if pat._reset_hook is None:
-            pytest.skip("instruction hook not available (LuaJIT?)")
 
         audio = self._make_audio()
         good_calculate = pat._calculate
