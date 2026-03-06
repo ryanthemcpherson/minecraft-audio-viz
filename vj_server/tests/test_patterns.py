@@ -1,5 +1,7 @@
 """Tests for the pattern engine and registry."""
 
+import os
+
 import pytest
 
 from vj_server.patterns import (
@@ -165,44 +167,7 @@ class TestPatternPadding:
 # ============================================================================
 
 
-def _lua_instruction_hooks_work() -> bool:
-    """Probe whether the Lua runtime's instruction-count hooks actually fire.
-
-    LuaJIT's JIT compiler can skip debug.sethook instruction hooks for
-    compiled traces, making infinite-loop tests hang instead of erroring.
-    Uses a bounded loop (not while-true) so the probe itself never hangs.
-    """
-    try:
-        from lupa import LuaRuntime
-    except ImportError:
-        return False
-    try:
-        lua = LuaRuntime(unpack_returned_tuples=True)
-        # Use a large but bounded loop — if hook fires and errors, it works.
-        # If it completes without error, hooks aren't firing.
-        lua.execute("""
-            _hook_fired = false
-            debug.sethook(function()
-                _hook_fired = true
-                error("hook test")
-            end, "", 100)
-        """)
-        try:
-            lua.execute("for i = 1, 1000000 do end")
-        except Exception:
-            pass
-        result = bool(lua.globals()["_hook_fired"])
-        # Clean up: remove hook
-        try:
-            lua.execute("debug.sethook()")
-        except Exception:
-            pass
-        return result
-    except Exception:
-        return False
-
-
-_HOOKS_WORK = _lua_instruction_hooks_work()
+_SKIP_TIMEOUT_TESTS = os.environ.get("SKIP_LUA_TIMEOUT_TESTS", "") == "1"
 
 
 class TestLuaTimeout:
@@ -219,7 +184,7 @@ class TestLuaTimeout:
             beat_phase=0.0,
         )
 
-    @pytest.mark.skipif(not _HOOKS_WORK, reason="Lua instruction hooks not supported (LuaJIT?)")
+    @pytest.mark.skipif(_SKIP_TIMEOUT_TESTS, reason="SKIP_LUA_TIMEOUT_TESTS=1")
     def test_infinite_loop_returns_empty_entities(self):
         """A pattern with an infinite loop should be caught by the instruction
         limit and return an empty entity list instead of hanging forever."""
@@ -241,7 +206,7 @@ class TestLuaTimeout:
         entities = pat.calculate_entities(audio)
         assert entities == [], "Infinite loop should return empty entities, not hang"
 
-    @pytest.mark.skipif(not _HOOKS_WORK, reason="Lua instruction hooks not supported (LuaJIT?)")
+    @pytest.mark.skipif(_SKIP_TIMEOUT_TESTS, reason="SKIP_LUA_TIMEOUT_TESTS=1")
     def test_auto_disable_after_consecutive_timeouts(self):
         """After MAX_CONSECUTIVE_TIMEOUTS consecutive timeouts, the pattern
         should auto-disable (set _calculate to None)."""
@@ -287,7 +252,7 @@ class TestLuaTimeout:
         # Verify internal counter is 0 (no timeouts)
         assert pat._consecutive_timeouts == 0
 
-    @pytest.mark.skipif(not _HOOKS_WORK, reason="Lua instruction hooks not supported (LuaJIT?)")
+    @pytest.mark.skipif(_SKIP_TIMEOUT_TESTS, reason="SKIP_LUA_TIMEOUT_TESTS=1")
     def test_success_between_timeouts_resets_counter(self):
         """A successful call between timeouts should reset the counter,
         preventing auto-disable from accumulating across non-consecutive failures."""
