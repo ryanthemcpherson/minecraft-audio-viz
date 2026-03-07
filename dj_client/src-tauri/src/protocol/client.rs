@@ -643,10 +643,10 @@ async fn handle_server_message(
             let mut s = state.lock();
             s.pending_pattern_change = Some(ps.pattern.clone());
             s.current_pattern = ps.pattern;
-            if let Some(ref config) = ps.config {
-                if let Some(count) = config.entity_count {
-                    s.mc_entity_count = Some(count);
-                }
+            if let Some(ref config) = ps.config
+                && let Some(count) = config.entity_count
+            {
+                s.mc_entity_count = Some(count);
             }
         }
         ServerMessage::ConfigSync(cfg) => {
@@ -666,9 +666,7 @@ async fn handle_server_message(
         ServerMessage::BandSensitivitySync(bs) => {
             if bs.sensitivity.len() >= 5 {
                 let mut arr = [1.0f32; 5];
-                for i in 0..5 {
-                    arr[i] = bs.sensitivity[i];
-                }
+                arr.copy_from_slice(&bs.sensitivity[..5]);
                 let mut s = state.lock();
                 s.band_sensitivity = arr;
                 s.pending_band_sensitivity = Some(arr);
@@ -698,15 +696,13 @@ async fn handle_server_message(
             if let Some(scripts) = route.pattern_scripts {
                 s.pending_pattern_scripts = Some(scripts);
             }
-            if let Some(ref sensitivity) = route.band_sensitivity {
-                if sensitivity.len() >= 5 {
-                    let mut arr = [1.0f32; 5];
-                    for i in 0..5 {
-                        arr[i] = sensitivity[i];
-                    }
-                    s.band_sensitivity = arr;
-                    s.pending_band_sensitivity = Some(arr);
-                }
+            if let Some(ref sensitivity) = route.band_sensitivity
+                && sensitivity.len() >= 5
+            {
+                let mut arr = [1.0f32; 5];
+                arr.copy_from_slice(&sensitivity[..5]);
+                s.band_sensitivity = arr;
+                s.pending_band_sensitivity = Some(arr);
             }
             if let Some(ref pattern) = route.current_pattern {
                 s.current_pattern = pattern.clone();

@@ -98,10 +98,10 @@ fn get_build_from_registry() -> Option<u32> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
-        if line.contains("CurrentBuildNumber") {
-            if let Some(val) = line.split_whitespace().last() {
-                return val.parse().ok();
-            }
+        if line.contains("CurrentBuildNumber")
+            && let Some(val) = line.split_whitespace().last()
+        {
+            return val.parse().ok();
         }
     }
     None
@@ -498,7 +498,7 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         pid, sample_rate, channels
     );
 
-    Ok((audio_client, sample_rate, channels as u16))
+    Ok((audio_client, sample_rate, channels))
 }
 
 /// Read audio packets from the process loopback IAudioClient.
