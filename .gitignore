@@ -137,7 +137,23 @@ coordinator/test.db
 # Tool caches
 .desloppify/
 .claude/skills/
+.claude/worktrees/
 pytest-cache-files-*/
+
+# Coverage artifacts
+.coverage
+htmlcov/
+
+# Additional env patterns
+.env.*
+!.env.example
+
+# Credentials
+*.pem
+*.key
+
+# Additional OS
+Desktop.ini
 
 # Community bot
 community_bot/.venv/
