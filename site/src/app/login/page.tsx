@@ -112,7 +112,7 @@ export default function LoginPage() {
       setAuth(res.access_token, res.refresh_token, res.user);
       router.push(res.user.onboarding_completed ? "/dashboard" : "/onboarding");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Unable to complete sign-in. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -272,7 +272,7 @@ export default function LoginPage() {
             disabled={loading}
             className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? "..." : "Log in"}
+            {loading ? "Logging in\u2026" : "Log in"}
           </button>
         </form>
 
@@ -338,7 +338,7 @@ export default function LoginPage() {
             disabled={loading}
             className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? "..." : "Create account"}
+            {loading ? "Creating account\u2026" : "Create account"}
           </button>
         </form>
 

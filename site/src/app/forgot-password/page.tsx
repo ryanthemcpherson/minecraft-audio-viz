@@ -19,7 +19,7 @@ export default function ForgotPasswordPage() {
       await requestPasswordReset(email);
       setSuccess(true);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Unable to send reset link. Please try again.");
     } finally {
       setLoading(false);
     }

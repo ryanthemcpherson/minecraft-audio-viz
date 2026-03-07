@@ -17,7 +17,7 @@ export default function NotFound() {
           href="/"
           className="inline-block rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
         >
-          Back to home
+          Return to MCAV
         </Link>
       </div>
     </div>

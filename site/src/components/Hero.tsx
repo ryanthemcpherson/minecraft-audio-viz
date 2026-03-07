@@ -26,7 +26,7 @@ export default function Hero() {
             href="/getting-started"
             className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-8 py-4 text-sm font-semibold text-white shadow-lg shadow-disc-cyan/20 transition-all hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110"
           >
-            Get Started
+            Start Building
             <svg
               width="16"
               height="16"
