@@ -772,7 +772,7 @@ function App() {
               onClick={handleToggleVoice}
               type="button"
             >
-              {voiceEnabled ? 'Voice Off' : 'Voice'}
+              {voiceEnabled ? 'Mute Voice' : 'Voice Chat'}
             </button>
             <button className="btn btn-disconnect" onClick={handleDisconnect}>
               Disconnect

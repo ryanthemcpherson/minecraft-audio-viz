@@ -99,7 +99,7 @@ export default function OnboardingPage() {
       await skipOnboarding(accessToken);
       router.push("/dashboard");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Unable to complete. Please try again.");
       setSubmitting(false);
     }
   }
@@ -122,7 +122,7 @@ export default function OnboardingPage() {
       setStep("server_owner_complete");
       setSubmitting(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Unable to create organization. Please try again.");
       setSubmitting(false);
     }
   }
@@ -140,7 +140,7 @@ export default function OnboardingPage() {
       setStep("team_member_complete");
       setSubmitting(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Unable to join organization. Please try again.");
       setSubmitting(false);
     }
   }
@@ -161,7 +161,7 @@ export default function OnboardingPage() {
       setCreatedProfileSlug(profile.slug ?? null);
       setStep("dj_complete");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Unable to create profile. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -188,7 +188,7 @@ export default function OnboardingPage() {
             <StepProgress current={0} />
 
             <h1 className="mb-2 text-center text-3xl font-bold">
-              <span className="text-disc-cyan">Welcome to MCAV</span>
+              <span className="text-disc-cyan">Set up your experience</span>
             </h1>
             <p className="mb-8 text-center text-text-secondary">
               How will you be using MCAV?

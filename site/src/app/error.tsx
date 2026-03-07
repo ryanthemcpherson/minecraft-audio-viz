@@ -13,10 +13,10 @@ export default function Error({
       <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
         <p className="mb-4 text-4xl">!</p>
         <h1 className="mb-2 text-xl font-semibold text-white">
-          Something went wrong
+          We hit a snag
         </h1>
         <p className="mb-6 text-sm text-text-secondary">
-          An unexpected error occurred. Please try again.
+          Something didn&apos;t load correctly. A retry usually fixes it.
         </p>
         <button
           onClick={reset}

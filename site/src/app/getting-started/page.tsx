@@ -695,7 +695,7 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                   </div>
                   <h3 className="font-bold mb-2">Pattern Gallery</h3>
                   <p className="text-sm text-text-secondary">
-                    Explore 55+ visualization patterns — spirals, auroras, galaxies, and more.
+                    Explore 40+ visualization patterns — spirals, auroras, galaxies, and more.
                   </p>
                 </a>
 

@@ -36,7 +36,7 @@ export default function DemoVideo() {
           {[
             { value: "21ms", label: "Latency" },
             { value: "5", label: "Frequency Bands" },
-            { value: "55+", label: "Patterns" },
+            { value: "40+", label: "Patterns" },
             { value: "60", label: "FPS Rendering" },
           ].map((stat) => (
             <div key={stat.label} className="text-center">
