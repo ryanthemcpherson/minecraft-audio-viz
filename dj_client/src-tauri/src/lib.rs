@@ -64,9 +64,6 @@ async fn connect_common(
     state_arc: Arc<Mutex<AppState>>,
     config: DjClientConfig,
     connect_code: Option<String>,
-    dj_name: String,
-    server_host: String,
-    server_port: u16,
     block_palette: Option<Vec<Option<String>>>,
 ) -> Result<(), String> {
     // If a previous bridge task is still running (e.g. reconnecting after
@@ -102,9 +99,9 @@ async fn connect_common(
     {
         let mut app_state = state_arc.lock();
         app_state.connect_code = connect_code;
-        app_state.dj_name = dj_name;
-        app_state.server_host = server_host;
-        app_state.server_port = server_port;
+        app_state.dj_name = config.dj_name.clone();
+        app_state.server_host = config.server_host.clone();
+        app_state.server_port = config.server_port;
     }
 
     // Create and connect client (async, no mutex held)
@@ -112,12 +109,11 @@ async fn connect_common(
     client.connect().await.map_err(|e| e.to_string())?;
 
     // Send block palette if provided
-    if let Some(palette) = block_palette {
-        if palette.iter().any(|m| m.is_some()) {
-            if let Err(e) = client.send_palette(palette).await {
-                log::warn!("Failed to send block palette: {}", e);
-            }
-        }
+    if let Some(palette) = block_palette
+        && palette.iter().any(|m| m.is_some())
+        && let Err(e) = client.send_palette(palette).await
+    {
+        log::warn!("Failed to send block palette: {}", e);
     }
 
     // Create shutdown channel for bridge task
@@ -143,6 +139,7 @@ async fn connect_common(
 }
 
 /// Connect to VJ server with connect code
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn connect_with_code(
     app_handle: AppHandle,
@@ -170,9 +167,6 @@ async fn connect_with_code(
         state.0.clone(),
         config,
         Some(code),
-        dj_name,
-        server_host,
-        server_port,
         block_palette,
     )
     .await
@@ -198,17 +192,7 @@ async fn connect_direct(
         ..Default::default()
     };
 
-    connect_common(
-        app_handle,
-        state.0.clone(),
-        config,
-        None,
-        dj_name,
-        server_host,
-        server_port,
-        None,
-    )
-    .await
+    connect_common(app_handle, state.0.clone(), config, None, None).await
 }
 
 /// Maximum number of automatic reconnection attempts before giving up.
@@ -286,7 +270,7 @@ async fn run_bridge(
 
                     // 2. Send audio frame if we have analysis data
                     // Hoist beat output vars for use in UI event emission (section 3)
-                    let mut out_is_beat = analysis.as_ref().map_or(false, |a| a.is_beat);
+                    let mut out_is_beat = analysis.as_ref().is_some_and(|a| a.is_beat);
                     let mut out_beat_intensity = analysis.as_ref().map_or(0.0, |a| a.beat_intensity);
                     if let Some(ref analysis) = analysis {
                         let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -359,8 +343,8 @@ async fn run_bridge(
                             app_state.voice_streamer.clone()
                         };
 
-                        if let Some(ref streamer) = voice_streamer {
-                            if streamer.is_enabled() {
+                        if let Some(ref streamer) = voice_streamer
+                            && streamer.is_enabled() {
                                 let frames = streamer.drain_frames();
                                 // Send at most 3 frames per tick (~48ms at 16ms ticks)
                                 // to avoid flooding the WebSocket
@@ -381,7 +365,6 @@ async fn run_bridge(
                                     }
                                 }
                             }
-                        }
                     }
 
                     // 3. Update connection state from DjClient (brief lock, no events)
@@ -394,17 +377,15 @@ async fn run_bridge(
 
                         // Check for preset_sync from server
                         let mut preset_event: Option<String> = None;
-                        if let Some(ref client) = app_state.client {
-                            if let Some(preset_name) = client.take_pending_preset() {
-                                if let Some(preset) = audio::get_preset(&preset_name) {
+                        if let Some(ref client) = app_state.client
+                            && let Some(preset_name) = client.take_pending_preset()
+                                && let Some(preset) = audio::get_preset(&preset_name) {
                                     if let Some(ref capture) = app_state.audio_capture {
                                         capture.analyzer().lock().apply_preset(&preset);
                                     }
                                     app_state.active_preset = preset.name.clone();
                                     preset_event = Some(preset.name.clone());
                                 }
-                            }
-                        }
 
                         // Consume pending pattern data from server
                         if let Some(ref client) = app_state.client {
@@ -412,11 +393,10 @@ async fn run_bridge(
                             if let Some(scripts) = client.take_pending_pattern_scripts() {
                                 let engine = pattern_engine.get_or_insert_with(patterns::PatternEngine::new);
                                 // Look for lib script first
-                                if let Some(lib_src) = scripts.get("lib") {
-                                    if let Err(e) = engine.load_lib(lib_src) {
+                                if let Some(lib_src) = scripts.get("lib")
+                                    && let Err(e) = engine.load_lib(lib_src) {
                                         log::warn!("Failed to load lib.lua: {}", e);
                                     }
-                                }
                                 for (name, src) in &scripts {
                                     if name != "lib" {
                                         engine.load_pattern(name, src);
@@ -426,29 +406,26 @@ async fn run_bridge(
                             }
 
                             // Switch pattern
-                            if let Some(pattern_name) = client.take_pending_pattern_change() {
-                                if let Some(ref mut engine) = pattern_engine {
-                                    if let Err(e) = engine.set_pattern(&pattern_name) {
+                            if let Some(pattern_name) = client.take_pending_pattern_change()
+                                && let Some(ref mut engine) = pattern_engine
+                                    && let Err(e) = engine.set_pattern(&pattern_name) {
                                         log::warn!("Failed to switch pattern: {}", e);
                                     }
-                                }
-                            }
 
                             // Update band sensitivity
-                            if let Some(sensitivity) = client.take_pending_band_sensitivity() {
-                                if let Some(ref mut engine) = pattern_engine {
+                            if let Some(sensitivity) = client.take_pending_band_sensitivity()
+                                && let Some(ref mut engine) = pattern_engine {
                                     engine.set_band_sensitivity(sensitivity);
                                 }
-                            }
 
                             // Update config (entity_count, zone)
-                            if let Some((entity_count, _zone)) = client.take_pending_config_change() {
-                                if let Some(ref mut engine) = pattern_engine {
-                                    let mut cfg = patterns::PatternConfig::default();
-                                    cfg.entity_count = entity_count;
-                                    engine.set_config(cfg);
+                            if let Some((entity_count, _zone)) = client.take_pending_config_change()
+                                && let Some(ref mut engine) = pattern_engine {
+                                    engine.set_config(patterns::PatternConfig {
+                                        entity_count,
+                                        ..Default::default()
+                                    });
                                 }
-                            }
                         }
 
                         // Consume pending DJ roster
@@ -611,7 +588,8 @@ async fn run_bridge(
         // Attempt to reconnect using stored config
         let reconnect_result = {
             let app_state = state_arc.lock();
-            let config = DjClientConfig {
+
+            DjClientConfig {
                 server_host: app_state.server_host.clone(),
                 server_port: app_state.server_port,
                 dj_name: app_state.dj_name.clone(),
@@ -623,8 +601,7 @@ async fn run_bridge(
                     None
                 },
                 ..Default::default()
-            };
-            config
+            }
         };
 
         let mut client = DjClient::new(reconnect_result);
@@ -962,13 +939,13 @@ fn set_preset(state: State<'_, AppStateWrapper>, name: String) -> Result<String,
     app_state.active_preset = preset.name.clone();
 
     // Send preferred preset to VJ server so it persists across DJ swaps
-    if let Some(tx) = app_state.client.as_ref().and_then(|c| c.get_tx_clone()) {
-        if let Ok(json) = serde_json::to_string(&serde_json::json!({
+    if let Some(tx) = app_state.client.as_ref().and_then(|c| c.get_tx_clone())
+        && let Ok(json) = serde_json::to_string(&serde_json::json!({
             "type": "set_my_preset",
             "preset": &preset.name
-        })) {
-            let _ = tx.try_send(Message::Text(json.into()));
-        }
+        }))
+    {
+        let _ = tx.try_send(Message::Text(json.into()));
     }
 
     Ok(preset.name)

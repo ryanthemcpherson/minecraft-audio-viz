@@ -39,6 +39,12 @@ pub struct PatternEngine {
     pattern_loaded: bool,
 }
 
+impl Default for PatternEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PatternEngine {
     pub fn new() -> Self {
         let lua = Lua::new();
