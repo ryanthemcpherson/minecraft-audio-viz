@@ -138,9 +138,23 @@ jobs:
         working-directory: minecraft_plugin
         run: ./mvnw package -q
 
-      - name: Run tests
+      - name: Run tests with coverage
         working-directory: minecraft_plugin
         run: ./mvnw test -q
+
+      - name: Generate JaCoCo coverage report
+        working-directory: minecraft_plugin
+        if: always()
+        run: ./mvnw jacoco:report -q
+
+      - name: Print coverage summary
+        working-directory: minecraft_plugin
+        if: always()
+        run: |
+          if [ -f target/site/jacoco/index.html ]; then
+            echo "### Java Coverage Report" >> $GITHUB_STEP_SUMMARY
+            echo "JaCoCo report generated at target/site/jacoco/" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ---------------------------------------------------------------------------
   # Next.js: site build + lint
@@ -165,6 +179,10 @@ jobs:
       - name: Lint
         working-directory: site
         run: npm run lint
+
+      - name: Run tests
+        working-directory: site
+        run: npm run test --if-present
 
       - name: Build
         working-directory: site
@@ -199,9 +217,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run coordinator tests
+      - name: Install pytest-cov
+        run: pip install pytest-cov
+
+      - name: Run coordinator tests with coverage
         working-directory: coordinator
-        run: pytest tests/ -v --tb=short -p no:cacheprovider
+        run: pytest tests/ -v --tb=short -p no:cacheprovider --cov=app --cov-report=term-missing --cov-fail-under=60
 
   # ---------------------------------------------------------------------------
   # VJ server: Python tests
@@ -220,12 +241,12 @@ jobs:
       - name: Install VJ dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e "vj_server/[full]" pytest pytest-asyncio pytest-timeout
+          pip install -e "vj_server/[full]" pytest pytest-asyncio pytest-timeout pytest-cov
 
-      - name: Run VJ server tests
+      - name: Run VJ server tests with coverage
         env:
           SKIP_LUA_TIMEOUT_TESTS: '1'
-        run: pytest vj_server/tests -v --tb=short --timeout=60 --timeout-method=signal -p no:cacheprovider
+        run: pytest vj_server/tests -v --tb=short --timeout=60 --timeout-method=signal -p no:cacheprovider --cov=vj_server --cov-report=term-missing --cov-fail-under=15
 
   # ---------------------------------------------------------------------------
   # DJ Client: Rust tests + web build
@@ -259,9 +280,13 @@ jobs:
         working-directory: dj_client
         run: npm run build
 
-      - name: Run DJ client tests
+      - name: Run DJ client frontend tests
         working-directory: dj_client
         run: npm test -- --watch=false
+
+      - name: Run Rust backend tests
+        working-directory: dj_client/src-tauri
+        run: cargo test
 
   # ---------------------------------------------------------------------------
   # Java: dependency verification (Gradle)
