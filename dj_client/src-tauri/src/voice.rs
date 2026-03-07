@@ -119,7 +119,9 @@ impl VoiceStreamer {
         };
         #[cfg(not(feature = "voice-opus"))]
         let codec = {
-            log::info!("Voice streaming using PCM (build with voice-opus feature for Opus encoding)");
+            log::info!(
+                "Voice streaming using PCM (build with voice-opus feature for Opus encoding)"
+            );
             "pcm".to_string()
         };
 
@@ -216,16 +218,13 @@ impl VoiceStreamer {
 
         // Extract complete 960-sample frames
         while inner.frame_buffer.len() >= VOICE_FRAME_SAMPLES {
-            let frame_samples: Vec<i16> =
-                inner.frame_buffer.drain(..VOICE_FRAME_SAMPLES).collect();
+            let frame_samples: Vec<i16> = inner.frame_buffer.drain(..VOICE_FRAME_SAMPLES).collect();
 
             // Encode frame: Opus if available, otherwise raw PCM bytes
             #[cfg(feature = "voice-opus")]
             let encoded = if let Some(ref mut encoder) = inner.opus_encoder {
                 match encoder.encode_vec(&frame_samples, 4000) {
-                    Ok(opus_bytes) => {
-                        base64::engine::general_purpose::STANDARD.encode(&opus_bytes)
-                    }
+                    Ok(opus_bytes) => base64::engine::general_purpose::STANDARD.encode(&opus_bytes),
                     Err(e) => {
                         log::warn!("Opus encode failed, sending PCM fallback: {}", e);
                         encode_pcm_frame(&frame_samples)

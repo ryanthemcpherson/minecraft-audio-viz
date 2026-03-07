@@ -4,12 +4,14 @@ use super::messages::*;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async_with_config, tungstenite::protocol::WebSocketConfig, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async_with_config, tungstenite::Message, tungstenite::protocol::WebSocketConfig,
+};
 
 /// Client errors
 #[derive(Error, Debug)]
@@ -198,7 +200,7 @@ impl DjClient {
         // Connect with message size limits to prevent memory exhaustion
         let mut ws_config = WebSocketConfig::default();
         ws_config.max_message_size = Some(1_048_576); // 1 MB
-        ws_config.max_frame_size = Some(1_048_576);   // 1 MB
+        ws_config.max_frame_size = Some(1_048_576); // 1 MB
         let ws_stream = tokio::time::timeout(
             Duration::from_secs(10),
             connect_async_with_config(&url, Some(ws_config), false),
@@ -225,7 +227,9 @@ impl DjClient {
                 self.config.dj_name.clone(),
                 self.config.dj_session_id.clone(),
             ))
-            .map_err(|e| ClientError::SendError(format!("Failed to serialize auth message: {}", e)))?
+            .map_err(|e| {
+                ClientError::SendError(format!("Failed to serialize auth message: {}", e))
+            })?
         } else if let (Some(id), Some(key)) = (&self.config.dj_id, &self.config.dj_key) {
             // Credential-based authentication
             serde_json::to_string(&DjAuthMessage::new(
@@ -233,7 +237,9 @@ impl DjClient {
                 key.clone(),
                 self.config.dj_name.clone(),
             ))
-            .map_err(|e| ClientError::SendError(format!("Failed to serialize auth message: {}", e)))?
+            .map_err(|e| {
+                ClientError::SendError(format!("Failed to serialize auth message: {}", e))
+            })?
         } else {
             return Err(ClientError::AuthenticationFailed(
                 "No credentials provided. Set a connect code or DJ ID/key in settings.".to_string(),
@@ -296,8 +302,12 @@ impl DjClient {
                                     .unwrap_or_default()
                                     .as_secs_f64();
                                 let response = ClockSyncResponse::new(now);
-                                let json = serde_json::to_string(&response)
-                                    .map_err(|e| ClientError::SendError(format!("Failed to serialize clock sync: {}", e)))?;
+                                let json = serde_json::to_string(&response).map_err(|e| {
+                                    ClientError::SendError(format!(
+                                        "Failed to serialize clock sync: {}",
+                                        e
+                                    ))
+                                })?;
                                 write
                                     .send(Message::Text(json.into()))
                                     .await
@@ -378,10 +388,18 @@ impl DjClient {
                                 // Extract message type for logging without full payload
                                 let msg_type = serde_json::from_str::<serde_json::Value>(text)
                                     .ok()
-                                    .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from));
+                                    .and_then(|v| {
+                                        v.get("type").and_then(|t| t.as_str()).map(String::from)
+                                    });
                                 match msg_type {
-                                    Some(t) => log::debug!("Ignoring unhandled server message type '{}': {}", t, e),
-                                    None => log::warn!("Received malformed JSON from server: {}", e),
+                                    Some(t) => log::debug!(
+                                        "Ignoring unhandled server message type '{}': {}",
+                                        t,
+                                        e
+                                    ),
+                                    None => {
+                                        log::warn!("Received malformed JSON from server: {}", e)
+                                    }
                                 }
                             }
                         }
@@ -658,11 +676,7 @@ async fn handle_server_message(
             }
         }
         ServerMessage::AudioSettingSync(as_msg) => {
-            log::info!(
-                "Audio setting sync: {} = {}",
-                as_msg.setting,
-                as_msg.value
-            );
+            log::info!("Audio setting sync: {} = {}", as_msg.setting, as_msg.value);
             // Audio settings are applied to the FFT analyzer via the bridge task
         }
         ServerMessage::StreamRoute(route) => {
@@ -674,9 +688,12 @@ async fn handle_server_message(
             s.mc_host = route.minecraft_host;
             s.mc_port = route.minecraft_port;
             s.mc_zone = route.zone;
-            s.mc_entity_count = route
-                .entity_count
-                .or_else(|| route.pattern_config.as_ref().and_then(|cfg| cfg.entity_count));
+            s.mc_entity_count = route.entity_count.or_else(|| {
+                route
+                    .pattern_config
+                    .as_ref()
+                    .and_then(|cfg| cfg.entity_count)
+            });
             // Store pattern scripts for engine initialization
             if let Some(scripts) = route.pattern_scripts {
                 s.pending_pattern_scripts = Some(scripts);
