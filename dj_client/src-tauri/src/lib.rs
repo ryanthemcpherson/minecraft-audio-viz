@@ -20,12 +20,12 @@ use state::AppState;
 use voice::{VoiceStatus, VoiceStreamer};
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, State};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -87,7 +87,9 @@ async fn connect_common(
         if let Some(handle) = old_handle {
             match tokio::time::timeout(Duration::from_millis(500), handle).await {
                 Ok(_) => log::info!("Old bridge task stopped cleanly"),
-                Err(_) => log::warn!("Old bridge task did not stop within 500ms, proceeding anyway"),
+                Err(_) => {
+                    log::warn!("Old bridge task did not stop within 500ms, proceeding anyway")
+                }
             }
         }
         // Clean up old client
@@ -661,8 +663,9 @@ async fn start_capture(
         voice_streamer.set_enabled(app_state.voice_config.enabled);
     }
 
-    let capture = AudioCaptureHandle::new_with_voice(source_id.clone(), Some(voice_streamer.clone()))
-        .map_err(|e| e.to_string())?;
+    let capture =
+        AudioCaptureHandle::new_with_voice(source_id.clone(), Some(voice_streamer.clone()))
+            .map_err(|e| e.to_string())?;
 
     let mut app_state = state.0.lock();
 
@@ -682,7 +685,10 @@ async fn start_capture(
         tokio::time::sleep(Duration::from_millis(500)).await;
         let mode = {
             let app_state = state_for_mode.lock();
-            app_state.audio_capture.as_ref().map(|c| c.get_capture_mode())
+            app_state
+                .audio_capture
+                .as_ref()
+                .map(|c| c.get_capture_mode())
         };
         if let Some(mode) = mode {
             let _ = app_handle.emit("capture-mode", &mode);
@@ -732,8 +738,9 @@ async fn change_audio_source(
     }
 
     // Start new capture
-    let capture = AudioCaptureHandle::new_with_voice(source_id.clone(), Some(voice_streamer.clone()))
-        .map_err(|e| e.to_string())?;
+    let capture =
+        AudioCaptureHandle::new_with_voice(source_id.clone(), Some(voice_streamer.clone()))
+            .map_err(|e| e.to_string())?;
 
     let mut app_state = state.0.lock();
 
@@ -753,7 +760,10 @@ async fn change_audio_source(
         tokio::time::sleep(Duration::from_millis(500)).await;
         let mode = {
             let app_state = state_for_mode.lock();
-            app_state.audio_capture.as_ref().map(|c| c.get_capture_mode())
+            app_state
+                .audio_capture
+                .as_ref()
+                .map(|c| c.get_capture_mode())
         };
         if let Some(mode) = mode {
             let _ = app_handle.emit("capture-mode", &mode);
@@ -775,7 +785,10 @@ pub struct CaptureStatus {
 #[tauri::command]
 fn get_capture_status(state: State<'_, AppStateWrapper>) -> CaptureStatus {
     let app_state = state.0.lock();
-    let capture_mode = app_state.audio_capture.as_ref().map(|c| c.get_capture_mode());
+    let capture_mode = app_state
+        .audio_capture
+        .as_ref()
+        .map(|c| c.get_capture_mode());
     CaptureStatus {
         active: app_state.audio_capture.is_some(),
         source_id: app_state.audio_source_id.clone(),
@@ -852,10 +865,7 @@ async fn set_voice_streaming(
         app_state.voice_config.enabled = enabled;
 
         let streamer = app_state.voice_streamer.clone();
-        let tx = app_state
-            .client
-            .as_ref()
-            .and_then(|c| c.get_tx_clone());
+        let tx = app_state.client.as_ref().and_then(|c| c.get_tx_clone());
         let config = app_state.voice_config.clone();
         (streamer, tx, config)
     };
@@ -906,10 +916,7 @@ async fn set_voice_config(
         app_state.voice_config.channel_type = channel_type.clone();
         app_state.voice_config.distance = distance;
 
-        app_state
-            .client
-            .as_ref()
-            .and_then(|c| c.get_tx_clone())
+        app_state.client.as_ref().and_then(|c| c.get_tx_clone())
     };
 
     // Send updated voice_config to server if connected
@@ -1070,46 +1077,38 @@ pub fn run() {
         .setup(|app| {
             // Create system tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
-            let disconnect_item = MenuItem::with_id(app, "disconnect", "Disconnect", true, None::<&str>)?;
+            let disconnect_item =
+                MenuItem::with_id(app, "disconnect", "Disconnect", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-            let menu = Menu::with_items(
-                app,
-                &[
-                    &show_item,
-                    &disconnect_item,
-                    &quit_item,
-                ],
-            )?;
+            let menu = Menu::with_items(app, &[&show_item, &disconnect_item, &quit_item])?;
 
             // Create system tray icon
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("MCAV DJ - Disconnected")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        "disconnect" => {
-                            let state = app.state::<AppStateWrapper>();
-                            let is_connected = state.0.lock().status.connected;
-                            if is_connected {
-                                let app_clone = app.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    let _ = disconnect(app_clone.state::<AppStateWrapper>()).await;
-                                });
-                            }
-                        }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
+                    "disconnect" => {
+                        let state = app.state::<AppStateWrapper>();
+                        let is_connected = state.0.lock().status.connected;
+                        if is_connected {
+                            let app_clone = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = disconnect(app_clone.state::<AppStateWrapper>()).await;
+                            });
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     // Double-click to show window

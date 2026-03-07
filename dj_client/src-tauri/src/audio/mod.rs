@@ -7,8 +7,8 @@ mod sources;
 mod platform;
 
 pub use capture::{AnalysisResult, AudioCaptureHandle, CaptureMode};
-pub use fft::{get_preset, get_presets, AudioPreset, BassLane, FftAnalyzer};
-pub use sources::{list_sources, AudioSource};
+pub use fft::{AudioPreset, BassLane, FftAnalyzer, get_preset, get_presets};
+pub use sources::{AudioSource, list_sources};
 
 /// Audio processing configuration
 #[derive(Debug, Clone)]

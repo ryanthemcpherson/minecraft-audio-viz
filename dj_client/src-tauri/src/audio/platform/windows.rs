@@ -10,42 +10,39 @@ use crate::audio::sources::{AudioSource, SourceType};
 use crate::voice::VoiceStreamer;
 
 use parking_lot::Mutex;
-use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
+use std::sync::mpsc as std_mpsc;
 use std::thread;
 
-use windows::core::{Interface, HRESULT};
 use windows::Win32::Foundation::{CloseHandle, E_FAIL, S_OK};
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, ActivateAudioInterfaceAsync, AudioSessionStateActive,
-    IAudioCaptureClient, IAudioClient, IAudioSessionControl, IAudioSessionControl2,
-    IAudioSessionEnumerator, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
-    AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
-    AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_LOOPBACK,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IActivateAudioInterfaceAsyncOperation,
-    IActivateAudioInterfaceCompletionHandler,
-    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
-    WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
+    AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
+    ActivateAudioInterfaceAsync, AudioSessionStateActive, IActivateAudioInterfaceAsyncOperation,
+    IActivateAudioInterfaceCompletionHandler, IAudioCaptureClient, IAudioClient,
+    IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionManager2,
+    IMMDeviceEnumerator, MMDeviceEnumerator, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
+    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
+    WAVEFORMATEXTENSIBLE_0, eConsole, eRender,
 };
 use windows::Win32::Media::KernelStreaming::{
     SPEAKER_FRONT_LEFT, SPEAKER_FRONT_RIGHT, WAVE_FORMAT_EXTENSIBLE,
 };
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
-    BLOB, IAgileObject,
-};
 use windows::Win32::System::Com::StructuredStorage::{
     PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+};
+use windows::Win32::System::Com::{
+    BLOB, CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    IAgileObject,
 };
 use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
 use windows::Win32::System::SystemInformation::GetVersionExW;
 use windows::Win32::System::Threading::{
-    CreateEventW, OpenProcess, SetEvent, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    CreateEventW, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, SetEvent, WaitForSingleObject,
 };
 use windows::Win32::System::Variant::VT_BLOB;
+use windows::core::{HRESULT, Interface};
 
 /// Minimum Windows build number that supports Process Loopback API
 const MIN_PROCESS_LOOPBACK_BUILD: u32 = 20348;
@@ -74,8 +71,10 @@ pub fn supports_process_loopback() -> bool {
     }
     // Fall back to GetVersionExW
     unsafe {
-        let mut osvi = std::mem::zeroed::<windows::Win32::System::SystemInformation::OSVERSIONINFOW>();
-        osvi.dwOSVersionInfoSize = std::mem::size_of::<windows::Win32::System::SystemInformation::OSVERSIONINFOW>() as u32;
+        let mut osvi =
+            std::mem::zeroed::<windows::Win32::System::SystemInformation::OSVERSIONINFOW>();
+        osvi.dwOSVersionInfoSize =
+            std::mem::size_of::<windows::Win32::System::SystemInformation::OSVERSIONINFOW>() as u32;
         if GetVersionExW(&mut osvi).is_ok() {
             let build = osvi.dwBuildNumber;
             log::info!("Windows build number (GetVersionExW): {}", build);
@@ -149,7 +148,9 @@ unsafe extern "system" fn ch_query_interface(
         || *iid == windows::core::IUnknown::IID
         || *iid == IAgileObject::IID
     {
-        (*this).ref_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        (*this)
+            .ref_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         *ppv = this as *mut std::ffi::c_void;
         S_OK
     } else {
@@ -159,11 +160,16 @@ unsafe extern "system" fn ch_query_interface(
 }
 
 unsafe extern "system" fn ch_add_ref(this: *mut CompletionHandler) -> u32 {
-    (*this).ref_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    (*this)
+        .ref_count
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        + 1
 }
 
 unsafe extern "system" fn ch_release(this: *mut CompletionHandler) -> u32 {
-    let prev = (*this).ref_count.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    let prev = (*this)
+        .ref_count
+        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     if prev == 1 {
         // Last reference; drop the allocation
         let _ = Box::from_raw(this);
@@ -189,9 +195,7 @@ static COMPLETION_HANDLER_VTBL: CompletionHandlerVtbl = CompletionHandlerVtbl {
 };
 
 /// Create a completion handler that signals the given event.
-unsafe fn create_completion_handler(
-    event: HANDLE,
-) -> IActivateAudioInterfaceCompletionHandler {
+unsafe fn create_completion_handler(event: HANDLE) -> IActivateAudioInterfaceCompletionHandler {
     let handler = Box::new(CompletionHandler {
         vtbl: &COMPLETION_HANDLER_VTBL,
         ref_count: std::sync::atomic::AtomicU32::new(1),
@@ -256,7 +260,10 @@ pub fn start_process_loopback(
                 } else if hr.0 == 1 {
                     eprintln!("[process-loopback] COM already MTA (S_FALSE)");
                 } else {
-                    eprintln!("[process-loopback] COM MTA init FAILED: HRESULT 0x{:08X}", hr.0 as u32);
+                    eprintln!(
+                        "[process-loopback] COM MTA init FAILED: HRESULT 0x{:08X}",
+                        hr.0 as u32
+                    );
                     let _ = init_tx.send(Err(format!(
                         "COM MTA initialization failed: HRESULT 0x{:08X}",
                         hr.0 as u32
@@ -274,7 +281,9 @@ pub fn start_process_loopback(
                     }
                     Err(e) => {
                         let _ = init_tx.send(Err(e));
-                        unsafe { CoUninitialize(); }
+                        unsafe {
+                            CoUninitialize();
+                        }
                         return;
                     }
                 };
@@ -318,8 +327,8 @@ pub fn start_process_loopback(
 unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16), String> {
     // COM must already be initialized as MTA by the caller (start_process_loopback).
 
-    let event = CreateEventW(None, true, false, None)
-        .map_err(|e| format!("CreateEvent failed: {}", e))?;
+    let event =
+        CreateEventW(None, true, false, None).map_err(|e| format!("CreateEvent failed: {}", e))?;
 
     // Build activation parameters
     let mut activation_params = AUDIOCLIENT_ACTIVATION_PARAMS {
@@ -372,11 +381,16 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         &handler,
     )
     .map_err(|e| {
-        eprintln!("[process-loopback] ActivateAudioInterfaceAsync FAILED: {} (PID {})", e, pid);
+        eprintln!(
+            "[process-loopback] ActivateAudioInterfaceAsync FAILED: {} (PID {})",
+            e, pid
+        );
         format!("ActivateAudioInterfaceAsync failed: {} (PID {})", e, pid)
     })?;
 
-    eprintln!("[process-loopback] ActivateAudioInterfaceAsync call succeeded, waiting for completion...");
+    eprintln!(
+        "[process-loopback] ActivateAudioInterfaceAsync call succeeded, waiting for completion..."
+    );
 
     // Wait for completion (5 second timeout)
     let wait_result = WaitForSingleObject(event, 5000);
@@ -414,12 +428,20 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
             let sr = mix_format.nSamplesPerSec;
             let ch = mix_format.nChannels;
             let bits = mix_format.wBitsPerSample;
-            eprintln!("[process-loopback] Mix format: {}Hz, {} ch, {} bits", sr, ch, bits);
-            windows::Win32::System::Com::CoTaskMemFree(Some(mix_format_ptr as *const _ as *const _));
+            eprintln!(
+                "[process-loopback] Mix format: {}Hz, {} ch, {} bits",
+                sr, ch, bits
+            );
+            windows::Win32::System::Com::CoTaskMemFree(Some(
+                mix_format_ptr as *const _ as *const _,
+            ));
             (sr, ch)
         }
         Err(e) => {
-            eprintln!("[process-loopback] GetMixFormat returned {}, using 48kHz stereo fallback", e);
+            eprintln!(
+                "[process-loopback] GetMixFormat returned {}, using 48kHz stereo fallback",
+                e
+            );
             (48000u32, 2u16)
         }
     };
@@ -439,7 +461,9 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
             cbSize: (std::mem::size_of::<WAVEFORMATEXTENSIBLE>()
                 - std::mem::size_of::<WAVEFORMATEX>()) as u16,
         },
-        Samples: WAVEFORMATEXTENSIBLE_0 { wValidBitsPerSample: 32 },
+        Samples: WAVEFORMATEXTENSIBLE_0 {
+            wValidBitsPerSample: 32,
+        },
         dwChannelMask: SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT,
         SubFormat: KSDATAFORMAT_SUBTYPE_IEEE_FLOAT,
     };
@@ -458,7 +482,12 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
             &desired_format.Format,
             None,
         )
-        .map_err(|e| format!("IAudioClient::Initialize failed: 0x{:08X}", e.code().0 as u32))?;
+        .map_err(|e| {
+            format!(
+                "IAudioClient::Initialize failed: 0x{:08X}",
+                e.code().0 as u32
+            )
+        })?;
 
     audio_client
         .Start()
@@ -509,13 +538,7 @@ fn run_process_capture_loop(
         let mut flags: u32 = 0;
 
         let hr = unsafe {
-            capture_client.GetBuffer(
-                &mut data_ptr,
-                &mut num_frames,
-                &mut flags,
-                None,
-                None,
-            )
+            capture_client.GetBuffer(&mut data_ptr, &mut num_frames, &mut flags, None, None)
         };
 
         if hr.is_err() {
@@ -531,9 +554,8 @@ fn run_process_capture_loop(
                 let silence = vec![0.0f32; total_samples / channels];
                 buffer.lock().push_samples(&silence);
             } else {
-                let f32_slice = unsafe {
-                    std::slice::from_raw_parts(data_ptr as *const f32, total_samples)
-                };
+                let f32_slice =
+                    unsafe { std::slice::from_raw_parts(data_ptr as *const f32, total_samples) };
 
                 if let Some(ref streamer) = voice_streamer {
                     streamer.push_samples(f32_slice, channels);

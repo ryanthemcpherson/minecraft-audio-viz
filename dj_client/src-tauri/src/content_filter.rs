@@ -18,7 +18,9 @@ pub fn contains_slur(text: &str) -> bool {
 /// message (never revealing what was detected).
 pub fn validate_no_slurs(text: &str, field_name: &str) -> Result<(), String> {
     if contains_slur(text) {
-        Err(format!("{field_name} contains language that is not allowed"))
+        Err(format!(
+            "{field_name} contains language that is not allowed"
+        ))
     } else {
         Ok(())
     }
@@ -27,9 +29,7 @@ pub fn validate_no_slurs(text: &str, field_name: &str) -> Result<(), String> {
 /// Strip zero-width and invisible Unicode characters that could be used to
 /// bypass the filter.
 fn strip_invisible(text: &str) -> String {
-    text.chars()
-        .filter(|c| !is_invisible(*c))
-        .collect()
+    text.chars().filter(|c| !is_invisible(*c)).collect()
 }
 
 fn is_invisible(c: char) -> bool {

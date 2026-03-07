@@ -64,7 +64,8 @@ impl PatternEngine {
 
     /// Store a pattern's source code
     pub fn load_pattern(&mut self, name: &str, source: &str) {
-        self.loaded_patterns.insert(name.to_string(), source.to_string());
+        self.loaded_patterns
+            .insert(name.to_string(), source.to_string());
     }
 
     /// Switch to a different pattern
@@ -192,9 +193,7 @@ impl PatternEngine {
         for pair in result.pairs::<i64, LuaTable>() {
             let (_, entity) = pair.map_err(|e| e.to_string())?;
 
-            let id: String = entity
-                .get("id")
-                .unwrap_or_else(|_| "block_0".to_string());
+            let id: String = entity.get("id").unwrap_or_else(|_| "block_0".to_string());
             let x: f64 = entity.get("x").unwrap_or(0.5);
             let y: f64 = entity.get("y").unwrap_or(0.5);
             let z: f64 = entity.get("z").unwrap_or(0.5);

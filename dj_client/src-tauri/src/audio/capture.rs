@@ -5,8 +5,8 @@ use crate::voice::VoiceStreamer;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, StreamConfig};
 use parking_lot::Mutex;
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use thiserror::Error;
 
@@ -284,7 +284,9 @@ fn run_audio_thread(
             // to capture system audio (loopback capture)
             log::info!("Using default output device for system audio loopback");
             is_loopback = true;
-            *mode_out.lock() = CaptureMode::SystemLoopback { fallback_reason: None };
+            *mode_out.lock() = CaptureMode::SystemLoopback {
+                fallback_reason: None,
+            };
             host.default_output_device()
                 .ok_or(CaptureError::NoOutputDevice)?
         }
@@ -293,7 +295,9 @@ fn run_audio_thread(
             let device_name = id.trim_start_matches("output:");
             log::info!("Using output device for loopback: {}", device_name);
             is_loopback = true;
-            *mode_out.lock() = CaptureMode::SystemLoopback { fallback_reason: None };
+            *mode_out.lock() = CaptureMode::SystemLoopback {
+                fallback_reason: None,
+            };
             host.output_devices()
                 .map_err(|e| CaptureError::ConfigError(e.to_string()))?
                 .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
@@ -315,7 +319,9 @@ fn run_audio_thread(
             let pid = parts
                 .get(1)
                 .and_then(|p| p.parse::<u32>().ok())
-                .ok_or_else(|| CaptureError::SourceNotFound(format!("Invalid app source: {}", id)))?;
+                .ok_or_else(|| {
+                    CaptureError::SourceNotFound(format!("Invalid app source: {}", id))
+                })?;
             let app_name = parts.get(2).unwrap_or(&"unknown").to_string();
 
             if super::platform::windows::supports_process_loopback() {
@@ -330,11 +336,7 @@ fn run_audio_thread(
                     voice_streamer.clone(),
                 ) {
                     Ok((mut loopback_handle, sample_rate, _channels)) => {
-                        log::info!(
-                            "Process loopback active: PID {} ({}Hz)",
-                            pid,
-                            sample_rate,
-                        );
+                        log::info!("Process loopback active: PID {} ({}Hz)", pid, sample_rate,);
                         *mode_out.lock() = CaptureMode::ProcessLoopback {
                             pid,
                             name: app_name.clone(),
@@ -440,7 +442,9 @@ fn run_audio_thread(
         }
         #[cfg(not(target_os = "windows"))]
         Some(id) if id.starts_with("app:") => {
-            log::info!("Per-app capture not available on this platform, using system audio loopback");
+            log::info!(
+                "Per-app capture not available on this platform, using system audio loopback"
+            );
             *mode_out.lock() = CaptureMode::SystemLoopback {
                 fallback_reason: Some("Not available on this platform".to_string()),
             };
@@ -452,7 +456,9 @@ fn run_audio_thread(
             // Default: use loopback capture for system audio
             log::info!("Using default output device for system audio loopback");
             is_loopback = true;
-            *mode_out.lock() = CaptureMode::SystemLoopback { fallback_reason: None };
+            *mode_out.lock() = CaptureMode::SystemLoopback {
+                fallback_reason: None,
+            };
             host.default_output_device()
                 .ok_or(CaptureError::NoOutputDevice)?
         }
@@ -518,7 +524,7 @@ fn run_audio_thread(
         _ => {
             return Err(CaptureError::ConfigError(
                 "Unsupported sample format".to_string(),
-            ))
+            ));
         }
     }
     .map_err(|e| CaptureError::StreamError(e.to_string()))?;
@@ -613,7 +619,10 @@ where
         move |data: &[T], _: &cpal::InputCallbackInfo| {
             // Convert to f32 (reuse scratch — no allocation after first callback)
             f32_scratch.clear();
-            f32_scratch.extend(data.iter().map(|s| -> f32 { cpal::Sample::from_sample(*s) }));
+            f32_scratch.extend(
+                data.iter()
+                    .map(|s| -> f32 { cpal::Sample::from_sample(*s) }),
+            );
 
             // Feed raw interleaved f32 samples to voice streamer (before downmix)
             if let Some(ref streamer) = voice_streamer {

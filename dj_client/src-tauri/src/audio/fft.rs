@@ -1,7 +1,7 @@
 //! FFT analysis - ported from Python fft_analyzer.py
 
-use super::{capture::AnalysisResult, AudioConfig};
-use rustfft::{num_complex::Complex, FftPlanner};
+use super::{AudioConfig, capture::AnalysisResult};
+use rustfft::{FftPlanner, num_complex::Complex};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -271,13 +271,13 @@ pub struct FftAnalyzer {
 
     // Beat detection
     beat_history: VecDeque<f32>,
-    beat_sum: f32,          // Running sum for O(1) mean
+    beat_sum: f32, // Running sum for O(1) mean
     beat_cooldown: usize,
     last_beat_times: VecDeque<f64>,
     prev_bass: f32,
     flux_history: VecDeque<f32>,
-    flux_sum: f32,           // Running sum for O(1) mean
-    flux_sum_sq: f32,        // Running sum of squares for O(1) variance
+    flux_sum: f32,    // Running sum for O(1) mean
+    flux_sum_sq: f32, // Running sum of squares for O(1) variance
     last_onset_time: Option<f64>,
     tempo_histogram: Vec<f32>,
     ioi_history: VecDeque<f64>,
@@ -387,7 +387,12 @@ impl FftAnalyzer {
         }
 
         // Apply window and prepare FFT input (reuse pre-allocated buffer)
-        for (i, (&s, &w)) in samples.iter().zip(self.window.iter()).enumerate().take(self.fft_size) {
+        for (i, (&s, &w)) in samples
+            .iter()
+            .zip(self.window.iter())
+            .enumerate()
+            .take(self.fft_size)
+        {
             self.fft_buffer[i] = Complex::new(s * w, 0.0);
         }
         // Zero remaining if samples < fft_size
@@ -814,7 +819,18 @@ mod tests {
         let presets = get_presets();
         assert_eq!(presets.len(), 7);
         let names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["auto", "edm", "chill", "rock", "hiphop", "folk", "classical"]);
+        assert_eq!(
+            names,
+            [
+                "auto",
+                "edm",
+                "chill",
+                "rock",
+                "hiphop",
+                "folk",
+                "classical"
+            ]
+        );
     }
 
     #[test]
@@ -862,7 +878,11 @@ mod tests {
         let silence = vec![0.0f32; 480]; // 10ms at 48kHz
         let (energy, kick) = bl.process(&silence);
 
-        assert!(energy < 0.01, "silence should produce near-zero energy, got {}", energy);
+        assert!(
+            energy < 0.01,
+            "silence should produce near-zero energy, got {}",
+            energy
+        );
         assert!(!kick, "silence should not trigger kick");
     }
 
@@ -879,7 +899,11 @@ mod tests {
             .collect();
 
         let (energy, _kick) = bl.process(&samples);
-        assert!(energy > 0.1, "80Hz tone should produce bass energy, got {}", energy);
+        assert!(
+            energy > 0.1,
+            "80Hz tone should produce bass energy, got {}",
+            energy
+        );
     }
 
     #[test]
@@ -934,7 +958,10 @@ mod tests {
 
         // First should fire, second should be cooldown-suppressed
         assert!(first_kick, "first kick should fire");
-        assert!(!second_kick, "second kick within cooldown should be suppressed");
+        assert!(
+            !second_kick,
+            "second kick within cooldown should be suppressed"
+        );
     }
 
     #[test]
