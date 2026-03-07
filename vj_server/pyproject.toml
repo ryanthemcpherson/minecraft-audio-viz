@@ -30,6 +30,25 @@ dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.0",
     "pytest-timeout>=2.0",
+    "pytest-cov>=6.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=vj_server --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["vj_server"]
+omit = ["vj_server/tests/*", "vj_server/test_*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 15
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
 ]
 
 [tool.setuptools.packages.find]
