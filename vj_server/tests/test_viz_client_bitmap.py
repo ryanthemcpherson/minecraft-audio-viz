@@ -4,22 +4,13 @@ Unit tests for VizClient bitmap protocol methods.
 
 Tests message construction and parameter handling without a live WebSocket
 server. Uses a mock to capture outgoing messages and return canned responses.
-
-Usage:
-    python -m pytest vj_server/test_viz_client_bitmap.py -v
 """
 
 import json
-import os
-
-# Add parent dir to path if needed
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from viz_client import VizClient
+from vj_server.viz_client import VizClient
 
 
 class MockWebSocket:
