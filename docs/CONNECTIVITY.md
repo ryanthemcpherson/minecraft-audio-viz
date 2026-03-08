@@ -18,54 +18,54 @@ This document describes the WebSocket connectivity architecture for the Minecraf
 
 The system uses a three-tier distributed architecture with WebSocket connections:
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                          Audio Sources (Windows)                          │
-│                     ┌────────────────────────────┐                        │
-│                     │     WASAPI Audio Capture    │                        │
-│                     │   (Spotify, Chrome, etc.)   │                        │
-│                     └─────────────┬──────────────┘                        │
-└───────────────────────────────────┼──────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        Python Audio Processor                             │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐       │
-│  │   FFT Analyzer   │───▶│  Beat Detection  │───▶│ Pattern Engine  │       │
-│  └─────────────────┘    └─────────────────┘    └─────────────────┘       │
-│                                                                           │
-│  Mode A: Local DJ                  Mode B: VJ Server                      │
-│  ┌────────────────┐               ┌────────────────┐                      │
-│  │   VizClient     │               │   VJ Server    │◀─── DJ 1 (Remote)   │
-│  │  (Direct MC)    │               │   (Central)    │◀─── DJ 2 (Remote)   │
-│  └───────┬────────┘               └───────┬────────┘◀─── DJ 3 (Remote)   │
-└──────────┼─────────────────────────────────┼─────────────────────────────┘
-           │                                  │
-           │ :8765                           │ :8765
-           ▼                                  ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        Minecraft Server                                   │
-│  ┌────────────────────────────────────────────────────────┐              │
-│  │              AudioViz Plugin (Paper 1.21+)              │              │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐   │              │
-│  │  │ WS Server   │  │ Entity Pool │  │ Zone Manager │   │              │
-│  │  │  (:8765)    │  │   Manager   │  │              │   │              │
-│  │  └─────────────┘  └─────────────┘  └──────────────┘   │              │
-│  └────────────────────────────────────────────────────────┘              │
-└──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Audio Sources
+        WASAPI[WASAPI Audio Capture<br/><small>Spotify, Chrome, etc.</small>]
+    end
 
-Browser Clients:
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Admin Panel   │     │   3D Preview    │     │   Remote DJ UI  │
-│    (:8080)      │     │    (:8766)      │     │    (:9000)      │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+    subgraph DJ Client
+        FFT[FFT Analyzer] --> Beat[Beat Detection]
+    end
+
+    WASAPI --> FFT
+
+    subgraph VJ Server
+        PE[Pattern Engine]
+        VIZ[VizClient<br/><small>MC connection</small>]
+        DJ_IN["DJ Input (:9000)"]
+    end
+
+    Beat -->|dj_audio_frame| DJ_IN
+    DJ_IN --> PE
+    PE --> VIZ
+
+    subgraph Minecraft Server
+        direction TB
+        MC_WS["WebSocket Server (:8765)"]
+        ZM[Zone Manager]
+        RENDER{Renderer}
+        MC_WS --> ZM --> RENDER
+        RENDER -->|Fabric mod| MAP[Map + Virtual Entities]
+        RENDER -->|Paper plugin| DISP[Display Entity Pools]
+    end
+
+    VIZ -->|":8765"| MC_WS
+
+    subgraph Browser Clients
+        AP["Admin Panel (:8080)"]
+        PREV["3D Preview (:8766)"]
+    end
+
+    PE --> AP
+    PE --> PREV
 ```
 
 ## Port Reference
 
 | Port | Protocol | Component | Description |
 |------|----------|-----------|-------------|
-| **8765** | WebSocket | Minecraft Plugin | Primary visualization data channel. Receives batch entity updates, audio data, and zone commands. |
+| **8765** | WebSocket | Minecraft (mod or plugin) | Primary visualization data channel. Receives batch entity updates, audio data, and zone commands. |
 | **8766** | WebSocket | VJ Server → Browsers | Browser client broadcast. Sends visualization state to 3D preview and admin panel. |
 | **9000** | WebSocket | VJ Server ← DJs | Remote DJ connections. Receives audio frames from remote DJs for centralized mixing. |
 | **8080** | HTTP | VJ Server | Admin panel web interface. Serves static files for DJ control panel. |
@@ -212,9 +212,9 @@ Heartbeats detect dead connections that TCP keep-alive might miss.
 
 ## Message Queue Behavior
 
-### Minecraft Plugin Message Queue
+### Minecraft Message Queue
 
-The Java plugin uses a tick-based message queue (`MessageQueue.java`).
+Both the Fabric mod and Paper plugin use a tick-based message queue.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

@@ -23,31 +23,23 @@ Technical documentation for the minecraft-audio-viz audio analysis pipeline.
 
 The audio processing system captures real-time audio on a DJ's machine, performs FFT analysis and beat detection locally, then streams the results to a central VJ server which runs visualization patterns and forwards entity updates to Minecraft and browser clients.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     DJ CLIENT (Tauri/Rust)                        │
-│                                                                  │
-│  WASAPI Loopback ─→ Circular Buffer ─→ FFT (rustfft) ─→ Bands   │
-│  (cpal, 48kHz)      (96k samples)      (1024-pt Hann)   Beat    │
-│                                                          BPM     │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ WebSocket (~60fps)
-                           │ dj_audio_frame
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     VJ SERVER (Python)                            │
-│                                                                  │
-│  Multi-DJ Management ─→ Pattern Engine ─→ Entity Positions       │
-│  Auth / Connect Codes   28 patterns       Normalized (0-1)       │
-│  Preset Application     AudioState                               │
-└──────────────┬──────────────────────────────┬────────────────────┘
-               │                              │
-               ▼                              ▼
-┌──────────────────────┐       ┌──────────────────────────┐
-│  Minecraft Plugin    │       │  Browser Preview         │
-│  (WebSocket :8765)   │       │  (WebSocket :8766)       │
-│  Display Entities    │       │  Three.js 3D             │
-└──────────────────────┘       └──────────────────────────┘
+```mermaid
+graph TD
+    subgraph DJ["DJ Client (Tauri/Rust)"]
+        CAP["WASAPI Loopback<br/><small>cpal, 48kHz</small>"] --> BUF["Circular Buffer<br/><small>96k samples</small>"]
+        BUF --> FFTB["FFT (rustfft)<br/><small>1024-pt Hann</small>"]
+        FFTB --> OUT["Bands + Beat + BPM"]
+    end
+
+    OUT -->|"dj_audio_frame<br/>~60fps WebSocket"| VJ
+
+    subgraph VJ["VJ Server (Python)"]
+        MGR["Multi-DJ Management"] --> PE["Pattern Engine<br/><small>41+ patterns</small>"]
+        PE --> ENT["Entity Positions<br/><small>normalized 0-1</small>"]
+    end
+
+    ENT --> MC["Minecraft Server<br/><small>Fabric mod or Paper plugin<br/>WebSocket :8765</small>"]
+    ENT --> BR["Browser Preview<br/><small>Three.js<br/>WebSocket :8766</small>"]
 ```
 
 ---
@@ -72,29 +64,11 @@ Audio is captured via Windows Audio Session API (WASAPI) loopback using the `cpa
 
 The capture system uses dedicated OS threads to avoid blocking the audio callback or the async runtime:
 
-```
-┌─────────────────────────────┐
-│  CPAL Audio Stream          │  Real-time callback (cannot block)
-│  multichannel → mono → buf  │
-└─────────────┬───────────────┘
-              │ Circular buffer (96k samples)
-              ▼
-┌─────────────────────────────┐
-│  Analysis Thread            │  Dedicated OS thread
-│  Every ~10ms:               │
-│  1. Read 1024 samples       │
-│  2. Hann window + FFT       │
-│  3. Band extraction + AGC   │
-│  4. Beat detection + BPM    │
-│  5. Update AnalysisResult   │
-└─────────────┬───────────────┘
-              │ Arc<Mutex<AnalysisResult>>
-              ▼
-┌─────────────────────────────┐
-│  Bridge Task (tokio async)  │  ~60fps (16ms interval)
-│  Read analysis → JSON       │
-│  Send via WebSocket         │
-└─────────────────────────────┘
+```mermaid
+graph TD
+    A["CPAL Audio Stream<br/><small>Real-time callback (cannot block)<br/>multichannel → mono → buf</small>"]
+    A -->|"Circular buffer (96k samples)"| B["Analysis Thread<br/><small>Dedicated OS thread, every ~10ms:<br/>1. Read 1024 samples<br/>2. Hann window + FFT<br/>3. Band extraction + AGC<br/>4. Beat detection + BPM<br/>5. Update AnalysisResult</small>"]
+    B -->|"Arc&lt;Mutex&lt;AnalysisResult&gt;&gt;"| C["Bridge Task (tokio async)<br/><small>~60fps (16ms interval)<br/>Read analysis → JSON<br/>Send via WebSocket</small>"]
 ```
 
 ### Application Enumeration
@@ -321,7 +295,7 @@ The VJ Server (`audio_processor/vj_server.py`) is the central hub that receives 
 
 ### Message Forwarding
 
-Certain messages from the admin panel are forwarded directly to the Minecraft plugin:
+Certain messages from the admin panel are forwarded directly to the Minecraft mod/plugin:
 
 - `set_zone_config`, `set_render_mode`, `set_renderer_backend`
 - `set_particle_effect`, `set_particle_config`
@@ -510,7 +484,7 @@ Each preset can adjust individual band responsiveness:
          │
 11. batch_update sent to Minecraft (:8765) and browsers (:8766)
          │
-12. Minecraft plugin converts to world coordinates via ZoneManager
+12. Minecraft mod/plugin converts to world coordinates via ZoneManager
 ```
 
 ### Minecraft batch_update Message
@@ -537,7 +511,7 @@ Each preset can adjust individual band responsiveness:
 }
 ```
 
-Entity positions use normalized coordinates (0-1) which the Minecraft plugin's ZoneManager converts to world coordinates based on the configured zone dimensions.
+Entity positions use normalized coordinates (0-1) which the ZoneManager (in both the Fabric mod and Paper plugin) converts to world coordinates based on the configured zone dimensions.
 
 ---
 
