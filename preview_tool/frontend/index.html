@@ -12,6 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to content</a>
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
@@ -22,7 +23,7 @@
                 </div>
             </div>
             <div class="header-center">
-                <div class="connection-status" id="connection-status">
+                <div class="connection-status" id="connection-status" aria-live="polite">
                     <span class="status-dot"></span>
                     <span class="status-text">Connecting...</span>
                 </div>
@@ -44,7 +45,7 @@
         </header>
 
         <!-- Main Content -->
-        <main class="app-main">
+        <main class="app-main" id="main-content">
             <!-- 3D Preview Section -->
             <section class="preview-section">
                 <canvas id="visualizer"></canvas>

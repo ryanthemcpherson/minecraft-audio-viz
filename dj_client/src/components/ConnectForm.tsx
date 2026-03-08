@@ -86,7 +86,7 @@ export default function ConnectForm({
         </div>
       )}
 
-      {error && <div className="error-message">{error}</div>}
+      {error && <div className="error-message" role="alert">{error}</div>}
 
       <button
         className="btn btn-connect full-width"
