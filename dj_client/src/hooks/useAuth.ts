@@ -37,11 +37,13 @@ export function useAuth(): UseAuthReturn {
       api
         .getProfile()
         .then(setUser)
-        .catch(() => {
+        .catch((err) => {
+          console.error("Failed to restore session:", err);
           void api.clearTokens();
         })
         .finally(() => setIsLoading(false));
-    }).catch(() => {
+    }).catch((err) => {
+      console.error("Failed to initialize token store:", err);
       setIsLoading(false);
     });
   }, []);
@@ -53,8 +55,8 @@ export function useAuth(): UseAuthReturn {
       if (api.isTokenExpiringSoon()) {
         try {
           await api.refreshTokens();
-        } catch {
-          // Silent — will retry next interval
+        } catch (err) {
+          console.error("Failed to refresh token:", err);
         }
       }
     }, 30_000);

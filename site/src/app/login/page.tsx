@@ -122,7 +122,8 @@ export default function LoginPage() {
     try {
       const url = await getDiscordAuthUrl();
       window.location.href = url;
-    } catch {
+    } catch (err) {
+      console.error("Failed to get Discord auth URL:", err);
       setError("Could not start Discord sign-in");
     }
   }
@@ -131,7 +132,8 @@ export default function LoginPage() {
     try {
       const url = await getGoogleAuthUrl();
       window.location.href = url;
-    } catch {
+    } catch (err) {
+      console.error("Failed to get Google auth URL:", err);
       setError("Could not start Google sign-in");
     }
   }
