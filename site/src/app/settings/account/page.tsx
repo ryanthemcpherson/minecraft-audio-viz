@@ -75,7 +75,7 @@ export default function AccountSettingsPage() {
         setProfile(p);
         setNameValue(p.display_name);
       })
-      .catch(() => {})
+      .catch((err) => { console.error("Failed to fetch user profile:", err); })
       .finally(() => setLoading(false));
 
     fetchSessions(accessToken)
@@ -172,7 +172,8 @@ export default function AccountSettingsPage() {
     try {
       const url = await getDiscordAuthUrl();
       window.location.href = url;
-    } catch {
+    } catch (err) {
+      console.error("Failed to get Discord auth URL:", err);
       setDiscordRedirecting(false);
     }
   }

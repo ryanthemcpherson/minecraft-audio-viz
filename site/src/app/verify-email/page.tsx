@@ -17,15 +17,21 @@ function VerifyEmailContent() {
   useEffect(() => {
     if (!token) return;
 
+    const controller = new AbortController();
+
     verifyEmail(token)
       .then((res) => {
+        if (controller.signal.aborted) return;
         setMessage(res.message || "Email verified!");
         setStatus("success");
       })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         setMessage(err instanceof Error ? err.message : "Verification failed");
         setStatus("error");
       });
+
+    return () => controller.abort();
   }, [token]);
 
   return (

@@ -89,8 +89,8 @@ function OrgCard({
     try {
       const res = await createInvite(accessToken, org.id);
       setInviteCode(res.code);
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error("Failed to create invite:", err);
     } finally {
       setInviteLoading(false);
     }
@@ -99,8 +99,8 @@ function OrgCard({
   function handleCopy(code: string) {
     try {
       navigator.clipboard.writeText(code);
-    } catch {
-      // Clipboard API may be unavailable in some contexts
+    } catch (err) {
+      console.error("Failed to copy to clipboard:", err);
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -386,8 +386,8 @@ export default function DashboardPage() {
     try {
       const d = await fetchUnifiedDashboard(accessToken);
       setDashboard(d);
-    } catch {
-      // keep existing dashboard state
+    } catch (err) {
+      console.error("Failed to load dashboard:", err);
     }
   }, [accessToken]);
 
@@ -398,11 +398,14 @@ export default function DashboardPage() {
       return;
     }
 
+    const controller = new AbortController();
+
     Promise.all([
       fetchMe(accessToken),
       fetchUnifiedDashboard(accessToken).catch(() => null),
     ])
       .then(([p, d]) => {
+        if (controller.signal.aborted) return;
         if (!p.onboarding_completed) {
           router.replace("/onboarding");
           return;
@@ -410,10 +413,16 @@ export default function DashboardPage() {
         setProfile(p);
         setDashboard(d);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.error("Failed to load dashboard data:", err);
         router.push("/login");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
   }, [user, accessToken, authLoading, router]);
 
   async function handleFullReset() {
@@ -422,7 +431,8 @@ export default function DashboardPage() {
     try {
       await resetAccountFull(accessToken);
       router.push("/onboarding");
-    } catch {
+    } catch (err) {
+      console.error("Failed to reset account:", err);
       setResettingFull(false);
       setConfirmFullReset(false);
     }
@@ -471,7 +481,7 @@ export default function DashboardPage() {
                   if (!accessToken) return;
                   try {
                     await resendVerification(accessToken);
-                  } catch {}
+                  } catch (err) { console.error("Failed to resend verification email:", err); }
                 }}
                 className="underline hover:text-amber-300"
               >

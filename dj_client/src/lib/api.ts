@@ -134,7 +134,8 @@ async function apiFetch<T>(
     let detail: string;
     try {
       detail = JSON.parse(body).detail ?? body;
-    } catch {
+    } catch (err) {
+      console.error("Failed to parse API error response:", err);
       detail = body;
     }
     throw new ApiError(res.status, detail);
@@ -152,8 +153,8 @@ async function authedFetch<T>(
   if (isTokenExpiringSoon()) {
     try {
       await refreshTokens();
-    } catch {
-      // If refresh fails, try the request anyway
+    } catch (err) {
+      console.error("Failed to pre-emptively refresh token:", err);
     }
   }
 
@@ -175,7 +176,8 @@ async function authedFetch<T>(
     if (e instanceof ApiError && e.status === 401) {
       try {
         await refreshTokens();
-      } catch {
+      } catch (err) {
+        console.error("Failed to refresh token after 401:", err);
         await clearTokens();
         throw e;
       }
@@ -314,8 +316,8 @@ export async function logout(): Promise<void> {
         method: 'POST',
         body: JSON.stringify({ refresh_token: refreshToken }),
       });
-    } catch {
-      // Best-effort; clear tokens regardless
+    } catch (err) {
+      console.error("Failed to revoke refresh token on logout:", err);
     }
   }
   await clearTokens();

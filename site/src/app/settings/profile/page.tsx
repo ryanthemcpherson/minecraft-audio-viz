@@ -122,8 +122,11 @@ export default function ProfileEditPage() {
       return;
     }
 
+    const controller = new AbortController();
+
     fetchMe(accessToken)
       .then((me) => {
+        if (controller.signal.aborted) return;
         if (me.dj_profile) {
           const p = me.dj_profile;
           setProfile(p);
@@ -143,8 +146,12 @@ export default function ProfileEditPage() {
           setBlockPalette(p.block_palette || [null, null, null, null, null]);
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((err) => { console.error("Failed to fetch user profile:", err); })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
   }, [user, accessToken, authLoading, router]);
 
   // Debounced slug check
@@ -165,7 +172,8 @@ export default function ProfileEditPage() {
           } else {
             setSlugAvailable(res.available);
           }
-        } catch {
+        } catch (err) {
+          console.error("Failed to check slug availability:", err);
           setSlugAvailable(null);
         } finally {
           setSlugChecking(false);
