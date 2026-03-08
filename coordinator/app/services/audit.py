@@ -11,7 +11,7 @@ def log_auth_event(
     event: str,
     *,
     user_id: str | None = None,
-    email: str | None = None,
+    email_hash: str | None = None,
     ip_address: str | None = None,
     detail: str | None = None,
 ) -> None:
@@ -27,7 +27,7 @@ def log_auth_event(
         extra={
             "event": event,
             "user_id": user_id,
-            "email": email,
+            "email_hash": email_hash,
             "ip_address": ip_address,
             "detail": detail,
         },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 import resend
@@ -54,7 +55,9 @@ async def send_password_reset_email(
         }
     )
 
-    _logger.info("Password reset email sent to %s", to_email)
+    _logger.info(
+        "Password reset email sent (hash=%s)", hashlib.sha256(to_email.encode()).hexdigest()[:12]
+    )
 
 
 async def send_verification_email(
@@ -94,4 +97,6 @@ async def send_verification_email(
         }
     )
 
-    _logger.info("Verification email sent to %s", to_email)
+    _logger.info(
+        "Verification email sent (hash=%s)", hashlib.sha256(to_email.encode()).hexdigest()[:12]
+    )
