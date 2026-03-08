@@ -41,3 +41,7 @@ archive
 *.jar
 *.mp4
 *.tgz
+
+# Secrets
+.env
+.env.*
