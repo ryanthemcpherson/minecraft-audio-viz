@@ -34,7 +34,7 @@ class JSONFormatter(logging.Formatter):
             "duration_ms",
             "event",
             "user_id",
-            "email",
+            "email_hash",
             "ip_address",
             "detail",
         ):
