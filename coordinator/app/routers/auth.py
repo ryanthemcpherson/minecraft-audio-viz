@@ -7,21 +7,18 @@ import logging
 import secrets
 import time
 import uuid as _uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
-from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_session
 from app.dependencies.auth import get_current_user, require_admin
-from app.models.db import DesktopExchangeCode, User, UserRole
-from app.models.db import RefreshToken as RefreshTokenModel
+from app.models.db import User
 from app.models.schemas import (
     AuthResponse,
     ChangePasswordRequest,
@@ -54,14 +51,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _OAUTH_STATE_TTL = 600  # seconds
 _EXCHANGE_CODE_TTL = 60  # seconds
-
-
-async def _cleanup_expired_exchange_codes(session: AsyncSession) -> None:
-    """Remove expired desktop OAuth exchange codes from the database."""
-    now = datetime.now(timezone.utc)
-    await session.execute(
-        sa_delete(DesktopExchangeCode).where(DesktopExchangeCode.expires_at < now)
-    )
 
 
 def _create_oauth_state(
@@ -174,7 +163,7 @@ async def register(
             logger.warning("Failed to send verification email to %s", body.email, exc_info=True)
 
     # Re-fetch user for response
-    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
+    user = await auth_service.get_user_by_id_strict(session, result.user_id)
 
     return _auth_response(result, user)
 
@@ -228,7 +217,7 @@ async def login(
 
     log_auth_event("login", user_id=str(result.user_id), email=body.email, ip_address=ip)
 
-    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
+    user = await auth_service.get_user_by_id_strict(session, result.user_id)
 
     return _auth_response(result, user)
 
@@ -322,9 +311,7 @@ async def discord_callback(
     ua = request.headers.get("user-agent")
 
     # Check if this Discord ID is already linked (to detect first-time link)
-    existing_discord_user = (
-        await session.execute(select(User).where(User.discord_id == discord_user.id))
-    ).scalar_one_or_none()
+    existing_discord_user = await auth_service.get_user_by_discord_id(session, discord_user.id)
     is_new_discord_link = existing_discord_user is None
 
     result = await auth_service.login_discord(
@@ -344,15 +331,11 @@ async def discord_callback(
 
     log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="discord")
 
-    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
+    user = await auth_service.get_user_by_id_strict(session, result.user_id)
 
     # Notify community bot on first Discord link
     if is_new_discord_link and user.discord_id:
-        role_rows = (
-            (await session.execute(select(UserRole).where(UserRole.user_id == user.id)))
-            .scalars()
-            .all()
-        )
+        role_rows = await auth_service.get_user_roles(session, user.id)
         await notify_role_change(
             settings=settings,
             discord_id=user.discord_id,
@@ -365,17 +348,17 @@ async def discord_callback(
     # Desktop deep-link flow: store auth response behind a one-time exchange code.
     # The client can either catch the deep link OR poll for completion via nonce.
     if state_payload.get("desktop"):
-        await _cleanup_expired_exchange_codes(session)
+        await auth_service.cleanup_expired_exchange_codes(session)
         exchange_code = secrets.token_urlsafe(32)
         nonce = state_payload.get("nonce")
-        row = DesktopExchangeCode(
+        await auth_service.store_exchange_code(
+            session,
             code=exchange_code,
             user_id=user.id,
             nonce=nonce,
-            payload=_json.dumps(auth_resp.model_dump(mode="json")),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EXCHANGE_CODE_TTL),
+            payload=auth_resp.model_dump(mode="json"),
+            ttl_seconds=_EXCHANGE_CODE_TTL,
         )
-        session.add(row)
         await session.commit()
         html = (
             "<html><head>"
@@ -501,23 +484,23 @@ async def google_callback(
 
     log_auth_event("login", user_id=str(result.user_id), ip_address=ip, detail="google")
 
-    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
+    user = await auth_service.get_user_by_id_strict(session, result.user_id)
 
     auth_resp = _auth_response(result, user)
 
     # Desktop deep-link flow
     if state_payload.get("desktop"):
-        await _cleanup_expired_exchange_codes(session)
+        await auth_service.cleanup_expired_exchange_codes(session)
         exchange_code = secrets.token_urlsafe(32)
         nonce = state_payload.get("nonce")
-        row = DesktopExchangeCode(
+        await auth_service.store_exchange_code(
+            session,
             code=exchange_code,
             user_id=user.id,
             nonce=nonce,
-            payload=_json.dumps(auth_resp.model_dump(mode="json")),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EXCHANGE_CODE_TTL),
+            payload=auth_resp.model_dump(mode="json"),
+            ttl_seconds=_EXCHANGE_CODE_TTL,
         )
-        session.add(row)
         await session.commit()
         html = (
             "<html><head>"
@@ -553,13 +536,9 @@ async def exchange_desktop_code(
     session: AsyncSession = Depends(get_session),
 ) -> AuthResponse:
     """Exchange a one-time code (from the desktop deep-link callback) for auth tokens."""
-    await _cleanup_expired_exchange_codes(session)
+    await auth_service.cleanup_expired_exchange_codes(session)
 
-    stmt = select(DesktopExchangeCode).where(
-        DesktopExchangeCode.code == body.exchange_code,
-        DesktopExchangeCode.used.is_(False),
-    )
-    row = (await session.execute(stmt)).scalar_one_or_none()
+    row = await auth_service.find_exchange_code(session, code=body.exchange_code)
 
     if row is None:
         raise HTTPException(status_code=400, detail="Invalid or already used exchange code")
@@ -595,11 +574,7 @@ async def desktop_poll(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Poll for desktop OAuth completion. Returns exchange_code when ready."""
-    stmt = select(DesktopExchangeCode).where(
-        DesktopExchangeCode.nonce == poll_token,
-        DesktopExchangeCode.used.is_(False),
-    )
-    row = (await session.execute(stmt)).scalar_one_or_none()
+    row = await auth_service.find_exchange_code(session, nonce=poll_token)
     if row is None:
         return {"status": "pending"}
     now = datetime.now(timezone.utc)
@@ -732,7 +707,7 @@ async def refresh(
 
     log_auth_event("token_refreshed", user_id=str(result.user_id), ip_address=ip)
 
-    user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
+    user = await auth_service.get_user_by_id_strict(session, result.user_id)
 
     return _auth_response(result, user)
 
@@ -917,20 +892,7 @@ async def delete_account(
     user.is_active = False
 
     # Revoke all refresh tokens
-    active_tokens = (
-        (
-            await session.execute(
-                select(RefreshTokenModel).where(
-                    RefreshTokenModel.user_id == user.id,
-                    RefreshTokenModel.revoked.is_(False),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for t in active_tokens:
-        t.revoked = True
+    await auth_service.revoke_all_user_tokens(session, user.id)
 
     await session.commit()
 
@@ -960,19 +922,15 @@ async def logout(
     """Revoke a specific refresh token, ending that session.  The token must
     belong to the authenticated user.  Returns 404 if not found.
     """
-    # Verify the refresh token belongs to the authenticated user before revoking
-    token_hash = auth_service._hash_refresh_token(
-        body.refresh_token, secret=settings.user_jwt_secret
+    token_row = await auth_service.find_and_revoke_refresh_token(
+        session,
+        refresh_token_value=body.refresh_token,
+        jwt_secret=settings.user_jwt_secret,
+        user_id=user.id,
     )
-    stmt = select(RefreshTokenModel).where(
-        RefreshTokenModel.token_hash == token_hash,
-        RefreshTokenModel.user_id == user.id,
-    )
-    token_row = (await session.execute(stmt)).scalar_one_or_none()
     if token_row is None:
         raise HTTPException(status_code=404, detail="Refresh token not found for this user")
 
-    token_row.revoked = True
     await session.commit()
 
     log_auth_event("logout", user_id=str(user.id), ip_address=_client_ip(request))
@@ -1080,19 +1038,7 @@ async def list_sessions(
     user, ordered by most recent first.  Supports pagination via ``limit``
     and ``offset``.
     """
-    now = datetime.now(timezone.utc)
-    stmt = (
-        select(RefreshTokenModel)
-        .where(
-            RefreshTokenModel.user_id == user.id,
-            RefreshTokenModel.revoked.is_(False),
-            RefreshTokenModel.expires_at > now,
-        )
-        .order_by(RefreshTokenModel.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = await auth_service.list_active_sessions(session, user.id, limit=limit, offset=offset)
 
     result = []
     for row in rows:
@@ -1135,16 +1081,10 @@ async def revoke_session(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
-    stmt = select(RefreshTokenModel).where(
-        RefreshTokenModel.id == sid,
-        RefreshTokenModel.user_id == user.id,
-        RefreshTokenModel.revoked.is_(False),
-    )
-    token_row = (await session.execute(stmt)).scalar_one_or_none()
+    token_row = await auth_service.revoke_session_by_id(session, sid, user.id)
     if token_row is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    token_row.revoked = True
     await session.commit()
 
     log_auth_event(

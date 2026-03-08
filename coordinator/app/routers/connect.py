@@ -20,10 +20,10 @@ from app.config import Settings, get_settings
 from app.database import get_session
 from app.models.db import DJSession, Show, VJServer
 from app.models.schemas import ConnectCodeResponse, ConnectResolveResponse
-from app.routers.servers import _authenticate_server
 from app.services.code_generator import normalise_code
 from app.services.jwt_service import create_token
 from app.services.metrics import incr as metrics_incr
+from app.services.server_service import authenticate_server
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +287,7 @@ async def _join_connect_code_inner(
 async def disconnect_dj(
     dj_session_id: uuid.UUID,
     request: Request,
-    server: "VJServer" = Depends(_authenticate_server),
+    server: "VJServer" = Depends(authenticate_server),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Record DJ disconnect and decrement the show's current_djs counter.

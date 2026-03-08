@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json as _json
 import logging
 import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import EmailVerificationToken, PasswordResetToken, RefreshToken, User
+from app.models.db import (
+    DesktopExchangeCode,
+    EmailVerificationToken,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserRole,
+)
 from app.services.password import hash_password, verify_password
 from app.services.user_jwt import create_refresh_token_value, create_user_token
 
@@ -81,6 +90,169 @@ async def _issue_tokens(
         display_name=user.display_name,
         expires_in=expiry_minutes * 60,
     )
+
+
+# ---------------------------------------------------------------------------
+# User lookups
+# ---------------------------------------------------------------------------
+
+
+async def get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """Fetch a user by primary key."""
+    return (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+
+
+async def get_user_by_id_strict(session: AsyncSession, user_id: uuid.UUID) -> User:
+    """Fetch a user by primary key, raising if not found."""
+    return (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+
+
+async def get_user_by_discord_id(session: AsyncSession, discord_id: str) -> User | None:
+    """Fetch a user by Discord ID."""
+    return (
+        await session.execute(select(User).where(User.discord_id == discord_id))
+    ).scalar_one_or_none()
+
+
+async def get_user_roles(session: AsyncSession, user_id: uuid.UUID) -> list[UserRole]:
+    """Fetch all roles for a user."""
+    result = await session.execute(select(UserRole).where(UserRole.user_id == user_id))
+    return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Desktop exchange codes
+# ---------------------------------------------------------------------------
+
+
+async def cleanup_expired_exchange_codes(session: AsyncSession) -> None:
+    """Remove expired desktop OAuth exchange codes from the database."""
+    now = datetime.now(timezone.utc)
+    await session.execute(
+        sa_delete(DesktopExchangeCode).where(DesktopExchangeCode.expires_at < now)
+    )
+
+
+async def find_exchange_code(
+    session: AsyncSession, *, code: str | None = None, nonce: str | None = None
+) -> DesktopExchangeCode | None:
+    """Find an unused exchange code by code value or by nonce (poll token)."""
+    if code is not None:
+        stmt = select(DesktopExchangeCode).where(
+            DesktopExchangeCode.code == code,
+            DesktopExchangeCode.used.is_(False),
+        )
+    elif nonce is not None:
+        stmt = select(DesktopExchangeCode).where(
+            DesktopExchangeCode.nonce == nonce,
+            DesktopExchangeCode.used.is_(False),
+        )
+    else:
+        return None
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def store_exchange_code(
+    session: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    nonce: str | None,
+    payload: dict,
+    ttl_seconds: int = 60,
+) -> DesktopExchangeCode:
+    """Store a desktop OAuth exchange code in the database."""
+    row = DesktopExchangeCode(
+        code=code,
+        user_id=user_id,
+        nonce=nonce,
+        payload=_json.dumps(payload),
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds),
+    )
+    session.add(row)
+    return row
+
+
+# ---------------------------------------------------------------------------
+# Session management
+# ---------------------------------------------------------------------------
+
+
+async def list_active_sessions(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[RefreshToken]:
+    """List active (non-revoked, non-expired) refresh tokens for a user."""
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(RefreshToken)
+        .where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked.is_(False),
+            RefreshToken.expires_at > now,
+        )
+        .order_by(RefreshToken.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def revoke_session_by_id(
+    session: AsyncSession,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> RefreshToken | None:
+    """Revoke a specific session (refresh token) by ID.
+
+    Returns the token row if found and revoked, None otherwise.
+    """
+    stmt = select(RefreshToken).where(
+        RefreshToken.id == session_id,
+        RefreshToken.user_id == user_id,
+        RefreshToken.revoked.is_(False),
+    )
+    token_row = (await session.execute(stmt)).scalar_one_or_none()
+    if token_row is not None:
+        token_row.revoked = True
+    return token_row
+
+
+async def revoke_all_user_tokens(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Revoke all active refresh tokens for a user. Returns the count revoked."""
+    stmt = select(RefreshToken).where(
+        RefreshToken.user_id == user_id,
+        RefreshToken.revoked.is_(False),
+    )
+    active_tokens = (await session.execute(stmt)).scalars().all()
+    for t in active_tokens:
+        t.revoked = True
+    return len(active_tokens)
+
+
+async def find_and_revoke_refresh_token(
+    session: AsyncSession,
+    *,
+    refresh_token_value: str,
+    jwt_secret: str,
+    user_id: uuid.UUID,
+) -> RefreshToken | None:
+    """Find a refresh token by value and user, then revoke it.
+
+    Returns the token row if found and revoked, None otherwise.
+    """
+    token_hash = _hash_refresh_token(refresh_token_value, secret=jwt_secret)
+    stmt = select(RefreshToken).where(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.user_id == user_id,
+    )
+    token_row = (await session.execute(stmt)).scalar_one_or_none()
+    if token_row is not None:
+        token_row.revoked = True
+    return token_row
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +606,7 @@ async def revoke_refresh_token(
 async def cleanup_expired_tokens(session: AsyncSession) -> int:
     """Delete refresh tokens that are revoked or expired. Returns count deleted."""
     now = datetime.now(timezone.utc)
-    stmt = delete(RefreshToken).where(
+    stmt = sa_delete(RefreshToken).where(
         or_(
             RefreshToken.revoked.is_(True),
             RefreshToken.expires_at < now,

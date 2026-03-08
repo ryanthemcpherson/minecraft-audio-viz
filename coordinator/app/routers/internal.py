@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_session
 from app.models.db import DJSession, User
-from app.routers.servers import _authenticate_server
+from app.services.server_service import authenticate_server
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 )
 async def get_dj_profile_for_session(
     dj_session_id: uuid.UUID,
-    server=Depends(_authenticate_server),
+    server=Depends(authenticate_server),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Look up DJSession -> User -> DJProfile and return profile data.
