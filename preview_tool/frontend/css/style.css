@@ -514,7 +514,6 @@ body {
 }
 
 .select-input:focus {
-    outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-dim);
 }
@@ -1113,6 +1112,24 @@ body {
 }
 
 /* ==========================================================================
+   Skip Link
+   ========================================================================== */
+
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 0;
+    padding: 8px 16px;
+    background: #08090d;
+    color: #43c5ff;
+    z-index: 10000;
+    font-size: 14px;
+}
+.skip-link:focus {
+    top: 0;
+}
+
+/* ==========================================================================
    Responsive - Sidebar below canvas at < 900px
    ========================================================================== */
 
@@ -1243,4 +1260,19 @@ body {
 @keyframes voice-header-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+/* Global focus-visible */
+:focus-visible {
+    outline: 2px solid #43c5ff;
+    outline-offset: 2px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }

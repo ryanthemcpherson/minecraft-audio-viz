@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="css/admin.css">
 </head>
 <body>
+    <a href="#app" class="skip-link">Skip to content</a>
     <div id="app">
         <!-- Header -->
         <header id="header">
@@ -24,7 +25,7 @@
                     </div>
                 </div>
                 <div class="connection-status-wrapper">
-                    <span id="connection-status" class="status disconnected">Disconnected</span>
+                    <span id="connection-status" class="status disconnected" aria-live="polite">Disconnected</span>
                     <button id="btn-reconnect" class="btn btn-reconnect hidden">Reconnect</button>
                 </div>
             </div>
