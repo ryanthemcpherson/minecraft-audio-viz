@@ -11,6 +11,7 @@
   ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
   ![Java 21](https://img.shields.io/badge/java-21-orange.svg)
   ![Fabric](https://img.shields.io/badge/fabric-MC%201.21.1-green.svg)
+  ![Paper](https://img.shields.io/badge/paper-MC%201.21.1-green.svg)
   ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
   ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 </div>
@@ -30,6 +31,7 @@
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
+- [Minecraft Integration](#minecraft-integration)
 - [Screenshots & Demo](#screenshots--demo)
 - [Visualization Patterns](#visualization-patterns)
 - [CLI Reference](#cli-reference)
@@ -47,9 +49,9 @@
 - **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
 - **Real-time FFT Analysis** — 5-band frequency processing with ultra-low latency (~20ms)
 - **55+ Visualization Patterns** — 41 Lua 3D patterns + 14 bitmap 2D patterns, from Spectrum Bars to Galaxy Spirals, Auroras, Plasma, and more
-- **Dual Render Backends** — high-res map tile displays (128x128 per tile) and virtual entity LED walls, switchable per zone
+- **Dual Render Backends** — high-res map tile displays (128x128 per tile) and entity LED walls, switchable per zone
 - **6 Audio Presets** — auto, edm, chill, rock, hiphop, classical
-- **Minecraft Rendering** — Fabric mod (primary) with SGUI menus, Polymer virtual entities, beat-reactive particles, and ambient lighting. Paper/Spigot plugin also available as an alternative
+- **Two Minecraft Integrations** — Fabric mod and Paper plugin, both connecting to the same VJ server (see [comparison](#minecraft-integration))
 - **3D Browser Preview** — WebGL scene with full Minecraft rendering parity
 - **Admin Control Panel** — VJ-style control surface with live meters, effects, and zone controls
 - **DJ Client** — cross-platform Tauri desktop app (Rust) for remote DJ sessions
@@ -110,46 +112,175 @@ audioviz-vj                   # Starts on port 9000
 #    Browser WS:   ws://localhost:8766 (used by 3D preview)
 ```
 
-### Minecraft Mod Setup (Optional)
+### Minecraft Setup (Optional)
 
-To render visualizations in Minecraft, build the Fabric mod and add it to your server's `mods/` folder:
+To render visualizations inside Minecraft, install either the Fabric mod or the Paper plugin. Both connect to the same VJ server — pick whichever matches your server platform.
 
+**Fabric mod:**
 ```bash
 cd minecraft_mod && ./gradlew build
 # Copy build/libs/audioviz-mod-*.jar to your server's mods/ folder
 # Requires: Fabric Loader, Fabric API, SGUI, Polymer
-# Configure VJ server: audioviz-vj --minecraft-host your-mc-server
 ```
 
-> **Alternative:** A Paper/Spigot plugin is also available at `minecraft_plugin/`. Build with `cd minecraft_plugin && mvn package`, then copy the JAR to your server's `plugins/` folder. The Fabric mod is recommended for better performance.
+**Paper plugin:**
+```bash
+cd minecraft_plugin && mvn package
+# Copy target/audioviz-plugin-*.jar to your server's plugins/ folder
+# No additional dependencies required
+```
+
+Then point the VJ server at your Minecraft server:
+```bash
+audioviz-vj --minecraft-host your-mc-server
+```
+
+See [Minecraft Integration](#minecraft-integration) for a detailed comparison.
 
 ---
 
 ## Architecture
 
-### Single DJ Mode (standalone)
+### System Overview
 
-```
-DJ Client (Rust/Tauri) ---> VJ Server (Python/Lua) ---> Minecraft Mod (Fabric)
-     Audio Capture              Pattern Engine          Map/Entity Renderer
-                                     |
-                          +----------+----------+
-                          v                     v
-                    Browser 3D            Admin Panel
-                     Preview              Control UI
+```mermaid
+graph LR
+    DJ1[DJ Client 1<br/><small>Rust/Tauri</small>] -->|audio frames| VJ[VJ Server<br/><small>Python + Lua</small>]
+    DJ2[DJ Client 2] -->|audio frames| VJ
+    DJ3[DJ Client 3] -->|audio frames| VJ
+
+    VJ -->|entity updates| MC[Minecraft Server<br/><small>Fabric mod or Paper plugin</small>]
+    VJ -->|viz state| BP[Browser 3D Preview<br/><small>Three.js</small>]
+    VJ -->|control state| AP[Admin Panel<br/><small>VJ control surface</small>]
+
+    style VJ fill:#1a1a2e,stroke:#00ccff,color:#f5f5f5
+    style MC fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
+    style DJ1 fill:#1a1a2e,stroke:#ffaa00,color:#f5f5f5
+    style DJ2 fill:#1a1a2e,stroke:#ffaa00,color:#f5f5f5
+    style DJ3 fill:#1a1a2e,stroke:#ffaa00,color:#f5f5f5
+    style BP fill:#1a1a2e,stroke:#5b6aff,color:#f5f5f5
+    style AP fill:#1a1a2e,stroke:#5b6aff,color:#f5f5f5
 ```
 
-### Multi-DJ Mode (live events)
+### Data Flow
 
+```mermaid
+graph TD
+    A[System Audio<br/><small>WASAPI loopback</small>] --> B[DJ Client<br/><small>FFT + beat detection</small>]
+    B -->|"dj_audio_frame<br/><small>bands[], peak, beat, bpm</small>"| C[VJ Server]
+    C --> D[Lua Pattern Engine<br/><small>41 patterns</small>]
+    C --> E[Bitmap Renderer<br/><small>14 patterns</small>]
+    D -->|"batch_update<br/><small>entity positions</small>"| F{Minecraft Server}
+    E -->|"bitmap_frame<br/><small>pixel data</small>"| F
+    D --> G[Browser Preview]
+    E --> G
+
+    F -->|Fabric mod| H[Map Renderer<br/><small>128x128 maps</small>]
+    F -->|Fabric mod| I[Virtual Entities<br/><small>Polymer</small>]
+    F -->|Paper plugin| J[Display Entities<br/><small>entity pools</small>]
+
+    style C fill:#1a1a2e,stroke:#00ccff,color:#f5f5f5
+    style F fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
 ```
-DJ Client 1 ---+
-DJ Client 2 ---+--> VJ Server (Central) ---> Minecraft (Shared)
-DJ Client 3 ---+         |
-                    +-----+-----+
-                    v           v
-                 Viewers     VJ Admin
-                (Browser)     Panel
+
+### Network Ports
+
+```mermaid
+graph LR
+    subgraph DJ Machines
+        DJC[DJ Client]
+    end
+
+    subgraph VJ Server
+        DJ_PORT["<b>:9000</b><br/>DJ WebSocket"]
+        BR_PORT["<b>:8766</b><br/>Browser WebSocket"]
+        HTTP_PORT["<b>:8080</b><br/>Admin Panel HTTP"]
+        MET_PORT["<b>:9001</b><br/>Metrics HTTP"]
+    end
+
+    subgraph Minecraft
+        MC_PORT["<b>:8765</b><br/>Viz WebSocket"]
+    end
+
+    subgraph Browsers
+        ADMIN[Admin Panel]
+        PREVIEW[3D Preview]
+    end
+
+    DJC --> DJ_PORT
+    DJ_PORT --- BR_PORT
+    BR_PORT --> MC_PORT
+    BR_PORT --> ADMIN
+    BR_PORT --> PREVIEW
+    HTTP_PORT --> ADMIN
+
+    style DJ_PORT fill:#1a1a2e,stroke:#ffaa00,color:#f5f5f5
+    style BR_PORT fill:#1a1a2e,stroke:#5b6aff,color:#f5f5f5
+    style MC_PORT fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
+    style HTTP_PORT fill:#1a1a2e,stroke:#5b6aff,color:#f5f5f5
+    style MET_PORT fill:#1a1a2e,stroke:#5b6aff,color:#f5f5f5
 ```
+
+| Port | Protocol | Purpose |
+|-|-|-|
+| 8765 | WebSocket | Minecraft mod/plugin ↔ VJ server |
+| 8766 | WebSocket | Browser clients (3D preview, admin panel) |
+| 9000 | WebSocket | DJ clients → VJ server |
+| 8080 | HTTP | Admin panel + 3D preview web UI |
+| 9001 | HTTP | Prometheus-compatible metrics (optional) |
+
+---
+
+## Minecraft Integration
+
+MCAV provides two ways to render visualizations in Minecraft. Both receive the same data from the VJ server — choose based on your server platform.
+
+### Choosing: Fabric Mod vs Paper Plugin
+
+```mermaid
+graph TD
+    Q{Which server<br/>platform?} -->|Fabric| FM[Fabric Mod<br/><code>minecraft_mod/</code>]
+    Q -->|Paper / Spigot| PP[Paper Plugin<br/><code>minecraft_plugin/</code>]
+
+    FM --> FB1[Map renderer<br/><small>128x128 maps in item frames</small>]
+    FM --> FB2[Virtual entities<br/><small>Polymer, zero server overhead</small>]
+    FM --> FB3[SGUI menus]
+
+    PP --> PB1[Display entities<br/><small>pre-allocated pools</small>]
+    PP --> PB2[Bitmap renderer<br/><small>text display pixel grids</small>]
+    PP --> PB3[Inventory menus]
+    PP --> PB4[Bedrock support<br/><small>via Geyser</small>]
+
+    style FM fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
+    style PP fill:#1a1a2e,stroke:#00ccff,color:#f5f5f5
+```
+
+| Feature | Fabric Mod | Paper Plugin |
+|-|-|-|
+| **Server platform** | Fabric Loader + Fabric API | Paper or Spigot |
+| **3D patterns (Lua)** | Virtual entities (Polymer) | Display entities (pooled) |
+| **2D patterns (bitmap)** | Map renderer (128x128 tiles) | Text display pixel grid |
+| **GUI system** | SGUI server-side menus | Inventory-based menus |
+| **Bedrock players** | Not supported | Supported (via Geyser) |
+| **Bundle packets** | Yes (atomic frame updates) | No |
+| **Dependencies** | Fabric API, SGUI, Polymer | None |
+| **Bandwidth (64x36 bitmap)** | ~4 KB/tick (10 packets) | ~1.15 MB/tick (23K packets) |
+| **Entity overhead** | Zero (virtual) | Real entities (pooled) |
+| **Beat effects** | Particles, ambient lighting, stage decorators | Particles, ambient lighting, stage decorators |
+
+**Summary:** The Fabric mod has better rendering performance (virtual entities, map-based bitmaps, bundle packets). The Paper plugin has simpler setup (no extra dependencies) and supports Bedrock players. Both provide the full visualization experience — the same patterns, the same VJ server, the same controls.
+
+### Shared Capabilities
+
+Both the mod and plugin provide:
+
+- **Zone management** — create, position, resize, and rotate visualization zones
+- **Pattern switching** — all 41 Lua 3D patterns + 14 bitmap patterns
+- **Beat-reactive effects** — particle bursts, ambient lighting, stage decorators
+- **Stage system** — multi-zone stages with spotlights, DJ billboards, and floor tiles
+- **Admin menus** — in-game GUI for zone/stage/pattern control
+- **WebSocket connection** — receives `batch_update` and `bitmap_frame` messages on port 8765
+- **Audio presets** — auto, edm, chill, rock, hiphop, classical
 
 ---
 
@@ -172,7 +303,7 @@ DJ Client 3 ---+         |
 
 ### Lua 3D Patterns (41)
 
-3D entity-based patterns computed by the VJ server's Lua engine and rendered by the Minecraft mod using virtual entities.
+3D entity-based patterns computed by the VJ server's Lua engine. Rendered in Minecraft by the Fabric mod (virtual entities) or Paper plugin (display entities), and mirrored in the browser 3D preview.
 
 | Pattern | Key | Description |
 |-|-|-|
@@ -220,7 +351,7 @@ DJ Client 3 ---+         |
 
 ### Bitmap Patterns (14)
 
-Flat 2D pixel-grid patterns rendered in-mod via map tile displays (128x128 per tile, glow item frames) or virtual entity LED walls. Includes effects processing, transitions, and layer compositing.
+Flat 2D pixel-grid patterns. The Fabric mod renders these via map tile displays (128x128 per tile, glow item frames). The Paper plugin renders them via text display entities as individually-addressable pixels. Both support effects processing and layer compositing.
 
 | Pattern | Key | Description |
 |-|-|-|
@@ -238,8 +369,6 @@ Flat 2D pixel-grid patterns rendered in-mod via map tile displays (128x128 per t
 | Galaxy | `bmp_galaxy` | Spiral galaxy with star particles |
 | Lightning | `bmp_lightning` | Beat-triggered lightning bolts |
 | Rotating Geometry | `bmp_geometry` | Rotating 3D wireframes |
-
-> The Paper/Spigot plugin (`minecraft_plugin/`) includes additional bitmap patterns beyond those listed here.
 
 ---
 
@@ -268,6 +397,8 @@ For development, see `dj_client/README.md`
 
 ## Minecraft Commands
 
+Both the Fabric mod and Paper plugin use the same `/audioviz` command tree:
+
 | Command | Description |
 |-|-|
 | `/audioviz menu` | Open the main control panel (`/av menu`, `/mcav menu`) |
@@ -278,7 +409,7 @@ For development, see `dj_client/README.md`
 | `/audioviz zone setrotation <name> <degrees>` | Set zone rotation |
 | `/audioviz zone info <name>` | Show zone details |
 | `/audioviz test <zone> <wave\|pulse\|random>` | Run test animation |
-| `/audioviz status` | Show mod status |
+| `/audioviz status` | Show connection and system status |
 | `/audioviz help` | Show command help |
 
 ---
@@ -313,9 +444,9 @@ For production, the VJ server enforces authentication by default.
 </details>
 
 <details>
-<summary><strong>Minecraft Mod Features</strong></summary>
+<summary><strong>In-Game Features (both mod and plugin)</strong></summary>
 
-### GUI menu system (SGUI)
+### GUI menu system
 - Main menu (system status, active zones, connection info)
 - DJ control panel (effects, presets, zone selection)
 - Stage management (create/edit stages, assign zone roles)
@@ -324,22 +455,23 @@ For production, the VJ server enforces authentication by default.
 - Stage decorator menus (spotlights, DJ banners, floor tiles)
 - Settings menu (performance tuning)
 
-### Dual render backends
-- **Map display** — high-resolution 128x128 pixel maps in glow item frames, dirty-rect tracking for efficient updates
-- **Virtual entity LED wall** — Polymer virtual block display entities as individually-addressable pixels
-
 ### Beat effects
 - Particle bursts on beats (bass flame, beat ring, spectrum dust, ambient mist)
 - Beat event system with configurable thresholds
 - Ambient lighting that responds to audio state
 - Stage decorators (spotlights, DJ billboards, floor tiles, beat text FX)
 
-### Performance optimizations
-- Batched entity updates via Polymer virtual entities (no real entity overhead)
+### Render backends
+
+**Fabric mod:**
+- Map display — high-resolution 128x128 pixel maps in glow item frames, dirty-rect tracking for efficient updates
+- Virtual entity LED wall — Polymer virtual block display entities as individually-addressable pixels
+- Bundle packets for tear-free frame updates
+
+**Paper plugin:**
+- Display entity pools — pre-allocated real entities with interpolation
+- Text display pixel grid — individually-addressable pixels via text display background color
 - Async bitmap rendering on dedicated thread pool
-- Tick-based message queue with bundle packet sending
-- Map dirty-rect tracking (only re-send changed regions)
-- Entity pool management + interpolation
 
 </details>
 
@@ -376,25 +508,25 @@ MINECRAFT_HOST=mc.example.com docker-compose up -d
 
 ```text
 minecraft-audio-viz/
-+-- dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
-+-- vj_server/             # VJ Server (Python, Lua pattern engine + routing)
-+-- minecraft_mod/         # Fabric mod (Java 21, MC 1.21.1) — primary
-+-- minecraft_plugin/      # Paper/Spigot plugin (Java 21) — alternative
-+-- admin_panel/           # Web control panel (VJ interface)
-+-- preview_tool/          # 3D browser preview (Three.js)
-+-- site/                  # Landing page (Next.js 15, mcav.live)
-+-- coordinator/           # DJ coordinator API (FastAPI, PostgreSQL)
-+-- community_bot/         # Discord community bot (discord.py)
-+-- discord_bot/           # Discord voice audio capture bot
-+-- worker/                # Tenant router (Cloudflare Workers)
-+-- protocol/              # Shared WebSocket protocol schemas
-+-- patterns/              # Lua 3D visualization patterns (41)
-+-- configs/               # Configuration files
-+-- docs/                  # Architecture and ops docs
-+-- scripts/               # PowerShell quick-start scripts
-+-- shows/                 # Saved show files
-+-- archive/               # Archived components
-    +-- python_dj_cli/     # Old Python DJ CLI (deprecated)
+├── dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
+├── vj_server/             # VJ Server (Python, Lua pattern engine + routing)
+├── minecraft_mod/         # Fabric mod (Java 21, MC 1.21.1)
+├── minecraft_plugin/      # Paper/Spigot plugin (Java 21, MC 1.21.1)
+├── admin_panel/           # Web control panel (VJ interface)
+├── preview_tool/          # 3D browser preview (Three.js)
+├── site/                  # Landing page (Next.js 15, mcav.live)
+├── coordinator/           # DJ coordinator API (FastAPI, PostgreSQL)
+├── community_bot/         # Discord community bot (discord.py)
+├── discord_bot/           # Discord voice audio capture bot
+├── worker/                # Tenant router (Cloudflare Workers)
+├── protocol/              # Shared WebSocket protocol schemas
+├── patterns/              # Lua 3D visualization patterns (41)
+├── configs/               # Configuration files
+├── docs/                  # Architecture and ops docs
+├── scripts/               # PowerShell quick-start scripts
+├── shows/                 # Saved show files
+└── archive/               # Archived components
+    └── python_dj_cli/     # Old Python DJ CLI (deprecated)
 ```
 
 ### Web Platform (mcav.live)
@@ -416,6 +548,9 @@ cd vj_server && pip install -e ".[dev]" && pytest
 # Minecraft Mod (Fabric)
 cd minecraft_mod && ./gradlew build
 
+# Minecraft Plugin (Paper)
+cd minecraft_plugin && mvn package
+
 # DJ Client (Rust/Tauri)
 cd dj_client && npm install && npm run tauri dev
 
@@ -431,7 +566,7 @@ cd site && npm install && npm run dev
 ## Known Limitations
 
 - **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server can run on Linux/Docker, but DJs must run on Windows.
-- **Java Edition only** — The Fabric mod requires Java Edition 1.21.1+ with Fabric Loader.
+- **Java Edition only** — Both the Fabric mod and Paper plugin require Java Edition 1.21.1+.
 - **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
 
 ---
