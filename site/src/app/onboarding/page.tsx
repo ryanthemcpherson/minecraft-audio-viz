@@ -68,8 +68,11 @@ export default function OnboardingPage() {
       return;
     }
 
+    const controller = new AbortController();
+
     fetchMe(accessToken)
       .then((profile) => {
+        if (controller.signal.aborted) return;
         if (profile.onboarding_completed) {
           router.replace("/dashboard");
         } else {
@@ -77,8 +80,11 @@ export default function OnboardingPage() {
         }
       })
       .catch(() => {
+        if (controller.signal.aborted) return;
         router.push("/login");
       });
+
+    return () => controller.abort();
   }, [user, accessToken, authLoading, router]);
 
   // Auto-generate slug from org name

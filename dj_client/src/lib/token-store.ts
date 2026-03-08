@@ -44,8 +44,8 @@ export async function initTokenStore(): Promise<void> {
     cachedAccessToken = (await store.get<string>('accessToken')) ?? null;
     cachedRefreshToken = (await store.get<string>('refreshToken')) ?? null;
     cachedExpiresAt = (await store.get<number>('expiresAt')) ?? null;
-  } catch {
-    // Store unavailable (e.g. running outside Tauri) - memory-only mode
+  } catch (err) {
+    console.error("Failed to load token store:", err);
   }
 
   // Migrate from localStorage if the store is empty but legacy tokens exist
@@ -106,8 +106,8 @@ async function persistTokens(): Promise<void> {
     if (cachedExpiresAt) {
       await store.set('expiresAt', cachedExpiresAt);
     }
-  } catch {
-    // Best-effort persist
+  } catch (err) {
+    console.error("Failed to persist tokens to store:", err);
   }
 }
 
@@ -131,8 +131,8 @@ export async function clearTokens(): Promise<void> {
       await store.delete('accessToken');
       await store.delete('refreshToken');
       await store.delete('expiresAt');
-    } catch {
-      // Best-effort clear
+    } catch (err) {
+      console.error("Failed to clear tokens from store:", err);
     }
   }
 }

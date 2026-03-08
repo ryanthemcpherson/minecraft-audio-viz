@@ -34,8 +34,8 @@ function ApiKeyReveal({ data, onDismiss }: { data: RegisterServerResponse; onDis
   function handleCopy(value: string, setter: (v: boolean) => void) {
     try {
       navigator.clipboard.writeText(value);
-    } catch {
-      // Clipboard API may be unavailable in some contexts
+    } catch (err) {
+      console.error("Failed to copy to clipboard:", err);
     }
     setter(true);
     setTimeout(() => setter(false), 2000);
@@ -282,24 +282,31 @@ export default function OrgServersPage() {
       return;
     }
 
+    const controller = new AbortController();
+
     async function load() {
       try {
         const [orgData, profile] = await Promise.all([
           getOrgBySlug(accessToken!, slug),
           fetchMe(accessToken!),
         ]);
+        if (controller.signal.aborted) return;
         setOrg(orgData);
         setIsOwner(orgData.owner_id === profile.id);
 
         const serverList = await listOrgServers(accessToken!, orgData.id);
+        if (controller.signal.aborted) return;
         setServers(serverList);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Failed to load");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
     load();
+
+    return () => controller.abort();
   }, [user, accessToken, authLoading, router, slug]);
 
   async function handleRegistered(data: RegisterServerResponse) {
@@ -318,8 +325,8 @@ export default function OrgServersPage() {
     try {
       await removeOrgServer(accessToken, org.id, serverId);
       setServers((prev) => prev.filter((s) => s.id !== serverId));
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error("Failed to remove server:", err);
     } finally {
       setRemovingId(null);
     }

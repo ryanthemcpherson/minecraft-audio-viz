@@ -212,7 +212,8 @@ async function tryRefreshAccessToken(): Promise<string | null> {
       const res = await refreshToken(stored);
       storeRefreshToken(res.refresh_token);
       return res.access_token;
-    } catch {
+    } catch (err) {
+      console.error("Failed to refresh access token:", err);
       clearStoredRefreshToken();
       return null;
     } finally {
@@ -349,8 +350,8 @@ export function getOAuthProvider(state: string): "discord" | "google" {
     while (b64.length % 4) b64 += "=";
     const payload = JSON.parse(atob(b64));
     if (payload.provider === "google") return "google";
-  } catch {
-    // Fall through to default
+  } catch (err) {
+    console.error("Failed to decode OAuth provider from state JWT:", err);
   }
   return "discord";
 }
