@@ -1491,7 +1491,6 @@ body {
     background: var(--bg-secondary);
     border-radius: var(--border-radius-xs);
     cursor: pointer;
-    outline: none;
     margin-bottom: var(--spacing-xs);
 }
 
@@ -1802,7 +1801,6 @@ body {
     background: var(--bg-tertiary);
     border-radius: var(--border-radius-xs);
     cursor: pointer;
-    outline: none;
 }
 
 .control-row input[type="range"]::-webkit-slider-thumb {
@@ -3971,7 +3969,6 @@ input:disabled + .toggle-slider {
 
 #banner-panel .control-input:focus {
     border-color: var(--accent-primary);
-    outline: none;
 }
 
 #banner-panel .control-select {
@@ -4649,4 +4646,18 @@ input:disabled + .toggle-slider {
     .bitmap-inline-form {
         flex-wrap: wrap;
     }
+}
+
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 0;
+    padding: 8px 16px;
+    background: #08090d;
+    color: #43c5ff;
+    z-index: 10000;
+    font-size: 14px;
+}
+.skip-link:focus {
+    top: 0;
 }
