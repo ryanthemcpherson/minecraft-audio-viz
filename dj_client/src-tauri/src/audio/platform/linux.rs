@@ -45,16 +45,16 @@ pub fn list_audio_applications() -> Result<Vec<AudioSource>, String> {
 
                 if line.starts_with("Sink Input #") {
                     // Save previous entry if valid
-                    if let (Some(name), Some(pid)) = (&current_name, &current_pid) {
-                        if !seen_pids.contains(pid) {
-                            seen_pids.insert(pid.clone());
-                            let binary = current_binary.as_deref().unwrap_or("unknown");
-                            sources.push(AudioSource {
-                                id: format!("app:{}:{}", pid, binary),
-                                name: name.clone(),
-                                source_type: SourceType::Application,
-                            });
-                        }
+                    if let (Some(name), Some(pid)) = (&current_name, &current_pid)
+                        && !seen_pids.contains(pid)
+                    {
+                        seen_pids.insert(pid.clone());
+                        let binary = current_binary.as_deref().unwrap_or("unknown");
+                        sources.push(AudioSource {
+                            id: format!("app:{}:{}", pid, binary),
+                            name: name.clone(),
+                            source_type: SourceType::Application,
+                        });
                     }
                     // Reset for next entry
                     current_name = None;
@@ -85,15 +85,15 @@ pub fn list_audio_applications() -> Result<Vec<AudioSource>, String> {
             }
 
             // Don't forget the last entry
-            if let (Some(name), Some(pid)) = (&current_name, &current_pid) {
-                if !seen_pids.contains(pid) {
-                    let binary = current_binary.as_deref().unwrap_or("unknown");
-                    sources.push(AudioSource {
-                        id: format!("app:{}:{}", pid, binary),
-                        name: name.clone(),
-                        source_type: SourceType::Application,
-                    });
-                }
+            if let (Some(name), Some(pid)) = (&current_name, &current_pid)
+                && !seen_pids.contains(pid)
+            {
+                let binary = current_binary.as_deref().unwrap_or("unknown");
+                sources.push(AudioSource {
+                    id: format!("app:{}:{}", pid, binary),
+                    name: name.clone(),
+                    source_type: SourceType::Application,
+                });
             }
         }
         Err(_) => {
