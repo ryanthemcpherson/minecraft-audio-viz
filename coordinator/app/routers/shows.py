@@ -18,8 +18,8 @@ from app.models.schemas import (
     EndShowResponse,
     ShowDetailResponse,
 )
-from app.routers.servers import _authenticate_server
 from app.services.code_generator import generate_unique_code
+from app.services.server_service import authenticate_server
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ router = APIRouter(tags=["shows"])
 )
 async def create_show(
     body: CreateShowRequest,
-    server: VJServer = Depends(_authenticate_server),
+    server: VJServer = Depends(authenticate_server),
     session: AsyncSession = Depends(get_session),
 ) -> CreateShowResponse:
     """Create a show for the authenticated server.
@@ -85,7 +85,7 @@ async def create_show(
 )
 async def end_show(
     show_id: uuid.UUID,
-    server: VJServer = Depends(_authenticate_server),
+    server: VJServer = Depends(authenticate_server),
     session: AsyncSession = Depends(get_session),
 ) -> EndShowResponse:
     """End a show, setting its status to ``ended`` and clearing the connect
@@ -137,7 +137,7 @@ async def end_show(
 )
 async def get_show(
     show_id: uuid.UUID,
-    server: VJServer = Depends(_authenticate_server),
+    server: VJServer = Depends(authenticate_server),
     session: AsyncSession = Depends(get_session),
 ) -> ShowDetailResponse:
     """Return full details for a show owned by the authenticated server."""
