@@ -9,7 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.db import RoleSource, RoleType
-from app.services.content_filter import validate_no_slurs
+from app.utils.content_filter import validate_no_slurs
 
 # ---------------------------------------------------------------------------
 # Shared

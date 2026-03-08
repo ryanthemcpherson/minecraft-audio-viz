@@ -9,13 +9,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.database import get_session
 from app.dependencies.auth import get_current_user, require_org_owner
-from app.models.db import Organization, OrgInvite, OrgMember, User, VJServer
+from app.models.db import User
 from app.models.schemas import (
     AssignServerRequest,
     AssignServerResponse,
@@ -31,9 +29,9 @@ from app.models.schemas import (
     RegisterOrgServerResponse,
     UpdateOrgRequest,
 )
-from app.routers.servers import _compute_key_prefix
+from app.services import org_service
 from app.services.code_generator import SAFE_CHARS
-from app.services.password import hash_password
+from app.services.server_service import register_server as svc_register_server
 
 logger = logging.getLogger(__name__)
 
@@ -111,30 +109,16 @@ async def create_org(
     """
     slug = _validate_slug(body.slug)
 
-    # Check uniqueness
-    existing = (
-        await session.execute(select(Organization).where(Organization.slug == slug))
-    ).scalar_one_or_none()
-    if existing is not None:
+    if not await org_service.check_slug_available(session, slug):
         raise HTTPException(status_code=409, detail="Slug already taken")
 
-    org = Organization(
-        id=uuid.uuid4(),
+    org = await org_service.create_org(
+        session,
         name=body.name,
         slug=slug,
         owner_id=user.id,
         description=body.description,
     )
-    session.add(org)
-
-    # Auto-create owner membership
-    membership = OrgMember(
-        id=uuid.uuid4(),
-        user_id=user.id,
-        org_id=org.id,
-        role="owner",
-    )
-    session.add(membership)
 
     await session.commit()
     await session.refresh(org)
@@ -168,24 +152,12 @@ async def get_org_by_slug(
     """Resolve an organization by its URL slug.  Requires the authenticated
     user to be a member.  Returns 404 if not found, 403 if not a member.
     """
-    org = (
-        await session.execute(
-            select(Organization).where(
-                Organization.slug == slug.lower().strip(),
-                Organization.is_active.is_(True),
-            )
-        )
-    ).scalar_one_or_none()
+    org = await org_service.get_org_by_slug(session, slug)
 
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    membership = (
-        await session.execute(
-            select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.org_id == org.id)
-        )
-    ).scalar_one_or_none()
-
+    membership = await org_service.get_membership(session, user.id, org.id)
     if membership is None:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
 
@@ -218,22 +190,12 @@ async def get_org(
     """Get organization details by ID.  Requires the authenticated user to be
     a member.  Returns 404 if not found, 403 if not a member.
     """
-    org = (
-        await session.execute(
-            select(Organization).where(Organization.id == org_id, Organization.is_active.is_(True))
-        )
-    ).scalar_one_or_none()
+    org = await org_service.get_org_by_id(session, org_id)
 
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # Check membership
-    membership = (
-        await session.execute(
-            select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.org_id == org_id)
-        )
-    ).scalar_one_or_none()
-
+    membership = await org_service.get_membership(session, user.id, org_id)
     if membership is None:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
 
@@ -267,19 +229,18 @@ async def update_org(
     """Update organization name, description, or avatar.  Only the org owner
     can perform this action.
     """
-    org = (
-        await session.execute(select(Organization).where(Organization.id == org_id))
-    ).scalar_one_or_none()
+    org = await org_service.get_org_by_id(session, org_id, active_only=False)
 
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    if body.name is not None:
-        org.name = body.name
-    if body.description is not None:
-        org.description = body.description
-    if body.avatar_url is not None:
-        org.avatar_url = body.avatar_url
+    await org_service.update_org(
+        session,
+        org,
+        name=body.name,
+        description=body.description,
+        avatar_url=body.avatar_url,
+    )
 
     await session.commit()
     await session.refresh(org)
@@ -314,9 +275,7 @@ async def assign_server(
     """Link an existing VJ server to this organization.  Owner-only.
     Returns 409 if the server is already assigned to a different org.
     """
-    server = (
-        await session.execute(select(VJServer).where(VJServer.id == body.server_id))
-    ).scalar_one_or_none()
+    server = await org_service.assign_server_to_org(session, body.server_id, org_id)
 
     if server is None:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -326,7 +285,6 @@ async def assign_server(
             status_code=409, detail="Server is already assigned to another organization"
         )
 
-    server.org_id = org_id
     await session.commit()
 
     return AssignServerResponse(server_id=server.id, org_id=org_id)
@@ -354,29 +312,11 @@ async def list_org_servers(
     """List VJ servers belonging to this organization with online status and
     active show counts.  Requires org membership.
     """
-    # Check membership
-    membership = (
-        await session.execute(
-            select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.org_id == org_id)
-        )
-    ).scalar_one_or_none()
-
+    membership = await org_service.get_membership(session, user.id, org_id)
     if membership is None:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
 
-    servers = (
-        (
-            await session.execute(
-                select(VJServer)
-                .where(VJServer.org_id == org_id)
-                .options(selectinload(VJServer.shows))
-                .limit(limit)
-                .offset(offset)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    servers = await org_service.list_org_servers(session, org_id, limit=limit, offset=offset)
 
     now = datetime.now(timezone.utc)
     results: list[OrgServerDetailResponse] = []
@@ -423,19 +363,16 @@ async def register_org_server(
     returned **once** and cannot be retrieved again.
     """
     api_key = f"mcav_{_secrets.token_urlsafe(32)}"
-    api_key_hash = hash_password(api_key)
     jwt_secret = f"jws_{_secrets.token_urlsafe(32)}"
 
-    server = VJServer(
-        id=uuid.uuid4(),
+    server = await svc_register_server(
         name=body.name,
         websocket_url=body.websocket_url,
-        api_key_hash=api_key_hash,
-        key_prefix=_compute_key_prefix(api_key),
+        api_key=api_key,
         jwt_secret=jwt_secret,
+        session=session,
         org_id=org_id,
     )
-    session.add(server)
     await session.commit()
     await session.refresh(server)
 
@@ -470,16 +407,11 @@ async def remove_org_server(
     """Unlink a server from this organization (does not delete the server).
     Owner-only.
     """
-    server = (
-        await session.execute(
-            select(VJServer).where(VJServer.id == server_id, VJServer.org_id == org_id)
-        )
-    ).scalar_one_or_none()
+    server = await org_service.remove_server_from_org(session, server_id, org_id)
 
     if server is None:
         raise HTTPException(status_code=404, detail="Server not found in this organization")
 
-    server.org_id = None
     await session.commit()
 
 
@@ -510,19 +442,15 @@ async def create_invite(
     """Create an invite code for this organization.  Owner-only.  Optionally
     set ``expires_in_hours`` and ``max_uses`` to limit the invite.
     """
-    expires_at = None
-    if body.expires_in_hours is not None:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours)
-
-    invite = OrgInvite(
-        id=uuid.uuid4(),
+    invite = await org_service.create_invite(
+        session,
         org_id=org_id,
         code=_generate_invite_code(),
         created_by=user.id,
-        expires_at=expires_at,
+        expires_in_hours=body.expires_in_hours,
         max_uses=body.max_uses,
     )
-    session.add(invite)
+
     await session.commit()
     await session.refresh(invite)
 
@@ -556,18 +484,7 @@ async def list_invites(
     session: AsyncSession = Depends(get_session),
 ) -> list[InviteResponse]:
     """List active invite codes for this organization.  Owner-only."""
-    invites = (
-        (
-            await session.execute(
-                select(OrgInvite)
-                .where(OrgInvite.org_id == org_id, OrgInvite.is_active.is_(True))
-                .limit(limit)
-                .offset(offset)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    invites = await org_service.list_active_invites(session, org_id, limit=limit, offset=offset)
 
     return [
         InviteResponse(
@@ -602,16 +519,11 @@ async def delete_invite(
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Deactivate an invite code so it can no longer be used.  Owner-only."""
-    invite = (
-        await session.execute(
-            select(OrgInvite).where(OrgInvite.id == invite_id, OrgInvite.org_id == org_id)
-        )
-    ).scalar_one_or_none()
+    invite = await org_service.deactivate_invite(session, invite_id, org_id)
 
     if invite is None:
         raise HTTPException(status_code=404, detail="Invite not found")
 
-    invite.is_active = False
     await session.commit()
 
 
@@ -633,14 +545,7 @@ async def join_org(
     """Join an organization using an invite code.  Returns 404 if the code is
     invalid, 410 if expired or max uses reached, 409 if already a member.
     """
-    invite = (
-        await session.execute(
-            select(OrgInvite).where(
-                OrgInvite.code == body.invite_code.upper(),
-                OrgInvite.is_active.is_(True),
-            )
-        )
-    ).scalar_one_or_none()
+    invite = await org_service.find_active_invite_by_code(session, body.invite_code)
 
     if invite is None:
         raise HTTPException(status_code=404, detail="Invalid or expired invite code")
@@ -654,35 +559,16 @@ async def join_org(
         raise HTTPException(status_code=410, detail="Invite code has reached its usage limit")
 
     # Check if already a member
-    existing = (
-        await session.execute(
-            select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.org_id == invite.org_id)
-        )
-    ).scalar_one_or_none()
-
+    existing = await org_service.get_membership(session, user.id, invite.org_id)
     if existing is not None:
         raise HTTPException(status_code=409, detail="Already a member of this organization")
 
-    # Create membership
-    membership = OrgMember(
-        id=uuid.uuid4(),
-        user_id=user.id,
-        org_id=invite.org_id,
-        role="member",
-    )
-    session.add(membership)
-
-    # Atomically increment use count
-    await session.execute(
-        update(OrgInvite).where(OrgInvite.id == invite.id).values(use_count=OrgInvite.use_count + 1)
-    )
+    await org_service.join_org_with_invite(session, user_id=user.id, invite=invite)
 
     await session.commit()
 
     # Fetch org info for response
-    org = (
-        await session.execute(select(Organization).where(Organization.id == invite.org_id))
-    ).scalar_one()
+    org = await org_service.get_org_for_invite(session, invite.org_id)
 
     return JoinOrgResponse(
         org_id=org.id,
