@@ -28,8 +28,8 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
         await auth.register(email, password, displayName);
       }
       // Modal will auto-close via parent watching isSignedIn
-    } catch {
-      // Error is shown via auth.error
+    } catch (err) {
+      console.error("Failed to submit auth form:", err);
     }
   };
 

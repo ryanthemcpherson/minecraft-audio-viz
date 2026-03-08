@@ -62,6 +62,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   // On mount, try to restore session from refresh token
   useEffect(() => {
+    const controller = new AbortController();
     const stored = getStoredRefreshToken();
     if (!stored) {
       queueMicrotask(() => setLoading(false));
@@ -70,19 +71,26 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
     refreshToken(stored)
       .then((res) => {
+        if (controller.signal.aborted) return;
         setAccessToken(res.access_token);
         storeRefreshToken(res.refresh_token);
         if (res.expires_in) setExpiresIn(res.expires_in);
         return fetchMe(res.access_token);
       })
-      .then((profile: UserProfile) => {
-        setUser(profile);
+      .then((profile: UserProfile | undefined) => {
+        if (controller.signal.aborted) return;
+        if (profile) setUser(profile);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("Failed to restore session from refresh token:", err);
         // Refresh failed — clear stale token
         clearStoredRefreshToken();
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
   }, []);
 
   // Periodically refresh the access token before it expires
@@ -145,8 +153,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     if (stored) {
       try {
         await logoutApi(stored);
-      } catch {
-        // Best-effort revocation
+      } catch (err) {
+        console.error("Failed to revoke refresh token on logout:", err);
       }
     }
     setAccessToken(null);
