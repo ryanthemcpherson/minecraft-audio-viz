@@ -76,7 +76,7 @@ jobs:
           body: |
             ## MCAV Fabric Mod ${{ steps.version.outputs.VERSION }}
 
-            Minecraft 1.21.1 | Fabric Loader | Java 21
+            Minecraft 1.21.11 | Fabric Loader | Java 21
 
             ### Requirements
             - [Fabric Loader](https://fabricmc.net/use/installer/) 0.16+

@@ -6,7 +6,7 @@
 
 **Architecture:** The expensive `pattern.render()` call (and transition blending) moves to a single-thread `ExecutorService`, writing into a per-zone back buffer. The main Bukkit thread only consumes completed frames, runs lightweight post-processing (effects, game state), and pushes to entities. If the async render hasn't completed by the next tick, the main thread skips that zone's update — automatic frame dropping with zero main-thread blocking.
 
-**Tech Stack:** Java 21, Paper API 1.21.1+, JUnit 5, Mockito
+**Tech Stack:** Java 21, Paper API 1.21.11+, JUnit 5, Mockito
 
 ---
 

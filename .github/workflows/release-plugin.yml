@@ -85,10 +85,10 @@ jobs:
           body: |
             ## MCAV Paper Plugin ${{ steps.version.outputs.VERSION }}
 
-            Minecraft 1.21.1 | Paper/Spigot | Java 21
+            Minecraft 1.21.11 | Paper/Spigot | Java 21
 
             ### Requirements
-            - [Paper](https://papermc.io/downloads/paper) 1.21.1+ (or Spigot/Purpur)
+            - [Paper](https://papermc.io/downloads/paper) 1.21.11+ (or Spigot/Purpur)
             - Java 21
 
             ### Optional
