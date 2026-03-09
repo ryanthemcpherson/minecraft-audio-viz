@@ -246,40 +246,40 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download Mod artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: minecraft-mod
           path: mod/
 
       - name: Download Plugin artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: minecraft-plugin
           path: plugin/
 
       - name: Download DJ Client Windows
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dj-client-windows-x64
           path: dj-client/windows/
         continue-on-error: true
 
       - name: Download DJ Client Linux
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dj-client-linux-x64
           path: dj-client/linux/
         continue-on-error: true
 
       - name: Download DJ Client macOS x64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dj-client-macos-x64
           path: dj-client/macos-x64/
         continue-on-error: true
 
       - name: Download DJ Client macOS ARM64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dj-client-macos-arm64
           path: dj-client/macos-arm64/
