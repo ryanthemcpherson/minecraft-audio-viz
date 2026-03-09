@@ -67,11 +67,11 @@ java {
 
 ```properties
 # gradle.properties
-minecraft_version=1.21.1
-yarn_mappings=1.21.1+build.3
+minecraft_version=1.21.11
+yarn_mappings=1.21.11+build.3
 loader_version=0.16.9
-fabric_version=0.107.0+1.21.1
-polymer_version=0.9.17+1.21.1
+fabric_version=0.107.0+1.21.11
+polymer_version=0.9.17+1.21.11
 ```
 
 **Step 2: Create fabric.mod.json**
@@ -91,7 +91,7 @@ polymer_version=0.9.17+1.21.1
   },
   "depends": {
     "fabricloader": ">=0.16.0",
-    "minecraft": ">=1.21.1",
+    "minecraft": ">=1.21.11",
     "java": ">=21",
     "fabric-api": "*"
   }

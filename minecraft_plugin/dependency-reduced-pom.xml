@@ -89,7 +89,7 @@
     <dependency>
       <groupId>io.papermc.paper</groupId>
       <artifactId>paper-api</artifactId>
-      <version>1.21.1-R0.1-SNAPSHOT</version>
+      <version>1.21.11-R0.1-SNAPSHOT</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -203,7 +203,7 @@
   </dependencies>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <paper.version>1.21.1-R0.1-SNAPSHOT</paper.version>
+    <paper.version>1.21.11-R0.1-SNAPSHOT</paper.version>
     <java.version>21</java.version>
   </properties>
 </project>

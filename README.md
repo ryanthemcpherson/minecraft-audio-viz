@@ -10,8 +10,8 @@
   ![Rust](https://img.shields.io/badge/rust-stable-orange.svg)
   ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
   ![Java 21](https://img.shields.io/badge/java-21-orange.svg)
-  ![Fabric](https://img.shields.io/badge/fabric-MC%201.21.1-green.svg)
-  ![Paper](https://img.shields.io/badge/paper-MC%201.21.1-green.svg)
+  ![Fabric](https://img.shields.io/badge/fabric-MC%201.21.11-green.svg)
+  ![Paper](https://img.shields.io/badge/paper-MC%201.21.11-green.svg)
   ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
   ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 </div>
@@ -510,8 +510,8 @@ MINECRAFT_HOST=mc.example.com docker-compose up -d
 minecraft-audio-viz/
 ├── dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
 ├── vj_server/             # VJ Server (Python, Lua pattern engine + routing)
-├── minecraft_mod/         # Fabric mod (Java 21, MC 1.21.1)
-├── minecraft_plugin/      # Paper/Spigot plugin (Java 21, MC 1.21.1)
+├── minecraft_mod/         # Fabric mod (Java 21, MC 1.21.11)
+├── minecraft_plugin/      # Paper/Spigot plugin (Java 21, MC 1.21.11)
 ├── admin_panel/           # Web control panel (VJ interface)
 ├── preview_tool/          # 3D browser preview (Three.js)
 ├── site/                  # Landing page (Next.js 15, mcav.live)
@@ -566,7 +566,7 @@ cd site && npm install && npm run dev
 ## Known Limitations
 
 - **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server can run on Linux/Docker, but DJs must run on Windows.
-- **Java Edition only** — Both the Fabric mod and Paper plugin require Java Edition 1.21.1+.
+- **Java Edition only** — Both the Fabric mod and Paper plugin require Java Edition 1.21.11+.
 - **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
 
 ---

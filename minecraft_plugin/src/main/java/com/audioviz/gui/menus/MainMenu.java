@@ -139,7 +139,7 @@ public class MainMenu implements Menu {
                 "&7Real-time audio visualization",
                 "",
                 "&fVersion: &71.0.0",
-                "&fAPI: &7Paper 1.21.1",
+                "&fAPI: &7Paper 1.21.11",
                 "",
                 "&7Use &f/audioviz help &7for",
                 "&7command information."

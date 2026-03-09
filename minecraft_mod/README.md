@@ -7,7 +7,7 @@ Server-side Fabric mod for real-time audio visualization with two rendering back
 
 ## Requirements
 
-- Minecraft 1.21.1+
+- Minecraft 1.21.11+
 - Fabric Loader 0.16.0+
 - Fabric API
 - Java 21+

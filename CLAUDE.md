@@ -279,7 +279,7 @@ client = VizClient(
 
 - **DJ Client**: Cross-platform audio via cpal; per-app capture uses Windows Process Loopback API (build 20348+)
 - **VJ Server**: Python 3.11+, runs on any platform
-- Requires **Paper/Spigot 1.21.1+** (Display Entities)
+- Requires **Paper/Spigot 1.21.11+** (Display Entities)
 - **Java 21** for Minecraft plugin
 - **Rust** + **Node.js** for DJ client (Tauri v2)
 

@@ -7,7 +7,7 @@
 
 **Architecture:** Add `get_stage`, `update_stage`, `set_stage_zone_config`, `get_stage_templates`, and `scan_stage_blocks` handlers to the existing `MessageHandler.java`. Add `StageTemplate.java` for template definitions (Fabric-native, no Bukkit deps). Add `moveStage()`, `rotateStage()`, `addRoleToStage()`, `removeRoleFromStage()` to `StageManager.java`. All response formats match the Paper plugin exactly.
 
-**Tech Stack:** Java 21, Fabric 1.21.1, Minecraft `net.minecraft.world`, `net.minecraft.block`, `net.minecraft.registry.Registries`
+**Tech Stack:** Java 21, Fabric 1.21.11, Minecraft `net.minecraft.world`, `net.minecraft.block`, `net.minecraft.registry.Registries`
 
 **Key files to reference:**
 - Paper plugin reference: `minecraft_plugin/src/main/java/com/audioviz/protocol/MessageHandler.java`
