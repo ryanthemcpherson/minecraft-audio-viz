@@ -448,7 +448,7 @@ jobs:
     needs: [java-build]
     steps:
       - name: Download mod JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: audioviz-mod-${{ github.sha }}
           path: ./artifacts/
