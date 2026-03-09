@@ -6,7 +6,7 @@
 
 **Architecture:** Three independent features built in size order. Each adds new classes under `com.audioviz` and hooks into the existing plugin lifecycle via `AudioVizPlugin.onEnable()`. Beat-sync modifies the audio pipeline in `BitmapPatternManager.updateAudioState()`. Latency adds timing capture in `MessageHandler`. Recording hooks into the tick loop. All pure server-side Java.
 
-**Tech Stack:** Java 21, Paper API 1.21.1, JUnit 5, Mockito 5, Maven
+**Tech Stack:** Java 21, Paper API 1.21.11, JUnit 5, Mockito 5, Maven
 
 **Test command:** `cd minecraft_plugin && ./mvnw test -pl .`
 

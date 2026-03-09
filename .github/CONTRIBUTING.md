@@ -37,7 +37,7 @@ cd dj_client && npm install && npm run tauri dev
 - Run `ruff check` and `ruff format --check` before committing
 
 ### Java
-- Target: Java 21, Paper API 1.21.1+
+- Target: Java 21, Paper API 1.21.11+
 - Static analysis: SpotBugs (`mvn spotbugs:check`)
 
 ### TypeScript / JavaScript

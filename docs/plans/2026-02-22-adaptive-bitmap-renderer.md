@@ -6,7 +6,7 @@
 
 **Architecture:** Patterns write to a logical-resolution `BitmapFrameBuffer` (unchanged). The new renderer converts pixels into half-block cell pairs, merges uniform rectangles greedily, assigns merged rects to a pre-allocated entity pool, and uses dual dirty tracking to minimize Bukkit API calls per tick.
 
-**Tech Stack:** Java 21, Paper API 1.21.1, Adventure Component API (for `TextColor`), JUnit 5 + Mockito
+**Tech Stack:** Java 21, Paper API 1.21.11, Adventure Component API (for `TextColor`), JUnit 5 + Mockito
 
 **Design doc:** `docs/plans/2026-02-22-adaptive-bitmap-renderer-design.md`
 
