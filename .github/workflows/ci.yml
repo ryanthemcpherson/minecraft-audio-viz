@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload Bandit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bandit-report-${{ github.sha }}
           path: bandit-report.json
@@ -112,7 +112,7 @@ jobs:
         run: ./gradlew build
 
       - name: Upload mod JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: audioviz-mod-${{ github.sha }}
           path: minecraft_mod/build/libs/audioviz-mod-*.jar
@@ -432,7 +432,7 @@ jobs:
         run: cyclonedx-py environment -o sbom-python.json --output-format json
 
       - name: Upload SBOMs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-${{ github.sha }}
           path: |
@@ -463,7 +463,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: checksums-${{ github.sha }}
           path: artifacts/SHA256SUMS.txt
