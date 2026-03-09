@@ -6,7 +6,7 @@
 
 **Architecture:** Extend the existing `AudioVizGui` base class with layout helpers and AnvilInputGui text input. Build 7 new menu classes following the established SGUI patterns (GuiElementBuilder, click callbacks, rebuild()). Wire into MainMenu and commands.
 
-**Tech Stack:** Java 21, SGUI 1.12.0 (eu.pb4.sgui), Fabric 1.21.1
+**Tech Stack:** Java 21, SGUI 1.12.0 (eu.pb4.sgui), Fabric 1.21.11
 
 **Key files to reference:**
 - Base class: `minecraft_mod/src/main/java/com/audioviz/gui/AudioVizGui.java`
