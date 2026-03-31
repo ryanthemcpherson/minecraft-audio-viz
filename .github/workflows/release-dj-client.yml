@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -291,3 +293,12 @@ jobs:
             artifacts/dj-client-macos-x64/*
             artifacts/dj-client-macos-arm64/*
             latest.json
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/dj-client-windows-x64/*
+            artifacts/dj-client-linux-x64/*
+            artifacts/dj-client-macos-x64/*
+            artifacts/dj-client-macos-arm64/*

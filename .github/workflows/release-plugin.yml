@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -99,3 +101,8 @@ jobs:
           files: |
             plugin/*.jar
             plugin/SHA256SUMS.txt
+
+      - name: Attest plugin artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'plugin/*.jar'
