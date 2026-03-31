@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -92,3 +94,8 @@ jobs:
           files: |
             mod/*.jar
             mod/SHA256SUMS.txt
+
+      - name: Attest mod artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'mod/*.jar'
