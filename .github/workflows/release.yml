@@ -52,7 +52,7 @@ jobs:
         run: ./gradlew build
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: minecraft-mod
           path: minecraft_mod/build/libs/audioviz-mod-*.jar
@@ -76,7 +76,7 @@ jobs:
         run: ./mvnw package -q
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: minecraft-plugin
           path: |
@@ -232,7 +232,7 @@ jobs:
         run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: release-artifacts/
