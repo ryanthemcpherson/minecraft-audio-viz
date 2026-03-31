@@ -93,29 +93,29 @@ jobs:
       - name: Audit root package
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-root.json || true
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high --json > npm-audit-root.json
+          npm audit --audit-level=high
 
       - name: Audit dj_client package
         working-directory: dj_client
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-djclient.json || true
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high --json > npm-audit-djclient.json
+          npm audit --audit-level=high
 
       - name: Audit site package
         working-directory: site
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-site.json || true
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high --json > npm-audit-site.json
+          npm audit --audit-level=high
 
       - name: Audit worker package
         working-directory: worker
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-worker.json || true
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high --json > npm-audit-worker.json
+          npm audit --audit-level=high
 
       - name: Upload npm audit reports
         if: always()
@@ -150,6 +150,13 @@ jobs:
         run: |
           cargo audit --json > cargo-audit-report.json || true
           cargo audit || true
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: cargo-deny check
+        working-directory: dj_client/src-tauri
+        run: cargo deny check
 
       - name: Upload cargo-audit report
         if: always()

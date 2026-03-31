@@ -61,6 +61,40 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: audioviz-scan:latest
+          cache-from: type=gha
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'audioviz-scan:latest'
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+
+      - name: Run Trivy (SARIF output)
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'audioviz-scan:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-sarif
+          path: trivy-results.sarif
+          retention-days: 30
+
       - name: Test Docker image
         if: github.event_name == 'pull_request'
         run: |

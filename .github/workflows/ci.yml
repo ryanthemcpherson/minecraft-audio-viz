@@ -326,25 +326,25 @@ jobs:
       - name: Audit root package
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high
 
       - name: Audit dj_client package
         working-directory: dj_client
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high
 
       - name: Audit site package
         working-directory: site
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high
 
       - name: Audit worker package
         working-directory: worker
         run: |
           npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high
 
   # ---------------------------------------------------------------------------
   # License compliance check
@@ -408,6 +408,13 @@ jobs:
         working-directory: dj_client/src-tauri
         run: cargo audit
 
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: cargo-deny check
+        working-directory: dj_client/src-tauri
+        run: cargo deny check
+
   # ---------------------------------------------------------------------------
   # SBOM generation (CycloneDX)
   # ---------------------------------------------------------------------------
@@ -423,6 +430,21 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install Python deps + CycloneDX
         run: |
           python -m pip install --upgrade pip
@@ -431,12 +453,32 @@ jobs:
       - name: Generate Python SBOM
         run: cyclonedx-py environment -o sbom-python.json --output-format json
 
+      - name: Generate npm SBOMs
+        run: |
+          npx @cyclonedx/cyclonedx-npm --output-file sbom-npm-root.json --package-lock-only || true
+          cd dj_client && npx @cyclonedx/cyclonedx-npm --output-file ../sbom-npm-dj-client.json --package-lock-only || true
+          cd ../site && npx @cyclonedx/cyclonedx-npm --output-file ../sbom-npm-site.json --package-lock-only || true
+          cd ../worker && npx @cyclonedx/cyclonedx-npm --output-file ../sbom-npm-worker.json --package-lock-only || true
+
+      - name: Generate Java SBOM (Maven)
+        working-directory: minecraft_plugin
+        continue-on-error: true
+        run: |
+          ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeAggregateBom -B -q
+          cp target/bom.json ../sbom-java-plugin.json
+
+      - name: Generate Rust SBOM
+        run: |
+          cargo install cargo-cyclonedx
+          cd dj_client/src-tauri && cargo cyclonedx --format json
+          cp dj_client/src-tauri/bom.json sbom-rust-dj-client.json || true
+
       - name: Upload SBOMs
         uses: actions/upload-artifact@v7
         with:
           name: sbom-${{ github.sha }}
           path: |
-            sbom-python.json
+            sbom-*.json
           retention-days: 90
 
   # ---------------------------------------------------------------------------
@@ -470,12 +512,28 @@ jobs:
           retention-days: 90
 
   # ---------------------------------------------------------------------------
+  # Secret scanning (TruffleHog)
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified --results=verified,unknown
+
+  # ---------------------------------------------------------------------------
   # Summary gate -- all required checks must pass
   # ---------------------------------------------------------------------------
   ci-passed:
     name: CI Passed
     if: always()
-    needs: [python-lint, java-build, java-plugin-build, site-build, coordinator-test, vj-server-test, dj-client-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
+    needs: [python-lint, java-build, java-plugin-build, site-build, coordinator-test, vj-server-test, dj-client-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Check required results
@@ -487,7 +545,9 @@ jobs:
                 "${{ needs.site-build.result }}" == "failure" ||
                 "${{ needs.coordinator-test.result }}" == "failure" ||
                 "${{ needs.vj-server-test.result }}" == "failure" ||
-                "${{ needs.dj-client-test.result }}" == "failure" ]]; then
+                "${{ needs.dj-client-test.result }}" == "failure" ||
+                "${{ needs.npm-audit.result }}" == "failure" ||
+                "${{ needs.secret-scan.result }}" == "failure" ]]; then
             echo "One or more required CI jobs failed."
             exit 1
           fi
@@ -505,3 +565,4 @@ jobs:
           echo "| npm audit | ${{ needs.npm-audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| cargo-audit | ${{ needs.rust-audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| License | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret scan | ${{ needs.secret-scan.result }} |" >> $GITHUB_STEP_SUMMARY
