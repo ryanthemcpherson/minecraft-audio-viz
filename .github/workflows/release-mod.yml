@@ -67,7 +67,7 @@ jobs:
           sha256sum *.jar > SHA256SUMS.txt
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
           name: MCAV Fabric Mod ${{ steps.version.outputs.VERSION }}
