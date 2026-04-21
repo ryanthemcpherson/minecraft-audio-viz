@@ -9,6 +9,6 @@
   "devDependencies": {
     "wrangler": "^4.79.0",
     "@cloudflare/workers-types": "^4.20260331.1",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   }
 }
