@@ -8,4 +8,4 @@ numpy>=1.24.0
 
 # WebSocket + environment
 websockets>=12.0
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
