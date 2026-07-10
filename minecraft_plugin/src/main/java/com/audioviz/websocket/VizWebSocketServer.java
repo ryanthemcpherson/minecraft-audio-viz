@@ -38,6 +38,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private final ConcurrentHashMap<WebSocket, Long> lastPongTime;
     private final WebSocketSecurityPolicy securityPolicy;
     private final Consumer<Runnable> authTimeoutScheduler;
+    private final Object connectionLifecycleLock;
 
     // Enable async processing for high-frequency messages
     private boolean asyncEnabled = true;
@@ -94,6 +95,7 @@ public class VizWebSocketServer extends WebSocketServer {
         this.gson = new Gson();
         this.clients = new ConcurrentHashMap<>();
         this.lastPongTime = new ConcurrentHashMap<>();
+        this.connectionLifecycleLock = new Object();
 
         // Allow rebinding the port immediately after a server restart
         // (prevents "Address already in use" from zombie/lingering sockets)
@@ -144,20 +146,24 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-        ClientInfo info = clients.get(conn);
-        if (info == null) {
-            lastPongTime.remove(conn);
-            return;
-        }
-
-        synchronized (info) {
-            if (!clients.remove(conn, info)) {
+        // Lock order is always lifecycle -> client. Listener callbacks run only
+        // under the reentrant lifecycle monitor and never while holding a client lock.
+        synchronized (connectionLifecycleLock) {
+            ClientInfo info = clients.get(conn);
+            if (info == null) {
+                lastPongTime.remove(conn);
                 return;
             }
-            lastPongTime.remove(conn);
 
-            if (!info.closeAndWasActive()) {
-                return;
+            synchronized (info) {
+                if (!clients.remove(conn, info)) {
+                    return;
+                }
+                lastPongTime.remove(conn);
+
+                if (!info.closeAndWasActive()) {
+                    return;
+                }
             }
 
             totalDisconnections.incrementAndGet();
@@ -303,13 +309,16 @@ public class VizWebSocketServer extends WebSocketServer {
     }
 
     private boolean admitClient(WebSocket conn, ClientInfo info) {
-        synchronized (info) {
-            if (clients.get(conn) != info || !info.activateIfAuthenticating()) {
-                return false;
+        synchronized (connectionLifecycleLock) {
+            synchronized (info) {
+                if (clients.get(conn) != info || !info.activateIfAuthenticating()) {
+                    return false;
+                }
+
+                lastPongTime.put(conn, System.currentTimeMillis());
+                totalConnections.incrementAndGet();
             }
 
-            lastPongTime.put(conn, System.currentTimeMillis());
-            totalConnections.incrementAndGet();
             notifyClientConnected(info);
             return true;
         }
