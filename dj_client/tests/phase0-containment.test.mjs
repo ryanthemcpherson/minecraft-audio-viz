@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +11,96 @@ const repositoryRoot = path.resolve(clientRoot, "..");
 const read = (relativePath) => fs.readFileSync(path.join(clientRoot, relativePath), "utf8");
 const readRepositoryFile = (relativePath) =>
   fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
+
+const composeEnvironment = {
+  ...process.env,
+  COMPOSE_PROFILES: "",
+  MCAV_USER_JWT_SECRET: "phase0-containment-test",
+  POSTGRES_USER: "phase0",
+  POSTGRES_PASSWORD: "phase0",
+  POSTGRES_DB: "phase0",
+};
+
+/**
+ * @param {string} composeFile
+ * @param {string[]} args
+ */
+const runCompose = (composeFile, args) => {
+  const commandArgs = ["compose", "--ansi", "never", "-f", composeFile, ...args];
+  const result = spawnSync("docker", commandArgs, {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: composeEnvironment,
+  });
+
+  if (result.error) {
+    assert.fail(
+      `Unable to execute Docker Compose for ${composeFile}. ` +
+        `Install Docker Compose v2 and ensure the Docker daemon is available. ${result.error.message}`,
+    );
+  }
+
+  return {
+    command: `docker ${commandArgs.join(" ")}`,
+    status: result.status,
+    output: [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
+    stdout: result.stdout,
+  };
+};
+
+/**
+ * @param {string} composeFile
+ */
+const readComposeModel = (composeFile) => {
+  const result = runCompose(composeFile, ["config", "--no-interpolate", "--format", "json"]);
+  assert.equal(
+    result.status,
+    0,
+    `${result.command} failed with status ${result.status}:\n${result.output}`,
+  );
+
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    assert.fail(`${result.command} returned invalid JSON: ${error.message}\n${result.output}`);
+  }
+};
+
+/**
+ * @param {Record<string, {container_name?: string}>} services
+ * @param {string} output
+ */
+const plannedServiceNames = (services, output) =>
+  Object.entries(services)
+    .filter(([serviceName, service]) => {
+      assert.equal(
+        typeof service.container_name,
+        "string",
+        `${serviceName} needs container_name for deterministic dry-run assertions`,
+      );
+      return output.includes(`Container ${service.container_name} `);
+    })
+    .map(([serviceName]) => serviceName)
+    .sort();
+
+/**
+ * @param {string} label
+ * @param {Record<string, {container_name?: string}>} services
+ * @param {{command: string, status: number | null, output: string}} result
+ * @param {string[]} expectedServices
+ */
+const assertSuccessfulComposePlan = (label, services, result, expectedServices) => {
+  assert.equal(
+    result.status,
+    0,
+    `${label} failed (${result.command}, status ${result.status}):\n${result.output}`,
+  );
+  assert.deepEqual(
+    plannedServiceNames(services, result.output),
+    [...expectedServices].sort(),
+    `${label} selected the wrong services:\n${result.output}`,
+  );
+};
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -187,6 +278,10 @@ test("unsupported DJ and Docker distribution workflows are fail closed", () => {
     /TAURI_SIGNING_PRIVATE_KEY|createUpdaterArtifacts|Disable updater artifacts/i,
   );
   assert.match(djClientCi, /npm run test:containment/);
+  assert.match(djClientCi, /docker compose version/);
+  assert.ok(
+    djClientCi.indexOf("docker compose version") < djClientCi.indexOf("npm run test:containment"),
+  );
   assert.match(djClientCi, /Build Tauri app \(unsigned validation\)/);
   assert.match(djClientCi, /run: npm run tauri:build -- --target/);
   for (const guardedPath of [
@@ -299,19 +394,65 @@ test("release and security gates reject masked or unsuccessful checks", () => {
   assert.match(yamlBlock(security, "security-summary", 2), /echo "\|-\|-\|"/);
 });
 
-test("unsupported VJ and demo Compose services require the quarantine profile", () => {
-  const compose = readRepositoryFile("docker-compose.yml");
-  const demoCompose = readRepositoryFile("docker-compose.demo.yml");
+test("Compose renders and plans the exact Phase 0 service quarantine", () => {
+  const rootModel = readComposeModel("docker-compose.yml");
+  assert.deepEqual(Object.keys(rootModel.services).sort(), ["coordinator", "postgres", "vj-server"]);
+  assert.deepEqual(rootModel.services["vj-server"].profiles, ["phase0-quarantined"]);
+  assert.deepEqual(rootModel.services.coordinator.profiles ?? [], []);
+  assert.deepEqual(rootModel.services.postgres.profiles ?? [], []);
 
-  for (const [source, service] of [
-    [compose, "vj-server"],
-    [demoCompose, "vj_server"],
-    [demoCompose, "preview"],
-  ]) {
-    assert.match(
-      yamlBlock(source, service, 2),
-      /^\s+profiles:\s*\n\s+- phase0-quarantined\s*$/m,
-      `${service} must be quarantined`,
-    );
-  }
+  const rootDefaultPlan = runCompose("docker-compose.yml", ["--dry-run", "up", "--no-build"]);
+  assertSuccessfulComposePlan("root default plan", rootModel.services, rootDefaultPlan, [
+    "coordinator",
+    "postgres",
+  ]);
+
+  const rootQuarantinePlan = runCompose("docker-compose.yml", [
+    "--dry-run",
+    "--profile",
+    "phase0-quarantined",
+    "up",
+    "--no-build",
+  ]);
+  assertSuccessfulComposePlan("root quarantine-profile plan", rootModel.services, rootQuarantinePlan, [
+    "coordinator",
+    "postgres",
+    "vj-server",
+  ]);
+
+  const demoModel = readComposeModel("docker-compose.demo.yml");
+  assert.deepEqual(Object.keys(demoModel.services).sort(), ["preview", "vj_server"]);
+  assert.deepEqual(demoModel.services.vj_server.profiles, ["phase0-quarantined"]);
+  assert.deepEqual(demoModel.services.preview.profiles, ["phase0-quarantined"]);
+
+  const demoDefaultPlan = runCompose("docker-compose.demo.yml", [
+    "--dry-run",
+    "up",
+    "--no-build",
+  ]);
+  assert.equal(
+    demoDefaultPlan.status,
+    1,
+    `demo default plan must fail closed with status 1:\n${demoDefaultPlan.output}`,
+  );
+  assert.match(
+    demoDefaultPlan.output,
+    /(?:^|\n)no service selected(?:\n|$)/,
+    `demo default plan failed for an unexpected reason:\n${demoDefaultPlan.output}`,
+  );
+  assert.deepEqual(plannedServiceNames(demoModel.services, demoDefaultPlan.output), []);
+
+  const demoQuarantinePlan = runCompose("docker-compose.demo.yml", [
+    "--dry-run",
+    "--profile",
+    "phase0-quarantined",
+    "up",
+    "--no-build",
+  ]);
+  assertSuccessfulComposePlan(
+    "demo quarantine-profile plan",
+    demoModel.services,
+    demoQuarantinePlan,
+    ["preview", "vj_server"],
+  );
 });
