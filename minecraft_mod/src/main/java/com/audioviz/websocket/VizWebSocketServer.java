@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -36,8 +37,10 @@ public class VizWebSocketServer extends WebSocketServer {
     private final WebSocketSecurityPolicy securityPolicy;
     private final ConnectionStateListener connectionStateListener;
     private final Object connectionLifecycleLock = new Object();
+    private final Object messageIntakeLock = new Object();
 
     private volatile boolean asyncEnabled = true;
+    private volatile boolean acceptingMessages = true;
 
     // Connection metrics
     private final AtomicLong totalConnections = new AtomicLong(0);
@@ -84,6 +87,10 @@ public class VizWebSocketServer extends WebSocketServer {
      * Handles heartbeat and metrics logging that was previously BukkitTask-based.
      */
     public void tick() {
+        if (!acceptingMessages) {
+            return;
+        }
+
         authTickCounter++;
         heartbeatTickCounter++;
         metricsTickCounter++;
@@ -106,7 +113,7 @@ public class VizWebSocketServer extends WebSocketServer {
         for (Map.Entry<WebSocket, ClientInfo> entry : clients.entrySet()) {
             WebSocket conn = entry.getKey();
             ClientInfo info = entry.getValue();
-            if (currentTick >= info.authDeadlineTick && info.closeIfInactive()) {
+            if (currentTick >= info.authDeadlineTick && closeInactiveClient(conn, info)) {
                 AudioVizMod.LOGGER.warn("Authentication timeout for {}", info.address);
                 conn.close(4002, "Authentication timeout");
             }
@@ -132,10 +139,9 @@ public class VizWebSocketServer extends WebSocketServer {
                 AudioVizMod.LOGGER.warn("Client {} heartbeat timeout (no pong for {}s), closing",
                     info.address, (now - lastPong) / 1000);
                 clientsToClose.add(conn);
-            } else if (conn.isOpen()) {
+            } else {
                 try {
-                    conn.send(pingMessage);
-                    totalMessagesSent.incrementAndGet();
+                    sendToActiveClient(conn, info, pingMessage);
                 } catch (Exception e) {
                     AudioVizMod.LOGGER.warn("Failed to send ping: {}", e.getMessage());
                     clientsToClose.add(conn);
@@ -165,11 +171,22 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        ClientInfo info = new ClientInfo(
-            conn.getRemoteSocketAddress().toString(),
-            authTickCounter + AUTH_TIMEOUT_TICKS
-        );
-        clients.put(conn, info);
+        ClientInfo info;
+        synchronized (messageIntakeLock) {
+            if (!acceptingMessages) {
+                info = null;
+            } else {
+                info = new ClientInfo(
+                    conn.getRemoteSocketAddress().toString(),
+                    authTickCounter + AUTH_TIMEOUT_TICKS
+                );
+                clients.put(conn, info);
+            }
+        }
+        if (info == null) {
+            conn.close(1001, "Server shutting down");
+            return;
+        }
 
         JsonObject welcome = new JsonObject();
         welcome.addProperty("type", "connected");
@@ -230,13 +247,17 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onMessage(WebSocket conn, String message) {
+        if (!acceptingMessages) {
+            return;
+        }
+
         totalMessagesReceived.incrementAndGet();
 
         ClientInfo clientInfo = clients.get(conn);
         if (message.length() > MAX_MESSAGE_SIZE) {
             if (clientInfo == null || !clientInfo.isActive()) {
                 if (clientInfo != null) {
-                    clientInfo.closeIfInactive();
+                    closeInactiveClient(conn, clientInfo);
                 }
                 conn.close(4001, "Authentication failed");
             } else {
@@ -251,8 +272,11 @@ public class VizWebSocketServer extends WebSocketServer {
                     && authenticate(conn, clientInfo, message)) {
                 return;
             }
+            if (!acceptingMessages) {
+                return;
+            }
             if (clientInfo != null) {
-                clientInfo.closeIfInactive();
+                closeInactiveClient(conn, clientInfo);
             }
             conn.close(4001, "Authentication failed");
             return;
@@ -261,12 +285,18 @@ public class VizWebSocketServer extends WebSocketServer {
         // Handle pong responses using only the message prefix so payload data cannot spoof a pong.
         String prefix = message.substring(0, Math.min(64, message.length()));
         if (prefix.contains("\"type\":\"pong\"") || prefix.contains("\"type\": \"pong\"")) {
-            lastPongTime.replace(conn, System.currentTimeMillis());
+            updatePongForActiveClient(conn, clientInfo);
             return;
         }
 
         if (asyncEnabled && isHighFrequencyMessage(message)) {
-            messageQueue.enqueueRaw(message);
+            try {
+                enqueueForActiveClient(conn, clientInfo, message);
+            } catch (RejectedExecutionException exception) {
+                if (acceptingMessages) {
+                    throw exception;
+                }
+            }
         } else {
             try {
                 JsonObject json = JsonParser.parseString(message).getAsJsonObject();
@@ -276,8 +306,7 @@ public class VizWebSocketServer extends WebSocketServer {
                 if ("get_ws_metrics".equals(type)) {
                     JsonObject response = getMetrics();
                     if (seq >= 0) response.addProperty("_seq", seq);
-                    conn.send(gson.toJson(response));
-                    totalMessagesSent.incrementAndGet();
+                    sendToActiveClient(conn, clientInfo, gson.toJson(response));
                     return;
                 }
 
@@ -287,33 +316,32 @@ public class VizWebSocketServer extends WebSocketServer {
                 // (entity spawning, world access, etc. must happen on the server thread).
                 // Response is sent asynchronously when the server thread completes.
                 CompletableFuture<JsonObject> future = new CompletableFuture<>();
-                serverExecutor.execute(() -> {
-                    if (!isActiveClient(conn)) {
-                        future.complete(null);
-                        return;
-                    }
-                    try {
-                        JsonObject result = messageHandler.handleMessage(type, json);
-                        future.complete(result);
-                    } catch (Exception e) {
-                        future.completeExceptionally(e);
-                    }
-                });
+                boolean submitted = submitForActiveClient(
+                    conn,
+                    clientInfo,
+                    () -> executeHandlerForActiveClient(
+                        conn,
+                        clientInfo,
+                        type,
+                        json,
+                        future
+                    )
+                );
+                if (!submitted) {
+                    return;
+                }
 
                 future.whenComplete((result, ex) -> {
                     try {
-                        if (!conn.isOpen() || !isActiveClient(conn)) return;
                         if (ex != null) {
                             JsonObject error = new JsonObject();
                             error.addProperty("type", "error");
                             error.addProperty("message", ex.getMessage());
                             if (seq >= 0) error.addProperty("_seq", seq);
-                            conn.send(gson.toJson(error));
-                            totalMessagesSent.incrementAndGet();
+                            sendToActiveClient(conn, clientInfo, gson.toJson(error));
                         } else if (result != null) {
                             if (seq >= 0) result.addProperty("_seq", seq);
-                            conn.send(gson.toJson(result));
-                            totalMessagesSent.incrementAndGet();
+                            sendToActiveClient(conn, clientInfo, gson.toJson(result));
                         }
                     } catch (Exception sendEx) {
                         AudioVizMod.LOGGER.warn("Failed to send response: {}", sendEx.getMessage());
@@ -323,13 +351,10 @@ public class VizWebSocketServer extends WebSocketServer {
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Error processing WebSocket message", e);
                 try {
-                    if (conn.isOpen() && isActiveClient(conn)) {
-                        JsonObject error = new JsonObject();
-                        error.addProperty("type", "error");
-                        error.addProperty("message", e.getMessage());
-                        conn.send(gson.toJson(error));
-                        totalMessagesSent.incrementAndGet();
-                    }
+                    JsonObject error = new JsonObject();
+                    error.addProperty("type", "error");
+                    error.addProperty("message", e.getMessage());
+                    sendToActiveClient(conn, clientInfo, gson.toJson(error));
                 } catch (Exception sendEx) {
                     AudioVizMod.LOGGER.warn("Failed to send error response: {}", sendEx.getMessage());
                     totalSendFailures.incrementAndGet();
@@ -373,26 +398,49 @@ public class VizWebSocketServer extends WebSocketServer {
 
     private boolean beginAuthentication(WebSocket conn, ClientInfo info) {
         synchronized (info) {
-            return clients.get(conn) == info && info.beginAuthentication();
+            return acceptingMessages
+                && clients.get(conn) == info
+                && info.beginAuthentication();
         }
     }
 
     private boolean admitClient(WebSocket conn, ClientInfo info) {
         synchronized (connectionLifecycleLock) {
             synchronized (info) {
-                if (clients.get(conn) != info || !info.activateIfAuthenticating()) {
+                if (!acceptingMessages || clients.get(conn) != info
+                        || !info.isAuthenticating()) {
                     return false;
                 }
-
-                lastPongTime.put(conn, System.currentTimeMillis());
-                totalConnections.incrementAndGet();
             }
 
+            // Keep the client non-active until the globally serialized
+            // connection callback has completed. The per-client lock is not
+            // held across the callback, so pending traffic observes inactive
+            // state instead of waiting and becoming active afterward.
             AudioVizMod.LOGGER.info("WebSocket client connected: {}", info.address);
             if (connectionStateListener != null) {
                 connectionStateListener.onDjConnect(info.address);
             }
+
+            synchronized (info) {
+                if (!acceptingMessages || clients.get(conn) != info) {
+                    return false;
+                }
+                if (!info.activateIfAuthenticating()) {
+                    return false;
+                }
+                lastPongTime.put(conn, System.currentTimeMillis());
+                totalConnections.incrementAndGet();
+            }
             return true;
+        }
+    }
+
+    private boolean closeInactiveClient(WebSocket conn, ClientInfo info) {
+        synchronized (connectionLifecycleLock) {
+            synchronized (info) {
+                return clients.get(conn) == info && info.closeIfInactive();
+            }
         }
     }
 
@@ -404,9 +452,76 @@ public class VizWebSocketServer extends WebSocketServer {
         }
     }
 
-    private boolean isActiveClient(WebSocket conn) {
-        ClientInfo info = clients.get(conn);
-        return info != null && info.isActive();
+    private boolean enqueueForActiveClient(WebSocket conn, ClientInfo info, String message) {
+        synchronized (messageIntakeLock) {
+            if (!acceptingMessages) {
+                return false;
+            }
+            synchronized (info) {
+                if (clients.get(conn) != info || !info.isActive()) {
+                    return false;
+                }
+                messageQueue.enqueueRaw(message);
+                return true;
+            }
+        }
+    }
+
+    private boolean submitForActiveClient(WebSocket conn, ClientInfo info, Runnable task) {
+        synchronized (messageIntakeLock) {
+            if (!acceptingMessages) {
+                return false;
+            }
+            synchronized (info) {
+                if (clients.get(conn) != info || !info.isActive()) {
+                    return false;
+                }
+                serverExecutor.execute(task);
+                return true;
+            }
+        }
+    }
+
+    private void executeHandlerForActiveClient(
+        WebSocket conn,
+        ClientInfo info,
+        String type,
+        JsonObject message,
+        CompletableFuture<JsonObject> future
+    ) {
+        JsonObject result;
+        try {
+            synchronized (info) {
+                if (!acceptingMessages || clients.get(conn) != info || !info.isActive()) {
+                    future.complete(null);
+                    return;
+                }
+                result = messageHandler.handleMessage(type, message);
+            }
+            future.complete(result);
+        } catch (Exception exception) {
+            future.completeExceptionally(exception);
+        }
+    }
+
+    private boolean sendToActiveClient(WebSocket conn, ClientInfo info, String message) {
+        synchronized (info) {
+            if (!acceptingMessages || clients.get(conn) != info
+                    || !info.isActive() || !conn.isOpen()) {
+                return false;
+            }
+            conn.send(message);
+            totalMessagesSent.incrementAndGet();
+            return true;
+        }
+    }
+
+    private void updatePongForActiveClient(WebSocket conn, ClientInfo info) {
+        synchronized (info) {
+            if (acceptingMessages && clients.get(conn) == info && info.isActive()) {
+                lastPongTime.replace(conn, System.currentTimeMillis());
+            }
+        }
     }
 
     private boolean isHighFrequencyMessage(String message) {
@@ -476,15 +591,13 @@ public class VizWebSocketServer extends WebSocketServer {
 
         for (Map.Entry<WebSocket, ClientInfo> entry : clients.entrySet()) {
             WebSocket conn = entry.getKey();
-            if (entry.getValue().isActive() && conn.isOpen()) {
-                try {
-                    conn.send(json);
+            try {
+                if (sendToActiveClient(conn, entry.getValue(), json)) {
                     successCount++;
-                    totalMessagesSent.incrementAndGet();
-                } catch (Exception e) {
-                    totalSendFailures.incrementAndGet();
-                    failedClients.add(conn);
                 }
+            } catch (Exception e) {
+                totalSendFailures.incrementAndGet();
+                failedClients.add(conn);
             }
         }
 
@@ -510,9 +623,19 @@ public class VizWebSocketServer extends WebSocketServer {
     }
 
     public void shutdown() {
-        messageQueue.stop();
+        synchronized (connectionLifecycleLock) {
+            if (!acceptingMessages) {
+                return;
+            }
+            acceptingMessages = false;
+        }
 
-        for (WebSocket conn : new ArrayList<>(getConnections())) {
+        // Drain any submission that crossed the intake gate before shutdown.
+        synchronized (messageIntakeLock) {
+            // Intentionally empty.
+        }
+
+        for (WebSocket conn : new ArrayList<>(clients.keySet())) {
             try { conn.close(1001, "Server shutting down"); } catch (Exception ignored) {}
         }
 
@@ -520,6 +643,9 @@ public class VizWebSocketServer extends WebSocketServer {
             stop(3000);
         } catch (InterruptedException e) {
             AudioVizMod.LOGGER.warn("WebSocket server shutdown interrupted");
+            Thread.currentThread().interrupt();
+        } finally {
+            messageQueue.stop();
         }
     }
 
@@ -607,6 +733,10 @@ public class VizWebSocketServer extends WebSocketServer {
 
         boolean isPending() {
             return state == ClientState.PENDING;
+        }
+
+        boolean isAuthenticating() {
+            return state == ClientState.AUTHENTICATING;
         }
 
         boolean isActive() {
