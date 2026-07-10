@@ -20,11 +20,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -186,6 +188,39 @@ class VizWebSocketServerAuthTest {
     }
 
     @Test
+    void remainsInvisibleUntilSerializedConnectCallbackCompletes() throws Exception {
+        BlockingConnectLifecycleListener lifecycleListener =
+            new BlockingConnectLifecycleListener();
+        VizWebSocketServer server = newServer("secret", lifecycleListener);
+        server.onOpen(connection, handshake);
+
+        CompletableFuture<Void> authentication = CompletableFuture.runAsync(
+            () -> server.onMessage(connection, AUTH_MESSAGE));
+        assertTrue(lifecycleListener.connectEntered.await(5, TimeUnit.SECONDS));
+
+        JsonObject notice = new JsonObject();
+        notice.addProperty("type", "server_notice");
+        AtomicReference<Thread> broadcastThread = new AtomicReference<>();
+        CompletableFuture<Integer> broadcast = CompletableFuture.supplyAsync(() -> {
+            broadcastThread.set(Thread.currentThread());
+            return server.broadcast(notice);
+        });
+        awaitBlockedOrComplete(broadcast, broadcastThread);
+
+        try {
+            assertEquals(0, server.getConnectionCount());
+            assertEquals(0, server.getMetrics().get("totalConnections").getAsLong());
+            assertTrue(broadcast.isDone());
+            assertEquals(0, broadcast.get(5, TimeUnit.SECONDS));
+        } finally {
+            lifecycleListener.releaseConnect.countDown();
+        }
+
+        authentication.get(5, TimeUnit.SECONDS);
+        assertEquals(1, server.getConnectionCount());
+    }
+
+    @Test
     void failedAuthOkSendNeverAdmitsClient() {
         VizWebSocketServer server = newServer("secret");
         server.onOpen(connection, handshake);
@@ -292,6 +327,158 @@ class VizWebSocketServerAuthTest {
     }
 
     @Test
+    void closeCannotOvertakeHighFrequencyQueueAcceptance() throws Exception {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        CountDownLatch enqueueEntered = new CountDownLatch(1);
+        CountDownLatch releaseEnqueue = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            enqueueEntered.countDown();
+            if (!releaseEnqueue.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release queue acceptance");
+            }
+            return null;
+        }).when(messageQueue).enqueueRaw(BATCH_UPDATE);
+
+        CompletableFuture<Void> message = CompletableFuture.runAsync(
+            () -> server.onMessage(connection, BATCH_UPDATE));
+        assertTrue(enqueueEntered.await(5, TimeUnit.SECONDS));
+
+        AtomicReference<Thread> closeThread = new AtomicReference<>();
+        CompletableFuture<Void> close = CompletableFuture.runAsync(() -> {
+            closeThread.set(Thread.currentThread());
+            server.onClose(connection, 1000, "closed", true);
+        });
+        awaitBlockedOrComplete(close, closeThread);
+
+        try {
+            assertFalse(close.isDone());
+        } finally {
+            releaseEnqueue.countDown();
+        }
+
+        message.get(5, TimeUnit.SECONDS);
+        close.get(5, TimeUnit.SECONDS);
+        verify(messageQueue).enqueueRaw(BATCH_UPDATE);
+        assertEquals(0, server.getConnectionCount());
+    }
+
+    @Test
+    void closeCannotOvertakeAcceptedHandlerExecution() throws Exception {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        server.onMessage(connection, "{\"type\":\"get_status\"}");
+        ArgumentCaptor<Runnable> handlerTask = ArgumentCaptor.forClass(Runnable.class);
+        verify(serverExecutor).execute(handlerTask.capture());
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch releaseHandler = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            handlerEntered.countDown();
+            if (!releaseHandler.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release handler");
+            }
+            return null;
+        }).when(messageHandler).handleMessage(anyString(), any(JsonObject.class));
+
+        CompletableFuture<Void> handler = CompletableFuture.runAsync(handlerTask.getValue());
+        assertTrue(handlerEntered.await(5, TimeUnit.SECONDS));
+
+        AtomicReference<Thread> closeThread = new AtomicReference<>();
+        CompletableFuture<Void> close = CompletableFuture.runAsync(() -> {
+            closeThread.set(Thread.currentThread());
+            server.onClose(connection, 1000, "closed", true);
+        });
+        awaitBlockedOrComplete(close, closeThread);
+
+        try {
+            assertFalse(close.isDone());
+        } finally {
+            releaseHandler.countDown();
+        }
+
+        handler.get(5, TimeUnit.SECONDS);
+        close.get(5, TimeUnit.SECONDS);
+        assertEquals(0, server.getConnectionCount());
+    }
+
+    @Test
+    void closeCannotOvertakeAcceptedHeartbeatSend() throws Exception {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+        CountDownLatch heartbeatReadyToSend = new CountDownLatch(1);
+        CountDownLatch releaseHeartbeat = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            heartbeatReadyToSend.countDown();
+            if (!releaseHeartbeat.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release heartbeat");
+            }
+            return true;
+        }).when(connection).isOpen();
+
+        CompletableFuture<Void> heartbeat = CompletableFuture.runAsync(
+            () -> runTicks(server, 300));
+        assertTrue(heartbeatReadyToSend.await(5, TimeUnit.SECONDS));
+
+        AtomicReference<Thread> closeThread = new AtomicReference<>();
+        CompletableFuture<Void> close = CompletableFuture.runAsync(() -> {
+            closeThread.set(Thread.currentThread());
+            server.onClose(connection, 1000, "closed", true);
+        });
+        awaitBlockedOrComplete(close, closeThread);
+
+        try {
+            assertFalse(close.isDone());
+        } finally {
+            releaseHeartbeat.countDown();
+        }
+
+        heartbeat.get(5, TimeUnit.SECONDS);
+        close.get(5, TimeUnit.SECONDS);
+        verify(connection).send(argThat(
+            (String message) -> message.contains("\"type\":\"ping\"")));
+    }
+
+    @Test
+    void closeCannotOvertakeAcceptedBroadcastSend() throws Exception {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+        CountDownLatch broadcastReadyToSend = new CountDownLatch(1);
+        CountDownLatch releaseBroadcast = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            broadcastReadyToSend.countDown();
+            if (!releaseBroadcast.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release broadcast");
+            }
+            return true;
+        }).when(connection).isOpen();
+        JsonObject notice = new JsonObject();
+        notice.addProperty("type", "server_notice");
+
+        CompletableFuture<Integer> broadcast = CompletableFuture.supplyAsync(
+            () -> server.broadcast(notice));
+        assertTrue(broadcastReadyToSend.await(5, TimeUnit.SECONDS));
+
+        AtomicReference<Thread> closeThread = new AtomicReference<>();
+        CompletableFuture<Void> close = CompletableFuture.runAsync(() -> {
+            closeThread.set(Thread.currentThread());
+            server.onClose(connection, 1000, "closed", true);
+        });
+        awaitBlockedOrComplete(close, closeThread);
+
+        try {
+            assertFalse(close.isDone());
+        } finally {
+            releaseBroadcast.countDown();
+        }
+
+        assertEquals(1, broadcast.get(5, TimeUnit.SECONDS));
+        close.get(5, TimeUnit.SECONDS);
+        assertEquals(0, server.getConnectionCount());
+    }
+
+    @Test
     void admittedClientEmitsConnectThenSingleDisconnect() {
         VizWebSocketServer server = newServer("secret");
         server.onOpen(connection, handshake);
@@ -395,7 +582,36 @@ class VizWebSocketServerAuthTest {
 
         handlerTask.getValue().run();
 
+        verifyNoInteractions(messageHandler);
         verify(connection, never()).send(anyString());
+    }
+
+    @Test
+    void replacedClientIdentityDoesNotRunStaleQueuedHandler() {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        server.onMessage(connection, "{\"type\":\"get_status\"}");
+        ArgumentCaptor<Runnable> handlerTask = ArgumentCaptor.forClass(Runnable.class);
+        verify(serverExecutor).execute(handlerTask.capture());
+
+        server.onClose(connection, 1000, "closed", true);
+        server.onOpen(connection, handshake);
+        handlerTask.getValue().run();
+
+        verifyNoInteractions(messageHandler);
+    }
+
+    @Test
+    void messageDuringShutdownCannotReachRejectedQueueExecutor() {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        doThrow(new RejectedExecutionException("queue stopped"))
+            .when(messageQueue).enqueueRaw(anyString());
+
+        server.shutdown();
+
+        assertDoesNotThrow(() -> server.onMessage(connection, BATCH_UPDATE));
+        verify(messageQueue, never()).enqueueRaw(BATCH_UPDATE);
     }
 
     private VizWebSocketServer newServer(String secret) {
@@ -424,11 +640,15 @@ class VizWebSocketServerAuthTest {
     }
 
     private static void awaitBlockedOrComplete(
-        CompletableFuture<Void> operation,
+        CompletableFuture<?> operation,
         AtomicReference<Thread> operationThread
     ) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!operation.isDone() && operationThread.get().getState() != Thread.State.BLOCKED) {
+        while (!operation.isDone()) {
+            Thread thread = operationThread.get();
+            if (thread != null && thread.getState() == Thread.State.BLOCKED) {
+                return;
+            }
             if (System.nanoTime() >= deadline) {
                 throw new AssertionError("Second authentication neither completed nor blocked");
             }
@@ -478,6 +698,27 @@ class VizWebSocketServerAuthTest {
             events.add("disconnect:" + reason);
             disconnectCount.incrementAndGet();
             connected.set(false);
+        }
+    }
+
+    private static final class BlockingConnectLifecycleListener extends ConnectionStateListener {
+        private final CountDownLatch connectEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseConnect = new CountDownLatch(1);
+
+        @Override
+        public void onDjConnect(String info) {
+            connectEntered.countDown();
+            try {
+                if (!releaseConnect.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to release connect callback");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(
+                    "Interrupted while waiting to release connect callback",
+                    exception
+                );
+            }
         }
     }
 

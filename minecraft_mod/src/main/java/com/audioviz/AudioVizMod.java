@@ -255,26 +255,35 @@ public class AudioVizMod implements DedicatedServerModInitializer {
 
         // Start WebSocket server only when the bind/auth combination is safe.
         String wsAddress = config.websocketAddress;
-        if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, config.websocketSecret)) {
-            wsServer = new VizWebSocketServer(
-                wsAddress,
-                config.websocketPort,
-                config.websocketSecret,
-                messageHandler,
-                messageQueue,
-                server,
-                connectionStateListener
-            );
-            wsServer.start();
-            LOGGER.info("WebSocket server starting on {}:{}", wsAddress, config.websocketPort);
-        } else {
-            wsServer = null;
-            LOGGER.error(
-                "AudioViz WebSocket listener is offline: bind to a loopback address " +
-                "(127.0.0.1, localhost, or ::1) or configure a non-empty " +
-                "websocketSecret before using a non-loopback websocketAddress."
-            );
-        }
+        startWebSocketListenerIfSafe(
+            wsAddress,
+            config.websocketSecret,
+            () -> {
+                wsServer = new VizWebSocketServer(
+                    wsAddress,
+                    config.websocketPort,
+                    config.websocketSecret,
+                    messageHandler,
+                    messageQueue,
+                    server,
+                    connectionStateListener
+                );
+                wsServer.start();
+                LOGGER.info(
+                    "WebSocket server starting on {}:{}",
+                    wsAddress,
+                    config.websocketPort
+                );
+            },
+            () -> {
+                wsServer = null;
+                LOGGER.error(
+                    "AudioViz WebSocket listener is offline: bind to a loopback address " +
+                    "(127.0.0.1, localhost, or ::1) or configure a non-empty " +
+                    "websocketSecret before using a non-loopback websocketAddress."
+                );
+            }
+        );
 
         // Wire bitmap frame broadcasting to WebSocket clients for browser preview
         if (bitmapPatternManager != null && wsServer != null) {
@@ -284,6 +293,20 @@ public class AudioVizMod implements DedicatedServerModInitializer {
 
         LOGGER.info("AudioViz started ({} bitmap patterns, {} stages)",
             bitmapPatternManager.getPatternIds().size(), stageManager.getStageCount());
+    }
+
+    static boolean startWebSocketListenerIfSafe(
+        String address,
+        String secret,
+        Runnable listenerStarter,
+        Runnable unsafeConfigHandler
+    ) {
+        if (!WebSocketSecurityPolicy.isSafeConfiguration(address, secret)) {
+            unsafeConfigHandler.run();
+            return false;
+        }
+        listenerStarter.run();
+        return true;
     }
 
     private void tick() {
