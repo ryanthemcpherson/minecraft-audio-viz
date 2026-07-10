@@ -12,7 +12,7 @@ from typing import AsyncIterator
 
 # Configure required test-only secrets before app.main imports create_app().
 os.environ.setdefault("MCAV_USER_JWT_SECRET", "test-user-jwt-env-secret-for-pytest-32+chars")
-os.environ.setdefault("MCAV_METRICS_TOKEN", "test-metrics-token")
+os.environ["MCAV_METRICS_TOKEN"] = "test-metrics-token"  # nosec B105
 os.environ.setdefault("MCAV_ENV", "development")
 
 import pytest

@@ -9,7 +9,7 @@ from app.config import Settings
 from httpx import AsyncClient
 
 
-@pytest.mark.parametrize("environment", ["production", "staging", "development"])
+@pytest.mark.parametrize("environment", ["production", "staging", "development", "test"])
 @pytest.mark.parametrize("metrics_token", [None, "", "   "])
 def test_every_environment_requires_metrics_token(
     environment: str, metrics_token: str | None
@@ -39,6 +39,9 @@ def test_default_environment_is_production(monkeypatch: pytest.MonkeyPatch) -> N
     [
         (None, 401),
         ("Bearer wrong-metrics-token", 401),
+        ("Basic test-metrics-token", 401),
+        ("Bearer", 401),
+        ("test-metrics-token", 401),
         ("Bearer test-metrics-token", 200),
     ],
 )
