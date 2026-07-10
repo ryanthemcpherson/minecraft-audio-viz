@@ -987,7 +987,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
         .invoke_handler(tauri::generate_handler![
             list_audio_sources,
