@@ -26,6 +26,7 @@ import com.audioviz.stages.StageManager;
 import com.audioviz.stages.StageZonePlacementManager;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
+import com.audioviz.websocket.WebSocketSecurityPolicy;
 import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
@@ -205,7 +206,17 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
         // Start WebSocket server with retry (port may linger briefly after restart)
         int wsPort = getConfig().getInt("websocket.port", 8765);
-        startWebSocketWithRetry(wsPort, 5, 2000);
+        String wsAddress = getConfig().getString("websocket.address", "127.0.0.1");
+        String wsSecret = getConfig().getString("ws-secret", "");
+        if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, wsSecret)) {
+            startWebSocketWithRetry(wsPort, 5, 2000);
+        } else {
+            getLogger().severe(
+                "AudioViz WebSocket listener is offline: bind to a loopback address " +
+                "(127.0.0.1, localhost, or ::1) or configure a non-empty ws-secret before " +
+                "using a non-loopback websocket.address."
+            );
+        }
 
         getLogger().info("AudioViz plugin enabled!");
     }

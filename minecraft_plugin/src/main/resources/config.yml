@@ -2,12 +2,12 @@
 
 # WebSocket server settings
 websocket:
-  # Bind address for the WebSocket server (0.0.0.0 = all interfaces)
-  address: "0.0.0.0"
+  # Bind address for the WebSocket server. Non-loopback addresses require ws-secret.
+  address: "127.0.0.1"
   # Port for the WebSocket server
   port: 8765
 
-# Shared secret for WebSocket authentication. Leave empty to disable (not recommended for production).
+# Shared secret for WebSocket authentication. Empty is allowed only for loopback development.
 ws-secret: ""
 
 # Default visualization settings

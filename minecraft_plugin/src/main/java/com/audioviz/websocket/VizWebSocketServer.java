@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 
 /**
@@ -35,6 +36,8 @@ public class VizWebSocketServer extends WebSocketServer {
     private final Gson gson;
     private final ConcurrentHashMap<WebSocket, ClientInfo> clients;
     private final ConcurrentHashMap<WebSocket, Long> lastPongTime;
+    private final WebSocketSecurityPolicy securityPolicy;
+    private final Consumer<Runnable> authTimeoutScheduler;
 
     // Enable async processing for high-frequency messages
     private boolean asyncEnabled = true;
@@ -54,13 +57,40 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final long HEARTBEAT_INTERVAL_TICKS = 300L; // 15 seconds
     private static final long PONG_TIMEOUT_MS = 45000L; // 45 seconds
     private static final long METRICS_LOG_INTERVAL_TICKS = 6000L; // 5 minutes
+    private static final long AUTH_TIMEOUT_TICKS = 100L; // 5 seconds
 
     public VizWebSocketServer(AudioVizPlugin plugin, int port) {
+        this(plugin, port, new MessageHandler(plugin));
+    }
+
+    private VizWebSocketServer(AudioVizPlugin plugin, int port, MessageHandler messageHandler) {
+        this(
+            plugin,
+            port,
+            messageHandler,
+            new MessageQueue(plugin, messageHandler),
+            new WebSocketSecurityPolicy(plugin.getConfig().getString("ws-secret", "")),
+            task -> plugin.getServer().getScheduler().runTaskLaterAsynchronously(
+                plugin, task, AUTH_TIMEOUT_TICKS)
+        );
+        messageQueue.start();
+    }
+
+    VizWebSocketServer(
+        AudioVizPlugin plugin,
+        int port,
+        MessageHandler messageHandler,
+        MessageQueue messageQueue,
+        WebSocketSecurityPolicy securityPolicy,
+        Consumer<Runnable> authTimeoutScheduler
+    ) {
         super(new InetSocketAddress(
-            plugin.getConfig().getString("websocket.address", "0.0.0.0"), port));
+            plugin.getConfig().getString("websocket.address", "127.0.0.1"), port));
         this.plugin = plugin;
-        this.messageHandler = new MessageHandler(plugin);
-        this.messageQueue = new MessageQueue(plugin, messageHandler);
+        this.messageHandler = messageHandler;
+        this.messageQueue = messageQueue;
+        this.securityPolicy = securityPolicy;
+        this.authTimeoutScheduler = authTimeoutScheduler;
         this.gson = new Gson();
         this.clients = new ConcurrentHashMap<>();
         this.lastPongTime = new ConcurrentHashMap<>();
@@ -74,39 +104,17 @@ public class VizWebSocketServer extends WebSocketServer {
         // websockets 16.x (Python) doesn't respond to java-websocket's protocol
         // pings, causing spurious 35s disconnects.
         setConnectionLostTimeout(0);
-
-        // Start the message queue processor
-        messageQueue.start();
     }
 
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake) {
+        if (handshake.hasFieldValue("Origin")) {
+            conn.close(4003, "Browser clients are not allowed");
+            return;
+        }
+
         ClientInfo info = new ClientInfo(conn.getRemoteSocketAddress().toString());
         clients.put(conn, info);
-        lastPongTime.put(conn, System.currentTimeMillis());
-        totalConnections.incrementAndGet();
-
-        plugin.getLogger().info("WebSocket client connected: " + info.address);
-
-        // If ws-secret is not configured, treat all connections as authenticated
-        String secret = plugin.getConfig().getString("ws-secret", "");
-        if (secret.isEmpty()) {
-            info.authenticated = true;
-        } else {
-            // Schedule auth timeout: close if not authenticated within 5 seconds
-            plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, () -> {
-                ClientInfo ci = clients.get(conn);
-                if (ci != null && !ci.authenticated) {
-                    plugin.getLogger().warning("Authentication timeout for " + ci.address);
-                    conn.close(4002, "Authentication timeout");
-                }
-            }, 100L); // 5 seconds = 100 ticks
-        }
-
-        var connectListener = plugin.getConnectionStateListener();
-        if (connectListener != null) {
-            connectListener.onDjConnect(conn.getRemoteSocketAddress().toString());
-        }
 
         // Send welcome message
         JsonObject welcome = new JsonObject();
@@ -114,14 +122,36 @@ public class VizWebSocketServer extends WebSocketServer {
         welcome.addProperty("message", "Connected to AudioViz server");
         welcome.addProperty("version", plugin.getDescription().getVersion());
         welcome.addProperty("server_type", "paper");
+        welcome.addProperty("auth_required", securityPolicy.requiresAuthentication());
         conn.send(gson.toJson(welcome));
         totalMessagesSent.incrementAndGet();
+
+        if (securityPolicy.requiresAuthentication()) {
+            authTimeoutScheduler.accept(() -> {
+                ClientInfo pendingClient = clients.get(conn);
+                if (pendingClient != null && pendingClient.rejectIfPending()) {
+                    plugin.getLogger().warning("Authentication timeout for " + pendingClient.address);
+                    conn.close(4002, "Authentication timeout");
+                }
+            });
+            return;
+        }
+
+        if (info.authenticate()) {
+            registerActiveClient(conn, info);
+            notifyClientConnected(info);
+        }
     }
 
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
         ClientInfo info = clients.remove(conn);
         lastPongTime.remove(conn);
+
+        if (info == null || !info.isAuthenticated()) {
+            return;
+        }
+
         totalDisconnections.incrementAndGet();
 
         String address = info != null ? info.address : "unknown";
@@ -133,7 +163,7 @@ public class VizWebSocketServer extends WebSocketServer {
             ", duration=" + durationStr);
 
         var disconnectListener = plugin.getConnectionStateListener();
-        if (disconnectListener != null && clients.isEmpty()) {
+        if (disconnectListener != null && activeClientCount() == 0) {
             disconnectListener.onDjDisconnect(reason != null ? reason : "connection closed");
         }
     }
@@ -145,30 +175,28 @@ public class VizWebSocketServer extends WebSocketServer {
     public void onMessage(WebSocket conn, String message) {
         totalMessagesReceived.incrementAndGet();
 
-        // Enforce WebSocket authentication if ws-secret is configured
-        ClientInfo authInfo = clients.get(conn);
-        String wsSecret = plugin.getConfig().getString("ws-secret", "");
-        if (!wsSecret.isEmpty() && authInfo != null && !authInfo.authenticated) {
-            try {
-                JsonObject msg = JsonParser.parseString(message).getAsJsonObject();
-                if ("auth".equals(msg.has("type") ? msg.get("type").getAsString() : null)) {
-                    String token = msg.has("token") ? msg.get("token").getAsString() : "";
-                    if (wsSecret.equals(token)) {
-                        authInfo.authenticated = true;
-                        conn.send("{\"type\":\"auth_ok\"}");
-                        totalMessagesSent.incrementAndGet();
-                        return;
-                    }
+        ClientInfo clientInfo = clients.get(conn);
+        if (message.length() > MAX_MESSAGE_SIZE) {
+            if (clientInfo == null || !clientInfo.isAuthenticated()) {
+                if (clientInfo != null) {
+                    clientInfo.rejectIfPending();
                 }
-            } catch (Exception ignored) {}
-            conn.close(4001, "Authentication failed");
+                conn.close(4001, "Authentication failed");
+            } else {
+                plugin.getLogger().warning("Oversized message rejected: " + message.length() +
+                    " chars from " + conn.getRemoteSocketAddress());
+            }
             return;
         }
 
-        // Reject oversized messages to prevent memory exhaustion
-        if (message.length() > MAX_MESSAGE_SIZE) {
-            plugin.getLogger().warning("Oversized message rejected: " + message.length() + " chars from " +
-                conn.getRemoteSocketAddress());
+        if (clientInfo == null || !clientInfo.isAuthenticated()) {
+            if (clientInfo != null && clientInfo.isPending() && authenticate(conn, clientInfo, message)) {
+                return;
+            }
+            if (clientInfo != null) {
+                clientInfo.rejectIfPending();
+            }
+            conn.close(4001, "Authentication failed");
             return;
         }
 
@@ -224,6 +252,43 @@ public class VizWebSocketServer extends WebSocketServer {
                 conn.send(gson.toJson(error));
                 totalMessagesSent.incrementAndGet();
             }
+        }
+    }
+
+    private boolean authenticate(WebSocket conn, ClientInfo info, String message) {
+        if (!securityPolicy.requiresAuthentication()) {
+            return false;
+        }
+
+        try {
+            JsonObject authMessage = JsonParser.parseString(message).getAsJsonObject();
+            if (!authMessage.has("type") || !authMessage.has("token") ||
+                    !"auth".equals(authMessage.get("type").getAsString()) ||
+                    !securityPolicy.tokenMatches(authMessage.get("token").getAsString()) ||
+                    !info.authenticate()) {
+                return false;
+            }
+        } catch (RuntimeException exception) {
+            return false;
+        }
+
+        registerActiveClient(conn, info);
+        conn.send("{\"type\":\"auth_ok\"}");
+        totalMessagesSent.incrementAndGet();
+        notifyClientConnected(info);
+        return true;
+    }
+
+    private void registerActiveClient(WebSocket conn, ClientInfo info) {
+        lastPongTime.put(conn, System.currentTimeMillis());
+        totalConnections.incrementAndGet();
+    }
+
+    private void notifyClientConnected(ClientInfo info) {
+        plugin.getLogger().info("WebSocket client connected: " + info.address);
+        var connectListener = plugin.getConnectionStateListener();
+        if (connectListener != null) {
+            connectListener.onDjConnect(info.address);
         }
     }
 
@@ -356,7 +421,7 @@ public class VizWebSocketServer extends WebSocketServer {
         metricsLogTask = plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, () -> {
             plugin.getLogger().info("WebSocket Metrics: connections=" + totalConnections.get() +
                 ", disconnections=" + totalDisconnections.get() +
-                ", active=" + clients.size() +
+                ", active=" + activeClientCount() +
                 ", sent=" + totalMessagesSent.get() +
                 ", received=" + totalMessagesReceived.get() +
                 ", sendFailures=" + totalSendFailures.get());
@@ -379,8 +444,9 @@ public class VizWebSocketServer extends WebSocketServer {
         int successCount = 0;
         List<WebSocket> failedClients = new ArrayList<>();
 
-        for (WebSocket conn : clients.keySet()) {
-            if (conn.isOpen()) {
+        for (Map.Entry<WebSocket, ClientInfo> entry : clients.entrySet()) {
+            WebSocket conn = entry.getKey();
+            if (entry.getValue().isAuthenticated() && conn.isOpen()) {
                 try {
                     conn.send(json);
                     successCount++;
@@ -414,7 +480,17 @@ public class VizWebSocketServer extends WebSocketServer {
      * Get number of connected clients.
      */
     public int getConnectionCount() {
-        return clients.size();
+        return activeClientCount();
+    }
+
+    private int activeClientCount() {
+        int count = 0;
+        for (ClientInfo info : clients.values()) {
+            if (info.isAuthenticated()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**
@@ -457,7 +533,7 @@ public class VizWebSocketServer extends WebSocketServer {
         metrics.addProperty("type", "ws_metrics");
         metrics.addProperty("totalConnections", totalConnections.get());
         metrics.addProperty("totalDisconnections", totalDisconnections.get());
-        metrics.addProperty("activeConnections", clients.size());
+        metrics.addProperty("activeConnections", activeClientCount());
         metrics.addProperty("totalMessagesSent", totalMessagesSent.get());
         metrics.addProperty("totalMessagesReceived", totalMessagesReceived.get());
         metrics.addProperty("totalSendFailures", totalSendFailures.get());
@@ -503,12 +579,42 @@ public class VizWebSocketServer extends WebSocketServer {
     private static class ClientInfo {
         final String address;
         final long connectedAt;
-        volatile boolean authenticated;
+        private volatile ClientState state;
 
         ClientInfo(String address) {
             this.address = address;
             this.connectedAt = System.currentTimeMillis();
-            this.authenticated = false;
+            this.state = ClientState.PENDING;
         }
+
+        synchronized boolean authenticate() {
+            if (state != ClientState.PENDING) {
+                return false;
+            }
+            state = ClientState.AUTHENTICATED;
+            return true;
+        }
+
+        synchronized boolean rejectIfPending() {
+            if (state != ClientState.PENDING) {
+                return false;
+            }
+            state = ClientState.REJECTED;
+            return true;
+        }
+
+        boolean isPending() {
+            return state == ClientState.PENDING;
+        }
+
+        boolean isAuthenticated() {
+            return state == ClientState.AUTHENTICATED;
+        }
+    }
+
+    private enum ClientState {
+        PENDING,
+        AUTHENTICATED,
+        REJECTED
     }
 }
