@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import msgspec
 
+from vj_server.config import validate_http_bind_host
+
 if TYPE_CHECKING:
     import websockets
 
@@ -584,11 +586,24 @@ class DJAuthConfig:
 
 
 _REJECTED_STATIC_PATH = ".mcav-rejected-static-path"
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 
 
-def _resolve_static_path(base: str | Path, raw_path: str) -> Path | None:
-    """Resolve an HTTP path beneath a static root using cross-platform rules."""
-    parsed = urllib.parse.urlsplit(raw_path)
+def _static_path_parts(raw_path: str) -> tuple[str, ...] | None:
+    """Return validated, normalized path parts without touching the filesystem."""
+    try:
+        parsed = urllib.parse.urlsplit(raw_path)
+    except ValueError:
+        return None
     if parsed.scheme or parsed.netloc:
         return None
 
@@ -597,7 +612,7 @@ def _resolve_static_path(base: str | Path, raw_path: str) -> Path | None:
         return None
 
     normalized = decoded.replace("\\", "/")
-    if normalized.startswith("//"):
+    if "//" in normalized:
         return None
 
     relative_text = normalized.lstrip("/")
@@ -605,47 +620,50 @@ def _resolve_static_path(base: str | Path, raw_path: str) -> Path | None:
     if windows_path.drive or windows_path.root:
         return None
 
-    parts = [part for part in PurePosixPath(relative_text).parts if part not in ("", ".")]
+    parts = tuple(part for part in PurePosixPath(relative_text).parts if part not in ("", "."))
     if ".." in parts:
         return None
 
-    reserved_names = {
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        "COM1",
-        "COM2",
-        "COM3",
-        "COM4",
-        "COM5",
-        "COM6",
-        "COM7",
-        "COM8",
-        "COM9",
-        "LPT1",
-        "LPT2",
-        "LPT3",
-        "LPT4",
-        "LPT5",
-        "LPT6",
-        "LPT7",
-        "LPT8",
-        "LPT9",
-    }
     for part in parts:
         windows_name = part.rstrip(" .")
+        if not windows_name or windows_name != part:
+            return None
         device_name = windows_name.split(".", 1)[0].upper()
-        if ":" in windows_name or device_name in reserved_names:
+        if ":" in windows_name or device_name in _WINDOWS_RESERVED_NAMES:
             return None
 
-    root = Path(base).resolve()
-    candidate = root.joinpath(*parts).resolve()
+    return parts
+
+
+def _resolve_static_path(base: str | Path, raw_path: str) -> Path | None:
+    """Resolve an HTTP path beneath a static root using cross-platform rules."""
+    parts = _static_path_parts(raw_path)
+    if parts is None:
+        return None
+
     try:
+        root = Path(base).resolve(strict=True)
+        candidate = root
+        for part in parts:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                return None
+        candidate = candidate.resolve(strict=True)
         candidate.relative_to(root)
-    except ValueError:
+    except (OSError, RuntimeError, ValueError):
         return None
     return candidate
+
+
+def _rejected_static_path(directory_map: dict, default_directory: str | None = None) -> str:
+    """Return a fixed absent path beneath one of the handler's configured roots."""
+    if "/" in directory_map:
+        root = directory_map["/"]
+    elif directory_map:
+        root = next(iter(directory_map.values()))
+    else:
+        root = default_directory or os.getcwd()
+    return str(Path(root).resolve() / _REJECTED_STATIC_PATH)
 
 
 def _make_directory_handler(directory_map: dict):
@@ -663,14 +681,23 @@ def _make_directory_handler(directory_map: dict):
             return str(resolved_path)
 
         def translate_path(self, path):
-            path = path.split("?", 1)[0].split("#", 1)[0]
+            rejected_path = _rejected_static_path(
+                self._directory_map,
+                getattr(self, "directory", None),
+            )
+            if _static_path_parts(path) is None:
+                return rejected_path
+
+            path = urllib.parse.urlsplit(path).path
             for url_prefix, fs_directory in self._directory_map.items():
                 if path == url_prefix or path.startswith(f"{url_prefix}/"):
-                    relative_path = path[len(url_prefix) :].lstrip("/")
+                    relative_path = path[len(url_prefix) :]
+                    if relative_path.startswith("/"):
+                        relative_path = relative_path[1:]
                     return self._safe_join(fs_directory, relative_path)
             if "/" in self._directory_map:
                 return self._safe_join(self._directory_map["/"], path)
-            return super().translate_path(path)
+            return rejected_path
 
         def log_message(self, format, *args):
             pass
@@ -693,14 +720,23 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
         return str(resolved_path)
 
     def translate_path(self, path):
-        path = path.split("?", 1)[0].split("#", 1)[0]
+        rejected_path = _rejected_static_path(
+            self.directory_map,
+            getattr(self, "directory", None),
+        )
+        if _static_path_parts(path) is None:
+            return rejected_path
+
+        path = urllib.parse.urlsplit(path).path
         for url_prefix, fs_directory in self.directory_map.items():
             if path == url_prefix or path.startswith(f"{url_prefix}/"):
-                relative_path = path[len(url_prefix) :].lstrip("/")
+                relative_path = path[len(url_prefix) :]
+                if relative_path.startswith("/"):
+                    relative_path = relative_path[1:]
                 return self._safe_join(fs_directory, relative_path)
         if "/" in self.directory_map:
             return self._safe_join(self.directory_map["/"], path)
-        return super().translate_path(path)
+        return rejected_path
 
     def log_message(self, format, *args):
         pass
@@ -708,6 +744,8 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
 
 def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
     """Run HTTP server for admin panel."""
+    host = validate_http_bind_host(host)
+
     # directory is the project root
     project_root = Path(directory)
     admin_dir = project_root / "admin_panel"

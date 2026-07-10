@@ -48,6 +48,7 @@ except ImportError:
     HAS_LINK = False
 
 from vj_server.beat_predictor import BeatPredictor
+from vj_server.config import validate_http_bind_host
 from vj_server.coordinator_client import CoordinatorClient
 from vj_server.dj_manager import DJManagerMixin
 from vj_server.models import (
@@ -108,7 +109,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
         self.http_port = http_port
-        self.http_host = http_host
+        self.http_host = validate_http_bind_host(http_host)
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
         self.minecraft_ws_secret = minecraft_ws_secret
@@ -1191,6 +1192,14 @@ def _validate_port(value: str) -> int:
     return port
 
 
+def _validate_http_host(value: str) -> str:
+    """Validate the legacy CLI's HTTP bind host."""
+    try:
+        return validate_http_bind_host(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _validate_positive_int(value: str) -> int:
     """Validate positive integer."""
     try:
@@ -1225,7 +1234,7 @@ async def main():
     )
     parser.add_argument(
         "--http-host",
-        type=str,
+        type=_validate_http_host,
         default=os.environ.get("HTTP_HOST", "127.0.0.1"),
         help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
     )

@@ -11,6 +11,8 @@ import os
 import signal
 import sys
 
+from vj_server.config import validate_http_bind_host
+
 # Fix Windows console encoding for unicode characters
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -31,7 +33,11 @@ def validate_port(value: str) -> int:
 
 def validate_hostname(value: str) -> str:
     """Validate hostname or IP address."""
-    if not value or len(value) > 253:
+    try:
+        value = validate_http_bind_host(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    if len(value) > 253:
         raise argparse.ArgumentTypeError(f"Invalid hostname: {value}")
     valid_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]")
     if not all(c in valid_chars for c in value):
