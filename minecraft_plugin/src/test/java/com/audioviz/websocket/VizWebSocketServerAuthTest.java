@@ -26,8 +26,12 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -279,6 +283,60 @@ class VizWebSocketServerAuthTest {
     }
 
     @Test
+    void crossClientCloseAndAdmissionKeepGlobalLifecycleOrdered() throws Exception {
+        BlockingLifecycleListener lifecycleListener = new BlockingLifecycleListener(plugin);
+        when(plugin.getConnectionStateListener()).thenReturn(lifecycleListener);
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        server.onMessage(connection, AUTH_MESSAGE);
+        lifecycleListener.beginRace();
+
+        CompletableFuture<Void> firstClose = CompletableFuture.runAsync(
+            () -> server.onClose(connection, 1000, "first closed", true));
+        assertTrue(lifecycleListener.disconnectEntered.await(5, TimeUnit.SECONDS));
+
+        WebSocket secondConnection = org.mockito.Mockito.mock(WebSocket.class);
+        ClientHandshake secondHandshake = org.mockito.Mockito.mock(ClientHandshake.class);
+        when(secondConnection.getRemoteSocketAddress())
+            .thenReturn(new InetSocketAddress("127.0.0.1", 54322));
+        when(secondConnection.isOpen()).thenReturn(true);
+        server.onOpen(secondConnection, secondHandshake);
+
+        CountDownLatch secondAckSent = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            secondAckSent.countDown();
+            return null;
+        }).when(secondConnection).send(AUTH_OK);
+        AtomicReference<Thread> secondAuthThread = new AtomicReference<>();
+        CompletableFuture<Void> secondAuthentication = CompletableFuture.runAsync(() -> {
+            secondAuthThread.set(Thread.currentThread());
+            server.onMessage(secondConnection, AUTH_MESSAGE);
+        });
+        assertTrue(secondAckSent.await(5, TimeUnit.SECONDS));
+
+        awaitBlockedOrComplete(secondAuthentication, secondAuthThread);
+        lifecycleListener.releaseDisconnect.countDown();
+        firstClose.get(5, TimeUnit.SECONDS);
+        secondAuthentication.get(5, TimeUnit.SECONDS);
+
+        assertEquals(List.of("disconnect:first closed", "connect:/127.0.0.1:54322"),
+            lifecycleListener.events);
+        assertTrue(lifecycleListener.connected.get());
+        assertEquals(1, lifecycleListener.connectCount.get());
+        assertEquals(1, lifecycleListener.disconnectCount.get());
+        assertEquals(1, server.getConnectionCount());
+        assertEquals(2, server.getMetrics().get("totalConnections").getAsLong());
+        assertEquals(1, server.getMetrics().get("totalDisconnections").getAsLong());
+
+        Runnable heartbeat = startAndCaptureHeartbeat(server);
+        heartbeat.run();
+        verify(connection, never()).send(argThat(
+            (String message) -> message.contains("\"type\":\"ping\"")));
+        verify(secondConnection).send(argThat(
+            (String message) -> message.contains("\"type\":\"ping\"")));
+    }
+
+    @Test
     void oversizedAuthenticationMessageIsRejectedBeforeAdmission() {
         VizWebSocketServer server = newServer("secret");
         server.onOpen(connection, handshake);
@@ -369,6 +427,65 @@ class VizWebSocketServerAuthTest {
         verify(scheduler).runTaskTimerAsynchronously(
             eq(plugin), heartbeat.capture(), eq(300L), eq(300L));
         return heartbeat.getValue();
+    }
+
+    private static void awaitBlockedOrComplete(
+        CompletableFuture<Void> operation,
+        AtomicReference<Thread> operationThread
+    ) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!operation.isDone() && operationThread.get().getState() != Thread.State.BLOCKED) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Second authentication neither completed nor blocked");
+            }
+            Thread.onSpinWait();
+        }
+    }
+
+    private static final class BlockingLifecycleListener extends ConnectionStateListener {
+        private final AtomicBoolean connected = new AtomicBoolean();
+        private final AtomicInteger connectCount = new AtomicInteger();
+        private final AtomicInteger disconnectCount = new AtomicInteger();
+        private final List<String> events = new CopyOnWriteArrayList<>();
+        private final CountDownLatch disconnectEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseDisconnect = new CountDownLatch(1);
+        private volatile boolean blockDisconnect;
+
+        private BlockingLifecycleListener(AudioVizPlugin plugin) {
+            super(plugin);
+        }
+
+        private void beginRace() {
+            events.clear();
+            connectCount.set(0);
+            disconnectCount.set(0);
+            blockDisconnect = true;
+        }
+
+        @Override
+        public void onDjConnect(String info) {
+            events.add("connect:" + info);
+            connectCount.incrementAndGet();
+            connected.set(true);
+        }
+
+        @Override
+        public void onDjDisconnect(String reason) {
+            if (blockDisconnect) {
+                disconnectEntered.countDown();
+                try {
+                    if (!releaseDisconnect.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out waiting to release disconnect event");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("Interrupted while waiting to release disconnect", exception);
+                }
+            }
+            events.add("disconnect:" + reason);
+            disconnectCount.incrementAndGet();
+            connected.set(false);
+        }
     }
 
     private JsonObject sentMessage(String type) {
