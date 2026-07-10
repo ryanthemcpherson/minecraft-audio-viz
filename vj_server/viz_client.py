@@ -122,11 +122,12 @@ class VizClient:
         now = time.time()
         if self._last_fire_and_forget_log == 0.0 or (now - self._last_fire_and_forget_log) > 10:
             logger.warning(
-                "Fire-and-forget send failures: voice_audio=%d bitmap_frame=%d (latest %s error: %s)",
+                "Fire-and-forget send failures: voice_audio=%d bitmap_frame=%d "
+                "(latest %s error_type=%s)",
                 self._fire_and_forget_errors.get("voice_audio", 0),
                 self._fire_and_forget_errors.get("bitmap_frame", 0),
                 channel,
-                error,
+                type(error).__name__,
             )
             self._last_fire_and_forget_log = now
 
@@ -282,7 +283,7 @@ class VizClient:
                     if self.ws:
                         await self.ws.send(self._encode({"type": "ping"}))
                 except Exception as e:
-                    logger.warning(f"Heartbeat ping failed: {e}")
+                    logger.warning("Heartbeat ping failed (error_type=%s)", type(e).__name__)
                     self._connected = False
                     if self.auto_reconnect:
                         asyncio.create_task(self.reconnect())
@@ -312,7 +313,7 @@ class VizClient:
                         try:
                             await self.ws.send(self._encode({"type": "pong"}))
                         except Exception as e:
-                            logger.warning(f"Failed to send pong: {e}")
+                            logger.warning("Failed to send pong (error_type=%s)", type(e).__name__)
                         continue
 
                     # Handle pong messages for heartbeat
@@ -510,11 +511,11 @@ class VizClient:
                 return mjson.decode(response)
 
         except websockets.exceptions.ConnectionClosed as e:
-            logger.error(f"Connection closed: {e}")
+            logger.error("Connection closed while sending (error_type=%s)", type(e).__name__)
             self._connected = False
             return None
         except Exception as e:
-            logger.error(f"Send error: {e}")
+            logger.error("Send failed (error_type=%s)", type(e).__name__)
             self._connected = False
             return None
 
@@ -598,7 +599,7 @@ class VizClient:
         except Exception as e:
             # Log unexpected errors but don't spam
             if self._last_fast_error == 0.0 or (time.time() - self._last_fast_error) > 5:
-                logger.warning(f"Fast update error: {e}")
+                logger.warning("Fast update failed (error_type=%s)", type(e).__name__)
                 self._last_fast_error = time.time()
             self._connected = False
 

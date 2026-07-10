@@ -7,6 +7,8 @@ import logging
 from typing import Any
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 import vj_server.viz_client as viz_client_module
 from vj_server.vj_server import VJServer
@@ -31,6 +33,14 @@ class RejectingVizClient:
 
     async def disconnect(self) -> None:
         self.disconnected = True
+
+
+class FailingDisconnectVizClient:
+    def __init__(self, secret: str) -> None:
+        self._secret = secret
+
+    async def disconnect(self) -> None:
+        raise ConnectionClosedError(Close(4001, f"peer echoed {self._secret}"), None, None)
 
 
 @pytest.mark.asyncio
@@ -58,3 +68,25 @@ async def test_minecraft_secret_is_reused_for_each_relay_connection(
     assert RejectingVizClient.instances[0].disconnected is True
     assert secret not in caplog.text
     assert secret not in json.dumps(server.get_health_stats())
+
+
+@pytest.mark.asyncio
+async def test_old_minecraft_client_disconnect_does_not_log_peer_close_reason(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    secret = "disconnect-shared-secret"
+    RejectingVizClient.instances.clear()
+    monkeypatch.setattr(viz_client_module, "VizClient", RejectingVizClient)
+    server = VJServer(
+        minecraft_ws_secret=secret,
+        require_auth=False,
+        show_spectrograph=False,
+        metrics_port=None,
+    )
+    server.viz_client = FailingDisconnectVizClient(secret)
+    caplog.set_level(logging.DEBUG)
+
+    assert await server.connect_minecraft() is False
+
+    assert "ConnectionClosedError" in caplog.text
+    assert secret not in caplog.text
