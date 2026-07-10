@@ -7,6 +7,7 @@ SQLite database (see conftest.py).
 from __future__ import annotations
 
 import pytest
+from app.config import Settings
 from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
@@ -66,11 +67,13 @@ async def test_request_id_echoed_in_response_header(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_metrics_endpoint_prometheus_format(client: AsyncClient) -> None:
+async def test_metrics_endpoint_prometheus_format(client: AsyncClient, settings: Settings) -> None:
     # Trigger at least one known counter
     _ = await client.get("/health")
     _ = await client.get("/api/v1/connect/BASS-ZZZZ")
-    resp = await client.get("/metrics")
+    resp = await client.get(
+        "/metrics", headers={"Authorization": f"Bearer {settings.metrics_token}"}
+    )
     assert resp.status_code == 200
     assert resp.headers.get("content-type", "").startswith("text/plain")
     body = resp.text
