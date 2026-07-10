@@ -1,3 +1,5 @@
+> **Phase 0 containment:** Prebuilt DJ-client releases, automatic updates, the VJ Docker image, and the zero-install Docker demo are temporarily unavailable. Source builds are for development verification only until signed release, rollback, clean-install, and end-to-end demo gates pass.
+
 <div align="center">
   <img src="mcav.png" alt="MCAV Logo" width="64" height="64">
   <h1>MCAV — Minecraft Audio Visualizer</h1>
@@ -59,42 +61,30 @@
 - **Stage System** — multi-zone stages with decorators, spotlight effects, and DJ billboards
 - **Timeline System** — pre-program timed shows with pattern, preset, and effect cues
 - **Coordinator API** — central DJ coordination with connect codes, show management, and JWT auth
-- **Docker Deployment** — containerized VJ server for production events
+- **Docker source configuration (quarantined)** — retained for unsupported development verification only
 
 ---
 
 ## Quick Start
 
-### Try the Demo (Zero Install)
+### Unsupported Phase 0 development verification
 
-**Requirements:** Docker only
-
-Experience MCAV in your browser with simulated audio:
+Prebuilt DJ-client installers and the zero-install demo are not supported during Phase 0. Contributors may run local source builds only to verify development changes; they are not release artifacts.
 
 ```bash
-git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-cd minecraft-audio-viz
-docker compose -f docker-compose.demo.yml up
+# Explicitly opt in to the quarantined, incomplete demo configuration
+docker compose -f docker-compose.demo.yml --profile phase0-quarantined up
+
+# Or validate an unsigned DJ client source build
+cd dj_client
+npm ci
+npm run test:containment
+npm run tauri:build
 ```
 
-Then open:
-- **http://localhost:8080** - Admin Panel (VJ server)
-- **http://localhost:8081** - 3D Preview (nginx)
+See [`dj_client/README.md`](dj_client/README.md) and [`demo/README.md`](demo/README.md) for the quarantine limitations.
 
-See [`demo/README.md`](demo/README.md) for full details.
-
-### Download DJ Client (Recommended)
-
-**[Download Latest Release](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)**
-
-The DJ Client is a cross-platform desktop app (Windows/macOS/Linux) for capturing and streaming audio:
-
-1. Download the installer for your platform from [GitHub Releases](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)
-2. Install and launch the DJ Client
-3. Select your audio source (Spotify, Chrome, system audio, etc.)
-4. Connect to a VJ server or run in standalone mode with browser preview
-
-### VJ Server Setup
+### VJ Server Source Setup (Development Verification Only)
 
 **Requirements:** Python 3.11+ (VJ server can run on any platform)
 
@@ -387,11 +377,7 @@ audioviz-vj --metrics-port 9001           # health metrics endpoint
 
 ### DJ Client
 
-The DJ Client is a desktop GUI app. Audio source selection and streaming controls are in the app interface.
-
-**Download:** [GitHub Releases](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)
-
-For development, see `dj_client/README.md`
+The DJ Client is a desktop GUI app. Prebuilt distribution is quarantined during Phase 0. For unsigned development verification, see `dj_client/README.md`.
 
 ---
 
@@ -415,7 +401,7 @@ Both the Fabric mod and Paper plugin use the same `/audioviz` command tree:
 ---
 
 <details>
-<summary><strong>Multi-DJ Mode (Live Events)</strong></summary>
+<summary><strong>Multi-DJ Mode (Development Reference)</strong></summary>
 
 ### 1) Start the VJ Server (central control)
 
@@ -428,9 +414,9 @@ Defaults:
 - Browser preview: `http://localhost:8080`
 - Admin panel: `http://localhost:8081`
 
-### 2) DJs connect using DJ Client (each DJ machine)
+### 2) DJs connect using a development DJ Client (each DJ machine)
 
-1. Download and install the [DJ Client](https://github.com/ryanthemcpherson/minecraft-audio-viz/releases)
+1. Build the unsigned DJ Client from source for development verification only
 2. Launch the DJ Client
 3. Enter VJ server connection details (host, port, DJ name, connect code)
 4. Select audio source and start streaming
@@ -487,18 +473,16 @@ Pre-program visualization shows:
 </details>
 
 <details>
-<summary><strong>Docker Support</strong></summary>
+<summary><strong>Unsupported Docker source verification (Phase 0 quarantine)</strong></summary>
 
-The VJ server can run in Docker for deployment:
+The VJ Docker image is not published or supported during Phase 0. Contributors can explicitly opt in to the quarantined source configuration for development verification:
 
 ```bash
-docker-compose up -d
-docker-compose logs -f vj-server
-
-MINECRAFT_HOST=mc.example.com docker-compose up -d
+docker compose --profile phase0-quarantined up -d vj-server
+docker compose logs -f vj-server
 ```
 
-> Note: **Audio capture requires Windows** and cannot run in Docker. DJs run locally and connect to the containerized VJ server.
+> This command is not a deployment recommendation or an end-to-end acceptance path. Audio capture still requires a local DJ client.
 
 </details>
 
@@ -565,7 +549,7 @@ cd site && npm install && npm run dev
 
 ## Known Limitations
 
-- **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server can run on Linux/Docker, but DJs must run on Windows.
+- **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server source can run on Linux, but its Docker path is quarantined during Phase 0 and DJs must run locally.
 - **Java Edition only** — Both the Fabric mod and Paper plugin require Java Edition 1.21.11+.
 - **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
 
