@@ -11,9 +11,8 @@ import {
   getGoogleAuthUrl,
   exchangeDiscordCode,
   exchangeGoogleCode,
+  exchangeOAuthCodeWithValidatedState,
   getOAuthProvider,
-  getStoredOAuthState,
-  clearStoredOAuthState,
 } from "@/lib/auth";
 
 type Tab = "login" | "signup";
@@ -72,18 +71,10 @@ export default function LoginPage() {
     const code = oauthCode.slice(0, separatorIdx);
     const state = oauthCode.slice(separatorIdx + 1);
 
-    // Validate CSRF state
-    const storedState = getStoredOAuthState();
-    clearStoredOAuthState();
-    if (storedState && storedState !== state) {
-      setError("Security validation failed. Please try signing in again.");
-      return;
-    }
-
     setOauthLoading(true);
     const provider = getOAuthProvider(state);
     const exchangeFn = provider === "google" ? exchangeGoogleCode : exchangeDiscordCode;
-    exchangeFn(code, state)
+    exchangeOAuthCodeWithValidatedState(code, state, exchangeFn)
       .then((res) => {
         setAuth(res.access_token, res.refresh_token, res.user);
         router.replace(

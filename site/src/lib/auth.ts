@@ -634,6 +634,28 @@ export function clearStoredOAuthState(): void {
   sessionStorage.removeItem(OAUTH_STATE_KEY);
 }
 
+export function consumeAndValidateOAuthState(receivedState: string): boolean {
+  const storedState = getStoredOAuthState();
+  clearStoredOAuthState();
+  return (
+    storedState !== null &&
+    storedState.length > 0 &&
+    receivedState.length > 0 &&
+    storedState === receivedState
+  );
+}
+
+export async function exchangeOAuthCodeWithValidatedState<T>(
+  code: string,
+  state: string,
+  exchange: (code: string, state: string) => Promise<T>
+): Promise<T> {
+  if (!consumeAndValidateOAuthState(state)) {
+    throw new Error("Security validation failed. Please try signing in again.");
+  }
+  return exchange(code, state);
+}
+
 export function getStoredRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(REFRESH_TOKEN_KEY);
