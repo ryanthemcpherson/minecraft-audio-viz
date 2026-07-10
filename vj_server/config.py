@@ -14,6 +14,15 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
+def validate_http_bind_host(value: str) -> str:
+    """Reject bind hosts that socketserver would interpret as a wildcard."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("HTTP bind host must not be empty or whitespace")
+    if value != value.strip():
+        raise ValueError("HTTP bind host must not contain surrounding whitespace")
+    return value
+
+
 @dataclass
 class AudioConfig:
     """Audio processing configuration."""
@@ -222,6 +231,9 @@ class ServerConfig:
     coordinator_api_key: Optional[str] = None  # plaintext API key for this server
     coordinator_server_name: str = "VJ Server"  # display name in coordinator
     coordinator_ws_url: Optional[str] = None  # public WS URL DJs connect to
+
+    def __post_init__(self) -> None:
+        self.http_host = validate_http_bind_host(self.http_host)
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
