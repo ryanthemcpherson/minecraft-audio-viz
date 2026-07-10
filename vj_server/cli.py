@@ -85,6 +85,12 @@ Examples:
         help="WebSocket port for browser clients (default: 8766)",
     )
     parser.add_argument(
+        "--http-host",
+        type=validate_hostname,
+        default=os.environ.get("HTTP_HOST", "127.0.0.1"),
+        help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
+    )
+    parser.add_argument(
         "--auth-file",
         type=str,
         default=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
@@ -214,6 +220,7 @@ Examples:
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
         broadcast_port=args.broadcast_port,
+        http_host=args.http_host,
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,
