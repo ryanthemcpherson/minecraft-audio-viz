@@ -1,16 +1,18 @@
 # Docker Compose for AudioViz
 #
-# This runs the VJ Server for multi-DJ setups.
-# Note: Audio capture requires Windows, so DJs run locally.
+# Phase 0 quarantine: the VJ service is retained for unsupported development
+# verification only. Note: Audio capture requires Windows, so DJs run locally.
 #
-# Usage:
-#   docker-compose up -d
+# Explicit development opt-in:
+#   docker compose --profile phase0-quarantined up -d vj-server
 #
 # DJs connect via:
 #   audioviz --app spotify --dj-relay --vj-server ws://your-server:9000
 
 services:
   vj-server:
+    profiles:
+      - phase0-quarantined
     build: .
     container_name: audioviz-vj
     restart: unless-stopped

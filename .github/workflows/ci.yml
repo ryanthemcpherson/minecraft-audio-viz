@@ -53,12 +53,15 @@ jobs:
         run: pip install bandit[toml]
 
       - name: Run Bandit
-        # Bandit exits non-zero when findings exist; report is still written
-        run: bandit -r vj_server/ -c pyproject.toml -f json -o bandit-report.json || true
-
-      - name: Bandit (console output)
-        continue-on-error: true
-        run: bandit -r vj_server/ -c pyproject.toml
+        run: |
+          set +e
+          bandit -r vj_server/ -c pyproject.toml -f json -o bandit-report.json
+          audit_status=$?
+          set -e
+          if [ -f bandit-report.json ]; then
+            cat bandit-report.json
+          fi
+          exit "$audit_status"
 
       - name: Upload Bandit report
         if: always()
@@ -88,8 +91,23 @@ jobs:
           pip install -e "vj_server/[full]" -e "coordinator/[dev]" pip-audit
 
       - name: Run pip-audit
-        continue-on-error: true
-        run: pip-audit --desc --local
+        run: |
+          set +e
+          pip-audit --desc --local --format json --output pip-audit-report.json
+          audit_status=$?
+          set -e
+          if [ -f pip-audit-report.json ]; then
+            cat pip-audit-report.json
+          fi
+          exit "$audit_status"
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pip-audit-report-${{ github.sha }}
+          path: pip-audit-report.json
+          retention-days: 30
 
   # ---------------------------------------------------------------------------
   # Java: build Fabric mod
@@ -306,7 +324,6 @@ jobs:
 
       - name: Verify dependencies
         working-directory: minecraft_mod
-        continue-on-error: true
         run: ./gradlew dependencies --configuration runtimeClasspath
 
   # ---------------------------------------------------------------------------
@@ -325,26 +342,61 @@ jobs:
 
       - name: Audit root package
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-root.json
+          audit_status=$?
+          set -e
+          cat npm-audit-root.json
+          exit "$audit_status"
 
       - name: Audit dj_client package
+        if: always()
         working-directory: dj_client
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-djclient.json
+          audit_status=$?
+          set -e
+          cat npm-audit-djclient.json
+          exit "$audit_status"
 
       - name: Audit site package
+        if: always()
         working-directory: site
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-site.json
+          audit_status=$?
+          set -e
+          cat npm-audit-site.json
+          exit "$audit_status"
 
       - name: Audit worker package
+        if: always()
         working-directory: worker
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-worker.json
+          audit_status=$?
+          set -e
+          cat npm-audit-worker.json
+          exit "$audit_status"
+
+      - name: Upload npm audit reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-audit-reports-${{ github.sha }}
+          path: |
+            npm-audit-root.json
+            dj_client/npm-audit-djclient.json
+            site/npm-audit-site.json
+            worker/npm-audit-worker.json
+          retention-days: 30
 
   # ---------------------------------------------------------------------------
   # License compliance check
@@ -386,7 +438,7 @@ jobs:
         run: |
           echo "### Java Dependency Licenses (Gradle)" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          ./gradlew dependencies --configuration runtimeClasspath >> $GITHUB_STEP_SUMMARY 2>&1 || true
+          ./gradlew dependencies --configuration runtimeClasspath >> $GITHUB_STEP_SUMMARY 2>&1
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # ---------------------------------------------------------------------------
@@ -406,7 +458,21 @@ jobs:
 
       - name: Run cargo-audit
         working-directory: dj_client/src-tauri
-        run: cargo audit
+        run: |
+          set +e
+          cargo audit --json > cargo-audit-report.json
+          audit_status=$?
+          set -e
+          cat cargo-audit-report.json
+          exit "$audit_status"
+
+      - name: Upload cargo-audit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-audit-report-${{ github.sha }}
+          path: dj_client/src-tauri/cargo-audit-report.json
+          retention-days: 30
 
   # ---------------------------------------------------------------------------
   # SBOM generation (CycloneDX)
@@ -480,28 +546,44 @@ jobs:
     steps:
       - name: Check required results
         run: |
-          # Core jobs (blocking)
-          if [[ "${{ needs.python-lint.result }}" == "failure" ||
-                "${{ needs.java-build.result }}" == "failure" ||
-                "${{ needs.java-plugin-build.result }}" == "failure" ||
-                "${{ needs.site-build.result }}" == "failure" ||
-                "${{ needs.coordinator-test.result }}" == "failure" ||
-                "${{ needs.vj-server-test.result }}" == "failure" ||
-                "${{ needs.dj-client-test.result }}" == "failure" ]]; then
-            echo "One or more required CI jobs failed."
+          if [[ "${{ needs.python-lint.result }}" != "success" ||
+                "${{ needs.java-build.result }}" != "success" ||
+                "${{ needs.java-plugin-build.result }}" != "success" ||
+                "${{ needs.site-build.result }}" != "success" ||
+                "${{ needs.coordinator-test.result }}" != "success" ||
+                "${{ needs.vj-server-test.result }}" != "success" ||
+                "${{ needs.dj-client-test.result }}" != "success" ||
+                "${{ needs.python-sast.result }}" != "success" ||
+                "${{ needs.python-audit.result }}" != "success" ||
+                "${{ needs.java-audit.result }}" != "success" ||
+                "${{ needs.npm-audit.result }}" != "success" ||
+                "${{ needs.rust-audit.result }}" != "success" ||
+                "${{ needs.license-check.result }}" != "success" ||
+                "${{ needs.sbom.result }}" != "success" ||
+                "${{ needs.checksums.result }}" != "success" ]]; then
+            echo "One or more required CI jobs did not succeed."
             exit 1
           fi
           echo "All required CI checks passed."
 
-      - name: Report advisory results
+      - name: Report required results
         if: always()
         run: |
-          echo "### Advisory Job Results (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "### Required CI Job Results" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "|-|-|" >> $GITHUB_STEP_SUMMARY
+          echo "| Python lint | ${{ needs.python-lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fabric build | ${{ needs.java-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Paper build | ${{ needs.java-plugin-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Site build | ${{ needs.site-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Coordinator tests | ${{ needs.coordinator-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| VJ server tests | ${{ needs.vj-server-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DJ client tests | ${{ needs.dj-client-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bandit SAST | ${{ needs.python-sast.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| pip-audit | ${{ needs.python-audit.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| OWASP | ${{ needs.java-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Java dependencies | ${{ needs.java-audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| npm audit | ${{ needs.npm-audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| cargo-audit | ${{ needs.rust-audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| License | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SBOM | ${{ needs.sbom.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Checksums | ${{ needs.checksums.result }} |" >> $GITHUB_STEP_SUMMARY

@@ -6,6 +6,9 @@ on:
     - cron: '0 6 * * 1'
   # Also run on-demand
   workflow_dispatch:
+  # Required by the release gate on the exact main-branch commit being tagged
+  push:
+    branches: [main]
   # Run on PRs that touch dependency files
   pull_request:
     paths:
@@ -43,8 +46,14 @@ jobs:
 
       - name: pip-audit (JSON report)
         run: |
-          pip-audit --desc --local --format json --output pip-audit-report.json || true
-          pip-audit --desc --local || true
+          set +e
+          pip-audit --desc --local --format json --output pip-audit-report.json
+          audit_status=$?
+          set -e
+          if [ -f pip-audit-report.json ]; then
+            cat pip-audit-report.json
+          fi
+          exit "$audit_status"
 
       - name: Upload pip-audit report
         if: always()
@@ -73,7 +82,6 @@ jobs:
 
       - name: Verify dependencies
         working-directory: minecraft_plugin
-        continue-on-error: true
         run: mvn dependency:tree -B
 
   # ---------------------------------------------------------------------------
@@ -92,30 +100,49 @@ jobs:
 
       - name: Audit root package
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-root.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-root.json
+          audit_status=$?
+          set -e
+          cat npm-audit-root.json
+          exit "$audit_status"
 
       - name: Audit dj_client package
+        if: always()
         working-directory: dj_client
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-djclient.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-djclient.json
+          audit_status=$?
+          set -e
+          cat npm-audit-djclient.json
+          exit "$audit_status"
 
       - name: Audit site package
+        if: always()
         working-directory: site
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-site.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-site.json
+          audit_status=$?
+          set -e
+          cat npm-audit-site.json
+          exit "$audit_status"
 
       - name: Audit worker package
+        if: always()
         working-directory: worker
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-worker.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-worker.json
+          audit_status=$?
+          set -e
+          cat npm-audit-worker.json
+          exit "$audit_status"
 
       - name: Upload npm audit reports
         if: always()
@@ -148,8 +175,12 @@ jobs:
       - name: cargo-audit (JSON report)
         working-directory: dj_client/src-tauri
         run: |
-          cargo audit --json > cargo-audit-report.json || true
-          cargo audit || true
+          set +e
+          cargo audit --json > cargo-audit-report.json
+          audit_status=$?
+          set -e
+          cat cargo-audit-report.json
+          exit "$audit_status"
 
       - name: Upload cargo-audit report
         if: always()
@@ -174,8 +205,19 @@ jobs:
           echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Ecosystem | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "|-|-|" >> $GITHUB_STEP_SUMMARY
           echo "| Python (pip-audit) | ${{ needs.python-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Java (Maven) | ${{ needs.java-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| npm | ${{ needs.npm-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rust (cargo-audit) | ${{ needs.rust-security.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check required results
+        run: |
+          if [[ "${{ needs.python-security.result }}" != "success" ||
+                "${{ needs.java-security.result }}" != "success" ||
+                "${{ needs.npm-security.result }}" != "success" ||
+                "${{ needs.rust-security.result }}" != "success" ]]; then
+            echo "One or more required security jobs did not succeed."
+            exit 1
+          fi
+          echo "All required security checks passed."
