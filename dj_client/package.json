@@ -11,7 +11,6 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri:build": "tauri build --no-sign",
-    "tauri:build:signed": "tauri build",
     "tauri": "tauri"
   },
   "dependencies": {
