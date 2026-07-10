@@ -21,6 +21,7 @@ services:
     environment:
       - MINECRAFT_HOST=${MINECRAFT_HOST:-localhost}
       - MINECRAFT_PORT=${MINECRAFT_PORT:-8765}
+      - MINECRAFT_WS_SECRET=${MINECRAFT_WS_SECRET:-}
       - VJ_SERVER_PORT=9000
     volumes:
       - ./configs:/app/configs:ro

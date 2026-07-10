@@ -204,6 +204,7 @@ class ServerConfig:
     # Minecraft connection
     minecraft_host: str = "localhost"
     minecraft_port: int = 8765
+    minecraft_ws_secret: str | None = None
 
     # VJ server
     vj_server_port: int = 9000
@@ -228,6 +229,7 @@ class ServerConfig:
         return cls(
             minecraft_host=os.environ.get("MINECRAFT_HOST", "localhost"),
             minecraft_port=int(os.environ.get("MINECRAFT_PORT", "8765")),
+            minecraft_ws_secret=os.environ.get("MINECRAFT_WS_SECRET") or None,
             vj_server_port=int(os.environ.get("VJ_SERVER_PORT", "9000")),
             preview_port=int(os.environ.get("PREVIEW_PORT", "8766")),
             http_host=os.environ.get("HTTP_HOST", "127.0.0.1"),
