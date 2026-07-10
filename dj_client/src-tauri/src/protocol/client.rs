@@ -3,7 +3,6 @@
 use super::messages::*;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -111,8 +110,6 @@ pub struct ConnectionState {
     pub current_pattern: String,
     /// Per-band sensitivity multipliers
     pub band_sensitivity: [f32; 5],
-    /// Pattern scripts received from server (consumed by bridge task)
-    pub pending_pattern_scripts: Option<HashMap<String, String>>,
     /// Pattern change received from server (consumed by bridge task)
     pub pending_pattern_change: Option<String>,
     /// Band sensitivity change received from server (consumed by bridge task)
@@ -144,7 +141,6 @@ impl Default for ConnectionState {
             pending_preset: None,
             current_pattern: String::new(),
             band_sensitivity: [1.0; 5],
-            pending_pattern_scripts: None,
             pending_pattern_change: None,
             pending_band_sensitivity: None,
             pending_config_change: None,
@@ -540,11 +536,6 @@ impl DjClient {
         self.state.lock().pending_preset.take()
     }
 
-    /// Take pending pattern scripts (if any) that were received from the server.
-    pub fn take_pending_pattern_scripts(&self) -> Option<HashMap<String, String>> {
-        self.state.lock().pending_pattern_scripts.take()
-    }
-
     /// Take pending pattern change (if any) that was received from the server.
     pub fn take_pending_pattern_change(&self) -> Option<String> {
         self.state.lock().pending_pattern_change.take()
@@ -692,10 +683,6 @@ async fn handle_server_message(
                     .as_ref()
                     .and_then(|cfg| cfg.entity_count)
             });
-            // Store pattern scripts for engine initialization
-            if let Some(scripts) = route.pattern_scripts {
-                s.pending_pattern_scripts = Some(scripts);
-            }
             if let Some(ref sensitivity) = route.band_sensitivity
                 && sensitivity.len() >= 5
             {
@@ -790,5 +777,28 @@ mod tests {
             .disconnect()
             .await
             .expect("disconnect should be idempotent");
+    }
+
+    #[tokio::test]
+    async fn legacy_stream_route_scripts_are_ignored() {
+        let state = Arc::new(Mutex::new(ConnectionState::default()));
+        let (tx, _rx) = mpsc::channel(1);
+        let input = r#"{
+          "type": "stream_route",
+          "route_mode": "relay",
+          "preset": "edm",
+          "pattern_scripts": {
+            "hostile": "os.execute('calc.exe')"
+          }
+        }"#;
+        let message: ServerMessage =
+            serde_json::from_str(input).expect("legacy route must remain parseable");
+
+        handle_server_message(&state, &tx, message).await;
+
+        let current = state.lock();
+        assert_eq!(current.route_mode, "relay");
+        assert_eq!(current.pending_preset.as_deref(), Some("edm"));
+        assert!(!format!("{current:?}").contains("os.execute"));
     }
 }
