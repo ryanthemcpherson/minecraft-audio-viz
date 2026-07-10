@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import TYPE_CHECKING
 
@@ -35,8 +36,16 @@ async def _handle_role_change(request: web.Request) -> web.Response:
     bot: CommunityBot = request.app["bot"]
 
     # Authenticate
-    secret = request.headers.get("X-Webhook-Secret", "")
-    if secret != bot.config.webhook_secret:
+    configured_secret = bot.config.webhook_secret.strip()
+    provided_secret = request.headers.get("X-Webhook-Secret", "")
+    if not configured_secret:
+        _logger.error("Webhook endpoint disabled because MCAV_WEBHOOK_SECRET is empty")
+        return web.json_response({"error": "webhook unavailable"}, status=503)
+    provided_secret_bytes = provided_secret.encode("utf-8", errors="surrogatepass")
+    configured_secret_bytes = configured_secret.encode("utf-8", errors="surrogatepass")
+    if not provided_secret or not hmac.compare_digest(
+        provided_secret_bytes, configured_secret_bytes
+    ):
         return web.json_response({"error": "unauthorized"}, status=401)
 
     # Parse body
