@@ -4,14 +4,12 @@ import ConnectedView from './components/ConnectedView';
 import DisconnectedView from './components/DisconnectedView';
 import { useAuth } from './hooks/useAuth';
 import { useConnection } from './hooks/useConnection';
-import { useAutoUpdate } from './hooks/useAutoUpdate';
 import { useAudioSources } from './hooks/useAudioSources';
 
 function App() {
   const auth = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const connection = useConnection(auth);
-  const update = useAutoUpdate();
   const audioSources = useAudioSources();
 
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
@@ -154,16 +152,6 @@ function App() {
               </a>
             </div>
           </div>
-        </div>
-      )}
-
-      {(update.availableUpdate && !update.dismissUpdateBanner) && (
-        <div className="update-banner">
-          <span>Update {update.availableUpdate.version} available</span>
-          <button className="btn btn-link" onClick={update.installAvailableUpdate} disabled={update.isInstallingUpdate}>
-            {update.isInstallingUpdate ? 'Installing...' : 'Update'}
-          </button>
-          <button className="btn-dismiss" onClick={() => update.setDismissUpdateBanner(true)}>&times;</button>
         </div>
       )}
 
