@@ -50,6 +50,7 @@ public class MessageQueue {
     private final AtomicLong messagesProcessed = new AtomicLong(0);
     private final AtomicLong batchesSent = new AtomicLong(0);
     private final AtomicLong messagesDropped = new AtomicLong(0);
+    private final AtomicLong messagesErrored = new AtomicLong(0);
 
     private static final int MAX_QUEUE_SIZE = 1000;
 
@@ -136,35 +137,51 @@ public class MessageQueue {
         while ((queuedMessage = queue.poll()) != null) {
             messagesProcessed.incrementAndGet();
 
-            JsonObject msg = queuedMessage.message();
-            String type = msg.has("type") ? msg.get("type").getAsString() : "unknown";
-
-            if ("batch_update".equals(type)) {
-                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                batchCandidatesByZone
-                    .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
-                    .addLast(queuedMessage);
-            } else if ("bitmap_frame".equals(type)) {
-                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                bitmapCandidatesByZone
-                    .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
-                    .addLast(queuedMessage);
-            } else {
-                try {
-                    boolean executed = queuedMessage.guard().runIfValid(
-                        () -> messageHandler.handleMessage(type, msg)
-                    );
-                    if (!executed) {
-                        messagesDropped.incrementAndGet();
-                    }
-                } catch (Exception e) {
-                    AudioVizMod.LOGGER.warn("Error handling message type: {}", type, e);
+            QueuedMessage current = queuedMessage;
+            try {
+                boolean accepted = current.guard().runIfValid(
+                    () -> classifyAndHandle(current)
+                );
+                if (!accepted) {
+                    messagesDropped.incrementAndGet();
                 }
+            } catch (Exception exception) {
+                messagesDropped.incrementAndGet();
+                messagesErrored.incrementAndGet();
+                AudioVizMod.LOGGER.warn(
+                    "Dropped queued message after processing error ({})",
+                    exception.getClass().getSimpleName()
+                );
             }
         }
 
         processCoalesced("batch_update", batchCandidatesByZone);
         processCoalesced("bitmap_frame", bitmapCandidatesByZone);
+    }
+
+    private void classifyAndHandle(QueuedMessage queuedMessage) {
+        JsonObject message = queuedMessage.message();
+        String type = message.has("type")
+            ? message.get("type").getAsString()
+            : "unknown";
+
+        if ("batch_update".equals(type)) {
+            String zoneName = message.has("zone")
+                ? message.get("zone").getAsString()
+                : "main";
+            batchCandidatesByZone
+                .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                .addLast(queuedMessage);
+        } else if ("bitmap_frame".equals(type)) {
+            String zoneName = message.has("zone")
+                ? message.get("zone").getAsString()
+                : "main";
+            bitmapCandidatesByZone
+                .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                .addLast(queuedMessage);
+        } else {
+            messageHandler.handleMessage(type, message);
+        }
     }
 
     private void processCoalesced(
@@ -190,12 +207,11 @@ public class MessageQueue {
                     }
                 } catch (Exception exception) {
                     AudioVizMod.LOGGER.warn(
-                        "Error handling {} for zone {}",
+                        "Dropped coalesced {} message after processing error ({})",
                         type,
-                        entry.getKey(),
-                        exception
+                        exception.getClass().getSimpleName()
                     );
-                    selected = true;
+                    messagesErrored.incrementAndGet();
                     break;
                 }
             }
@@ -233,6 +249,10 @@ public class MessageQueue {
                 ", Queue: " + queue.size();
         if (dropped > 0) {
             stats += ", Dropped: " + dropped;
+        }
+        long errors = messagesErrored.get();
+        if (errors > 0) {
+            stats += ", Errors: " + errors;
         }
         return stats;
     }

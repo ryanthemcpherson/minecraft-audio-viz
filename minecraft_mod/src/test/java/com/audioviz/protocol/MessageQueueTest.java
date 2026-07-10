@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
@@ -69,6 +72,45 @@ class MessageQueueTest {
 
         verify(messageHandler).handleMessage(eq("batch_update"), same(olderValid));
         verifyNoMoreInteractions(messageHandler);
+    }
+
+    @Test
+    void staleMalformedNewestDoesNotSuppressOlderValidSameZoneUpdate() {
+        MessageQueue.MessageGuard validGuard = operation -> {
+            operation.run();
+            return true;
+        };
+        MessageQueue.MessageGuard staleGuard = operation -> false;
+        JsonObject olderValid = batchUpdate("main", "older-valid");
+        JsonObject latestStale = batchUpdate("main", "latest-stale");
+        latestStale.add("zone", new JsonObject());
+
+        messageQueue.enqueue(olderValid, validGuard);
+        messageQueue.enqueue(latestStale, staleGuard);
+
+        assertDoesNotThrow(messageQueue::processTick);
+
+        verify(messageHandler).handleMessage(eq("batch_update"), same(olderValid));
+        verifyNoMoreInteractions(messageHandler);
+        assertTrue(messageQueue.getStats().contains("Dropped: 1"));
+        assertFalse(messageQueue.getStats().contains("Errors:"));
+    }
+
+    @Test
+    void activeMalformedMessageIsDroppedWithoutAbortingLaterValidMessage() {
+        JsonObject malformed = new JsonObject();
+        malformed.add("type", new JsonObject());
+        JsonObject laterValid = batchUpdate("main", "later-valid");
+
+        messageQueue.enqueue(malformed);
+        messageQueue.enqueue(laterValid);
+
+        assertDoesNotThrow(messageQueue::processTick);
+
+        verify(messageHandler).handleMessage(eq("batch_update"), same(laterValid));
+        verifyNoMoreInteractions(messageHandler);
+        assertTrue(messageQueue.getStats().contains("Dropped: 1"));
+        assertTrue(messageQueue.getStats().contains("Errors: 1"));
     }
 
     private static JsonObject batchUpdate(String zone, String marker) {
