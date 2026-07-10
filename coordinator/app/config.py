@@ -36,6 +36,7 @@ class Settings(BaseSettings):
             )
         # Validate JWT secret strength
         self._validate_jwt_secret()
+        self._validate_metrics_token()
 
     def _validate_jwt_secret(self) -> None:
         """Reject insecure JWT secrets.
@@ -68,6 +69,12 @@ class Settings(BaseSettings):
             UserWarning,
             stacklevel=2,
         )
+
+    def _validate_metrics_token(self) -> None:
+        token = (self.metrics_token or "").strip()
+        if not token:
+            raise ValueError("MCAV_METRICS_TOKEN is required")
+        self.metrics_token = token
 
     # DJ-session JWT (per-server secrets – unchanged)
     jwt_default_expiry_minutes: int = 15
@@ -104,7 +111,7 @@ class Settings(BaseSettings):
     metrics_token: str | None = None
 
     # Environment
-    mcav_env: str = "development"
+    mcav_env: str = "production"
 
     # Proxy / rate limiting
     trusted_proxies: list[str] = ["127.0.0.1", "::1"]
