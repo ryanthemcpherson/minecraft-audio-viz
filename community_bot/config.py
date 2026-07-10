@@ -26,10 +26,13 @@ class Config:
         guild_id = os.environ.get("MCAV_DISCORD_GUILD_ID", "")
         if not guild_id:
             raise RuntimeError("MCAV_DISCORD_GUILD_ID is required")
+        webhook_secret = os.environ.get("MCAV_WEBHOOK_SECRET", "").strip()
+        if not webhook_secret:
+            raise RuntimeError("MCAV_WEBHOOK_SECRET is required")
         return cls(
             bot_token=token,
             guild_id=int(guild_id),
             coordinator_url=os.environ.get("MCAV_COORDINATOR_URL", "http://localhost:8090"),
-            webhook_secret=os.environ.get("MCAV_WEBHOOK_SECRET", ""),
+            webhook_secret=webhook_secret,
             webhook_port=int(os.environ.get("MCAV_WEBHOOK_PORT", "8100")),
         )
