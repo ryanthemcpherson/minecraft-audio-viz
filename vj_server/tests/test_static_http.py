@@ -20,6 +20,7 @@ from vj_server.models import (
     MultiDirectoryHandler,
     _make_directory_handler,
     _resolve_static_path,
+    _static_path_parts,
     run_http_server,
 )
 from vj_server.vj_server import VJServer
@@ -196,6 +197,44 @@ def test_resolver_rejects_windows_superscript_device_alias(
     candidate.write_text("must not be served", encoding="utf-8")
 
     assert _resolve_static_path(tmp_path, raw_path) is None
+
+
+@pytest.mark.parametrize(
+    "raw_path",
+    [
+        "CON .txt",
+        "con  .TXT",
+        "COM1 .log",
+        "com9  .LOG",
+        "COM¹ .txt",
+        "com³  .TXT",
+        "LPT² .dat",
+        "lpt1  .DAT",
+        "nested/Con .cfg",
+        "CON .txt ",
+        "LPT² .dat.",
+    ],
+)
+def test_static_path_syntax_rejects_space_padded_windows_device_basename(
+    raw_path: str,
+) -> None:
+    assert _static_path_parts(raw_path) is None
+
+
+@pytest.mark.parametrize(
+    "raw_path",
+    [
+        "CONSOLE .txt",
+        "XCON .txt",
+        "COM10 .log",
+        "LPT20 .dat",
+        "myCOM1 .txt",
+        "COM¹file .txt",
+        "nested/not-CON .txt",
+    ],
+)
+def test_static_path_syntax_allows_ordinary_device_name_substrings(raw_path: str) -> None:
+    assert _static_path_parts(raw_path) is not None
 
 
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])

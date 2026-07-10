@@ -631,7 +631,7 @@ def _static_path_parts(raw_path: str) -> tuple[str, ...] | None:
         windows_name = part.rstrip(" .")
         if not windows_name or windows_name != part:
             return None
-        device_name = windows_name.split(".", 1)[0].upper()
+        device_name = windows_name.split(".", 1)[0].rstrip(" .").upper()
         if ":" in windows_name or device_name in _WINDOWS_RESERVED_NAMES:
             return None
 
