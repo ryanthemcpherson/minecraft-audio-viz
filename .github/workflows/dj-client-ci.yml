@@ -64,6 +64,9 @@ jobs:
         working-directory: dj_client
         run: npm ci
 
+      - name: Verify Docker Compose availability
+        run: docker compose version
+
       - name: Verify Phase 0 containment
         working-directory: dj_client
         run: npm run test:containment
