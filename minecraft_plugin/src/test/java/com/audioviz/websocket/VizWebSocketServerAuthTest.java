@@ -25,15 +25,22 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -45,6 +52,8 @@ import static org.mockito.Mockito.when;
 class VizWebSocketServerAuthTest {
 
     private static final String BATCH_UPDATE = "{\"type\":\"batch_update\",\"updates\":[]}";
+    private static final String AUTH_MESSAGE = "{\"type\":\"auth\",\"token\":\"secret\"}";
+    private static final String AUTH_OK = "{\"type\":\"auth_ok\"}";
 
     @Mock
     private AudioVizPlugin plugin;
@@ -166,6 +175,110 @@ class VizWebSocketServerAuthTest {
     }
 
     @Test
+    void remainsInactiveWhileAuthOkSendIsBlocked() throws Exception {
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        Runnable heartbeat = startAndCaptureHeartbeat(server);
+        CountDownLatch ackSendStarted = new CountDownLatch(1);
+        CountDownLatch releaseAckSend = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            ackSendStarted.countDown();
+            if (!releaseAckSend.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release auth_ok send");
+            }
+            return null;
+        }).when(connection).send(AUTH_OK);
+
+        CompletableFuture<Void> authentication = CompletableFuture.runAsync(
+            () -> server.onMessage(connection, AUTH_MESSAGE));
+        assertTrue(ackSendStarted.await(5, TimeUnit.SECONDS));
+
+        try {
+            assertEquals(0, server.getConnectionCount());
+            assertEquals(0, server.getMetrics().get("totalConnections").getAsLong());
+            JsonObject broadcast = new JsonObject();
+            broadcast.addProperty("type", "server_notice");
+            assertEquals(0, server.broadcast(broadcast));
+            heartbeat.run();
+            verify(connection, never()).send(argThat(
+                (String message) -> message.contains("\"type\":\"ping\"")));
+            verify(connectionStateListener, never()).onDjConnect(anyString());
+        } finally {
+            releaseAckSend.countDown();
+        }
+
+        authentication.get(5, TimeUnit.SECONDS);
+        assertEquals(1, server.getConnectionCount());
+        verify(connectionStateListener).onDjConnect(connection.getRemoteSocketAddress().toString());
+    }
+
+    @Test
+    void failedAuthOkSendNeverAdmitsClient() {
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        Runnable heartbeat = startAndCaptureHeartbeat(server);
+        doThrow(new IllegalStateException("send failed")).when(connection).send(AUTH_OK);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> server.onMessage(connection, AUTH_MESSAGE)
+        );
+
+        assertInactive(server);
+        heartbeat.run();
+        verify(connection, never()).send(argThat(
+            (String message) -> message.contains("\"type\":\"ping\"")));
+    }
+
+    @Test
+    void closeDuringAuthOkSendPreventsPostCloseAdmission() throws Exception {
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        Runnable heartbeat = startAndCaptureHeartbeat(server);
+        CountDownLatch ackSendStarted = new CountDownLatch(1);
+        CountDownLatch releaseAckSend = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            ackSendStarted.countDown();
+            if (!releaseAckSend.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release auth_ok send");
+            }
+            return null;
+        }).when(connection).send(AUTH_OK);
+
+        CompletableFuture<Void> authentication = CompletableFuture.runAsync(
+            () -> server.onMessage(connection, AUTH_MESSAGE));
+        assertTrue(ackSendStarted.await(5, TimeUnit.SECONDS));
+        server.onClose(connection, 1000, "closed", true);
+        releaseAckSend.countDown();
+        authentication.get(5, TimeUnit.SECONDS);
+
+        assertInactive(server);
+        heartbeat.run();
+        verify(connection, never()).send(argThat(
+            (String message) -> message.contains("\"type\":\"ping\"")));
+    }
+
+    @Test
+    void admittedClientEmitsConnectThenSingleDisconnect() {
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        server.onMessage(connection, AUTH_MESSAGE);
+
+        server.onClose(connection, 1000, "closed", true);
+        server.onClose(connection, 1000, "closed", true);
+
+        InOrder lifecycle = inOrder(connectionStateListener);
+        lifecycle.verify(connectionStateListener)
+            .onDjConnect(connection.getRemoteSocketAddress().toString());
+        lifecycle.verify(connectionStateListener).onDjDisconnect("closed");
+        verify(connectionStateListener).onDjConnect(connection.getRemoteSocketAddress().toString());
+        verify(connectionStateListener).onDjDisconnect("closed");
+        assertEquals(0, server.getConnectionCount());
+        assertEquals(1, server.getMetrics().get("totalConnections").getAsLong());
+        assertEquals(1, server.getMetrics().get("totalDisconnections").getAsLong());
+    }
+
+    @Test
     void oversizedAuthenticationMessageIsRejectedBeforeAdmission() {
         VizWebSocketServer server = newServer("secret");
         server.onOpen(connection, handshake);
@@ -245,6 +358,17 @@ class VizWebSocketServerAuthTest {
             new WebSocketSecurityPolicy(secret),
             authTimeoutTasks::add
         );
+    }
+
+    private Runnable startAndCaptureHeartbeat(VizWebSocketServer server) {
+        when(plugin.getServer()).thenReturn(bukkitServer);
+        when(bukkitServer.getScheduler()).thenReturn(scheduler);
+        server.onStart();
+
+        ArgumentCaptor<Runnable> heartbeat = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runTaskTimerAsynchronously(
+            eq(plugin), heartbeat.capture(), eq(300L), eq(300L));
+        return heartbeat.getValue();
     }
 
     private JsonObject sentMessage(String type) {

@@ -129,7 +129,7 @@ public class VizWebSocketServer extends WebSocketServer {
         if (securityPolicy.requiresAuthentication()) {
             authTimeoutScheduler.accept(() -> {
                 ClientInfo pendingClient = clients.get(conn);
-                if (pendingClient != null && pendingClient.rejectIfPending()) {
+                if (pendingClient != null && pendingClient.closeIfInactive()) {
                     plugin.getLogger().warning("Authentication timeout for " + pendingClient.address);
                     conn.close(4002, "Authentication timeout");
                 }
@@ -137,34 +137,42 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        if (info.authenticate()) {
-            registerActiveClient(conn, info);
-            notifyClientConnected(info);
+        if (beginAuthentication(conn, info)) {
+            admitClient(conn, info);
         }
     }
 
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-        ClientInfo info = clients.remove(conn);
-        lastPongTime.remove(conn);
-
-        if (info == null || !info.isAuthenticated()) {
+        ClientInfo info = clients.get(conn);
+        if (info == null) {
+            lastPongTime.remove(conn);
             return;
         }
 
-        totalDisconnections.incrementAndGet();
+        synchronized (info) {
+            if (!clients.remove(conn, info)) {
+                return;
+            }
+            lastPongTime.remove(conn);
 
-        String address = info != null ? info.address : "unknown";
-        long connectionDuration = info != null ? System.currentTimeMillis() - info.connectedAt : 0;
-        String durationStr = formatDuration(connectionDuration);
+            if (!info.closeAndWasActive()) {
+                return;
+            }
 
-        plugin.getLogger().info("Client " + address + " disconnected: code=" + code +
-            ", reason=" + (reason != null && !reason.isEmpty() ? reason : "none") +
-            ", duration=" + durationStr);
+            totalDisconnections.incrementAndGet();
 
-        var disconnectListener = plugin.getConnectionStateListener();
-        if (disconnectListener != null && activeClientCount() == 0) {
-            disconnectListener.onDjDisconnect(reason != null ? reason : "connection closed");
+            long connectionDuration = System.currentTimeMillis() - info.connectedAt;
+            String durationStr = formatDuration(connectionDuration);
+
+            plugin.getLogger().info("Client " + info.address + " disconnected: code=" + code +
+                ", reason=" + (reason != null && !reason.isEmpty() ? reason : "none") +
+                ", duration=" + durationStr);
+
+            var disconnectListener = plugin.getConnectionStateListener();
+            if (disconnectListener != null && activeClientCount() == 0) {
+                disconnectListener.onDjDisconnect(reason != null ? reason : "connection closed");
+            }
         }
     }
 
@@ -177,9 +185,9 @@ public class VizWebSocketServer extends WebSocketServer {
 
         ClientInfo clientInfo = clients.get(conn);
         if (message.length() > MAX_MESSAGE_SIZE) {
-            if (clientInfo == null || !clientInfo.isAuthenticated()) {
+            if (clientInfo == null || !clientInfo.isActive()) {
                 if (clientInfo != null) {
-                    clientInfo.rejectIfPending();
+                    clientInfo.closeIfInactive();
                 }
                 conn.close(4001, "Authentication failed");
             } else {
@@ -189,12 +197,12 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        if (clientInfo == null || !clientInfo.isAuthenticated()) {
+        if (clientInfo == null || !clientInfo.isActive()) {
             if (clientInfo != null && clientInfo.isPending() && authenticate(conn, clientInfo, message)) {
                 return;
             }
             if (clientInfo != null) {
-                clientInfo.rejectIfPending();
+                clientInfo.closeIfInactive();
             }
             conn.close(4001, "Authentication failed");
             return;
@@ -204,7 +212,7 @@ public class VizWebSocketServer extends WebSocketServer {
         // crafted messages with "pong" buried in payload data)
         String prefix = message.substring(0, Math.min(64, message.length()));
         if (prefix.contains("\"type\":\"pong\"") || prefix.contains("\"type\": \"pong\"")) {
-            lastPongTime.put(conn, System.currentTimeMillis());
+            lastPongTime.replace(conn, System.currentTimeMillis());
             return;
         }
 
@@ -260,28 +268,59 @@ public class VizWebSocketServer extends WebSocketServer {
             return false;
         }
 
+        JsonObject authMessage;
         try {
-            JsonObject authMessage = JsonParser.parseString(message).getAsJsonObject();
+            authMessage = JsonParser.parseString(message).getAsJsonObject();
             if (!authMessage.has("type") || !authMessage.has("token") ||
                     !"auth".equals(authMessage.get("type").getAsString()) ||
-                    !securityPolicy.tokenMatches(authMessage.get("token").getAsString()) ||
-                    !info.authenticate()) {
+                    !securityPolicy.tokenMatches(authMessage.get("token").getAsString())) {
                 return false;
             }
         } catch (RuntimeException exception) {
             return false;
         }
 
-        registerActiveClient(conn, info);
-        conn.send("{\"type\":\"auth_ok\"}");
-        totalMessagesSent.incrementAndGet();
-        notifyClientConnected(info);
+        if (!beginAuthentication(conn, info)) {
+            return false;
+        }
+
+        try {
+            conn.send("{\"type\":\"auth_ok\"}");
+            totalMessagesSent.incrementAndGet();
+        } catch (RuntimeException exception) {
+            discardUnauthenticatedClient(conn, info);
+            throw exception;
+        }
+
+        admitClient(conn, info);
         return true;
     }
 
-    private void registerActiveClient(WebSocket conn, ClientInfo info) {
-        lastPongTime.put(conn, System.currentTimeMillis());
-        totalConnections.incrementAndGet();
+    private boolean beginAuthentication(WebSocket conn, ClientInfo info) {
+        synchronized (info) {
+            return clients.get(conn) == info && info.beginAuthentication();
+        }
+    }
+
+    private boolean admitClient(WebSocket conn, ClientInfo info) {
+        synchronized (info) {
+            if (clients.get(conn) != info || !info.activateIfAuthenticating()) {
+                return false;
+            }
+
+            lastPongTime.put(conn, System.currentTimeMillis());
+            totalConnections.incrementAndGet();
+            notifyClientConnected(info);
+            return true;
+        }
+    }
+
+    private void discardUnauthenticatedClient(WebSocket conn, ClientInfo info) {
+        synchronized (info) {
+            clients.remove(conn, info);
+            lastPongTime.remove(conn);
+            info.closeIfInactive();
+        }
     }
 
     private void notifyClientConnected(ClientInfo info) {
@@ -383,12 +422,16 @@ public class VizWebSocketServer extends WebSocketServer {
             for (Map.Entry<WebSocket, Long> entry : lastPongTime.entrySet()) {
                 WebSocket conn = entry.getKey();
                 long lastPong = entry.getValue();
+                ClientInfo info = clients.get(conn);
+
+                if (info == null || !info.isActive()) {
+                    lastPongTime.remove(conn, lastPong);
+                    continue;
+                }
 
                 // Check if client has timed out
                 if (now - lastPong > PONG_TIMEOUT_MS) {
-                    ClientInfo info = clients.get(conn);
-                    String address = info != null ? info.address : "unknown";
-                    plugin.getLogger().warning("Client " + address + " heartbeat timeout (no pong for " +
+                    plugin.getLogger().warning("Client " + info.address + " heartbeat timeout (no pong for " +
                         ((now - lastPong) / 1000) + "s), closing connection");
                     clientsToClose.add(conn);
                 } else if (conn.isOpen()) {
@@ -446,7 +489,7 @@ public class VizWebSocketServer extends WebSocketServer {
 
         for (Map.Entry<WebSocket, ClientInfo> entry : clients.entrySet()) {
             WebSocket conn = entry.getKey();
-            if (entry.getValue().isAuthenticated() && conn.isOpen()) {
+            if (entry.getValue().isActive() && conn.isOpen()) {
                 try {
                     conn.send(json);
                     successCount++;
@@ -486,7 +529,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private int activeClientCount() {
         int count = 0;
         for (ClientInfo info : clients.values()) {
-            if (info.isAuthenticated()) {
+            if (info.isActive()) {
                 count++;
             }
         }
@@ -587,34 +630,49 @@ public class VizWebSocketServer extends WebSocketServer {
             this.state = ClientState.PENDING;
         }
 
-        synchronized boolean authenticate() {
+        synchronized boolean beginAuthentication() {
             if (state != ClientState.PENDING) {
                 return false;
             }
-            state = ClientState.AUTHENTICATED;
+            state = ClientState.AUTHENTICATING;
             return true;
         }
 
-        synchronized boolean rejectIfPending() {
-            if (state != ClientState.PENDING) {
+        synchronized boolean activateIfAuthenticating() {
+            if (state != ClientState.AUTHENTICATING) {
                 return false;
             }
-            state = ClientState.REJECTED;
+            state = ClientState.ACTIVE;
             return true;
+        }
+
+        synchronized boolean closeIfInactive() {
+            if (state == ClientState.ACTIVE || state == ClientState.CLOSED) {
+                return false;
+            }
+            state = ClientState.CLOSED;
+            return true;
+        }
+
+        synchronized boolean closeAndWasActive() {
+            boolean wasActive = state == ClientState.ACTIVE;
+            state = ClientState.CLOSED;
+            return wasActive;
         }
 
         boolean isPending() {
             return state == ClientState.PENDING;
         }
 
-        boolean isAuthenticated() {
-            return state == ClientState.AUTHENTICATED;
+        boolean isActive() {
+            return state == ClientState.ACTIVE;
         }
     }
 
     private enum ClientState {
         PENDING,
-        AUTHENTICATED,
-        REJECTED
+        AUTHENTICATING,
+        ACTIVE,
+        CLOSED
     }
 }
