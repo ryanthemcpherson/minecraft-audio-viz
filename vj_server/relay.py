@@ -1546,7 +1546,10 @@ class RelayMixin:
             try:
                 await self.viz_client.disconnect()
             except Exception as e:
-                logger.debug(f"Error disconnecting old Minecraft client: {e}")
+                logger.debug(
+                    "Error disconnecting old Minecraft client (error_type=%s)",
+                    type(e).__name__,
+                )
             self.viz_client = None
 
         logger.info(f"Connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}...")

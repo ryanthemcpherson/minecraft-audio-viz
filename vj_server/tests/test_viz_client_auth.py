@@ -364,3 +364,114 @@ async def test_reconnect_reuses_auth_token(
     assert second_websocket.sent_messages == expected_auth
 
     await client.disconnect()
+
+
+def peer_close(secret: str) -> ConnectionClosedError:
+    return ConnectionClosedError(Close(4001, f"peer echoed {secret}"), None, None)
+
+
+def fail_send_with(error: Exception) -> Callable[[dict[str, Any]], None]:
+    def fail_send(_message: dict[str, Any]) -> None:
+        raise error
+
+    return fail_send
+
+
+@pytest.mark.parametrize("error_kind", ["connection_closed", "generic"])
+@pytest.mark.asyncio
+async def test_post_auth_send_does_not_log_peer_close_reason(
+    caplog: pytest.LogCaptureFixture, error_kind: str
+) -> None:
+    secret = "post-auth-send-secret"
+    error: Exception
+    if error_kind == "connection_closed":
+        error = peer_close(secret)
+    else:
+        error = RuntimeError(f"peer echoed {secret}")
+    websocket = FakeWebSocket(on_send=fail_send_with(error))
+    client = VizClient(auth_token=secret)
+    client.ws = websocket
+    client._connected = True
+    caplog.set_level(logging.DEBUG)
+
+    assert await client.send({"type": "get_zones"}) is None
+
+    assert client.connected is False
+    assert type(error).__name__ in caplog.text
+    assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_send_does_not_log_peer_close_reason(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    secret = "heartbeat-send-secret"
+    websocket = FakeWebSocket(on_send=fail_send_with(peer_close(secret)))
+    client = VizClient(auth_token=secret)
+    client.ws = websocket
+    client._connected = True
+    caplog.set_level(logging.DEBUG)
+
+    async def no_delay(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(viz_client_module.asyncio, "sleep", no_delay)
+
+    await client._heartbeat_loop()
+
+    assert client.connected is False
+    assert "ConnectionClosedError" in caplog.text
+    assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_pong_send_does_not_log_peer_close_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "pong-send-secret"
+    websocket = FakeWebSocket(
+        {"type": "ping"},
+        peer_close(secret),
+        on_send=fail_send_with(peer_close(secret)),
+    )
+    client = VizClient(auth_token=secret)
+    client.ws = websocket
+    client._connected = True
+    caplog.set_level(logging.DEBUG)
+
+    await client._receive_loop()
+
+    assert client.connected is False
+    assert "ConnectionClosedError" in caplog.text
+    assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_fast_update_does_not_log_peer_close_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "fast-update-secret"
+    websocket = FakeWebSocket(on_send=fail_send_with(RuntimeError(f"peer echoed {secret}")))
+    client = VizClient(auth_token=secret)
+    client.ws = websocket
+    client._connected = True
+    caplog.set_level(logging.DEBUG)
+
+    await client.batch_update_fast("main", [])
+
+    assert client.connected is False
+    assert "RuntimeError" in caplog.text
+    assert secret not in caplog.text
+
+
+def test_fire_and_forget_diagnostic_does_not_log_peer_close_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "fire-and-forget-secret"
+    client = VizClient(auth_token=secret)
+    caplog.set_level(logging.DEBUG)
+
+    client._record_fire_and_forget_error("voice_audio", peer_close(secret))
+
+    assert "ConnectionClosedError" in caplog.text
+    assert secret not in caplog.text
