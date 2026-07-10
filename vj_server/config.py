@@ -210,6 +210,7 @@ class ServerConfig:
 
     # Preview server
     preview_port: int = 8766
+    http_host: str = "127.0.0.1"
     http_port: int = 8080
 
     # Authentication
@@ -229,6 +230,7 @@ class ServerConfig:
             minecraft_port=int(os.environ.get("MINECRAFT_PORT", "8765")),
             vj_server_port=int(os.environ.get("VJ_SERVER_PORT", "9000")),
             preview_port=int(os.environ.get("PREVIEW_PORT", "8766")),
+            http_host=os.environ.get("HTTP_HOST", "127.0.0.1"),
             http_port=int(os.environ.get("HTTP_PORT", "8080")),
             dj_auth_file=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
             coordinator_url=os.environ.get("COORDINATOR_URL"),

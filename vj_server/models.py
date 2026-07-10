@@ -11,7 +11,6 @@ import json
 import logging
 import math
 import os
-import posixpath
 import re
 import secrets
 import socketserver
@@ -20,7 +19,7 @@ import time
 import urllib.parse
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import msgspec
@@ -584,6 +583,71 @@ class DJAuthConfig:
         return vj
 
 
+_REJECTED_STATIC_PATH = ".mcav-rejected-static-path"
+
+
+def _resolve_static_path(base: str | Path, raw_path: str) -> Path | None:
+    """Resolve an HTTP path beneath a static root using cross-platform rules."""
+    parsed = urllib.parse.urlsplit(raw_path)
+    if parsed.scheme or parsed.netloc:
+        return None
+
+    decoded = urllib.parse.unquote(parsed.path)
+    if "\x00" in decoded:
+        return None
+
+    normalized = decoded.replace("\\", "/")
+    if normalized.startswith("//"):
+        return None
+
+    relative_text = normalized.lstrip("/")
+    windows_path = PureWindowsPath(relative_text)
+    if windows_path.drive or windows_path.root:
+        return None
+
+    parts = [part for part in PurePosixPath(relative_text).parts if part not in ("", ".")]
+    if ".." in parts:
+        return None
+
+    reserved_names = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    }
+    for part in parts:
+        windows_name = part.rstrip(" .")
+        device_name = windows_name.split(".", 1)[0].upper()
+        if ":" in windows_name or device_name in reserved_names:
+            return None
+
+    root = Path(base).resolve()
+    candidate = root.joinpath(*parts).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
 def _make_directory_handler(directory_map: dict):
     """Create a handler class with its own directory_map to avoid shared mutable state."""
 
@@ -593,13 +657,10 @@ def _make_directory_handler(directory_map: dict):
         _directory_map = directory_map
 
         def _safe_join(self, base: str, path: str) -> str:
-            path = path.split("?", 1)[0].split("#", 1)[0]
-            path = posixpath.normpath(urllib.parse.unquote(path))
-            words = [word for word in path.split("/") if word not in ("", ".", "..")]
-            full_path = base
-            for word in words:
-                full_path = os.path.join(full_path, word)
-            return full_path
+            resolved_path = _resolve_static_path(base, path)
+            if resolved_path is None:
+                resolved_path = Path(base).resolve() / _REJECTED_STATIC_PATH
+            return str(resolved_path)
 
         def translate_path(self, path):
             path = path.split("?", 1)[0].split("#", 1)[0]
@@ -626,13 +687,10 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def _safe_join(self, base: str, path: str) -> str:
-        path = path.split("?", 1)[0].split("#", 1)[0]
-        path = posixpath.normpath(urllib.parse.unquote(path))
-        words = [word for word in path.split("/") if word not in ("", ".", "..")]
-        full_path = base
-        for word in words:
-            full_path = os.path.join(full_path, word)
-        return full_path
+        resolved_path = _resolve_static_path(base, path)
+        if resolved_path is None:
+            resolved_path = Path(base).resolve() / _REJECTED_STATIC_PATH
+        return str(resolved_path)
 
     def translate_path(self, path):
         path = path.split("?", 1)[0].split("#", 1)[0]
@@ -648,7 +706,7 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-def run_http_server(port: int, directory: str):
+def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
     """Run HTTP server for admin panel."""
     # directory is the project root
     project_root = Path(directory)
@@ -667,7 +725,7 @@ def run_http_server(port: int, directory: str):
         allow_reuse_address = True
 
     try:
-        with ReusableTCPServer(("", port), handler_cls) as httpd:
+        with ReusableTCPServer((host, port), handler_cls) as httpd:
             httpd.serve_forever()
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")

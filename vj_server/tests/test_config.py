@@ -1,6 +1,6 @@
 """Tests for vj_server.config — audio presets, AudioConfig roundtrip, defaults."""
 
-from vj_server.config import PRESETS, AudioConfig, get_preset, list_presets
+from vj_server.config import PRESETS, AudioConfig, ServerConfig, get_preset, list_presets
 
 # ============================================================================
 # Preset field-range validation
@@ -123,3 +123,12 @@ class TestDefaultPresetValues:
         assert default.attack == auto.attack
         assert default.release == auto.release
         assert default.beat_threshold == auto.beat_threshold
+
+
+class TestServerConfig:
+    def test_http_host_defaults_to_loopback(self):
+        assert ServerConfig().http_host == "127.0.0.1"
+
+    def test_http_host_allows_explicit_non_loopback(self, monkeypatch):
+        monkeypatch.setenv("HTTP_HOST", "0.0.0.0")
+        assert ServerConfig.from_env().http_host == "0.0.0.0"

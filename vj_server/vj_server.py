@@ -91,6 +91,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         dj_port: int = 9000,
         broadcast_port: int = 8766,
         http_port: int = 8080,
+        http_host: str = "127.0.0.1",
         minecraft_host: str = "localhost",
         minecraft_port: int = 8765,
         zone: str = "main",
@@ -106,6 +107,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
         self.http_port = http_port
+        self.http_host = http_host
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
         self.zone = zone
@@ -1004,12 +1006,12 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             project_root = Path(__file__).parent.parent
             http_thread = threading.Thread(
                 target=run_http_server,
-                args=(self.http_port, str(project_root)),
+                args=(self.http_port, str(project_root), self.http_host),
                 daemon=True,
             )
             http_thread.start()
-            logger.info(f"Admin panel: http://localhost:{self.http_port}/")
-            logger.info(f"3D Preview: http://localhost:{self.http_port}/preview/")
+            logger.info(f"Admin panel: http://{self.http_host}:{self.http_port}/")
+            logger.info(f"3D Preview: http://{self.http_host}:{self.http_port}/preview/")
 
         # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
         dj_server = await ws_serve(
@@ -1220,6 +1222,12 @@ async def main():
         help="HTTP port for admin panel (default: 8080)",
     )
     parser.add_argument(
+        "--http-host",
+        type=str,
+        default=os.environ.get("HTTP_HOST", "127.0.0.1"),
+        help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
+    )
+    parser.add_argument(
         "--minecraft-host",
         "--host",
         type=str,
@@ -1269,6 +1277,7 @@ async def main():
         dj_port=args.dj_port,
         broadcast_port=args.broadcast_port,
         http_port=args.http_port,
+        http_host=args.http_host,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.port,
         zone=args.zone,
