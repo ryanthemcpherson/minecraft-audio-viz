@@ -25,6 +25,7 @@ import com.audioviz.stages.ZonePlacementManager;
 import com.audioviz.virtual.VirtualEntityPool;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
+import com.audioviz.websocket.WebSocketSecurityPolicy;
 import com.audioviz.zones.VisualizationZone;
 import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneManager;
@@ -252,11 +253,28 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         messageHandler.setBitmapFrameHandler(this::handleBitmapFrameRendering);
         messageQueue = new MessageQueue(messageHandler);
 
-        // Start WebSocket server
-        String wsAddress = "0.0.0.0";
-        wsServer = new VizWebSocketServer(wsAddress, config.websocketPort, messageHandler, messageQueue, server);
-        wsServer.start();
-        LOGGER.info("WebSocket server starting on port {}", config.websocketPort);
+        // Start WebSocket server only when the bind/auth combination is safe.
+        String wsAddress = config.websocketAddress;
+        if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, config.websocketSecret)) {
+            wsServer = new VizWebSocketServer(
+                wsAddress,
+                config.websocketPort,
+                config.websocketSecret,
+                messageHandler,
+                messageQueue,
+                server,
+                connectionStateListener
+            );
+            wsServer.start();
+            LOGGER.info("WebSocket server starting on {}:{}", wsAddress, config.websocketPort);
+        } else {
+            wsServer = null;
+            LOGGER.error(
+                "AudioViz WebSocket listener is offline: bind to a loopback address " +
+                "(127.0.0.1, localhost, or ::1) or configure a non-empty " +
+                "websocketSecret before using a non-loopback websocketAddress."
+            );
+        }
 
         // Wire bitmap frame broadcasting to WebSocket clients for browser preview
         if (bitmapPatternManager != null && wsServer != null) {
@@ -402,6 +420,8 @@ public class AudioVizMod implements DedicatedServerModInitializer {
         if (wsServer != null) {
             wsServer.shutdown();
             LOGGER.info("WebSocket server stopped");
+        } else if (messageQueue != null) {
+            messageQueue.stop();
         }
 
         // Shutdown bitmap pattern engine

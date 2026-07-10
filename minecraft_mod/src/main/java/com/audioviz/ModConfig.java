@@ -8,6 +8,8 @@ import java.nio.file.Path;
 
 public class ModConfig {
     // WebSocket
+    public String websocketAddress = "127.0.0.1";
+    public String websocketSecret = "";
     public int websocketPort = 8765;
     public int djPort = 9000;
 
@@ -39,6 +41,10 @@ public class ModConfig {
     }
 
     private void validate() {
+        websocketAddress = websocketAddress == null || websocketAddress.isBlank()
+            ? "127.0.0.1"
+            : websocketAddress.strip();
+        websocketSecret = websocketSecret == null ? "" : websocketSecret.strip();
         websocketPort = clamp(websocketPort, 1024, 65535);
         djPort = clamp(djPort, 1024, 65535);
         maxEntitiesPerZone = clamp(maxEntitiesPerZone, 1, 10000);
