@@ -1,7 +1,6 @@
 //! Message types for VJ server protocol
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// DJ authentication message (traditional credentials)
 #[derive(Debug, Clone, Serialize)]
@@ -391,8 +390,6 @@ pub struct StreamRouteMessage {
     #[serde(default)]
     pub current_pattern: Option<String>,
     #[serde(default)]
-    pub pattern_scripts: Option<HashMap<String, String>>,
-    #[serde(default)]
     pub band_sensitivity: Option<Vec<f32>>,
     #[serde(default)]
     pub preset: Option<String>,
@@ -542,6 +539,9 @@ mod tests {
           "entity_count": 24,
           "pattern_config": {
             "entity_count": 24
+          },
+          "pattern_scripts": {
+            "hostile": "os.execute('calc.exe')"
           }
         }"#;
 

@@ -35,6 +35,28 @@ class FakeDJManager:
     _cleanup_expired_codes = DJManagerMixin._cleanup_expired_codes
 
 
+def test_stream_route_is_relay_only_and_omits_pattern_scripts() -> None:
+    from vj_server.vj_server import VJServer
+
+    server = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    dj = DJConnection(
+        dj_id="dj-1",
+        dj_name="Containment DJ",
+        websocket=None,
+        direct_mode=True,
+    )
+    server._djs[dj.dj_id] = dj
+    server._active_dj_id = dj.dj_id
+
+    route = server._build_stream_route_message(dj.dj_id, dj)
+
+    assert route["route_mode"] == "relay"
+    assert route["reason"] == "phase0_remote_execution_disabled"
+    assert "pattern_scripts" not in route
+    assert "minecraft_host" not in route
+    assert "minecraft_port" not in route
+
+
 # ============================================================================
 # active_dj property
 # ============================================================================
