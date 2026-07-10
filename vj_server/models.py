@@ -19,6 +19,7 @@ import time
 import urllib.parse
 from collections import deque
 from dataclasses import dataclass, field
+from http import HTTPStatus
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -595,6 +596,8 @@ _WINDOWS_RESERVED_NAMES = {
     "CONOUT$",
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
+    *(f"COM{number}" for number in "¹²³"),
+    *(f"LPT{number}" for number in "¹²³"),
 }
 
 
@@ -666,10 +669,44 @@ def _rejected_static_path(directory_map: dict, default_directory: str | None = N
     return str(Path(root).resolve() / _REJECTED_STATIC_PATH)
 
 
+class _StaticRequestHandlerMixin:
+    """Reject invalid static requests before the base handler touches the filesystem."""
+
+    _static_path_rejected = False
+    _static_path_override: str | None = None
+
+    def _reject_static_path(
+        self,
+        directory_map: dict,
+        default_directory: str | None = None,
+    ) -> str:
+        self._static_path_rejected = True
+        return _rejected_static_path(directory_map, default_directory)
+
+    def _take_static_path_override(self) -> str | None:
+        translated_path = self._static_path_override
+        self._static_path_override = None
+        return translated_path
+
+    def send_head(self):
+        self._static_path_rejected = False
+        self._static_path_override = None
+        translated_path = self.translate_path(self.path)
+        if self._static_path_rejected:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
+
+        self._static_path_override = translated_path
+        try:
+            return super().send_head()
+        finally:
+            self._static_path_override = None
+
+
 def _make_directory_handler(directory_map: dict):
     """Create a handler class with its own directory_map to avoid shared mutable state."""
 
-    class _Handler(http.server.SimpleHTTPRequestHandler):
+    class _Handler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRequestHandler):
         """HTTP handler that serves from multiple directories."""
 
         _directory_map = directory_map
@@ -677,16 +714,20 @@ def _make_directory_handler(directory_map: dict):
         def _safe_join(self, base: str, path: str) -> str:
             resolved_path = _resolve_static_path(base, path)
             if resolved_path is None:
-                resolved_path = Path(base).resolve() / _REJECTED_STATIC_PATH
+                return self._reject_static_path({"/": base})
             return str(resolved_path)
 
         def translate_path(self, path):
-            rejected_path = _rejected_static_path(
-                self._directory_map,
-                getattr(self, "directory", None),
-            )
+            translated_path = self._take_static_path_override()
+            if translated_path is not None:
+                return translated_path
+
+            self._static_path_rejected = False
             if _static_path_parts(path) is None:
-                return rejected_path
+                return self._reject_static_path(
+                    self._directory_map,
+                    getattr(self, "directory", None),
+                )
 
             path = urllib.parse.urlsplit(path).path
             for url_prefix, fs_directory in self._directory_map.items():
@@ -697,7 +738,10 @@ def _make_directory_handler(directory_map: dict):
                     return self._safe_join(fs_directory, relative_path)
             if "/" in self._directory_map:
                 return self._safe_join(self._directory_map["/"], path)
-            return rejected_path
+            return self._reject_static_path(
+                self._directory_map,
+                getattr(self, "directory", None),
+            )
 
         def log_message(self, format, *args):
             pass
@@ -705,7 +749,7 @@ def _make_directory_handler(directory_map: dict):
     return _Handler
 
 
-class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
+class MultiDirectoryHandler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRequestHandler):
     """HTTP handler that serves from multiple directories (legacy, prefer _make_directory_handler)."""
 
     def __init__(self, *args, **kwargs):
@@ -716,16 +760,20 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
     def _safe_join(self, base: str, path: str) -> str:
         resolved_path = _resolve_static_path(base, path)
         if resolved_path is None:
-            resolved_path = Path(base).resolve() / _REJECTED_STATIC_PATH
+            return self._reject_static_path({"/": base})
         return str(resolved_path)
 
     def translate_path(self, path):
-        rejected_path = _rejected_static_path(
-            self.directory_map,
-            getattr(self, "directory", None),
-        )
+        translated_path = self._take_static_path_override()
+        if translated_path is not None:
+            return translated_path
+
+        self._static_path_rejected = False
         if _static_path_parts(path) is None:
-            return rejected_path
+            return self._reject_static_path(
+                self.directory_map,
+                getattr(self, "directory", None),
+            )
 
         path = urllib.parse.urlsplit(path).path
         for url_prefix, fs_directory in self.directory_map.items():
@@ -736,7 +784,10 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
                 return self._safe_join(fs_directory, relative_path)
         if "/" in self.directory_map:
             return self._safe_join(self.directory_map["/"], path)
-        return rejected_path
+        return self._reject_static_path(
+            self.directory_map,
+            getattr(self, "directory", None),
+        )
 
     def log_message(self, format, *args):
         pass
