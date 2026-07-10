@@ -208,14 +208,16 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-        synchronized (connectionLifecycleLock) {
-            ClientInfo info = clients.get(conn);
-            if (info == null) {
-                lastPongTime.remove(conn);
-                return;
-            }
+        ClientInfo info = clients.get(conn);
+        if (info == null) {
+            lastPongTime.remove(conn);
+            return;
+        }
 
-            synchronized (info) {
+        // Lock order is always client -> global lifecycle. Waiting for
+        // in-flight work on this client never blocks unrelated lifecycle events.
+        synchronized (info) {
+            synchronized (connectionLifecycleLock) {
                 if (!clients.remove(conn, info)) {
                     return;
                 }
@@ -224,23 +226,23 @@ public class VizWebSocketServer extends WebSocketServer {
                 if (!info.closeAndWasActive()) {
                     return;
                 }
-            }
 
-            totalDisconnections.incrementAndGet();
+                totalDisconnections.incrementAndGet();
 
-            long duration = System.currentTimeMillis() - info.connectedAt;
-            AudioVizMod.LOGGER.info(
-                "Client {} disconnected: code={}, reason={}, duration={}",
-                info.address,
-                code,
-                reason != null && !reason.isEmpty() ? reason : "none",
-                formatDuration(duration)
-            );
-
-            if (connectionStateListener != null && activeClientCount() == 0) {
-                connectionStateListener.onDjDisconnect(
-                    reason != null ? reason : "connection closed"
+                long duration = System.currentTimeMillis() - info.connectedAt;
+                AudioVizMod.LOGGER.info(
+                    "Client {} disconnected: code={}, reason={}, duration={}",
+                    info.address,
+                    code,
+                    reason != null && !reason.isEmpty() ? reason : "none",
+                    formatDuration(duration)
                 );
+
+                if (connectionStateListener != null && activeClientCount() == 0) {
+                    connectionStateListener.onDjDisconnect(
+                        reason != null ? reason : "connection closed"
+                    );
+                }
             }
         }
     }
@@ -405,40 +407,38 @@ public class VizWebSocketServer extends WebSocketServer {
     }
 
     private boolean admitClient(WebSocket conn, ClientInfo info) {
+        synchronized (info) {
+            if (!acceptingMessages || clients.get(conn) != info
+                    || !info.beginAdmission()) {
+                return false;
+            }
+        }
+
         synchronized (connectionLifecycleLock) {
-            synchronized (info) {
-                if (!acceptingMessages || clients.get(conn) != info
-                        || !info.isAuthenticating()) {
-                    return false;
-                }
+            if (!acceptingMessages || clients.get(conn) != info || !info.isAdmitting()) {
+                return false;
             }
 
             // Keep the client non-active until the globally serialized
-            // connection callback has completed. The per-client lock is not
-            // held across the callback, so pending traffic observes inactive
-            // state instead of waiting and becoming active afterward.
+            // connection callback has completed. No client lock is held here.
             AudioVizMod.LOGGER.info("WebSocket client connected: {}", info.address);
             if (connectionStateListener != null) {
                 connectionStateListener.onDjConnect(info.address);
             }
 
-            synchronized (info) {
-                if (!acceptingMessages || clients.get(conn) != info) {
-                    return false;
-                }
-                if (!info.activateIfAuthenticating()) {
-                    return false;
-                }
-                lastPongTime.put(conn, System.currentTimeMillis());
-                totalConnections.incrementAndGet();
+            if (!acceptingMessages || clients.get(conn) != info
+                    || !info.activateIfAdmitting()) {
+                return false;
             }
+            lastPongTime.put(conn, System.currentTimeMillis());
+            totalConnections.incrementAndGet();
             return true;
         }
     }
 
     private boolean closeInactiveClient(WebSocket conn, ClientInfo info) {
-        synchronized (connectionLifecycleLock) {
-            synchronized (info) {
+        synchronized (info) {
+            synchronized (connectionLifecycleLock) {
                 return clients.get(conn) == info && info.closeIfInactive();
             }
         }
@@ -446,9 +446,11 @@ public class VizWebSocketServer extends WebSocketServer {
 
     private void discardUnauthenticatedClient(WebSocket conn, ClientInfo info) {
         synchronized (info) {
-            clients.remove(conn, info);
-            lastPongTime.remove(conn);
-            info.closeIfInactive();
+            synchronized (connectionLifecycleLock) {
+                clients.remove(conn, info);
+                lastPongTime.remove(conn);
+                info.closeIfInactive();
+            }
         }
     }
 
@@ -461,7 +463,9 @@ public class VizWebSocketServer extends WebSocketServer {
                 if (clients.get(conn) != info || !info.isActive()) {
                     return false;
                 }
-                messageQueue.enqueueRaw(message);
+                MessageQueue.MessageGuard guard = operation ->
+                    runForActiveClient(conn, info, operation);
+                messageQueue.enqueueRaw(message, guard);
                 return true;
             }
         }
@@ -501,6 +505,16 @@ public class VizWebSocketServer extends WebSocketServer {
             future.complete(result);
         } catch (Exception exception) {
             future.completeExceptionally(exception);
+        }
+    }
+
+    private boolean runForActiveClient(WebSocket conn, ClientInfo info, Runnable operation) {
+        synchronized (info) {
+            if (!acceptingMessages || clients.get(conn) != info || !info.isActive()) {
+                return false;
+            }
+            operation.run();
+            return true;
         }
     }
 
@@ -709,8 +723,20 @@ public class VizWebSocketServer extends WebSocketServer {
             return true;
         }
 
-        synchronized boolean activateIfAuthenticating() {
+        synchronized boolean beginAdmission() {
             if (state != ClientState.AUTHENTICATING) {
+                return false;
+            }
+            state = ClientState.ADMITTING;
+            return true;
+        }
+
+        /**
+         * Called only while holding the global lifecycle lock. Once a client is
+         * ADMITTING, every competing close transition also requires that lock.
+         */
+        boolean activateIfAdmitting() {
+            if (state != ClientState.ADMITTING) {
                 return false;
             }
             state = ClientState.ACTIVE;
@@ -735,8 +761,8 @@ public class VizWebSocketServer extends WebSocketServer {
             return state == ClientState.PENDING;
         }
 
-        boolean isAuthenticating() {
-            return state == ClientState.AUTHENTICATING;
+        boolean isAdmitting() {
+            return state == ClientState.ADMITTING;
         }
 
         boolean isActive() {
@@ -747,6 +773,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private enum ClientState {
         PENDING,
         AUTHENTICATING,
+        ADMITTING,
         ACTIVE,
         CLOSED
     }
