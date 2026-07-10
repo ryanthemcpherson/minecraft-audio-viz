@@ -6,9 +6,8 @@ import { useAuth } from "@/components/AuthProvider";
 import {
   exchangeDiscordCode,
   exchangeGoogleCode,
+  exchangeOAuthCodeWithValidatedState,
   getOAuthProvider,
-  getStoredOAuthState,
-  clearStoredOAuthState,
 } from "@/lib/auth";
 import Link from "next/link";
 
@@ -77,17 +76,8 @@ function CallbackHandler() {
     // instead of the full callback URL with code/state params.
     window.history.replaceState({}, "", "/login");
 
-    // Validate state against stored value (CSRF protection)
-    const storedState = getStoredOAuthState();
-    clearStoredOAuthState();
-
-    if (storedState && storedState !== state) {
-      queueMicrotask(() => setError("Security validation failed. Please try signing in again."));
-      return;
-    }
-
     const exchangeFn = provider === "google" ? exchangeGoogleCode : exchangeDiscordCode;
-    exchangeFn(code, state)
+    exchangeOAuthCodeWithValidatedState(code, state, exchangeFn)
       .then((res) => {
         setAuth(res.access_token, res.refresh_token, res.user);
         router.replace(res.user.onboarding_completed ? "/dashboard" : "/onboarding");
