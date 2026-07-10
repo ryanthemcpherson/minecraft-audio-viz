@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -86,7 +88,10 @@ class VizWebSocketServerAuthTest {
             .onDjConnect(connection.getRemoteSocketAddress().toString());
 
         server.onMessage(connection, BATCH_UPDATE);
-        verify(messageQueue).enqueueRaw(BATCH_UPDATE);
+        verify(messageQueue).enqueueRaw(
+            eq(BATCH_UPDATE),
+            any(MessageQueue.MessageGuard.class)
+        );
 
         server.onClose(connection, 1000, "closed", true);
         verify(connectionStateListener).onDjDisconnect("closed");
@@ -131,7 +136,10 @@ class VizWebSocketServerAuthTest {
 
         verify(connection).close(4001, "Authentication failed");
         verifyNoInteractions(messageHandler);
-        verify(messageQueue, never()).enqueueRaw(anyString());
+        verify(messageQueue, never()).enqueueRaw(
+            anyString(),
+            any(MessageQueue.MessageGuard.class)
+        );
         verify(serverExecutor, never()).execute(any(Runnable.class));
     }
 
@@ -150,7 +158,10 @@ class VizWebSocketServerAuthTest {
         assertEquals(1, server.getConnectionCount());
 
         server.onMessage(connection, BATCH_UPDATE);
-        verify(messageQueue).enqueueRaw(BATCH_UPDATE);
+        verify(messageQueue).enqueueRaw(
+            eq(BATCH_UPDATE),
+            any(MessageQueue.MessageGuard.class)
+        );
     }
 
     @Test
@@ -338,7 +349,10 @@ class VizWebSocketServerAuthTest {
                 throw new AssertionError("Timed out waiting to release queue acceptance");
             }
             return null;
-        }).when(messageQueue).enqueueRaw(BATCH_UPDATE);
+        }).when(messageQueue).enqueueRaw(
+            eq(BATCH_UPDATE),
+            any(MessageQueue.MessageGuard.class)
+        );
 
         CompletableFuture<Void> message = CompletableFuture.runAsync(
             () -> server.onMessage(connection, BATCH_UPDATE));
@@ -359,7 +373,10 @@ class VizWebSocketServerAuthTest {
 
         message.get(5, TimeUnit.SECONDS);
         close.get(5, TimeUnit.SECONDS);
-        verify(messageQueue).enqueueRaw(BATCH_UPDATE);
+        verify(messageQueue).enqueueRaw(
+            eq(BATCH_UPDATE),
+            any(MessageQueue.MessageGuard.class)
+        );
         assertEquals(0, server.getConnectionCount());
     }
 
@@ -551,6 +568,61 @@ class VizWebSocketServerAuthTest {
     }
 
     @Test
+    void secondClientAdmissionBypassesFirstClientCloseWaitingOnHandler() throws Exception {
+        RecordingLifecycleListener lifecycleListener = new RecordingLifecycleListener();
+        VizWebSocketServer server = newServer("", lifecycleListener);
+        server.onOpen(connection, handshake);
+        lifecycleListener.events.clear();
+
+        server.onMessage(connection, "{\"type\":\"get_status\"}");
+        ArgumentCaptor<Runnable> handlerTask = ArgumentCaptor.forClass(Runnable.class);
+        verify(serverExecutor).execute(handlerTask.capture());
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch releaseHandler = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            handlerEntered.countDown();
+            if (!releaseHandler.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release first client handler");
+            }
+            return null;
+        }).when(messageHandler).handleMessage(anyString(), any(JsonObject.class));
+        CompletableFuture<Void> handler = CompletableFuture.runAsync(handlerTask.getValue());
+        assertTrue(handlerEntered.await(5, TimeUnit.SECONDS));
+
+        AtomicReference<Thread> closeThread = new AtomicReference<>();
+        CompletableFuture<Void> firstClose = CompletableFuture.runAsync(() -> {
+            closeThread.set(Thread.currentThread());
+            server.onClose(connection, 1000, "first closed", true);
+        });
+        awaitBlockedOrComplete(firstClose, closeThread);
+        assertFalse(firstClose.isDone());
+
+        WebSocket secondConnection = mock(WebSocket.class);
+        ClientHandshake secondHandshake = mock(ClientHandshake.class);
+        when(secondConnection.getRemoteSocketAddress())
+            .thenReturn(new InetSocketAddress("127.0.0.1", 54322));
+        when(secondConnection.isOpen()).thenReturn(true);
+        AtomicReference<Thread> admissionThread = new AtomicReference<>();
+        CompletableFuture<Void> secondAdmission = CompletableFuture.runAsync(() -> {
+            admissionThread.set(Thread.currentThread());
+            server.onOpen(secondConnection, secondHandshake);
+        });
+        awaitBlockedOrComplete(secondAdmission, admissionThread);
+        boolean admissionCompletedBeforeRelease = secondAdmission.isDone();
+
+        releaseHandler.countDown();
+        handler.get(5, TimeUnit.SECONDS);
+        firstClose.get(5, TimeUnit.SECONDS);
+        secondAdmission.get(5, TimeUnit.SECONDS);
+
+        assertTrue(admissionCompletedBeforeRelease);
+        assertEquals(List.of("connect:/127.0.0.1:54322"), lifecycleListener.events);
+        assertEquals(1, server.getConnectionCount());
+        assertEquals(2, server.getMetrics().get("totalConnections").getAsLong());
+        assertEquals(1, server.getMetrics().get("totalDisconnections").getAsLong());
+    }
+
+    @Test
     void oversizedAuthenticationMessageIsRejectedBeforeAdmission() {
         VizWebSocketServer server = newServer("secret");
         server.onOpen(connection, handshake);
@@ -602,16 +674,102 @@ class VizWebSocketServerAuthTest {
     }
 
     @Test
+    void closedGenerationCannotExecuteCapturedHighFrequencyQueueWork() {
+        CapturingMessageQueue guardedQueue = new CapturingMessageQueue(messageHandler);
+        VizWebSocketServer server = newServer(
+            "",
+            connectionStateListener,
+            guardedQueue
+        );
+        try {
+            server.onOpen(connection, handshake);
+            server.onMessage(connection, BATCH_UPDATE);
+
+            server.onClose(connection, 1000, "closed", true);
+            server.onOpen(connection, handshake);
+            guardedQueue.releaseCapturedMessage();
+            guardedQueue.processTick();
+
+            verifyNoInteractions(messageHandler);
+        } finally {
+            guardedQueue.stop();
+        }
+    }
+
+    @Test
     void messageDuringShutdownCannotReachRejectedQueueExecutor() {
         VizWebSocketServer server = newServer("");
         server.onOpen(connection, handshake);
         doThrow(new RejectedExecutionException("queue stopped"))
-            .when(messageQueue).enqueueRaw(anyString());
+            .when(messageQueue).enqueueRaw(
+                anyString(),
+                any(MessageQueue.MessageGuard.class)
+            );
 
         server.shutdown();
 
         assertDoesNotThrow(() -> server.onMessage(connection, BATCH_UPDATE));
-        verify(messageQueue, never()).enqueueRaw(BATCH_UPDATE);
+        verify(messageQueue, never()).enqueueRaw(
+            eq(BATCH_UPDATE),
+            any(MessageQueue.MessageGuard.class)
+        );
+    }
+
+    @Test
+    void shutdownDrainsCrossedSubmissionBeforeCloseServerStopAndQueueStop() throws Exception {
+        VizWebSocketServer server = spy(newServer(""));
+        server.onOpen(connection, handshake);
+        List<String> shutdownEvents = new CopyOnWriteArrayList<>();
+        AtomicBoolean queueStopped = new AtomicBoolean();
+        CountDownLatch enqueueEntered = new CountDownLatch(1);
+        CountDownLatch releaseEnqueue = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            enqueueEntered.countDown();
+            if (!releaseEnqueue.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release crossed submission");
+            }
+            if (queueStopped.get()) {
+                throw new RejectedExecutionException("queue stopped before submission drained");
+            }
+            return null;
+        }).when(messageQueue).enqueueRaw(
+            eq(BATCH_UPDATE),
+            any(MessageQueue.MessageGuard.class)
+        );
+        doAnswer(invocation -> {
+            shutdownEvents.add("client-close");
+            return null;
+        }).when(connection).close(1001, "Server shutting down");
+        doAnswer(invocation -> {
+            shutdownEvents.add("server-stop");
+            return null;
+        }).when(server).stop(3000);
+        doAnswer(invocation -> {
+            queueStopped.set(true);
+            shutdownEvents.add("queue-stop");
+            return null;
+        }).when(messageQueue).stop();
+
+        CompletableFuture<Void> message = CompletableFuture.runAsync(
+            () -> server.onMessage(connection, BATCH_UPDATE));
+        assertTrue(enqueueEntered.await(5, TimeUnit.SECONDS));
+        AtomicReference<Thread> shutdownThread = new AtomicReference<>();
+        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(() -> {
+            shutdownThread.set(Thread.currentThread());
+            server.shutdown();
+        });
+        awaitBlockedOrComplete(shutdown, shutdownThread);
+
+        assertFalse(shutdown.isDone());
+        assertTrue(shutdownEvents.isEmpty());
+        releaseEnqueue.countDown();
+
+        message.get(5, TimeUnit.SECONDS);
+        shutdown.get(5, TimeUnit.SECONDS);
+        assertEquals(
+            List.of("client-close", "server-stop", "queue-stop"),
+            shutdownEvents
+        );
     }
 
     private VizWebSocketServer newServer(String secret) {
@@ -622,15 +780,45 @@ class VizWebSocketServerAuthTest {
         String secret,
         ConnectionStateListener lifecycleListener
     ) {
+        return newServer(secret, lifecycleListener, messageQueue);
+    }
+
+    private VizWebSocketServer newServer(
+        String secret,
+        ConnectionStateListener lifecycleListener,
+        MessageQueue queue
+    ) {
         return new VizWebSocketServer(
             "127.0.0.1",
             0,
             secret,
             messageHandler,
-            messageQueue,
+            queue,
             serverExecutor,
             lifecycleListener
         );
+    }
+
+    private static final class CapturingMessageQueue extends MessageQueue {
+        private String capturedMessage;
+        private MessageGuard capturedGuard;
+
+        private CapturingMessageQueue(MessageHandler messageHandler) {
+            super(messageHandler);
+        }
+
+        @Override
+        public void enqueueRaw(String rawJson, MessageGuard guard) {
+            capturedMessage = rawJson;
+            capturedGuard = guard;
+        }
+
+        private void releaseCapturedMessage() {
+            if (capturedMessage == null || capturedGuard == null) {
+                throw new AssertionError("No guarded queue message was captured");
+            }
+            enqueue(JsonParser.parseString(capturedMessage).getAsJsonObject(), capturedGuard);
+        }
     }
 
     private static void runTicks(VizWebSocketServer server, int ticks) {
@@ -719,6 +907,20 @@ class VizWebSocketServerAuthTest {
                     exception
                 );
             }
+        }
+    }
+
+    private static final class RecordingLifecycleListener extends ConnectionStateListener {
+        private final List<String> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void onDjConnect(String info) {
+            events.add("connect:" + info);
+        }
+
+        @Override
+        public void onDjDisconnect(String reason) {
+            events.add("disconnect:" + reason);
         }
     }
 

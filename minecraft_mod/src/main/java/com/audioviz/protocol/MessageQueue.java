@@ -1,10 +1,10 @@
 package com.audioviz.protocol;
 
 import com.audioviz.AudioVizMod;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -26,10 +26,22 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class MessageQueue {
 
+    @FunctionalInterface
+    public interface MessageGuard {
+        /** Runs {@code operation} atomically with the guard check when still valid. */
+        boolean runIfValid(Runnable operation);
+    }
+
+    private static final MessageGuard ALLOW_ALL = operation -> {
+        operation.run();
+        return true;
+    };
+    private static final Runnable NO_OP = () -> { };
+
     private final MessageHandler messageHandler;
 
     // Queue for parsed JSON messages
-    private final ConcurrentLinkedQueue<JsonObject> queue = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<QueuedMessage> queue = new ConcurrentLinkedQueue<>();
 
     // Dedicated thread pool for JSON parsing
     private final ExecutorService jsonExecutor;
@@ -42,8 +54,10 @@ public class MessageQueue {
     private static final int MAX_QUEUE_SIZE = 1000;
 
     // Reusable per-tick maps — cleared each tick
-    private final HashMap<String, JsonObject> latestBatchByZone = new HashMap<>(4);
-    private final HashMap<String, JsonObject> latestBitmapFrameByZone = new HashMap<>(4);
+    private final HashMap<String, ArrayDeque<QueuedMessage>> batchCandidatesByZone =
+        new HashMap<>(4);
+    private final HashMap<String, ArrayDeque<QueuedMessage>> bitmapCandidatesByZone =
+        new HashMap<>(4);
 
     public MessageQueue(MessageHandler messageHandler) {
         this.messageHandler = messageHandler;
@@ -59,17 +73,21 @@ public class MessageQueue {
      * Called from WebSocket thread — must be thread-safe and non-blocking.
      */
     public void enqueueRaw(String rawJson) {
+        enqueueRaw(rawJson, ALLOW_ALL);
+    }
+
+    /**
+     * Enqueue raw JSON with a guard that remains attached through parsing and execution.
+     */
+    public void enqueueRaw(String rawJson, MessageGuard guard) {
         jsonExecutor.submit(() -> {
             try {
-                JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
-                if (queue.size() >= MAX_QUEUE_SIZE) {
-                    queue.poll();
-                    long dropped = messagesDropped.incrementAndGet();
-                    if (dropped % 100 == 1) {
-                        AudioVizMod.LOGGER.warn("MessageQueue backpressure: dropped (total: {})", dropped);
-                    }
+                if (!guard.runIfValid(NO_OP)) {
+                    messagesDropped.incrementAndGet();
+                    return;
                 }
-                queue.offer(json);
+                JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
+                offer(new QueuedMessage(json, guard));
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Failed to parse JSON message", e);
             }
@@ -80,11 +98,28 @@ public class MessageQueue {
      * Enqueue an already-parsed JSON object.
      */
     public void enqueue(JsonObject json) {
+        enqueue(json, ALLOW_ALL);
+    }
+
+    /**
+     * Enqueue parsed JSON with a guard checked atomically around handler execution.
+     */
+    public void enqueue(JsonObject json, MessageGuard guard) {
+        offer(new QueuedMessage(json, guard));
+    }
+
+    private void offer(QueuedMessage message) {
         if (queue.size() >= MAX_QUEUE_SIZE) {
             queue.poll();
-            messagesDropped.incrementAndGet();
+            long dropped = messagesDropped.incrementAndGet();
+            if (dropped % 100 == 1) {
+                AudioVizMod.LOGGER.warn(
+                    "MessageQueue backpressure: dropped (total: {})",
+                    dropped
+                );
+            }
         }
-        queue.offer(json);
+        queue.offer(message);
     }
 
     /**
@@ -92,53 +127,84 @@ public class MessageQueue {
      * Called on the server thread from AudioVizMod.tick().
      */
     public void processTick() {
-        latestBatchByZone.clear();
-        latestBitmapFrameByZone.clear();
+        batchCandidatesByZone.clear();
+        bitmapCandidatesByZone.clear();
 
-        // Drain queue, keeping only latest batch_update/bitmap_frame per zone
-        JsonObject msg;
-        while ((msg = queue.poll()) != null) {
+        // Keep fallback candidates so a stale newest message cannot suppress
+        // an older valid update for the same zone.
+        QueuedMessage queuedMessage;
+        while ((queuedMessage = queue.poll()) != null) {
             messagesProcessed.incrementAndGet();
 
+            JsonObject msg = queuedMessage.message();
             String type = msg.has("type") ? msg.get("type").getAsString() : "unknown";
 
             if ("batch_update".equals(type)) {
                 String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                JsonObject replaced = latestBatchByZone.put(zoneName, msg);
-                if (replaced != null) messagesDropped.incrementAndGet();
+                batchCandidatesByZone
+                    .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                    .addLast(queuedMessage);
             } else if ("bitmap_frame".equals(type)) {
                 String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                JsonObject replaced = latestBitmapFrameByZone.put(zoneName, msg);
-                if (replaced != null) messagesDropped.incrementAndGet();
+                bitmapCandidatesByZone
+                    .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                    .addLast(queuedMessage);
             } else {
                 try {
-                    messageHandler.handleMessage(type, msg);
+                    boolean executed = queuedMessage.guard().runIfValid(
+                        () -> messageHandler.handleMessage(type, msg)
+                    );
+                    if (!executed) {
+                        messagesDropped.incrementAndGet();
+                    }
                 } catch (Exception e) {
                     AudioVizMod.LOGGER.warn("Error handling message type: {}", type, e);
                 }
             }
         }
 
-        // Process latest batch_update per zone
-        for (Map.Entry<String, JsonObject> entry : latestBatchByZone.entrySet()) {
-            try {
-                messageHandler.handleMessage("batch_update", entry.getValue());
-                batchesSent.incrementAndGet();
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Error handling batch_update for zone {}", entry.getKey(), e);
-            }
-        }
+        processCoalesced("batch_update", batchCandidatesByZone);
+        processCoalesced("bitmap_frame", bitmapCandidatesByZone);
+    }
 
-        // Process latest bitmap_frame per zone
-        for (JsonObject frame : latestBitmapFrameByZone.values()) {
-            try {
-                messageHandler.handleMessage("bitmap_frame", frame);
-                batchesSent.incrementAndGet();
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Error handling bitmap_frame", e);
+    private void processCoalesced(
+        String type,
+        Map<String, ArrayDeque<QueuedMessage>> candidatesByZone
+    ) {
+        for (Map.Entry<String, ArrayDeque<QueuedMessage>> entry : candidatesByZone.entrySet()) {
+            ArrayDeque<QueuedMessage> candidates = entry.getValue();
+            int candidateCount = candidates.size();
+            boolean selected = false;
+
+            QueuedMessage candidate;
+            while ((candidate = candidates.pollLast()) != null) {
+                QueuedMessage current = candidate;
+                try {
+                    boolean executed = current.guard().runIfValid(
+                        () -> messageHandler.handleMessage(type, current.message())
+                    );
+                    if (executed) {
+                        batchesSent.incrementAndGet();
+                        selected = true;
+                        break;
+                    }
+                } catch (Exception exception) {
+                    AudioVizMod.LOGGER.warn(
+                        "Error handling {} for zone {}",
+                        type,
+                        entry.getKey(),
+                        exception
+                    );
+                    selected = true;
+                    break;
+                }
             }
+
+            messagesDropped.addAndGet(selected ? candidateCount - 1L : candidateCount);
         }
     }
+
+    private record QueuedMessage(JsonObject message, MessageGuard guard) { }
 
     /**
      * Stop the message processor.
