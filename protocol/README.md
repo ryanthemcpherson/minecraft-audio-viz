@@ -24,6 +24,14 @@ Lua pattern source or direct Minecraft connection details to DJ clients. Legacy
 clients may still send or receive the optional `minecraft_host` and
 `minecraft_port` fields, but Phase 0 servers do not use them for direct rendering.
 
+## Minecraft WebSocket authentication
+
+The VJ client and Minecraft renderer use this handshake before renderer traffic:
+`connected(auth_required)` → optional `auth(token)` → `auth_ok`. Bad or missing
+credentials close the connection with code 4001. The five-second authentication
+deadline closes with code 4002. Browser-style handshakes carrying an `Origin`
+header close with code 4003 before the renderer sends `connected`.
+
 ## Layout
 - `protocol/schemas/index.json`: schema inventory
 - `protocol/schemas/types/`: shared reusable types
@@ -39,6 +47,7 @@ clients may still send or receive the optional `minecraft_host` and
 ## Message Coverage
 
 ### Core (Plugin ↔ Processor)
+- `connected` / `ws_auth` / `ws_auth_ok` — Minecraft connection authentication
 - `ping` / `pong` — Liveness heartbeat
 - `error` — Error response for any failed request
 - `get_zones` / `zones` — Zone listing

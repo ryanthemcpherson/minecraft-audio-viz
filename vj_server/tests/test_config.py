@@ -132,3 +132,11 @@ class TestServerConfig:
     def test_http_host_allows_explicit_non_loopback(self, monkeypatch):
         monkeypatch.setenv("HTTP_HOST", "0.0.0.0")
         assert ServerConfig.from_env().http_host == "0.0.0.0"
+
+    def test_minecraft_ws_secret_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("MINECRAFT_WS_SECRET", raising=False)
+        assert ServerConfig.from_env().minecraft_ws_secret is None
+
+    def test_minecraft_ws_secret_loads_from_environment(self, monkeypatch):
+        monkeypatch.setenv("MINECRAFT_WS_SECRET", "shared-secret")
+        assert ServerConfig.from_env().minecraft_ws_secret == "shared-secret"

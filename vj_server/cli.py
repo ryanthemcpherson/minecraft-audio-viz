@@ -79,6 +79,11 @@ Examples:
         help="Minecraft WebSocket port (default: 8765 or $MINECRAFT_PORT)",
     )
     parser.add_argument(
+        "--minecraft-ws-secret",
+        default=os.environ.get("MINECRAFT_WS_SECRET"),
+        help="Shared secret for the Minecraft WebSocket",
+    )
+    parser.add_argument(
         "--broadcast-port",
         type=validate_port,
         default=8766,
@@ -219,6 +224,7 @@ Examples:
         dj_port=args.port,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
+        minecraft_ws_secret=args.minecraft_ws_secret,
         broadcast_port=args.broadcast_port,
         http_host=args.http_host,
         entity_count=args.entities,

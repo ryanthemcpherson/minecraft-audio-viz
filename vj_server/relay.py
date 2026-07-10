@@ -1550,7 +1550,12 @@ class RelayMixin:
             self.viz_client = None
 
         logger.info(f"Connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}...")
-        self.viz_client = VizClient(self.minecraft_host, self.minecraft_port, enable_heartbeat=True)
+        self.viz_client = VizClient(
+            self.minecraft_host,
+            self.minecraft_port,
+            enable_heartbeat=True,
+            auth_token=self.minecraft_ws_secret,
+        )
         self.viz_client.on("stage_zone_configs", self._handle_stage_zone_configs)
         self.viz_client.on("bitmap_frame", self._relay_bitmap_frame)
 

@@ -94,6 +94,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         http_host: str = "127.0.0.1",
         minecraft_host: str = "localhost",
         minecraft_port: int = 8765,
+        minecraft_ws_secret: str | None = None,
         zone: str = "main",
         entity_count: int = 16,
         auth_config: Optional[DJAuthConfig] = None,
@@ -110,6 +111,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self.http_host = http_host
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
+        self.minecraft_ws_secret = minecraft_ws_secret
         self.zone = zone
         self.entity_count = entity_count
         self.auth_config = auth_config or DJAuthConfig()
@@ -1237,6 +1239,11 @@ async def main():
     parser.add_argument(
         "--port", type=_validate_port, default=8765, help="Minecraft WebSocket port"
     )
+    parser.add_argument(
+        "--minecraft-ws-secret",
+        default=os.environ.get("MINECRAFT_WS_SECRET"),
+        help="Shared secret for the Minecraft WebSocket",
+    )
     parser.add_argument("--zone", type=str, default="main", help="Visualization zone")
     parser.add_argument("--entities", type=_validate_positive_int, default=16, help="Entity count")
     parser.add_argument(
@@ -1280,6 +1287,7 @@ async def main():
         http_host=args.http_host,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.port,
+        minecraft_ws_secret=args.minecraft_ws_secret,
         zone=args.zone,
         entity_count=args.entities,
         auth_config=auth_config,

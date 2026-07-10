@@ -17,6 +17,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class _SecretRedactingLogger(logging.LoggerAdapter):
+    """Prevent WebSocket frame diagnostics from exposing an auth token."""
+
+    def __init__(self, wrapped_logger: logging.Logger, secret: str | None) -> None:
+        super().__init__(wrapped_logger, {})
+        self._secret = secret
+
+    def _redact(self, value: Any) -> Any:
+        if self._secret is None:
+            return value
+        if isinstance(value, str):
+            return value.replace(self._secret, "[REDACTED]")
+        if isinstance(value, bytes):
+            return value.replace(self._secret.encode(), b"[REDACTED]")
+        rendered = str(value)
+        if self._secret in rendered:
+            return rendered.replace(self._secret, "[REDACTED]")
+        return value
+
+    def log(self, level: int, msg: object, *args: Any, **kwargs: Any) -> None:
+        if not self.isEnabledFor(level):
+            return
+        if self._secret is not None and kwargs.get("exc_info"):
+            kwargs["exc_info"] = None
+        self.logger.log(
+            level,
+            self._redact(msg),
+            *(self._redact(arg) for arg in args),
+            **kwargs,
+        )
+
+
 class VizClient:
     """WebSocket client for AudioViz Minecraft plugin."""
 
@@ -28,6 +60,7 @@ class VizClient:
         auto_reconnect: bool = False,
         max_reconnect_attempts: int = 10,
         enable_heartbeat: bool = False,  # Enable background heartbeat (requires receive loop)
+        auth_token: str | None = None,
     ):
         self.host = host
         self.port = port
@@ -43,6 +76,7 @@ class VizClient:
         self.auto_reconnect = auto_reconnect
         self.max_reconnect_attempts = max_reconnect_attempts
         self._reconnect_attempts = 0
+        self.auth_token = auth_token.strip() if auth_token and auth_token.strip() else None
 
         # Heartbeat settings
         self._enable_heartbeat = enable_heartbeat
@@ -96,8 +130,47 @@ class VizClient:
             )
             self._last_fire_and_forget_log = now
 
+    async def _next_handshake_message(self) -> dict[str, Any]:
+        """Read one handshake message without introducing a second recv consumer."""
+        if self._use_receive_loop:
+            return await asyncio.wait_for(
+                self._unmatched_responses.get(), timeout=self.connect_timeout
+            )
+        if self.ws is None:
+            raise RuntimeError("WebSocket transport is not connected")
+        raw = await asyncio.wait_for(self.ws.recv(), timeout=self.connect_timeout)
+        return mjson.decode(raw)
+
+    async def _close_failed_connection(self) -> None:
+        """Fail closed and release all transport state after a handshake error."""
+        self._connected = False
+        heartbeat_task = self._heartbeat_task
+        receive_task = self._receive_task
+        self.stop_heartbeat()
+        self._stop_receive_loop()
+        self._cancel_pending_futures("handshake failed")
+        self.server_type = None
+
+        tasks = [
+            task
+            for task in (heartbeat_task, receive_task)
+            if task is not None and task is not asyncio.current_task()
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        websocket = self.ws
+        self.ws = None
+        if websocket is not None:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
     async def connect(self) -> bool:
-        """Connect to the AudioViz WebSocket server."""
+        """Connect and complete the Minecraft WebSocket authentication handshake."""
+        self._connected = False
+        self.server_type = None
         try:
             # Use open_timeout instead of asyncio.wait_for — the latter wraps
             # the awaitable in a Task which breaks websockets 14+'s internal
@@ -106,63 +179,86 @@ class VizClient:
                 self.uri,
                 open_timeout=self.connect_timeout,
                 max_size=10 * 1024 * 1024,  # 10MB — stage block scans can be large
+                logger=_SecretRedactingLogger(
+                    logging.getLogger("websockets.client"), self.auth_token
+                ),
             )
-            self._connected = True
-
-            # Reset reconnection counter on successful connection
-            self._reconnect_attempts = 0
-            # Track successful liveness baseline even before heartbeat starts.
             self._last_pong = time.time()
 
-            # Start background tasks BEFORE reading welcome message.
-            # In websockets 14+, only one recv() coroutine can run at a time.
-            # If we call recv() here and then start the receive loop, the
-            # receive loop's recv() fails with "already running". Instead,
-            # let the receive loop be the sole recv() consumer.
+            # The receive loop is the sole recv() consumer when enabled. It
+            # may start before authentication, but heartbeat traffic waits
+            # until the handshake completes.
             if self._enable_heartbeat:
                 self._use_receive_loop = True
                 self._receive_task = asyncio.create_task(self._receive_loop())
+
+            welcome = await self._next_handshake_message()
+            if welcome.get("type") != "connected":
+                logger.error("Minecraft WebSocket returned an invalid initial handshake")
+                await self._close_failed_connection()
+                return False
+
+            auth_required = welcome.get("auth_required")
+            if not isinstance(auth_required, bool):
+                logger.error("Minecraft WebSocket returned an invalid authentication requirement")
+                await self._close_failed_connection()
+                return False
+
+            self.server_type = welcome.get("server_type")
+            if auth_required:
+                if self.auth_token is None:
+                    logger.error(
+                        "Minecraft WebSocket authentication is required but no secret is configured"
+                    )
+                    await self._close_failed_connection()
+                    return False
+
+                if self.ws is None:
+                    await self._close_failed_connection()
+                    return False
+                await self.ws.send(self._encode({"type": "auth", "token": self.auth_token}))
+                auth_response = await self._next_handshake_message()
+                if auth_response.get("type") != "auth_ok":
+                    logger.error("Minecraft WebSocket authentication was rejected")
+                    await self._close_failed_connection()
+                    return False
+
+            # Renderer requests and liveness traffic are gated on a completed
+            # handshake, including the unauthenticated loopback case.
+            self._connected = True
+            self._reconnect_attempts = 0
+            if self._enable_heartbeat:
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-                # Read welcome message from unmatched queue (has no seq)
-                try:
-                    welcome = await asyncio.wait_for(
-                        self._unmatched_responses.get(), timeout=self.connect_timeout
-                    )
-                    self.server_type = welcome.get("server_type")
-                    logger.info(
-                        f"Connected to AudioViz: {welcome.get('message', 'OK')} (server_type={self.server_type})"
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("No welcome message received, but connection is up")
-            else:
-                # Without heartbeat, read welcome directly (no receive loop conflict)
-                response = await self.ws.recv()
-                data = mjson.decode(response)
-                self.server_type = data.get("server_type")
-                logger.info(
-                    f"Connected to AudioViz: {data.get('message', 'OK')} (server_type={self.server_type})"
-                )
+            logger.info("Connected to AudioViz (server_type=%s)", self.server_type)
 
             return True
 
         except asyncio.TimeoutError:
-            logger.error(f"Connection timed out to {self.uri}")
+            logger.error("Minecraft WebSocket handshake timed out to %s", self.uri)
+            await self._close_failed_connection()
             return False
 
-        except Exception as e:
-            logger.error(f"Failed to connect: {e}")
+        except asyncio.CancelledError:
+            await self._close_failed_connection()
+            raise
+
+        except Exception:
+            # Handshake errors can contain a peer-provided close reason. Do
+            # not include it because a rejecting peer may echo credentials.
+            logger.error("Minecraft WebSocket connection or authentication failed")
+            await self._close_failed_connection()
             return False
 
     async def disconnect(self):
         """Disconnect from the server."""
+        self._connected = False
         # Stop background tasks
         self.stop_heartbeat()
         self._stop_receive_loop()
 
         if self.ws:
             await self.ws.close()
-            self._connected = False
             logger.info("Disconnected from AudioViz")
 
     async def _heartbeat_loop(self):
@@ -197,11 +293,18 @@ class VizClient:
     async def _receive_loop(self):
         """Background task that receives and routes incoming messages."""
         try:
-            while self._connected and self.ws:
+            while self.ws:
                 try:
                     message = await self.ws.recv()
                     data = mjson.decode(message)
                     msg_type = data.get("type")
+
+                    # Before connect() completes, every message belongs to the
+                    # handshake. Do not hide pings, dispatch handlers, or emit
+                    # renderer/liveness traffic before authentication succeeds.
+                    if not self._connected:
+                        self._queue_unmatched_response(data)
+                        continue
 
                     # Handle ping messages - respond with pong
                     if msg_type == "ping":
@@ -233,14 +336,7 @@ class VizClient:
 
                     # No matching seq — queue as unmatched (welcome, unsolicited messages)
                     if msg_type not in self._message_handlers:
-                        try:
-                            self._unmatched_responses.put_nowait(data)
-                        except asyncio.QueueFull:
-                            try:
-                                self._unmatched_responses.get_nowait()
-                            except asyncio.QueueEmpty:
-                                pass
-                            self._unmatched_responses.put_nowait(data)
+                        self._queue_unmatched_response(data)
 
                     # Route to registered handlers
                     if msg_type in self._message_handlers:
@@ -254,25 +350,41 @@ class VizClient:
                             logger.error(f"Handler error for {msg_type}: {e}")
 
                 except websockets.exceptions.ConnectionClosed:
+                    was_connected = self._connected
                     logger.warning("Connection closed by server")
                     self._connected = False
                     self._cancel_pending_futures("connection closed")
-                    if self.auto_reconnect:
+                    if was_connected and self.auto_reconnect:
                         asyncio.create_task(self.reconnect())
                     break
                 except msgspec.DecodeError:
                     logger.warning("Received invalid JSON message")
-                except Exception as e:
-                    if self._connected:
-                        logger.error(f"Receive loop error: {e}")
-                        # If we get recv conflicts, connection is broken - trigger reconnect
-                        if "recv" in str(e) and "already running" in str(e):
-                            self._connected = False
-                            if self.auto_reconnect:
-                                asyncio.create_task(self.reconnect())
-                            break
+                    if not self._connected:
+                        self._queue_unmatched_response({})
+                        break
+                except Exception:
+                    # Peer-controlled close reasons can contain credentials.
+                    # Keep the failure generic and fail the transport closed.
+                    was_connected = self._connected
+                    logger.error("Minecraft WebSocket receive loop failed")
+                    self._connected = False
+                    self._cancel_pending_futures("receive loop failed")
+                    if was_connected and self.auto_reconnect:
+                        asyncio.create_task(self.reconnect())
+                    break
         except asyncio.CancelledError:
             pass  # Task cancelled during shutdown
+
+    def _queue_unmatched_response(self, data: dict[str, Any]) -> None:
+        """Queue an unsolicited or handshake response without blocking recv()."""
+        try:
+            self._unmatched_responses.put_nowait(data)
+        except asyncio.QueueFull:
+            try:
+                self._unmatched_responses.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            self._unmatched_responses.put_nowait(data)
 
     def _cancel_pending_futures(self, reason: str):
         """Cancel all pending request futures (e.g. on disconnect)."""
@@ -303,13 +415,13 @@ class VizClient:
         """Stop the heartbeat task."""
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
-            self._heartbeat_task = None
+        self._heartbeat_task = None
 
     def _stop_receive_loop(self):
         """Stop the receive loop task."""
         if self._receive_task and not self._receive_task.done():
             self._receive_task.cancel()
-            self._receive_task = None
+        self._receive_task = None
         self._use_receive_loop = False
         # Clear unmatched responses queue
         while not self._unmatched_responses.empty():
@@ -325,6 +437,7 @@ class VizClient:
             True if reconnection succeeded, False if all attempts exhausted.
         """
         # Stop existing tasks first
+        self._connected = False
         self.stop_heartbeat()
         self._stop_receive_loop()
 
