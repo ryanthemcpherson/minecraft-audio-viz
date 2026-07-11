@@ -1,13 +1,14 @@
 """Tests for the pattern engine and registry."""
 
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+import vj_server.patterns as patterns_module
 from vj_server.patterns import (
+    LUA_MEMORY_LIMIT_BYTES,
     AudioState,
     LuaPattern,
     PatternConfig,
@@ -282,24 +283,14 @@ class TestLuaTimeout:
         # Verify internal counter is 0 (no timeouts)
         assert pat._consecutive_timeouts == 0
 
-    @pytest.mark.parametrize("runtime_module", ("lupa", "lupa.luajit21"))
-    def test_true_infinite_loop_is_interrupted_in_subprocess(self, runtime_module: str):
-        """Both supported runtimes must interrupt a true infinite loop."""
-        if importlib.util.find_spec(runtime_module) is None:
-            pytest.skip(f"{runtime_module} not installed")
-
+    def test_true_infinite_loop_is_interrupted_in_subprocess(self):
+        """The supported memory-limited runtime must interrupt a true infinite loop."""
         probe = """
-import importlib
-import sys
-
-import vj_server.patterns as patterns
 from vj_server.patterns import AudioState, LuaPattern, PatternConfig
 
-runtime_module = importlib.import_module(sys.argv[1])
-patterns._resolved_lua_runtime = runtime_module.LuaRuntime
-patterns._resolved_lua_runtime_name = sys.argv[1]
-
 pattern = LuaPattern("spectrum", PatternConfig(entity_count=1))
+if pattern._lua is None:
+    raise SystemExit("memory-limited Lua runtime unavailable")
 pattern._lua.execute("function calculate(audio, config, dt) while true do end end")
 pattern._calculate = pattern._lua.globals()["calculate"]
 pattern._flat_mode = None
@@ -317,7 +308,7 @@ if pattern.calculate_entities(audio) != []:
 """
         try:
             completed = subprocess.run(
-                [sys.executable, "-c", probe, runtime_module],
+                [sys.executable, "-c", probe],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -325,9 +316,45 @@ if pattern.calculate_entities(audio) != []:
                 cwd=Path(__file__).resolve().parents[2],
             )
         except subprocess.TimeoutExpired:
-            pytest.fail(f"{runtime_module} did not interrupt the infinite loop")
+            pytest.fail("Lua runtime did not interrupt the infinite loop")
 
         assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    def test_runtime_enforces_memory_limit(self):
+        pat = LuaPattern("spectrum", PatternConfig(entity_count=0))
+        if pat._lua is None:
+            pytest.skip("memory-limited lupa runtime not installed")
+
+        assert pat._lua.get_max_memory() == LUA_MEMORY_LIMIT_BYTES
+
+    def test_cumulative_allocation_disables_and_releases_runtime(self, monkeypatch):
+        """Sub-budget frame allocations cannot grow the process without bound."""
+        monkeypatch.setattr(patterns_module, "LUA_MEMORY_LIMIT_BYTES", 2 * 1024 * 1024)
+        pat = LuaPattern("spectrum", PatternConfig(entity_count=0))
+        if pat._lua is None:
+            pytest.skip("memory-limited lupa runtime not installed")
+
+        pat._lua.execute("""
+            retained_chunks = {}
+            function calculate(audio, config, dt)
+                local chunk = {}
+                for i = 1, 20000 do
+                    chunk[i] = i
+                end
+                retained_chunks[#retained_chunks + 1] = chunk
+                return {}
+            end
+        """)
+        pat._calculate = pat._lua.globals()["calculate"]
+        pat._flat_mode = None
+
+        for _ in range(20):
+            pat.calculate_entities(self._make_audio())
+            if pat._calculate is None:
+                break
+
+        assert pat._calculate is None
+        assert pat._lua is None
 
     def test_success_between_timeouts_resets_counter(self):
         """A successful call between timeouts should reset the counter,

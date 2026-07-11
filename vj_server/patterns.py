@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # in a single calculate() call, a Lua error is raised.
 LUA_HOOK_INTERVAL = 1000
 LUA_INSTRUCTION_LIMIT = 1_000_000
+LUA_MEMORY_LIMIT_BYTES = 16 * 1024 * 1024
 MAX_CONSECUTIVE_TIMEOUTS = 3
 
 
@@ -92,10 +93,10 @@ class VisualizationPattern(ABC):
 # Lua Pattern Runner
 # ============================================================================
 
-# Cached LuaRuntime class — resolved once on first use to avoid repeated
-# import probing (4 try/except blocks) on every pattern creation.
+# Cached memory-limited PUC Lua runtime and exception type.
 _resolved_lua_runtime = None
 _resolved_lua_runtime_name = None
+_resolved_lua_memory_error = None
 
 
 def _deny_python_attribute_access(
@@ -106,46 +107,27 @@ def _deny_python_attribute_access(
 
 
 def _resolve_lua_runtime():
-    """Resolve the best available LuaRuntime class once and cache it."""
-    global _resolved_lua_runtime, _resolved_lua_runtime_name
+    """Resolve the memory-limit-capable PUC Lua runtime once and cache it."""
+    global _resolved_lua_memory_error, _resolved_lua_runtime, _resolved_lua_runtime_name
     if _resolved_lua_runtime is not None:
         return _resolved_lua_runtime
 
-    # Prefer PUC Lua runtime on Windows/Python 3.13 for stability.
-    if sys.platform == "win32" and sys.version_info >= (3, 13):
-        try:
-            from lupa import LuaRuntime as _LuaRuntime
-
-            _resolved_lua_runtime = _LuaRuntime
-            _resolved_lua_runtime_name = "default Lua runtime (PUC Lua)"
-            logger.info("Resolved %s", _resolved_lua_runtime_name)
-            return _resolved_lua_runtime
-        except ImportError:
-            pass
-
     try:
-        from lupa.luajit21 import LuaRuntime as _LuaRuntime
-
-        _resolved_lua_runtime = _LuaRuntime
-        _resolved_lua_runtime_name = "LuaJIT 2.1 runtime"
+        from lupa import LuaMemoryError as _LuaMemoryError
+        from lupa import LuaRuntime as _LuaRuntime
     except ImportError:
-        try:
-            from lupa.luajit20 import LuaRuntime as _LuaRuntime
+        logger.warning("lupa not installed, Lua patterns unavailable")
+        return None
 
-            _resolved_lua_runtime = _LuaRuntime
-            _resolved_lua_runtime_name = "LuaJIT 2.0 runtime"
-        except ImportError:
-            try:
-                from lupa import LuaRuntime as _LuaRuntime
-
-                _resolved_lua_runtime = _LuaRuntime
-                _resolved_lua_runtime_name = "default Lua runtime (PUC Lua)"
-            except ImportError:
-                logger.warning("lupa not installed, Lua patterns unavailable")
-                return None
-
+    _resolved_lua_runtime = _LuaRuntime
+    _resolved_lua_memory_error = _LuaMemoryError
+    _resolved_lua_runtime_name = "memory-limited PUC Lua runtime"
     logger.info("Resolved %s", _resolved_lua_runtime_name)
     return _resolved_lua_runtime
+
+
+def _is_lua_memory_error(error: Exception) -> bool:
+    return _resolved_lua_memory_error is not None and isinstance(error, _resolved_lua_memory_error)
 
 
 class LuaPattern(VisualizationPattern):
@@ -166,7 +148,17 @@ class LuaPattern(VisualizationPattern):
         self._consecutive_timeouts = 0
         self._entity_state = {}
         self._position_deadband = 0.0015
-        self._load_lua(pattern_key)
+        try:
+            self._load_lua(pattern_key)
+        except Exception as error:
+            if not _is_lua_memory_error(error):
+                raise
+            logger.error(
+                "Lua pattern auto-disabled (%s): exceeded %d-byte memory limit during load",
+                self._pattern_key,
+                LUA_MEMORY_LIMIT_BYTES,
+            )
+            self._disable_lua_runtime()
 
     def seed_entity_state(self, state: dict):
         """Seed entity positions from another pattern's state for smooth transitions."""
@@ -177,17 +169,23 @@ class LuaPattern(VisualizationPattern):
         if LuaRuntime is None:
             return
 
-        self._lua = LuaRuntime(
-            unpack_returned_tuples=True,
-            register_eval=False,
-            register_builtins=False,
-            attribute_filter=_deny_python_attribute_access,
-        )
+        try:
+            self._lua = LuaRuntime(
+                unpack_returned_tuples=True,
+                register_eval=False,
+                register_builtins=False,
+                attribute_filter=_deny_python_attribute_access,
+                max_memory=LUA_MEMORY_LIMIT_BYTES,
+            )
+        except (RuntimeError, TypeError):
+            logger.error(
+                "Lua patterns disabled: the installed runtime cannot enforce a memory limit"
+            )
+            self._lua = None
+            return
 
         # Install instruction-count hook BEFORE sandbox removes debug.
         # This prevents infinite-loop patterns from blocking the event loop.
-        # LuaJIT can compile hot loops without delivering count hooks, so turn
-        # it off before installing the hook and hide its control API below.
         # Uses do-end block so count/limit are upvalues, not globals —
         # patterns cannot tamper with them even before debug is removed.
         self._reset_hook = self._lua.execute(f"""
@@ -626,6 +624,14 @@ class LuaPattern(VisualizationPattern):
             self._consecutive_timeouts = 0
             return entities
         except Exception as e:
+            if _is_lua_memory_error(e):
+                logger.error(
+                    "Lua pattern auto-disabled (%s): exceeded %d-byte memory limit",
+                    self._pattern_key,
+                    LUA_MEMORY_LIMIT_BYTES,
+                )
+                self._disable_lua_runtime()
+                return []
             is_timeout = "instruction limit" in str(e)
             if is_timeout:
                 self._consecutive_timeouts += 1
@@ -645,6 +651,17 @@ class LuaPattern(VisualizationPattern):
             else:
                 logger.error("Lua pattern error (%s): %s", self._pattern_key, e)
             return []
+
+    def _disable_lua_runtime(self) -> None:
+        """Release a failed runtime and every proxy that can keep it alive."""
+        self._calculate = None
+        self._calculate_orig = None
+        self._reset_hook = None
+        self._audio_table = None
+        self._bands_table = None
+        self._config_table = None
+        self._flat_mode = None
+        self._lua = None
 
 
 # ============================================================================
