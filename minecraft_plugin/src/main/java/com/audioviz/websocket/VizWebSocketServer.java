@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -39,9 +40,14 @@ public class VizWebSocketServer extends WebSocketServer {
     private final WebSocketSecurityPolicy securityPolicy;
     private final Consumer<Runnable> authTimeoutScheduler;
     private final Object connectionLifecycleLock;
+    private final Object messageIntakeLock;
+    // Guarded by connectionLifecycleLock. Tracks clients whose connect callback
+    // completed and whose matching disconnect callback is still outstanding.
+    private int lifecycleActiveClients;
 
     // Enable async processing for high-frequency messages
-    private boolean asyncEnabled = true;
+    private volatile boolean asyncEnabled = true;
+    private volatile boolean acceptingMessages = true;
 
     // Heartbeat task for connection health monitoring
     private BukkitTask heartbeatTask;
@@ -96,6 +102,8 @@ public class VizWebSocketServer extends WebSocketServer {
         this.clients = new ConcurrentHashMap<>();
         this.lastPongTime = new ConcurrentHashMap<>();
         this.connectionLifecycleLock = new Object();
+        this.messageIntakeLock = new Object();
+        this.lifecycleActiveClients = 0;
 
         // Allow rebinding the port immediately after a server restart
         // (prevents "Address already in use" from zombie/lingering sockets)
@@ -115,69 +123,130 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        ClientInfo info = new ClientInfo(conn.getRemoteSocketAddress().toString());
-        clients.put(conn, info);
-
-        // Send welcome message
-        JsonObject welcome = new JsonObject();
-        welcome.addProperty("type", "connected");
-        welcome.addProperty("message", "Connected to AudioViz server");
-        welcome.addProperty("version", plugin.getDescription().getVersion());
-        welcome.addProperty("server_type", "paper");
-        welcome.addProperty("auth_required", securityPolicy.requiresAuthentication());
-        conn.send(gson.toJson(welcome));
-        totalMessagesSent.incrementAndGet();
-
-        if (securityPolicy.requiresAuthentication()) {
-            authTimeoutScheduler.accept(() -> {
-                ClientInfo pendingClient = clients.get(conn);
-                if (pendingClient != null && pendingClient.closeIfInactive()) {
-                    plugin.getLogger().warning("Authentication timeout for " + pendingClient.address);
-                    conn.close(4002, "Authentication timeout");
-                }
-            });
+        ClientInfo info;
+        synchronized (messageIntakeLock) {
+            if (!acceptingMessages) {
+                info = null;
+            } else {
+                info = new ClientInfo(conn.getRemoteSocketAddress().toString());
+                // Acquire the opening generation lease before publishing the
+                // client. Shutdown drains the intake gate before snapshotting,
+                // so every accepted onOpen is represented by an in-flight lease.
+                info.beginOperationIfOpen();
+                clients.put(conn, info);
+            }
+        }
+        if (info == null) {
+            conn.close(1001, "Server shutting down");
             return;
         }
 
-        if (beginAuthentication(conn, info)) {
-            admitClient(conn, info);
+        try {
+            // Send welcome message
+            JsonObject welcome = new JsonObject();
+            welcome.addProperty("type", "connected");
+            welcome.addProperty("message", "Connected to AudioViz server");
+            welcome.addProperty("version", plugin.getDescription().getVersion());
+            welcome.addProperty("server_type", "paper");
+            welcome.addProperty("auth_required", securityPolicy.requiresAuthentication());
+            conn.send(gson.toJson(welcome));
+            totalMessagesSent.incrementAndGet();
+
+            if (securityPolicy.requiresAuthentication()) {
+                authTimeoutScheduler.accept(() -> {
+                    ClientInfo pendingClient = clients.get(conn);
+                    if (pendingClient != null && closeInactiveClient(conn, pendingClient)) {
+                        plugin.getLogger().warning(
+                            "Authentication timeout for " + pendingClient.address);
+                        conn.close(4002, "Authentication timeout");
+                    }
+                });
+                return;
+            }
+
+            if (beginAuthentication(conn, info)) {
+                try {
+                    admitClient(conn, info);
+                } finally {
+                    info.endOperation();
+                }
+            }
+        } finally {
+            info.endOperation();
         }
     }
 
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-        // Lock order is always lifecycle -> client. Listener callbacks run only
-        // under the reentrant lifecycle monitor and never while holding a client lock.
-        synchronized (connectionLifecycleLock) {
-            ClientInfo info = clients.get(conn);
-            if (info == null) {
-                lastPongTime.remove(conn);
+        ClientInfo info = clients.get(conn);
+        if (info == null) {
+            lastPongTime.remove(conn);
+            return;
+        }
+
+        ClientCloseResult closeResult;
+        synchronized (info) {
+            if (clients.get(conn) != info) {
                 return;
             }
 
-            synchronized (info) {
-                if (!clients.remove(conn, info)) {
-                    return;
+            if (info.isAdmitting()) {
+                // Admission callbacks are serialized by the lifecycle lock. Keep
+                // client -> lifecycle lock order so a completed connect callback
+                // is always paired with this close.
+                synchronized (connectionLifecycleLock) {
+                    closeResult = info.closeAndAwaitDrained();
+                    finishClientClose(conn, info, closeResult, code, reason);
                 }
-                lastPongTime.remove(conn);
-
-                if (!info.closeAndWasActive()) {
-                    return;
-                }
+                return;
             }
 
-            totalDisconnections.incrementAndGet();
+            // Mark this generation closing before waiting. Object.wait releases
+            // the client monitor, and no global lock is held while work drains.
+            closeResult = info.closeAndAwaitDrained();
+        }
 
-            long connectionDuration = System.currentTimeMillis() - info.connectedAt;
-            String durationStr = formatDuration(connectionDuration);
+        synchronized (connectionLifecycleLock) {
+            finishClientClose(conn, info, closeResult, code, reason);
+        }
+    }
 
-            plugin.getLogger().info("Client " + info.address + " disconnected: code=" + code +
-                ", reason=" + (reason != null && !reason.isEmpty() ? reason : "none") +
-                ", duration=" + durationStr);
+    private void finishClientClose(
+        WebSocket conn,
+        ClientInfo info,
+        ClientCloseResult closeResult,
+        int code,
+        String reason
+    ) {
+        if (closeResult == null || !clients.remove(conn, info)) {
+            return;
+        }
+        lastPongTime.remove(conn);
+        if (!closeResult.wasActive()) {
+            return;
+        }
 
-            var disconnectListener = plugin.getConnectionStateListener();
-            if (disconnectListener != null && activeClientCount() == 0) {
-                disconnectListener.onDjDisconnect(reason != null ? reason : "connection closed");
+        totalDisconnections.incrementAndGet();
+        lifecycleActiveClients = Math.max(0, lifecycleActiveClients - 1);
+
+        long connectionDuration = System.currentTimeMillis() - info.connectedAt;
+        String durationStr = formatDuration(connectionDuration);
+        plugin.getLogger().info("Client " + info.address + " disconnected: code=" + code +
+            ", reason=" + (reason != null && !reason.isEmpty() ? reason : "none") +
+            ", duration=" + durationStr);
+
+        var disconnectListener = plugin.getConnectionStateListener();
+        if (disconnectListener != null && lifecycleActiveClients == 0) {
+            try {
+                disconnectListener.onDjDisconnect(
+                    reason != null ? reason : "connection closed"
+                );
+            } catch (RuntimeException exception) {
+                plugin.getLogger().log(
+                    Level.WARNING,
+                    "Connection listener failed during WebSocket close",
+                    exception
+                );
             }
         }
     }
@@ -187,15 +256,21 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onMessage(WebSocket conn, String message) {
+        if (!acceptingMessages) {
+            return;
+        }
+
         totalMessagesReceived.incrementAndGet();
 
         ClientInfo clientInfo = clients.get(conn);
+        if (clientInfo != null && clientInfo.rejectsMessagesWithoutClosing()) {
+            return;
+        }
         if (message.length() > MAX_MESSAGE_SIZE) {
             if (clientInfo == null || !clientInfo.isActive()) {
-                if (clientInfo != null) {
-                    clientInfo.closeIfInactive();
+                if (clientInfo == null || closeInactiveClient(conn, clientInfo)) {
+                    conn.close(4001, "Authentication failed");
                 }
-                conn.close(4001, "Authentication failed");
             } else {
                 plugin.getLogger().warning("Oversized message rejected: " + message.length() +
                     " chars from " + conn.getRemoteSocketAddress());
@@ -207,10 +282,9 @@ public class VizWebSocketServer extends WebSocketServer {
             if (clientInfo != null && clientInfo.isPending() && authenticate(conn, clientInfo, message)) {
                 return;
             }
-            if (clientInfo != null) {
-                clientInfo.closeIfInactive();
+            if (clientInfo == null || closeInactiveClient(conn, clientInfo)) {
+                conn.close(4001, "Authentication failed");
             }
-            conn.close(4001, "Authentication failed");
             return;
         }
 
@@ -218,15 +292,20 @@ public class VizWebSocketServer extends WebSocketServer {
         // crafted messages with "pong" buried in payload data)
         String prefix = message.substring(0, Math.min(64, message.length()));
         if (prefix.contains("\"type\":\"pong\"") || prefix.contains("\"type\": \"pong\"")) {
-            lastPongTime.replace(conn, System.currentTimeMillis());
+            updatePongForActiveClient(conn, clientInfo);
             return;
         }
 
         // High-frequency messages (batch_update, audio) go through async queue
         // Other messages are processed synchronously for immediate response
         if (asyncEnabled && isHighFrequencyMessage(message)) {
-            // Async processing - non-blocking
-            messageQueue.enqueueRaw(message);
+            try {
+                enqueueForActiveClient(conn, clientInfo, message);
+            } catch (RejectedExecutionException exception) {
+                if (acceptingMessages) {
+                    throw exception;
+                }
+            }
         } else {
             // Synchronous processing for commands that need immediate response
             try {
@@ -241,20 +320,11 @@ public class VizWebSocketServer extends WebSocketServer {
                 if ("get_ws_metrics".equals(type)) {
                     JsonObject response = getMetrics();
                     if (seq >= 0) response.addProperty("_seq", seq);
-                    conn.send(gson.toJson(response));
-                    totalMessagesSent.incrementAndGet();
+                    sendToActiveClient(conn, clientInfo, gson.toJson(response));
                     return;
                 }
 
-                // Process message
-                JsonObject response = messageHandler.handleMessage(type, json);
-
-                // Send response if any
-                if (response != null) {
-                    if (seq >= 0) response.addProperty("_seq", seq);
-                    conn.send(gson.toJson(response));
-                    totalMessagesSent.incrementAndGet();
-                }
+                handleForActiveClient(conn, clientInfo, type, json, seq);
 
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Error processing WebSocket message", e);
@@ -263,8 +333,7 @@ public class VizWebSocketServer extends WebSocketServer {
                 JsonObject error = new JsonObject();
                 error.addProperty("type", "error");
                 error.addProperty("message", e.getMessage());
-                conn.send(gson.toJson(error));
-                totalMessagesSent.incrementAndGet();
+                sendToActiveClient(conn, clientInfo, gson.toJson(error));
             }
         }
     }
@@ -294,41 +363,159 @@ public class VizWebSocketServer extends WebSocketServer {
             conn.send("{\"type\":\"auth_ok\"}");
             totalMessagesSent.incrementAndGet();
         } catch (RuntimeException exception) {
+            // A close helper must never wait on the operation lease owned by
+            // this thread. Release it before discarding the failed generation.
+            info.endOperation();
             discardUnauthenticatedClient(conn, info);
             throw exception;
         }
 
-        admitClient(conn, info);
-        return true;
+        try {
+            admitClient(conn, info);
+            return true;
+        } finally {
+            info.endOperation();
+        }
     }
 
     private boolean beginAuthentication(WebSocket conn, ClientInfo info) {
         synchronized (info) {
-            return clients.get(conn) == info && info.beginAuthentication();
+            return acceptingMessages
+                && clients.get(conn) == info
+                && info.beginAuthenticationOperation();
         }
     }
 
     private boolean admitClient(WebSocket conn, ClientInfo info) {
-        synchronized (connectionLifecycleLock) {
-            synchronized (info) {
-                if (clients.get(conn) != info || !info.activateIfAuthenticating()) {
-                    return false;
-                }
+        synchronized (info) {
+            if (!acceptingMessages || clients.get(conn) != info
+                    || !info.beginAdmission()) {
+                return false;
+            }
+        }
 
-                lastPongTime.put(conn, System.currentTimeMillis());
-                totalConnections.incrementAndGet();
+        synchronized (connectionLifecycleLock) {
+            if (!acceptingMessages || clients.get(conn) != info || !info.isAdmitting()) {
+                return false;
             }
 
             notifyClientConnected(info);
+
+            if (!acceptingMessages || clients.get(conn) != info
+                    || !info.activateIfAdmitting()) {
+                return false;
+            }
+            lastPongTime.put(conn, System.currentTimeMillis());
+            totalConnections.incrementAndGet();
+            lifecycleActiveClients++;
             return true;
         }
     }
 
     private void discardUnauthenticatedClient(WebSocket conn, ClientInfo info) {
-        synchronized (info) {
-            clients.remove(conn, info);
+        if (info.closeInactiveAndAwaitDrained() && clients.remove(conn, info)) {
             lastPongTime.remove(conn);
-            info.closeIfInactive();
+        }
+    }
+
+    private boolean closeInactiveClient(WebSocket conn, ClientInfo info) {
+        if (clients.get(conn) != info || !info.closeInactiveAndAwaitDrained()) {
+            return false;
+        }
+        boolean removed = clients.remove(conn, info);
+        if (removed) {
+            lastPongTime.remove(conn);
+        }
+        return removed;
+    }
+
+    private boolean enqueueForActiveClient(WebSocket conn, ClientInfo info, String message) {
+        synchronized (messageIntakeLock) {
+            if (!acceptingMessages) {
+                return false;
+            }
+            if (!beginOperationForActiveClient(conn, info)) {
+                return false;
+            }
+            try {
+                MessageQueue.MessageGuard guard = operation ->
+                    runForActiveClient(conn, info, operation);
+                messageQueue.enqueueRaw(message, guard);
+                return true;
+            } finally {
+                info.endOperation();
+            }
+        }
+    }
+
+    private void handleForActiveClient(
+        WebSocket conn,
+        ClientInfo info,
+        String type,
+        JsonObject message,
+        int seq
+    ) {
+        if (!beginOperationForActiveClient(conn, info)) {
+            return;
+        }
+        try {
+            JsonObject response = messageHandler.handleMessage(type, message);
+            if (response != null) {
+                if (seq >= 0) response.addProperty("_seq", seq);
+                sendToActiveClient(conn, info, gson.toJson(response));
+            }
+        } finally {
+            info.endOperation();
+        }
+    }
+
+    private boolean runForActiveClient(WebSocket conn, ClientInfo info, Runnable operation) {
+        if (!beginOperationForActiveClient(conn, info)) {
+            return false;
+        }
+        try {
+            operation.run();
+            return true;
+        } finally {
+            info.endOperation();
+        }
+    }
+
+    private boolean sendToActiveClient(WebSocket conn, ClientInfo info, String message) {
+        if (!beginOperationForActiveClient(conn, info)) {
+            return false;
+        }
+        try {
+            if (!conn.isOpen()) {
+                return false;
+            }
+            conn.send(message);
+            totalMessagesSent.incrementAndGet();
+            return true;
+        } finally {
+            info.endOperation();
+        }
+    }
+
+    private void updatePongForActiveClient(WebSocket conn, ClientInfo info) {
+        if (!beginOperationForActiveClient(conn, info)) {
+            return;
+        }
+        try {
+            lastPongTime.replace(conn, System.currentTimeMillis());
+        } finally {
+            info.endOperation();
+        }
+    }
+
+    private boolean beginOperationForActiveClient(WebSocket conn, ClientInfo info) {
+        if (!acceptingMessages || clients.get(conn) != info || !info.isActive()) {
+            return false;
+        }
+        synchronized (info) {
+            return acceptingMessages
+                && clients.get(conn) == info
+                && info.beginOperationIfActive();
         }
     }
 
@@ -443,11 +630,10 @@ public class VizWebSocketServer extends WebSocketServer {
                     plugin.getLogger().warning("Client " + info.address + " heartbeat timeout (no pong for " +
                         ((now - lastPong) / 1000) + "s), closing connection");
                     clientsToClose.add(conn);
-                } else if (conn.isOpen()) {
+                } else {
                     // Send ping to active clients
                     try {
-                        conn.send(pingMessage);
-                        totalMessagesSent.incrementAndGet();
+                        sendToActiveClient(conn, info, pingMessage);
                     } catch (Exception e) {
                         plugin.getLogger().warning("Failed to send ping to client: " + e.getMessage());
                         clientsToClose.add(conn);
@@ -498,18 +684,16 @@ public class VizWebSocketServer extends WebSocketServer {
 
         for (Map.Entry<WebSocket, ClientInfo> entry : clients.entrySet()) {
             WebSocket conn = entry.getKey();
-            if (entry.getValue().isActive() && conn.isOpen()) {
-                try {
-                    conn.send(json);
+            try {
+                if (sendToActiveClient(conn, entry.getValue(), json)) {
                     successCount++;
-                    totalMessagesSent.incrementAndGet();
-                } catch (Exception e) {
-                    ClientInfo info = clients.get(conn);
-                    String address = info != null ? info.address : "unknown";
-                    plugin.getLogger().warning("Broadcast failed to client " + address + ": " + e.getMessage());
-                    totalSendFailures.incrementAndGet();
-                    failedClients.add(conn);
                 }
+            } catch (Exception e) {
+                ClientInfo info = clients.get(conn);
+                String address = info != null ? info.address : "unknown";
+                plugin.getLogger().warning("Broadcast failed to client " + address + ": " + e.getMessage());
+                totalSendFailures.incrementAndGet();
+                failedClients.add(conn);
             }
         }
 
@@ -549,6 +733,38 @@ public class VizWebSocketServer extends WebSocketServer {
      * Shutdown the server and message queue.
      */
     public void shutdown() {
+        synchronized (connectionLifecycleLock) {
+            if (!acceptingMessages) {
+                return;
+            }
+            acceptingMessages = false;
+        }
+
+        // Drain any submission that crossed the intake gate before shutdown.
+        synchronized (messageIntakeLock) {
+            // Intentionally empty.
+        }
+
+        List<WebSocket> connectionsToClose = new ArrayList<>(clients.keySet());
+        for (Map.Entry<WebSocket, ClientInfo> entry : new ArrayList<>(clients.entrySet())) {
+            WebSocket conn = entry.getKey();
+            ClientInfo info = entry.getValue();
+            // Join the same per-generation drain protocol used by onClose.
+            // No global lifecycle lock is held while accepted work completes.
+            ClientCloseResult closeResult = info.closeAndAwaitDrained();
+            synchronized (connectionLifecycleLock) {
+                finishClientClose(
+                    conn,
+                    info,
+                    closeResult,
+                    1001,
+                    "Server shutting down"
+                );
+            }
+        }
+        clients.clear();
+        lastPongTime.clear();
+
         // Cancel heartbeat task
         if (heartbeatTask != null) {
             heartbeatTask.cancel();
@@ -561,10 +777,8 @@ public class VizWebSocketServer extends WebSocketServer {
             metricsLogTask = null;
         }
 
-        messageQueue.stop();
-
         // Close all active connections before stopping the server
-        for (org.java_websocket.WebSocket conn : new java.util.ArrayList<>(getConnections())) {
+        for (WebSocket conn : connectionsToClose) {
             try {
                 conn.close(1001, "Server shutting down");
             } catch (Exception ignored) {}
@@ -574,6 +788,9 @@ public class VizWebSocketServer extends WebSocketServer {
             stop(3000);  // Stop with 3 second timeout for clean thread shutdown
         } catch (InterruptedException e) {
             plugin.getLogger().warning("WebSocket server shutdown interrupted");
+            Thread.currentThread().interrupt();
+        } finally {
+            messageQueue.stop();
         }
     }
 
@@ -632,41 +849,113 @@ public class VizWebSocketServer extends WebSocketServer {
         final String address;
         final long connectedAt;
         private volatile ClientState state;
+        private int inFlightOperations;
+        private boolean closeWasActive;
 
         ClientInfo(String address) {
             this.address = address;
             this.connectedAt = System.currentTimeMillis();
             this.state = ClientState.PENDING;
+            this.inFlightOperations = 0;
+            this.closeWasActive = false;
         }
 
-        synchronized boolean beginAuthentication() {
+        synchronized boolean beginOperationIfOpen() {
+            if (state == ClientState.CLOSING || state == ClientState.CLOSED) {
+                return false;
+            }
+            inFlightOperations++;
+            return true;
+        }
+
+        synchronized boolean beginAuthenticationOperation() {
             if (state != ClientState.PENDING) {
                 return false;
             }
             state = ClientState.AUTHENTICATING;
+            inFlightOperations++;
             return true;
         }
 
-        synchronized boolean activateIfAuthenticating() {
+        synchronized boolean beginAdmission() {
             if (state != ClientState.AUTHENTICATING) {
+                return false;
+            }
+            state = ClientState.ADMITTING;
+            return true;
+        }
+
+        /** Called only while holding the server's global lifecycle lock. */
+        boolean activateIfAdmitting() {
+            if (state != ClientState.ADMITTING) {
                 return false;
             }
             state = ClientState.ACTIVE;
             return true;
         }
 
-        synchronized boolean closeIfInactive() {
-            if (state == ClientState.ACTIVE || state == ClientState.CLOSED) {
+        synchronized boolean beginOperationIfActive() {
+            if (state != ClientState.ACTIVE) {
                 return false;
             }
-            state = ClientState.CLOSED;
+            inFlightOperations++;
             return true;
         }
 
-        synchronized boolean closeAndWasActive() {
+        synchronized void endOperation() {
+            if (inFlightOperations <= 0) {
+                throw new IllegalStateException("Client operation lease underflow");
+            }
+            inFlightOperations--;
+            if (inFlightOperations == 0) {
+                notifyAll();
+            }
+        }
+
+        synchronized boolean closeInactiveAndAwaitDrained() {
+            if (state != ClientState.PENDING && state != ClientState.AUTHENTICATING) {
+                return false;
+            }
+            closeAndAwaitDrained();
+            return true;
+        }
+
+        synchronized ClientCloseResult closeAndAwaitDrained() {
+            if (state == ClientState.CLOSING) {
+                boolean interrupted = false;
+                while (state == ClientState.CLOSING) {
+                    try {
+                        wait();
+                    } catch (InterruptedException exception) {
+                        interrupted = true;
+                    }
+                }
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                return new ClientCloseResult(closeWasActive);
+            }
+            if (state == ClientState.CLOSED) {
+                return new ClientCloseResult(closeWasActive);
+            }
+
             boolean wasActive = state == ClientState.ACTIVE;
+            closeWasActive = wasActive;
+            state = ClientState.CLOSING;
+            boolean interrupted = false;
+            while (inFlightOperations > 0) {
+                try {
+                    wait();
+                } catch (InterruptedException exception) {
+                    interrupted = true;
+                }
+            }
             state = ClientState.CLOSED;
-            return wasActive;
+            notifyAll();
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return new ClientCloseResult(wasActive);
         }
 
         boolean isPending() {
@@ -676,12 +965,26 @@ public class VizWebSocketServer extends WebSocketServer {
         boolean isActive() {
             return state == ClientState.ACTIVE;
         }
+
+        boolean isAdmitting() {
+            return state == ClientState.ADMITTING;
+        }
+
+        boolean rejectsMessagesWithoutClosing() {
+            return state == ClientState.ADMITTING
+                || state == ClientState.CLOSING
+                || state == ClientState.CLOSED;
+        }
     }
+
+    private record ClientCloseResult(boolean wasActive) { }
 
     private enum ClientState {
         PENDING,
         AUTHENTICATING,
+        ADMITTING,
         ACTIVE,
+        CLOSING,
         CLOSED
     }
 }
