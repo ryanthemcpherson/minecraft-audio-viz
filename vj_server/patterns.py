@@ -98,6 +98,13 @@ _resolved_lua_runtime = None
 _resolved_lua_runtime_name = None
 
 
+def _deny_python_attribute_access(
+    _object: object, _attribute_name: object, _is_setting: bool
+) -> str:
+    """Prevent Lua code from traversing any accidentally exposed Python object."""
+    raise AttributeError("Python attribute access is disabled in Lua patterns")
+
+
 def _resolve_lua_runtime():
     """Resolve the best available LuaRuntime class once and cache it."""
     global _resolved_lua_runtime, _resolved_lua_runtime_name
@@ -170,33 +177,46 @@ class LuaPattern(VisualizationPattern):
         if LuaRuntime is None:
             return
 
-        self._lua = LuaRuntime(unpack_returned_tuples=True)
+        self._lua = LuaRuntime(
+            unpack_returned_tuples=True,
+            register_eval=False,
+            register_builtins=False,
+            attribute_filter=_deny_python_attribute_access,
+        )
 
         # Install instruction-count hook BEFORE sandbox removes debug.
         # This prevents infinite-loop patterns from blocking the event loop.
+        # LuaJIT can compile hot loops without delivering count hooks, so turn
+        # it off before installing the hook and hide its control API below.
         # Uses do-end block so count/limit are upvalues, not globals —
         # patterns cannot tamper with them even before debug is removed.
-        self._lua.execute(f"""
+        self._reset_hook = self._lua.execute(f"""
+            if jit ~= nil then
+                jit.off()
+            end
             do
                 local _count = 0
                 local _limit = {LUA_INSTRUCTION_LIMIT}
+                local _raise_timeout = error
                 debug.sethook(function()
-                    _count = _count + 1
-                    if _count > _limit then
-                        error("pattern exceeded instruction limit")
+                    _count = _count + {LUA_HOOK_INTERVAL}
+                    if _count >= _limit then
+                        _raise_timeout("pattern exceeded instruction limit")
                     end
                 end, "", {LUA_HOOK_INTERVAL})
-                function __reset_hook()
+                return function()
                     _count = 0
                 end
             end
         """)
-        self._reset_hook = self._lua.globals()["__reset_hook"]
 
         # Sandbox: remove dangerous globals before loading any pattern code
         self._lua.execute("""
             os = nil; io = nil; debug = nil; package = nil
-            require = nil; load = nil; loadfile = nil; dofile = nil
+            jit = nil; python = nil; coroutine = nil
+            require = nil; load = nil; loadstring = nil
+            loadfile = nil; dofile = nil; module = nil
+            getfenv = nil; setfenv = nil
             collectgarbage = nil; rawget = nil; rawset = nil
             pcall = nil; xpcall = nil; rawequal = nil; rawlen = nil
             string.dump = nil; string.rep = nil
