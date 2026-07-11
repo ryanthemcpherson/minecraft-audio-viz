@@ -99,14 +99,19 @@ def _create_sentinel_collision(root: Path, collision_kind: str) -> None:
         )
 
 
-def _make_capturing_tcp_server(bind_attempts: list[tuple[str, int]]) -> type[object]:
+def _make_capturing_tcp_server(
+    bind_attempts: list[tuple[str, int]],
+    handler_classes: list[type[http.server.SimpleHTTPRequestHandler]] | None = None,
+) -> type[object]:
     class CapturingTCPServer:
         def __init__(
             self,
             server_address: tuple[str, int],
-            _handler_class: type[http.server.SimpleHTTPRequestHandler],
+            handler_class: type[http.server.SimpleHTTPRequestHandler],
         ) -> None:
             bind_attempts.append(server_address)
+            if handler_classes is not None:
+                handler_classes.append(handler_class)
 
         def __enter__(self) -> "CapturingTCPServer":
             return self
@@ -384,6 +389,31 @@ def test_http_handlers_redirect_and_serve_safe_directory_index(
     assert index_body == b"safe index"
 
 
+@pytest.mark.parametrize("implementation", ["factory", "legacy"])
+@pytest.mark.parametrize("index_name", ["index.html", "index.htm"])
+def test_http_handlers_reject_symlinked_directory_index_escape(
+    tmp_path: Path,
+    implementation: str,
+    index_name: str,
+) -> None:
+    static_root = tmp_path / "static"
+    docs = static_root / "docs"
+    docs.mkdir(parents=True)
+    outside_index = tmp_path / "outside-index.html"
+    outside_index.write_text("secret index must not be served", encoding="utf-8")
+    (docs / index_name).symlink_to(outside_index)
+    handler_class = _build_handler_class(
+        implementation,
+        {"/preview": str(static_root)},
+    )
+
+    with _running_http_server(handler_class) as address:
+        status, body, _ = _http_get(address, "/preview/docs/")
+
+    assert status == HTTPStatus.NOT_FOUND
+    assert b"secret index must not be served" not in body
+
+
 def test_http_server_defaults_to_loopback() -> None:
     assert signature(run_http_server).parameters["host"].default == "127.0.0.1"
 
@@ -421,6 +451,36 @@ def test_http_server_passes_explicit_wildcard_host_to_bind(
     run_http_server(4321, str(tmp_path), "0.0.0.0")
 
     assert bind_attempts == [("0.0.0.0", 4321)]
+
+
+def test_http_server_does_not_serve_project_files_when_ui_assets_are_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / ".env").write_text("secret must not be served", encoding="utf-8")
+    bind_attempts: list[tuple[str, int]] = []
+    handler_classes: list[type[http.server.SimpleHTTPRequestHandler]] = []
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            models.socketserver,
+            "TCPServer",
+            _make_capturing_tcp_server(bind_attempts, handler_classes),
+        )
+        run_http_server(4321, str(project_root))
+
+    assert bind_attempts == [("127.0.0.1", 4321)]
+    assert len(handler_classes) == 1
+    with _running_http_server(handler_classes[0]) as address:
+        admin_status, admin_body, _ = _http_get(address, "/.env")
+        preview_status, preview_body, _ = _http_get(address, "/preview/.env")
+
+    assert admin_status == HTTPStatus.NOT_FOUND
+    assert preview_status == HTTPStatus.NOT_FOUND
+    assert b"secret must not be served" not in admin_body
+    assert b"secret must not be served" not in preview_body
 
 
 @pytest.mark.parametrize("host", ["", " \t "])

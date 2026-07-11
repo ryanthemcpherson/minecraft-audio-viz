@@ -688,10 +688,32 @@ class _StaticRequestHandlerMixin:
         self._static_path_override = None
         return translated_path
 
+    def _resolve_static_response_path(self, translated_path: str) -> str:
+        request_path = urllib.parse.urlsplit(self.path).path
+        if not request_path.endswith("/") or not Path(translated_path).is_dir():
+            return translated_path
+
+        for index_name in ("index.html", "index.htm"):
+            if not (Path(translated_path) / index_name).is_file():
+                continue
+
+            resolved_index = _resolve_static_path(translated_path, index_name)
+            if resolved_index is None:
+                self._static_path_rejected = True
+                return translated_path
+            return str(resolved_index)
+
+        return translated_path
+
     def send_head(self):
         self._static_path_rejected = False
         self._static_path_override = None
         translated_path = self.translate_path(self.path)
+        if self._static_path_rejected:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
+
+        translated_path = self._resolve_static_response_path(translated_path)
         if self._static_path_rejected:
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return None
@@ -804,8 +826,8 @@ def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
 
     # Admin panel at root, preview at /preview (absolute paths, no os.chdir)
     dir_map = {
-        "/preview": str(frontend_dir) if frontend_dir.exists() else str(directory),
-        "/": str(admin_dir) if admin_dir.exists() else str(directory),
+        "/preview": str(frontend_dir),
+        "/": str(admin_dir),
     }
     handler_cls = _make_directory_handler(dir_map)
 
