@@ -13,18 +13,26 @@ import {
   exchangeGoogleCode,
   exchangeOAuthCodeWithValidatedState,
   getOAuthProvider,
+  clearStoredOAuthState,
 } from "@/lib/auth";
 
 type Tab = "login" | "signup";
+type ConsumedCookie =
+  | { found: false }
+  | { found: true; value: string | null };
 
 /** Read and delete a cookie by name. */
-function consumeCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
+function consumeCookie(name: string): ConsumedCookie {
+  if (typeof document === "undefined") return { found: false };
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  if (!match) return null;
+  if (!match) return { found: false };
   // Delete it immediately
   document.cookie = `${name}=; path=/; max-age=0`;
-  return decodeURIComponent(match[1]);
+  try {
+    return { found: true, value: decodeURIComponent(match[1]) };
+  } catch {
+    return { found: true, value: null };
+  }
 }
 
 export default function LoginPage() {
@@ -51,19 +59,31 @@ export default function LoginPage() {
   useEffect(() => {
     if (oauthHandled.current) return;
 
-    const oauthError = consumeCookie("mcav_oauth_error");
-    if (oauthError) {
+    const oauthErrorCookie = consumeCookie("mcav_oauth_error");
+    if (oauthErrorCookie.found) {
       oauthHandled.current = true;
-      setError(oauthError);
+      clearStoredOAuthState();
+      setError(
+        oauthErrorCookie.value === null
+          ? "Invalid OAuth response. Please try signing in again."
+          : oauthErrorCookie.value || "OAuth sign-in failed. Please try again."
+      );
       return;
     }
 
-    const oauthCode = consumeCookie("mcav_oauth_code");
-    if (!oauthCode) return;
+    const oauthCodeCookie = consumeCookie("mcav_oauth_code");
+    if (!oauthCodeCookie.found) return;
 
     oauthHandled.current = true;
+    const oauthCode = oauthCodeCookie.value;
+    if (oauthCode === null) {
+      clearStoredOAuthState();
+      setError("Invalid OAuth response. Please try signing in again.");
+      return;
+    }
     const separatorIdx = oauthCode.indexOf(":");
-    if (separatorIdx === -1) {
+    if (separatorIdx <= 0 || separatorIdx === oauthCode.length - 1) {
+      clearStoredOAuthState();
       setError("Invalid OAuth response. Please try signing in again.");
       return;
     }
