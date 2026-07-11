@@ -1,10 +1,15 @@
 package com.audioviz.websocket;
 
+import com.audioviz.AudioVizMod;
 import com.audioviz.connection.ConnectionStateListener;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,7 +99,7 @@ class VizWebSocketServerAuthTest {
         );
 
         server.onClose(connection, 1000, "closed", true);
-        verify(connectionStateListener).onDjDisconnect("closed");
+        verify(connectionStateListener).onDjDisconnect("remote close (code 1000)");
     }
 
     @Test
@@ -141,6 +146,106 @@ class VizWebSocketServerAuthTest {
             any(MessageQueue.MessageGuard.class)
         );
         verify(serverExecutor, never()).execute(any(Runnable.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"type\":\"auth\",\"token\":\"secret\",\"extra\":true}",
+        "{\"type\":\"auth\",\"v\":1,\"token\":\"secret\"}"
+    })
+    void rejectsAuthenticationMessagesOutsideClosedSchema(String message) {
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+
+        server.onMessage(connection, message);
+
+        verify(connection).close(4001, "Authentication failed");
+        verify(connection, never()).send(AUTH_OK);
+        assertEquals(0, server.getConnectionCount());
+    }
+
+    @Test
+    void rejectsNonStringTokenEvenWhenJsonCoercionWouldMatch() {
+        VizWebSocketServer server = newServer("123");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+
+        server.onMessage(connection, "{\"type\":\"auth\",\"token\":123}");
+
+        verify(connection).close(4001, "Authentication failed");
+        verify(connection, never()).send(AUTH_OK);
+    }
+
+    @Test
+    void rejectsTokenLongerThanSchemaMaximumEvenWhenSecretMatches() {
+        String overlongToken = "x".repeat(1025);
+        VizWebSocketServer server = newServer(overlongToken);
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+
+        server.onMessage(connection,
+            "{\"type\":\"auth\",\"token\":\"" + overlongToken + "\"}");
+
+        verify(connection).close(4001, "Authentication failed");
+        verify(connection, never()).send(AUTH_OK);
+    }
+
+    @Test
+    void acceptsOptionalStringProtocolVersion() {
+        VizWebSocketServer server = newServer("secret");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+
+        server.onMessage(connection,
+            "{\"type\":\"auth\",\"v\":\"1.0.0\",\"token\":\"secret\"}");
+
+        verify(connection).send(AUTH_OK);
+        assertEquals(1, server.getConnectionCount());
+    }
+
+    @Test
+    void peerCloseReasonIsNeitherLoggedNorForwarded() {
+        VizWebSocketServer server = newServer("");
+        List<String> logMessages = new CopyOnWriteArrayList<>();
+        AbstractAppender appender = new AbstractAppender(
+            "peer-close-secrecy-test",
+            null,
+            PatternLayout.createDefaultLayout(),
+            false,
+            null
+        ) {
+            @Override
+            public void append(LogEvent event) {
+                logMessages.add(event.getMessage().getFormattedMessage());
+            }
+        };
+        org.apache.logging.log4j.core.Logger logger =
+            (org.apache.logging.log4j.core.Logger) LogManager.getLogger(AudioVizMod.LOGGER.getName());
+        appender.start();
+        logger.addAppender(appender);
+        server.onOpen(connection, handshake);
+
+        try {
+            server.onClose(connection, 4009, "SECRET_SENTINEL\r\nforged-log", true);
+        } finally {
+            logger.removeAppender(appender);
+            appender.stop();
+        }
+
+        verify(connectionStateListener).onDjDisconnect("remote close (code 4009)");
+        assertTrue(logMessages.stream().noneMatch(message ->
+            message.contains("SECRET_SENTINEL") || message.contains("\r") || message.contains("\n")));
+    }
+
+    @Test
+    void localCloseUsesOnlyDirectionAndNumericCode() {
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+
+        server.onClose(connection, 1001, "SECRET_SENTINEL\r\nforged-log", false);
+
+        verify(connectionStateListener).onDjDisconnect("local close (code 1001)");
     }
 
     @Test
@@ -507,9 +612,9 @@ class VizWebSocketServerAuthTest {
         InOrder lifecycle = inOrder(connectionStateListener);
         lifecycle.verify(connectionStateListener)
             .onDjConnect(connection.getRemoteSocketAddress().toString());
-        lifecycle.verify(connectionStateListener).onDjDisconnect("closed");
+        lifecycle.verify(connectionStateListener).onDjDisconnect("remote close (code 1000)");
         verify(connectionStateListener).onDjConnect(connection.getRemoteSocketAddress().toString());
-        verify(connectionStateListener).onDjDisconnect("closed");
+        verify(connectionStateListener).onDjDisconnect("remote close (code 1000)");
         assertEquals(0, server.getConnectionCount());
         assertEquals(1, server.getMetrics().get("totalConnections").getAsLong());
         assertEquals(1, server.getMetrics().get("totalDisconnections").getAsLong());
@@ -551,7 +656,9 @@ class VizWebSocketServerAuthTest {
         firstClose.get(5, TimeUnit.SECONDS);
         secondAuthentication.get(5, TimeUnit.SECONDS);
 
-        assertEquals(List.of("disconnect:first closed", "connect:/127.0.0.1:54322"),
+        assertEquals(List.of(
+                "disconnect:remote close (code 1000)",
+                "connect:/127.0.0.1:54322"),
             lifecycleListener.events);
         assertTrue(lifecycleListener.connected.get());
         assertEquals(1, lifecycleListener.connectCount.get());

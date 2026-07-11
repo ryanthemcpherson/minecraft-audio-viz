@@ -4,10 +4,13 @@ import com.audioviz.AudioVizPlugin;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.bukkit.scheduler.BukkitTask;
 import org.java_websocket.WebSocket;
+import org.java_websocket.drafts.Draft;
+import org.java_websocket.drafts.Draft_6455;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
 
@@ -65,6 +68,8 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final long PONG_TIMEOUT_MS = 45000L; // 45 seconds
     private static final long METRICS_LOG_INTERVAL_TICKS = 6000L; // 5 minutes
     private static final long AUTH_TIMEOUT_TICKS = 100L; // 5 seconds
+    private static final int MAX_MESSAGE_SIZE = 262_144;
+    private static final int MAX_AUTH_TOKEN_LENGTH = 1_024;
 
     public VizWebSocketServer(AudioVizPlugin plugin, int port) {
         this(plugin, port, new MessageHandler(plugin));
@@ -91,8 +96,13 @@ public class VizWebSocketServer extends WebSocketServer {
         WebSocketSecurityPolicy securityPolicy,
         Consumer<Runnable> authTimeoutScheduler
     ) {
-        super(new InetSocketAddress(
-            plugin.getConfig().getString("websocket.address", "127.0.0.1"), port));
+        super(
+            new InetSocketAddress(
+                plugin.getConfig().getString("websocket.address", "127.0.0.1"),
+                port
+            ),
+            transportDrafts()
+        );
         this.plugin = plugin;
         this.messageHandler = messageHandler;
         this.messageQueue = messageQueue;
@@ -196,7 +206,7 @@ public class VizWebSocketServer extends WebSocketServer {
                 // is always paired with this close.
                 synchronized (connectionLifecycleLock) {
                     closeResult = info.closeAndAwaitDrained();
-                    finishClientClose(conn, info, closeResult, code, reason);
+                    finishClientClose(conn, info, closeResult, code, remote);
                 }
                 return;
             }
@@ -207,7 +217,7 @@ public class VizWebSocketServer extends WebSocketServer {
         }
 
         synchronized (connectionLifecycleLock) {
-            finishClientClose(conn, info, closeResult, code, reason);
+            finishClientClose(conn, info, closeResult, code, remote);
         }
     }
 
@@ -216,7 +226,7 @@ public class VizWebSocketServer extends WebSocketServer {
         ClientInfo info,
         ClientCloseResult closeResult,
         int code,
-        String reason
+        boolean remote
     ) {
         if (closeResult == null || !clients.remove(conn, info)) {
             return;
@@ -231,16 +241,15 @@ public class VizWebSocketServer extends WebSocketServer {
 
         long connectionDuration = System.currentTimeMillis() - info.connectedAt;
         String durationStr = formatDuration(connectionDuration);
+        String safeCause = safeCloseCause(remote, code);
         plugin.getLogger().info("Client " + info.address + " disconnected: code=" + code +
-            ", reason=" + (reason != null && !reason.isEmpty() ? reason : "none") +
+            ", cause=" + safeCause +
             ", duration=" + durationStr);
 
         var disconnectListener = plugin.getConnectionStateListener();
         if (disconnectListener != null && lifecycleActiveClients == 0) {
             try {
-                disconnectListener.onDjDisconnect(
-                    reason != null ? reason : "connection closed"
-                );
+                disconnectListener.onDjDisconnect(safeCause);
             } catch (RuntimeException exception) {
                 plugin.getLogger().log(
                     Level.WARNING,
@@ -250,9 +259,6 @@ public class VizWebSocketServer extends WebSocketServer {
             }
         }
     }
-
-    // Maximum incoming message size (256KB - generous for any valid message)
-    private static final int MAX_MESSAGE_SIZE = 262_144;
 
     @Override
     public void onMessage(WebSocket conn, String message) {
@@ -346,9 +352,7 @@ public class VizWebSocketServer extends WebSocketServer {
         JsonObject authMessage;
         try {
             authMessage = JsonParser.parseString(message).getAsJsonObject();
-            if (!authMessage.has("type") || !authMessage.has("token") ||
-                    !"auth".equals(authMessage.get("type").getAsString()) ||
-                    !securityPolicy.tokenMatches(authMessage.get("token").getAsString())) {
+            if (!isValidAuthenticationMessage(authMessage)) {
                 return false;
             }
         } catch (RuntimeException exception) {
@@ -376,6 +380,44 @@ public class VizWebSocketServer extends WebSocketServer {
         } finally {
             info.endOperation();
         }
+    }
+
+    private boolean isValidAuthenticationMessage(JsonObject authMessage) {
+        int propertyCount = authMessage.size();
+        if (!authMessage.has("type") || !authMessage.has("token")
+                || (propertyCount != 2 && propertyCount != 3)
+                || (propertyCount == 3 && !authMessage.has("v"))) {
+            return false;
+        }
+
+        JsonElement type = authMessage.get("type");
+        JsonElement tokenElement = authMessage.get("token");
+        JsonElement version = authMessage.get("v");
+        if (!isJsonString(type) || !"auth".equals(type.getAsString())
+                || !isJsonString(tokenElement)
+                || (version != null && !isJsonString(version))) {
+            return false;
+        }
+
+        String token = tokenElement.getAsString();
+        int tokenLength = token.codePointCount(0, token.length());
+        return tokenLength >= 1
+            && tokenLength <= MAX_AUTH_TOKEN_LENGTH
+            && securityPolicy.tokenMatches(token);
+    }
+
+    private static boolean isJsonString(JsonElement element) {
+        return element != null
+            && element.isJsonPrimitive()
+            && element.getAsJsonPrimitive().isString();
+    }
+
+    private static List<Draft> transportDrafts() {
+        return List.of(new Draft_6455(List.of(), MAX_MESSAGE_SIZE));
+    }
+
+    private static String safeCloseCause(boolean remote, int code) {
+        return (remote ? "remote" : "local") + " close (code " + code + ")";
     }
 
     private boolean beginAuthentication(WebSocket conn, ClientInfo info) {
@@ -758,7 +800,7 @@ public class VizWebSocketServer extends WebSocketServer {
                     info,
                     closeResult,
                     1001,
-                    "Server shutting down"
+                    false
                 );
             }
         }

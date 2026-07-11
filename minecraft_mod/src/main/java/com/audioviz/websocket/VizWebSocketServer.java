@@ -5,9 +5,12 @@ import com.audioviz.connection.ConnectionStateListener;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.java_websocket.WebSocket;
+import org.java_websocket.drafts.Draft;
+import org.java_websocket.drafts.Draft_6455;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
 
@@ -54,6 +57,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final int HEARTBEAT_INTERVAL_TICKS = 300; // 15 seconds
     private static final int METRICS_LOG_INTERVAL_TICKS = 6000; // 5 minutes
     private static final long AUTH_TIMEOUT_TICKS = 100L; // 5 seconds
+    private static final int MAX_AUTH_TOKEN_LENGTH = 1_024;
 
     // Tick counters (driven by AudioVizMod.tick())
     private int heartbeatTickCounter = 0;
@@ -71,7 +75,7 @@ public class VizWebSocketServer extends WebSocketServer {
         Executor serverExecutor,
         ConnectionStateListener connectionStateListener
     ) {
-        super(new InetSocketAddress(address, port));
+        super(new InetSocketAddress(address, port), transportDrafts());
         this.messageHandler = messageHandler;
         this.messageQueue = messageQueue;
         this.serverExecutor = serverExecutor;
@@ -230,18 +234,17 @@ public class VizWebSocketServer extends WebSocketServer {
                 totalDisconnections.incrementAndGet();
 
                 long duration = System.currentTimeMillis() - info.connectedAt;
+                String safeCause = safeCloseCause(remote, code);
                 AudioVizMod.LOGGER.info(
-                    "Client {} disconnected: code={}, reason={}, duration={}",
+                    "Client {} disconnected: code={}, cause={}, duration={}",
                     info.address,
                     code,
-                    reason != null && !reason.isEmpty() ? reason : "none",
+                    safeCause,
                     formatDuration(duration)
                 );
 
                 if (connectionStateListener != null && activeClientCount() == 0) {
-                    connectionStateListener.onDjDisconnect(
-                        reason != null ? reason : "connection closed"
-                    );
+                    connectionStateListener.onDjDisconnect(safeCause);
                 }
             }
         }
@@ -373,9 +376,7 @@ public class VizWebSocketServer extends WebSocketServer {
         JsonObject authMessage;
         try {
             authMessage = JsonParser.parseString(message).getAsJsonObject();
-            if (!authMessage.has("type") || !authMessage.has("token")
-                    || !"auth".equals(authMessage.get("type").getAsString())
-                    || !securityPolicy.tokenMatches(authMessage.get("token").getAsString())) {
+            if (!isValidAuthenticationMessage(authMessage)) {
                 return false;
             }
         } catch (RuntimeException exception) {
@@ -396,6 +397,44 @@ public class VizWebSocketServer extends WebSocketServer {
 
         admitClient(conn, info);
         return true;
+    }
+
+    private boolean isValidAuthenticationMessage(JsonObject authMessage) {
+        int propertyCount = authMessage.size();
+        if (!authMessage.has("type") || !authMessage.has("token")
+                || (propertyCount != 2 && propertyCount != 3)
+                || (propertyCount == 3 && !authMessage.has("v"))) {
+            return false;
+        }
+
+        JsonElement type = authMessage.get("type");
+        JsonElement tokenElement = authMessage.get("token");
+        JsonElement version = authMessage.get("v");
+        if (!isJsonString(type) || !"auth".equals(type.getAsString())
+                || !isJsonString(tokenElement)
+                || (version != null && !isJsonString(version))) {
+            return false;
+        }
+
+        String token = tokenElement.getAsString();
+        int tokenLength = token.codePointCount(0, token.length());
+        return tokenLength >= 1
+            && tokenLength <= MAX_AUTH_TOKEN_LENGTH
+            && securityPolicy.tokenMatches(token);
+    }
+
+    private static boolean isJsonString(JsonElement element) {
+        return element != null
+            && element.isJsonPrimitive()
+            && element.getAsJsonPrimitive().isString();
+    }
+
+    private static List<Draft> transportDrafts() {
+        return List.of(new Draft_6455(List.of(), MAX_MESSAGE_SIZE));
+    }
+
+    private static String safeCloseCause(boolean remote, int code) {
+        return (remote ? "remote" : "local") + " close (code " + code + ")";
     }
 
     private boolean beginAuthentication(WebSocket conn, ClientInfo info) {
