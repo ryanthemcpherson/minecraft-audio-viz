@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from secrets import token_urlsafe
 
 import pytest
 from app.config import Settings
 from httpx import AsyncClient
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("environment", ["production", "staging", "development", "test"])
@@ -32,6 +35,22 @@ def test_default_environment_is_production(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
     assert settings.mcav_env == "production"
+
+
+def test_root_compose_supplies_required_metrics_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "- MCAV_METRICS_TOKEN=${MCAV_METRICS_TOKEN:?Metrics token must be set}" in compose
+
+    expected_token = token_urlsafe(32)
+    monkeypatch.setenv("MCAV_METRICS_TOKEN", expected_token)
+    settings = Settings(
+        _env_file=None,
+        user_jwt_secret=token_urlsafe(32),
+    )
+
+    assert settings.metrics_token == expected_token
 
 
 @pytest.mark.parametrize(

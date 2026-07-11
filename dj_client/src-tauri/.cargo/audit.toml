@@ -1,0 +1,39 @@
+# Phase 0 temporary exceptions for currently unavoidable transitive dependencies.
+#
+# The GTK3 advisories come from Tauri's Linux webview backend. The Opus finding
+# belongs to the optional voice codec; macro, hashing, and Unicode findings are
+# transitive. The two unsound advisories require APIs/conditions MCAV does not
+# use (glib VariantStrIter and a custom logger re-entering ThreadRng).
+# Unsupported binaries remain quarantined while these dependency families are
+# migrated in Phase 1.
+#
+# Keep this list exact: containment tests reject additions or removals, and the
+# warning deny policy below makes every newly published advisory fail closed.
+[advisories]
+ignore = [
+  "RUSTSEC-2024-0370",
+  "RUSTSEC-2024-0411",
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
+  "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  "RUSTSEC-2024-0429",
+  "RUSTSEC-2025-0057",
+  "RUSTSEC-2025-0075",
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
+  "RUSTSEC-2026-0097",
+  "RUSTSEC-2026-0150",
+]
+
+[output]
+deny = ["warnings"]
+quiet = false
+show_tree = true
