@@ -126,6 +126,7 @@ class VizClient:
         self.auto_reconnect = auto_reconnect
         self.max_reconnect_attempts = max_reconnect_attempts
         self._reconnect_attempts = 0
+        self._reconnect_task: Optional[asyncio.Task[Any]] = None
         self.auth_token = auth_token.strip() if auth_token and auth_token.strip() else None
 
         # Heartbeat settings
@@ -192,31 +193,54 @@ class VizClient:
         raw = await asyncio.wait_for(self.ws.recv(), timeout=self.connect_timeout)
         return mjson.decode(raw)
 
-    async def _close_failed_connection(self) -> None:
-        """Fail closed and release all transport state after a handshake error."""
+    def _schedule_reconnect(self) -> None:
+        """Own at most one automatic reconnect attempt."""
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = asyncio.create_task(self.reconnect())
+
+    async def _drain_transport(
+        self, pending_reason: str, *, cancel_reconnect: bool = False
+    ) -> bool:
+        """Release the current transport and all work owned by it."""
         self._connected = False
         heartbeat_task = self._heartbeat_task
         receive_task = self._receive_task
-        self.stop_heartbeat()
-        self._stop_receive_loop()
-        self._cancel_pending_futures("handshake failed")
+        reconnect_task = self._reconnect_task if cancel_reconnect else None
+        current_task = asyncio.current_task()
+        self.stop_heartbeat(exclude_task=current_task)
+        self._stop_receive_loop(exclude_task=current_task)
+        if cancel_reconnect:
+            self._reconnect_task = None
+            if (
+                reconnect_task is not None
+                and reconnect_task is not current_task
+                and not reconnect_task.done()
+            ):
+                reconnect_task.cancel()
+        self._cancel_pending_futures(pending_reason)
         self.server_type = None
+        websocket = self.ws
+        self.ws = None
 
         tasks = [
             task
-            for task in (heartbeat_task, receive_task)
-            if task is not None and task is not asyncio.current_task()
+            for task in (heartbeat_task, receive_task, reconnect_task)
+            if task is not None and task is not current_task
         ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-        websocket = self.ws
-        self.ws = None
         if websocket is not None:
             try:
                 await websocket.close()
             except Exception:
                 pass
+            return True
+        return False
+
+    async def _close_failed_connection(self) -> None:
+        """Fail closed and release all transport state after a handshake error."""
+        await self._drain_transport("handshake failed")
 
     async def connect(self) -> bool:
         """Connect and complete the Minecraft WebSocket authentication handshake."""
@@ -255,7 +279,12 @@ class VizClient:
                 await self._close_failed_connection()
                 return False
 
-            self.server_type = welcome.get("server_type")
+            server_type = welcome.get("server_type")
+            if not isinstance(server_type, str) or server_type not in {"paper", "fabric"}:
+                logger.error("Minecraft WebSocket returned an invalid renderer type")
+                await self._close_failed_connection()
+                return False
+            self.server_type = server_type
             if auth_required:
                 if self.auth_token is None:
                     logger.error(
@@ -303,13 +332,7 @@ class VizClient:
 
     async def disconnect(self):
         """Disconnect from the server."""
-        self._connected = False
-        # Stop background tasks
-        self.stop_heartbeat()
-        self._stop_receive_loop()
-
-        if self.ws:
-            await self.ws.close()
+        if await self._drain_transport("client disconnected", cancel_reconnect=True):
             logger.info("Disconnected from AudioViz")
 
     async def _heartbeat_loop(self):
@@ -325,7 +348,7 @@ class VizClient:
                     logger.warning("Pong timeout detected - no response for 30+ seconds")
                     self._connected = False
                     if self.auto_reconnect:
-                        asyncio.create_task(self.reconnect())
+                        self._schedule_reconnect()
                     break
 
                 # Send heartbeat ping
@@ -336,7 +359,7 @@ class VizClient:
                     logger.warning("Heartbeat ping failed (error_type=%s)", type(e).__name__)
                     self._connected = False
                     if self.auto_reconnect:
-                        asyncio.create_task(self.reconnect())
+                        self._schedule_reconnect()
                     break
         except asyncio.CancelledError:
             pass  # Task cancelled during shutdown
@@ -406,7 +429,7 @@ class VizClient:
                     self._connected = False
                     self._cancel_pending_futures("connection closed")
                     if was_connected and self.auto_reconnect:
-                        asyncio.create_task(self.reconnect())
+                        self._schedule_reconnect()
                     break
                 except msgspec.DecodeError:
                     logger.warning("Received invalid JSON message")
@@ -421,7 +444,7 @@ class VizClient:
                     self._connected = False
                     self._cancel_pending_futures("receive loop failed")
                     if was_connected and self.auto_reconnect:
-                        asyncio.create_task(self.reconnect())
+                        self._schedule_reconnect()
                     break
         except asyncio.CancelledError:
             pass  # Task cancelled during shutdown
@@ -462,15 +485,23 @@ class VizClient:
                 self._receive_task = asyncio.create_task(self._receive_loop())
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-    def stop_heartbeat(self):
+    def stop_heartbeat(self, *, exclude_task: asyncio.Task[Any] | None = None):
         """Stop the heartbeat task."""
-        if self._heartbeat_task and not self._heartbeat_task.done():
+        if (
+            self._heartbeat_task
+            and self._heartbeat_task is not exclude_task
+            and not self._heartbeat_task.done()
+        ):
             self._heartbeat_task.cancel()
         self._heartbeat_task = None
 
-    def _stop_receive_loop(self):
+    def _stop_receive_loop(self, *, exclude_task: asyncio.Task[Any] | None = None):
         """Stop the receive loop task."""
-        if self._receive_task and not self._receive_task.done():
+        if (
+            self._receive_task
+            and self._receive_task is not exclude_task
+            and not self._receive_task.done()
+        ):
             self._receive_task.cancel()
         self._receive_task = None
         self._use_receive_loop = False

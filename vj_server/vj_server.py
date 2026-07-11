@@ -1173,9 +1173,12 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             except asyncio.CancelledError:
                 pass
 
-        if self.viz_client and self.viz_client.connected:
-            await self.viz_client.set_visible(self.zone, False)
-            await self.viz_client.disconnect()
+        if self.viz_client:
+            try:
+                if self.viz_client.connected:
+                    await self.viz_client.set_visible(self.zone, False)
+            finally:
+                await self.viz_client.disconnect()
 
         if self.spectrograph:
             self.spectrograph.clear()

@@ -80,6 +80,21 @@ class PostHandshakeSetupVizClient:
             raise self.disconnect_error
 
 
+class CleanupVizClient:
+    def __init__(self, *, connected: bool, visibility_error: Exception | None = None) -> None:
+        self.connected = connected
+        self.visibility_error = visibility_error
+        self.calls: list[str] = []
+
+    async def set_visible(self, _zone: str, _visible: bool) -> None:
+        self.calls.append("set_visible")
+        if self.visibility_error is not None:
+            raise self.visibility_error
+
+    async def disconnect(self) -> None:
+        self.calls.append("disconnect")
+
+
 @pytest.mark.asyncio
 async def test_minecraft_secret_is_reused_for_each_relay_connection(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -127,6 +142,37 @@ async def test_old_minecraft_client_disconnect_does_not_log_peer_close_reason(
 
     assert "ConnectionClosedError" in caplog.text
     assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cleanup_disconnects_existing_client_when_not_connected() -> None:
+    server = VJServer(
+        require_auth=False,
+        show_spectrograph=False,
+        metrics_port=None,
+    )
+    client = CleanupVizClient(connected=False)
+    server.viz_client = client  # type: ignore[assignment]
+
+    await server.cleanup()
+
+    assert client.calls == ["disconnect"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_disconnects_when_visibility_update_fails() -> None:
+    server = VJServer(
+        require_auth=False,
+        show_spectrograph=False,
+        metrics_port=None,
+    )
+    client = CleanupVizClient(connected=True, visibility_error=RuntimeError("send failed"))
+    server.viz_client = client  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="send failed"):
+        await server.cleanup()
+
+    assert client.calls == ["set_visible", "disconnect"]
 
 
 @pytest.mark.parametrize(
