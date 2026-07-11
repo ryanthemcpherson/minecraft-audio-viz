@@ -20,10 +20,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
@@ -54,13 +56,15 @@ public class MessageQueue {
     private final MessageHandler messageHandler;
 
     // Queue for parsed JSON messages
-    private final ConcurrentLinkedQueue<QueuedMessage> messageQueue;
+    private final ArrayBlockingQueue<QueuedMessage> messageQueue;
 
     // Queue for batched entity updates (collected across messages)
     private final ConcurrentLinkedQueue<EntityUpdate> entityUpdateQueue;
 
     // Dedicated thread pool for JSON parsing
-    private final ExecutorService jsonExecutor;
+    private final ThreadPoolExecutor jsonExecutor;
+    private final Object intakeLock = new Object();
+    private boolean acceptingMessages = true;
 
     // Tick processor task
     private BukkitTask processorTask;
@@ -72,6 +76,8 @@ public class MessageQueue {
     private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
 
     // Backpressure limit
+    private static final int JSON_PARSER_THREADS = 2;
+    private static final int MAX_RAW_QUEUE_SIZE = 64;
     private static final int MAX_QUEUE_SIZE = 1000;
 
     // Pre-allocated identity rotation (immutable, safe to share across all entities).
@@ -103,13 +109,21 @@ public class MessageQueue {
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
         this.messageHandler = messageHandler;
-        this.messageQueue = new ConcurrentLinkedQueue<>();
+        this.messageQueue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
         this.entityUpdateQueue = new ConcurrentLinkedQueue<>();
-        this.jsonExecutor = Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "AudioViz-JSON-Parser");
-            t.setDaemon(true);
-            return t;
-        });
+        this.jsonExecutor = new ThreadPoolExecutor(
+            JSON_PARSER_THREADS,
+            JSON_PARSER_THREADS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(MAX_RAW_QUEUE_SIZE),
+            runnable -> {
+                Thread thread = new Thread(runnable, "AudioViz-JSON-Parser");
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy()
+        );
     }
 
     /**
@@ -129,15 +143,18 @@ public class MessageQueue {
             processorTask.cancel();
             processorTask = null;
         }
-        jsonExecutor.shutdown();
+        synchronized (intakeLock) {
+            acceptingMessages = false;
+            jsonExecutor.shutdown();
+        }
         boolean interrupted = false;
         boolean forcedShutdownLogged = false;
         while (!jsonExecutor.isTerminated()) {
             try {
-                if (jsonExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                if (jsonExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
                     break;
                 }
-                jsonExecutor.shutdownNow();
+                discardQueuedParserTasks();
                 if (!forcedShutdownLogged) {
                     plugin.getLogger().warning(
                         "MessageQueue JSON executor did not terminate gracefully"
@@ -146,7 +163,7 @@ public class MessageQueue {
                 }
             } catch (InterruptedException e) {
                 interrupted = true;
-                jsonExecutor.shutdownNow();
+                discardQueuedParserTasks();
             }
         }
 
@@ -184,7 +201,7 @@ public class MessageQueue {
      * Enqueue raw JSON with a guard that remains attached through parsing and execution.
      */
     public void enqueueRaw(String rawJson, MessageGuard guard) {
-        jsonExecutor.submit(() -> {
+        Runnable parseTask = () -> {
             try {
                 if (!guard.runIfValid(NO_OP)) {
                     messagesDropped.incrementAndGet();
@@ -195,7 +212,19 @@ public class MessageQueue {
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Failed to parse JSON message", e);
             }
-        });
+        };
+
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            try {
+                jsonExecutor.execute(parseTask);
+            } catch (RejectedExecutionException exception) {
+                recordDroppedMessage();
+            }
+        }
     }
 
     /**
@@ -209,18 +238,46 @@ public class MessageQueue {
      * Enqueue parsed JSON with a guard checked atomically around handler execution.
      */
     public void enqueue(JsonObject json, MessageGuard guard) {
-        offer(new QueuedMessage(json, guard));
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            offer(new QueuedMessage(json, guard));
+        }
     }
 
     private void offer(QueuedMessage message) {
-        if (messageQueue.size() >= MAX_QUEUE_SIZE) {
-            messageQueue.poll(); // Drop oldest
-            long dropped = messagesDropped.incrementAndGet();
-            if (dropped % 100 == 1) {
-                plugin.getLogger().warning("MessageQueue backpressure: dropped message (total dropped: " + dropped + ")");
+        synchronized (messageQueue) {
+            if (messageQueue.offer(message)) {
+                return;
+            }
+
+            QueuedMessage discarded = messageQueue.poll();
+            if (!messageQueue.offer(message)) {
+                recordDroppedMessage();
+                return;
+            }
+            if (discarded != null) {
+                recordDroppedMessage();
             }
         }
-        messageQueue.offer(message);
+    }
+
+    private void discardQueuedParserTasks() {
+        int discardedTasks = jsonExecutor.shutdownNow().size();
+        if (discardedTasks > 0) {
+            messagesDropped.addAndGet(discardedTasks);
+        }
+    }
+
+    private void recordDroppedMessage() {
+        long dropped = messagesDropped.incrementAndGet();
+        if (dropped % 100 == 1) {
+            plugin.getLogger().warning(
+                "MessageQueue backpressure: dropped message (total dropped: " + dropped + ")"
+            );
+        }
     }
 
     /**

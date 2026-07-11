@@ -7,9 +7,9 @@ import com.google.gson.JsonParser;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -41,10 +41,12 @@ public class MessageQueue {
     private final MessageHandler messageHandler;
 
     // Queue for parsed JSON messages
-    private final ConcurrentLinkedQueue<QueuedMessage> queue = new ConcurrentLinkedQueue<>();
+    private final ArrayBlockingQueue<QueuedMessage> queue;
 
     // Dedicated thread pool for JSON parsing
-    private final ExecutorService jsonExecutor;
+    private final ThreadPoolExecutor jsonExecutor;
+    private final Object intakeLock = new Object();
+    private boolean acceptingMessages = true;
 
     // Stats
     private final AtomicLong messagesProcessed = new AtomicLong(0);
@@ -52,6 +54,8 @@ public class MessageQueue {
     private final AtomicLong messagesDropped = new AtomicLong(0);
     private final AtomicLong messagesErrored = new AtomicLong(0);
 
+    private static final int JSON_PARSER_THREADS = 2;
+    private static final int MAX_RAW_QUEUE_SIZE = 64;
     private static final int MAX_QUEUE_SIZE = 1000;
 
     // Reusable per-tick maps — cleared each tick
@@ -62,11 +66,20 @@ public class MessageQueue {
 
     public MessageQueue(MessageHandler messageHandler) {
         this.messageHandler = messageHandler;
-        this.jsonExecutor = Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "AudioViz-JSON-Parser");
-            t.setDaemon(true);
-            return t;
-        });
+        this.queue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
+        this.jsonExecutor = new ThreadPoolExecutor(
+            JSON_PARSER_THREADS,
+            JSON_PARSER_THREADS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(MAX_RAW_QUEUE_SIZE),
+            runnable -> {
+                Thread thread = new Thread(runnable, "AudioViz-JSON-Parser");
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy()
+        );
     }
 
     /**
@@ -81,7 +94,7 @@ public class MessageQueue {
      * Enqueue raw JSON with a guard that remains attached through parsing and execution.
      */
     public void enqueueRaw(String rawJson, MessageGuard guard) {
-        jsonExecutor.submit(() -> {
+        Runnable parseTask = () -> {
             try {
                 if (!guard.runIfValid(NO_OP)) {
                     messagesDropped.incrementAndGet();
@@ -92,7 +105,19 @@ public class MessageQueue {
             } catch (Exception e) {
                 AudioVizMod.LOGGER.warn("Failed to parse JSON message", e);
             }
-        });
+        };
+
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            try {
+                jsonExecutor.execute(parseTask);
+            } catch (RejectedExecutionException exception) {
+                recordDroppedMessage();
+            }
+        }
     }
 
     /**
@@ -106,21 +131,47 @@ public class MessageQueue {
      * Enqueue parsed JSON with a guard checked atomically around handler execution.
      */
     public void enqueue(JsonObject json, MessageGuard guard) {
-        offer(new QueuedMessage(json, guard));
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            offer(new QueuedMessage(json, guard));
+        }
     }
 
     private void offer(QueuedMessage message) {
-        if (queue.size() >= MAX_QUEUE_SIZE) {
-            queue.poll();
-            long dropped = messagesDropped.incrementAndGet();
-            if (dropped % 100 == 1) {
-                AudioVizMod.LOGGER.warn(
-                    "MessageQueue backpressure: dropped (total: {})",
-                    dropped
-                );
+        synchronized (queue) {
+            if (queue.offer(message)) {
+                return;
+            }
+
+            QueuedMessage discarded = queue.poll();
+            if (!queue.offer(message)) {
+                recordDroppedMessage();
+                return;
+            }
+            if (discarded != null) {
+                recordDroppedMessage();
             }
         }
-        queue.offer(message);
+    }
+
+    private void discardQueuedParserTasks() {
+        int discardedTasks = jsonExecutor.shutdownNow().size();
+        if (discardedTasks > 0) {
+            messagesDropped.addAndGet(discardedTasks);
+        }
+    }
+
+    private void recordDroppedMessage() {
+        long dropped = messagesDropped.incrementAndGet();
+        if (dropped % 100 == 1) {
+            AudioVizMod.LOGGER.warn(
+                "MessageQueue backpressure: dropped (total: {})",
+                dropped
+            );
+        }
     }
 
     /**
@@ -226,14 +277,35 @@ public class MessageQueue {
      * Stop the message processor.
      */
     public void stop() {
-        jsonExecutor.shutdown();
-        try {
-            if (!jsonExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                jsonExecutor.shutdownNow();
-                AudioVizMod.LOGGER.warn("MessageQueue JSON executor did not terminate gracefully");
+        synchronized (intakeLock) {
+            acceptingMessages = false;
+            jsonExecutor.shutdown();
+        }
+        boolean interrupted = false;
+        boolean forcedShutdownLogged = false;
+        while (!jsonExecutor.isTerminated()) {
+            try {
+                if (jsonExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    break;
+                }
+                discardQueuedParserTasks();
+                if (!forcedShutdownLogged) {
+                    AudioVizMod.LOGGER.warn(
+                        "MessageQueue JSON executor did not terminate gracefully"
+                    );
+                    forcedShutdownLogged = true;
+                }
+            } catch (InterruptedException exception) {
+                interrupted = true;
+                discardQueuedParserTasks();
             }
-        } catch (InterruptedException e) {
-            jsonExecutor.shutdownNow();
+        }
+
+        queue.clear();
+        batchCandidatesByZone.clear();
+        bitmapCandidatesByZone.clear();
+
+        if (interrupted) {
             Thread.currentThread().interrupt();
         }
         long dropped = messagesDropped.get();
