@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from websockets.exceptions import ConnectionClosedError
-from websockets.frames import Close
+from websockets.frames import OP_TEXT, Close, Frame
 
 import vj_server.viz_client as viz_client_module
 from vj_server.viz_client import VizClient
@@ -116,6 +116,56 @@ async def test_connect_authenticates_before_returning_success(
     assert client.server_type == "fabric"
     assert client.auth_token == "shared-secret"
     assert websocket.sent_messages == [{"type": "auth", "token": "shared-secret"}]
+
+
+@pytest.mark.asyncio
+async def test_transport_logger_redacts_encoded_auth_frame_with_escaped_token(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = 'quoted" token with \\backslashes'
+    websocket = FakeWebSocket(
+        {
+            "type": "connected",
+            "auth_required": True,
+            "server_type": "paper",
+        },
+        {"type": "auth_ok"},
+    )
+    connect_calls = install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(auth_token=secret, connect_timeout=0.05)
+
+    assert await client.connect() is True
+
+    auth_wire = client._encode({"type": "auth", "token": secret})
+    auth_frame = Frame(OP_TEXT, auth_wire.encode())
+    peer_echo_frame = Frame(OP_TEXT, f"peer echoed {secret}".encode())
+    embedded_auth_wire = f"peer echoed {auth_wire}"
+    embedded_auth_frame = Frame(OP_TEXT, embedded_auth_wire.encode())
+    transport_logger = connect_calls[0]["logger"]
+    caplog.set_level(logging.DEBUG)
+
+    transport_logger.debug("> %s", auth_frame)
+    transport_logger.debug("< %s", peer_echo_frame)
+    transport_logger.debug("< %s", embedded_auth_wire)
+    transport_logger.debug("< %s", embedded_auth_wire.encode())
+    transport_logger.debug("< %s", embedded_auth_frame)
+
+    encoded_secret = json.dumps(secret)[1:-1]
+    repr_encoded_secret = encoded_secret.replace("\\", "\\\\")
+    assert str(auth_frame) not in caplog.text
+    assert str(peer_echo_frame) not in caplog.text
+    assert str(embedded_auth_frame) not in caplog.text
+    assert embedded_auth_wire not in caplog.text
+    assert repr(embedded_auth_wire) not in caplog.text
+    assert auth_wire not in caplog.text
+    assert repr(auth_wire) not in caplog.text
+    assert secret not in caplog.text
+    assert encoded_secret not in caplog.text
+    assert repr_encoded_secret not in caplog.text
+    assert "[REDACTED]" in caplog.text
+
+    await client.disconnect()
 
 
 @pytest.mark.parametrize("enable_heartbeat", [False, True])

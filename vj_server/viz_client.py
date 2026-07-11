@@ -12,6 +12,7 @@ import msgspec
 import msgspec.json as mjson
 import websockets
 from websockets.client import WebSocketClientProtocol
+from websockets.frames import Frame
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,17 +24,66 @@ class _SecretRedactingLogger(logging.LoggerAdapter):
     def __init__(self, wrapped_logger: logging.Logger, secret: str | None) -> None:
         super().__init__(wrapped_logger, {})
         self._secret = secret
+        if secret is None:
+            self._secret_text_variants: tuple[str, ...] = ()
+            self._secret_byte_variants: tuple[bytes, ...] = ()
+        else:
+            escaped_secret = mjson.encode(secret)[1:-1].decode()
+            text_variants = [secret]
+            if escaped_secret != secret:
+                text_variants.append(escaped_secret)
+            self._secret_text_variants = tuple(text_variants)
+            self._secret_byte_variants = tuple(
+                variant.encode() for variant in self._secret_text_variants
+            )
+
+    def _contains_secret(self, value: Any) -> bool:
+        if self._secret is None:
+            return False
+        if isinstance(value, str):
+            return any(variant in value for variant in self._secret_text_variants)
+        if isinstance(value, bytes):
+            return any(variant in value for variant in self._secret_byte_variants)
+        if isinstance(value, dict):
+            return any(
+                self._contains_secret(key) or self._contains_secret(item)
+                for key, item in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(self._contains_secret(item) for item in value)
+        return False
+
+    def _json_contains_secret(self, value: str | bytes) -> bool:
+        try:
+            decoded = mjson.decode(value)
+        except (msgspec.DecodeError, TypeError):
+            return False
+        return self._contains_secret(decoded)
 
     def _redact(self, value: Any) -> Any:
         if self._secret is None:
             return value
+        if isinstance(value, Frame):
+            frame_data = bytes(value.data)
+            if self._contains_secret(frame_data) or self._json_contains_secret(frame_data):
+                return "[REDACTED]"
         if isinstance(value, str):
-            return value.replace(self._secret, "[REDACTED]")
+            if self._json_contains_secret(value):
+                return "[REDACTED]"
+            for variant in self._secret_text_variants:
+                value = value.replace(variant, "[REDACTED]")
+            return value
         if isinstance(value, bytes):
-            return value.replace(self._secret.encode(), b"[REDACTED]")
+            if self._json_contains_secret(value):
+                return b"[REDACTED]"
+            for variant in self._secret_byte_variants:
+                value = value.replace(variant, b"[REDACTED]")
+            return value
         rendered = str(value)
-        if self._secret in rendered:
-            return rendered.replace(self._secret, "[REDACTED]")
+        if self._contains_secret(rendered):
+            for variant in self._secret_text_variants:
+                rendered = rendered.replace(variant, "[REDACTED]")
+            return rendered
         return value
 
     def log(self, level: int, msg: object, *args: Any, **kwargs: Any) -> None:
