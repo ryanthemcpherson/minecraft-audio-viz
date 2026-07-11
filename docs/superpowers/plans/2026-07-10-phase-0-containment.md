@@ -1276,3 +1276,11 @@ Expected: all planned commits are present and atomic; the linked worktree is cle
 ## Completion Criteria
 
 Phase 0 is complete only when every Task 11 gate is green and its evidence report is committed. Completion does not authorize public DJ-client or Docker distribution. The next action is a focused Phase 1 foundation design covering workspace layout, canonical protocol envelope, benchmark harness, and the first Rust Show Engine skeleton; it must follow a new plan-first approval cycle.
+
+## Final-review amendment — 2026-07-11
+
+Rust dependency auditing uses cargo-audit's default vulnerability exit policy without advisory IDs in an ignore list and without promoting informational warnings to blocking failures. CI and the security workflow emit the complete JSON report, so a vulnerability remains blocking while unmaintained and unsoundness warnings remain visible and report-only. At this review boundary the lockfile reports 20 informational warnings (18 unmaintained and two unsoundness advisories); this amendment does not assert a warning-free dependency graph.
+
+The warnings are upstream or optional/target-specific edges in the quarantined DJ-client graph. The Linux Tauri path reaches the GTK3 family through `tauri` / `tauri-runtime-wry` / `wry` / `webkit2gtk`, including `glib` and `proc-macro-error`. Other Tauri utility paths reach `fxhash` through `kuchikiki` / `selectors` and the `unic-*` crates through `urlpattern`. The optional `voice-opus` feature reaches `audiopus_sys` through `opus`, and `tokio-tungstenite` reaches the warned `rand` version independently of the client's direct `rand` dependency. Cargo-audit correctly reports these lockfile edges even when a feature or target is inactive on the runner.
+
+Report-only warning treatment is bounded by the existing distribution quarantine: DJ release publication remains fail-closed, retained upload steps remain statically false, validation builds remain unsigned with `--no-bundle`, and updater/Docker distribution remains disabled. Reopening DJ distribution requires an approved plan that resolves or explicitly re-evaluates the upstream advisory topology together with signed artifacts, rollback, clean-install, and release-gate evidence; this amendment grants no distribution exception.
