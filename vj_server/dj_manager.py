@@ -941,6 +941,7 @@ class DJManagerMixin:
                         "dj_id": dj_id,
                         "dj_name": dj.dj_name,
                         "is_active": self._active_dj_id == dj_id,
+                        "route_mode": "relay",
                         "current_pattern": self._pattern_name,
                         "pattern_config": {
                             "entity_count": self.entity_count,
