@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -44,6 +46,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private final Consumer<Runnable> authTimeoutScheduler;
     private final Object connectionLifecycleLock;
     private final Object messageIntakeLock;
+    private final CompletableFuture<Void> startupCompletion;
     // Guarded by connectionLifecycleLock. Tracks clients whose connect callback
     // completed and whose matching disconnect callback is still outstanding.
     private int lifecycleActiveClients;
@@ -113,6 +116,7 @@ public class VizWebSocketServer extends WebSocketServer {
         this.lastPongTime = new ConcurrentHashMap<>();
         this.connectionLifecycleLock = new Object();
         this.messageIntakeLock = new Object();
+        this.startupCompletion = new CompletableFuture<>();
         this.lifecycleActiveClients = 0;
 
         // Allow rebinding the port immediately after a server restart
@@ -606,6 +610,10 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onError(WebSocket conn, Exception ex) {
+        if (conn == null) {
+            startupCompletion.completeExceptionally(ex);
+        }
+
         // Guard against null address during shutdown/reload
         String address = "server";
         try {
@@ -641,9 +649,25 @@ public class VizWebSocketServer extends WebSocketServer {
 
     @Override
     public void onStart() {
-        plugin.getLogger().info("WebSocket server started successfully");
-        startHeartbeat();
-        startMetricsLogging();
+        synchronized (connectionLifecycleLock) {
+            if (!acceptingMessages || startupCompletion.isDone()) {
+                return;
+            }
+            try {
+                startHeartbeat();
+                startMetricsLogging();
+                startupCompletion.complete(null);
+            } catch (RuntimeException failure) {
+                startupCompletion.completeExceptionally(failure);
+                cancelScheduledTasks();
+                throw failure;
+            }
+        }
+    }
+
+    /** Completes only after the selector thread has confirmed the listener bind. */
+    public CompletionStage<Void> startupCompletion() {
+        return startupCompletion.minimalCompletionStage();
     }
 
     /**
@@ -706,6 +730,17 @@ public class VizWebSocketServer extends WebSocketServer {
                 ", received=" + totalMessagesReceived.get() +
                 ", sendFailures=" + totalSendFailures.get());
         }, METRICS_LOG_INTERVAL_TICKS, METRICS_LOG_INTERVAL_TICKS);
+    }
+
+    private void cancelScheduledTasks() {
+        if (heartbeatTask != null) {
+            heartbeatTask.cancel();
+            heartbeatTask = null;
+        }
+        if (metricsLogTask != null) {
+            metricsLogTask.cancel();
+            metricsLogTask = null;
+        }
     }
 
     private JsonObject createPingMessage() {
@@ -780,6 +815,7 @@ public class VizWebSocketServer extends WebSocketServer {
                 return;
             }
             acceptingMessages = false;
+            startupCompletion.cancel(false);
         }
 
         // Drain any submission that crossed the intake gate before shutdown.
@@ -807,17 +843,7 @@ public class VizWebSocketServer extends WebSocketServer {
         clients.clear();
         lastPongTime.clear();
 
-        // Cancel heartbeat task
-        if (heartbeatTask != null) {
-            heartbeatTask.cancel();
-            heartbeatTask = null;
-        }
-
-        // Cancel metrics logging task
-        if (metricsLogTask != null) {
-            metricsLogTask.cancel();
-            metricsLogTask = null;
-        }
+        cancelScheduledTasks();
 
         // Close all active connections before stopping the server
         for (WebSocket conn : connectionsToClose) {
