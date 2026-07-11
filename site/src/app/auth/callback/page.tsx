@@ -8,6 +8,7 @@ import {
   exchangeGoogleCode,
   exchangeOAuthCodeWithValidatedState,
   getOAuthProvider,
+  clearStoredOAuthState,
 } from "@/lib/auth";
 import Link from "next/link";
 
@@ -40,9 +41,19 @@ function CallbackHandler() {
   useEffect(() => {
     if (handled.current) return;
 
-    const errorParam = searchParams.get("error");
-    if (errorParam) {
+    const hasCallbackParams = [
+      "error",
+      "error_description",
+      "code",
+      "state",
+    ].some((param) => searchParams.has(param));
+    if (!hasCallbackParams) return;
+
+    handled.current = true;
+
+    if (searchParams.has("error")) {
       const desc = searchParams.get("error_description") || "Permission denied";
+      clearStoredOAuthState();
       // Clean the URL before showing error
       window.history.replaceState({}, "", "/login");
       queueMicrotask(() => setError(desc));
@@ -53,12 +64,10 @@ function CallbackHandler() {
     const state = searchParams.get("state");
 
     if (!code || !state) {
+      clearStoredOAuthState();
       queueMicrotask(() => setError("Missing authorization code. Please try signing in again."));
       return;
     }
-
-    // Mark as handled so we don't re-process on re-render
-    handled.current = true;
 
     const provider = getOAuthProvider(state);
 
