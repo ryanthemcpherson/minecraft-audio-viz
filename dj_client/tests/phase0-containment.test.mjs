@@ -15,6 +15,7 @@ const readRepositoryFile = (relativePath) =>
 const composeEnvironment = {
   ...process.env,
   COMPOSE_PROFILES: "",
+  MCAV_METRICS_TOKEN: "phase0-containment-metrics-token",
   MCAV_USER_JWT_SECRET: "phase0-containment-test",
   POSTGRES_USER: "phase0",
   POSTGRES_PASSWORD: "phase0",
@@ -53,6 +54,24 @@ const runCompose = (composeFile, args) => {
  */
 const readComposeModel = (composeFile) => {
   const result = runCompose(composeFile, ["config", "--no-interpolate", "--format", "json"]);
+  assert.equal(
+    result.status,
+    0,
+    `${result.command} failed with status ${result.status}:\n${result.output}`,
+  );
+
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    assert.fail(`${result.command} returned invalid JSON: ${error.message}\n${result.output}`);
+  }
+};
+
+/**
+ * @param {string} composeFile
+ */
+const readInterpolatedComposeModel = (composeFile) => {
+  const result = runCompose(composeFile, ["config", "--format", "json"]);
   assert.equal(
     result.status,
     0,
@@ -284,6 +303,28 @@ test("unsupported DJ and Docker distribution workflows are fail closed", () => {
   );
   assert.match(djClientCi, /Build Tauri app \(unsigned validation\)/);
   assert.match(djClientCi, /run: npm run tauri:build -- --target/);
+  assert.match(
+    djClientCi,
+    /run: npm run tauri:build -- --target \$\{\{ matrix\.rust_target }} --no-bundle/,
+  );
+  for (const uploadName of [
+    "Upload artifacts (Linux)",
+    "Upload artifacts (Windows)",
+    "Upload artifacts (macOS x64)",
+    "Upload artifacts (macOS ARM64)",
+  ]) {
+    const lines = djClientCi.replace(/\r/g, "").split("\n");
+    const start = lines.findIndex((line) => line === `      - name: ${uploadName}`);
+    assert.notEqual(start, -1, `Missing preserved quarantine step: ${uploadName}`);
+    let end = start + 1;
+    while (end < lines.length && !lines[end].startsWith("      - name: ")) end += 1;
+    const uploadStep = lines.slice(start, end).join("\n");
+    assert.match(
+      uploadStep,
+      /^\s+if:\s*\$\{\{\s*false\s*&&/m,
+      `${uploadName} must remain fail-closed until signed distribution is restored`,
+    );
+  }
   for (const guardedPath of [
     ".github/workflows/release-dj-client.yml",
     ".github/workflows/release.yml",
@@ -319,6 +360,29 @@ test("release and security gates reject masked or unsuccessful checks", () => {
   const combinedRelease = readRepositoryFile(".github/workflows/release.yml");
   const ci = readRepositoryFile(".github/workflows/ci.yml");
   const security = readRepositoryFile(".github/workflows/security.yml");
+  const cargoAuditPolicy = read("src-tauri/.cargo/audit.toml");
+  const approvedRustSecExceptions = [
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2024-0411",
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0414",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0417",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    "RUSTSEC-2024-0429",
+    "RUSTSEC-2025-0057",
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+    "RUSTSEC-2026-0097",
+    "RUSTSEC-2026-0150",
+  ];
 
   for (const [name, workflow] of [
     ["release", combinedRelease],
@@ -333,6 +397,16 @@ test("release and security gates reject masked or unsuccessful checks", () => {
   assert.match(yamlBlock(security, "on", 0), /^\s+push:\s*\n\s+branches:\s*\[main\]\s*$/m);
   assert.equal((ci.match(/npm ci --ignore-scripts/g) ?? []).length, 4);
   assert.equal((security.match(/npm ci --ignore-scripts/g) ?? []).length, 4);
+  assert.deepEqual(
+    [...cargoAuditPolicy.matchAll(/RUSTSEC-\d{4}-\d{4}/g)]
+      .map((match) => match[0])
+      .sort(),
+    approvedRustSecExceptions,
+  );
+  assert.match(cargoAuditPolicy, /^\[output\]\s*\n\s*deny\s*=\s*\["warnings"\]\s*$/m);
+  for (const workflow of [ci, security]) {
+    assert.match(workflow, /cargo audit --json --deny warnings/);
+  }
 
   for (const step of [
     "Run Bandit",
@@ -396,10 +470,15 @@ test("release and security gates reject masked or unsuccessful checks", () => {
 
 test("Compose renders and plans the exact Phase 0 service quarantine", () => {
   const rootModel = readComposeModel("docker-compose.yml");
+  const interpolatedRootModel = readInterpolatedComposeModel("docker-compose.yml");
   assert.deepEqual(Object.keys(rootModel.services).sort(), ["coordinator", "postgres", "vj-server"]);
   assert.deepEqual(rootModel.services["vj-server"].profiles, ["phase0-quarantined"]);
   assert.deepEqual(rootModel.services.coordinator.profiles ?? [], []);
   assert.deepEqual(rootModel.services.postgres.profiles ?? [], []);
+  assert.equal(
+    interpolatedRootModel.services.coordinator.environment.MCAV_METRICS_TOKEN,
+    composeEnvironment.MCAV_METRICS_TOKEN,
+  );
 
   const rootDefaultPlan = runCompose("docker-compose.yml", ["--dry-run", "up", "--no-build"]);
   assertSuccessfulComposePlan("root default plan", rootModel.services, rootDefaultPlan, [

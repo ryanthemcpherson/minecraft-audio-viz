@@ -458,7 +458,7 @@ jobs:
         working-directory: dj_client/src-tauri
         run: |
           set +e
-          cargo audit --json > cargo-audit-report.json
+          cargo audit --json --deny warnings > cargo-audit-report.json
           audit_status=$?
           set -e
           cat cargo-audit-report.json
