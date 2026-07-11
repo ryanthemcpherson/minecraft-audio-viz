@@ -165,6 +165,14 @@ class LuaPattern(VisualizationPattern):
         self._entity_state = {k: dict(v) for k, v in state.items()}
 
     def _load_lua(self, pattern_key: str):
+        if _cached_patterns is None:
+            refresh_pattern_cache()
+
+        pattern_text = _file_cache.get(pattern_key)
+        if pattern_text is None:
+            logger.warning("Pattern file not found: %s.lua", pattern_key)
+            return
+
         LuaRuntime = _resolve_lua_runtime()
         if LuaRuntime is None:
             return
@@ -220,123 +228,118 @@ class LuaPattern(VisualizationPattern):
             string.dump = nil; string.rep = nil
         """)
 
-        # Load lib.lua (prefer pre-loaded cache, fall back to disk)
-        patterns_dir = Path(__file__).parent.parent / "patterns"
+        # Load only the canonical lib.lua discovered during cache refresh.
         lib_text = _lib_cache
-        if lib_text is None:
-            lib_path = patterns_dir / "lib.lua"
-            if lib_path.exists():
-                lib_text = lib_path.read_text(encoding="utf-8")
+        flat_wrapper_factory = None
         if lib_text:
             self._lua.execute(lib_text)
-
-        # Load pattern script (prefer pre-loaded cache, fall back to disk)
-        pattern_text = _file_cache.get(pattern_key)
-        if pattern_text is None:
-            pattern_path = patterns_dir / f"{pattern_key}.lua"
-            if pattern_path.exists():
-                pattern_text = pattern_path.read_text(encoding="utf-8")
-        if pattern_text is not None:
-            self._lua.execute(pattern_text)
-            self._calculate = self._lua.globals()["calculate"]
-            # Pre-allocate persistent Lua tables for reuse each frame
-            self._audio_table = self._lua.table_from(
-                {
-                    "amplitude": 0.0,
-                    "peak": 0.0,
-                    "is_beat": False,
-                    "beat": False,
-                    "beat_intensity": 0.0,
-                    "frame": 0,
-                    "bpm": 0.0,
-                    "beat_phase": 0.0,
-                }
-            )
-            self._bands_table = self._lua.table_from({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0})
-            self._audio_table["bands"] = self._bands_table
-            self._config_table = self._lua.table_from(
-                {
-                    "entity_count": 0,
-                    "zone_size": 0,
-                    "beat_boost": 0.0,
-                    "base_scale": 0.0,
-                    "max_scale": 0.0,
-                }
-            )
-            # Read metadata from Lua globals
-            g = self._lua.globals()
-            try:
-                lua_name = g["name"]
-                if lua_name:
-                    self.name = str(lua_name)
-            except (KeyError, IndexError):
-                pass
-            try:
-                lua_desc = g["description"]
-                if lua_desc:
-                    self.description = str(lua_desc)
-            except (KeyError, IndexError):
-                pass
-            try:
-                rec = g["recommended_entities"]
-                if isinstance(rec, (int, float)):
-                    self.recommended_entities = max(1, min(256, int(rec)))
-            except (KeyError, IndexError):
-                pass
-            try:
-                rec = g["start_blocks"]
-                if self.recommended_entities is None and isinstance(rec, (int, float)):
-                    self.recommended_entities = max(1, min(256, int(rec)))
-            except (KeyError, IndexError):
-                pass
-            try:
-                cat = g["category"]
-                if cat:
-                    self.category = str(cat)
-            except (KeyError, IndexError):
-                pass
-            try:
-                sc = g["static_camera"]
-                if sc is not None:
-                    self.static_camera = bool(sc)
-            except (KeyError, IndexError):
-                pass
-
-            # Inject flat_pack wrapper for fast Lua→Python bridge transfer
-            if _USE_FLAT_PACK and pattern_text is not None:
-                has_optional = any(
-                    kw in pattern_text for kw in ("glow", "brightness", "material", "interpolation")
-                )
-                self._calculate_orig = self._calculate
-                if has_optional:
-                    # Dual mode: return flat array + original tables for optional fields
-                    self._lua.execute("""
-                        local _orig = calculate
-                        function _flat_wrapper(audio, config, dt)
-                            local result = _orig(audio, config, dt)
-                            if not result then return nil, nil, 0 end
-                            local flat, count = flat_pack(result)
-                            return flat, result, count
-                        end
-                    """)
-                    self._calculate = self._lua.globals()["_flat_wrapper"]
-                    self._flat_mode = "dual"
-                else:
-                    # Flat-only mode: no optional fields to read
-                    self._lua.execute("""
-                        local _orig = calculate
-                        function _flat_wrapper(audio, config, dt)
-                            local result = _orig(audio, config, dt)
-                            if not result then return nil, 0 end
-                            local flat, count = flat_pack(result)
+            if _USE_FLAT_PACK:
+                # Capture the trusted packer before pattern code can replace its global.
+                # Copy only the configured entity budget into a plain table so neither
+                # __len nor a forged packer can choose bridge work.
+                flat_wrapper_factory = self._lua.execute("""
+                    local _trusted_flat_pack = flat_pack
+                    return function(original, include_tables)
+                        return function(audio, config, dt, entity_budget)
+                            local result = original(audio, config, dt)
+                            if not result then
+                                if include_tables then return nil, nil, 0 end
+                                return nil, 0
+                            end
+                            local bounded = {}
+                            for i = 1, entity_budget do
+                                local entity = result[i]
+                                if entity == nil then break end
+                                bounded[i] = entity
+                            end
+                            local flat, count = _trusted_flat_pack(bounded)
+                            if include_tables then return flat, bounded, count end
                             return flat, count
                         end
-                    """)
-                    self._calculate = self._lua.globals()["_flat_wrapper"]
-                    self._flat_mode = "flat"
-                logger.debug("Pattern %s: flat_pack mode=%s", pattern_key, self._flat_mode)
-        else:
-            logger.warning(f"Pattern file not found: {pattern_key}.lua")
+                    end
+                """)
+
+        # Load only pattern text selected from the safe discovery cache.
+        self._lua.execute(pattern_text)
+        self._calculate = self._lua.globals()["calculate"]
+        # Pre-allocate persistent Lua tables for reuse each frame
+        self._audio_table = self._lua.table_from(
+            {
+                "amplitude": 0.0,
+                "peak": 0.0,
+                "is_beat": False,
+                "beat": False,
+                "beat_intensity": 0.0,
+                "frame": 0,
+                "bpm": 0.0,
+                "beat_phase": 0.0,
+            }
+        )
+        self._bands_table = self._lua.table_from({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0})
+        self._audio_table["bands"] = self._bands_table
+        self._config_table = self._lua.table_from(
+            {
+                "entity_count": 0,
+                "zone_size": 0,
+                "beat_boost": 0.0,
+                "base_scale": 0.0,
+                "max_scale": 0.0,
+            }
+        )
+        # Read metadata from Lua globals
+        g = self._lua.globals()
+        try:
+            lua_name = g["name"]
+            if lua_name:
+                self.name = str(lua_name)
+        except (KeyError, IndexError):
+            pass
+        try:
+            lua_desc = g["description"]
+            if lua_desc:
+                self.description = str(lua_desc)
+        except (KeyError, IndexError):
+            pass
+        try:
+            rec = g["recommended_entities"]
+            if isinstance(rec, (int, float)):
+                self.recommended_entities = max(1, min(256, int(rec)))
+        except (KeyError, IndexError):
+            pass
+        try:
+            rec = g["start_blocks"]
+            if self.recommended_entities is None and isinstance(rec, (int, float)):
+                self.recommended_entities = max(1, min(256, int(rec)))
+        except (KeyError, IndexError):
+            pass
+        try:
+            cat = g["category"]
+            if cat:
+                self.category = str(cat)
+        except (KeyError, IndexError):
+            pass
+        try:
+            sc = g["static_camera"]
+            if sc is not None:
+                self.static_camera = bool(sc)
+        except (KeyError, IndexError):
+            pass
+
+        # Inject flat_pack wrapper for fast Lua→Python bridge transfer
+        if flat_wrapper_factory is not None:
+            has_optional = any(
+                kw in pattern_text for kw in ("glow", "brightness", "material", "interpolation")
+            )
+            self._calculate_orig = self._calculate
+            if has_optional:
+                # Dual mode: return flat array + original tables for optional fields
+                self._calculate = flat_wrapper_factory(self._calculate, True)
+                self._flat_mode = "dual"
+            else:
+                # Flat-only mode: no optional fields to read
+                self._calculate = flat_wrapper_factory(self._calculate, False)
+                self._flat_mode = "flat"
+            logger.debug("Pattern %s: flat_pack mode=%s", pattern_key, self._flat_mode)
 
     def _smooth_entity(
         self, entity_id, target_x, target_y, target_z, target_scale, target_rotation, dt
@@ -446,11 +449,11 @@ class LuaPattern(VisualizationPattern):
             entities.append(entity)
         return entities
 
-    def _unpack_tables(self, result, dt):
+    def _unpack_tables(self, result, dt, entity_budget):
         """Legacy path: unpack Lua table-of-tables into entity dicts with smoothing."""
         entities = []
         seen_ids = set()
-        for i in range(1, len(result) + 1):
+        for i in range(1, entity_budget + 1):
             entry = result[i]
             if entry is not None:
                 entity_id = str(entry["id"]) if entry["id"] else f"block_{i - 1}"
@@ -538,7 +541,8 @@ class LuaPattern(VisualizationPattern):
 
             # Update pre-allocated config table in-place
             config_table = self._config_table
-            config_table["entity_count"] = self.config.entity_count
+            target_count = max(0, int(self.config.entity_count))
+            config_table["entity_count"] = target_count
             config_table["zone_size"] = self.config.zone_size
             config_table["beat_boost"] = self.config.beat_boost
             config_table["base_scale"] = self.config.base_scale
@@ -548,7 +552,7 @@ class LuaPattern(VisualizationPattern):
             if self._reset_hook is not None:
                 self._reset_hook()
 
-            result = self._calculate(audio_table, config_table, dt)
+            result = self._calculate(audio_table, config_table, dt, target_count)
 
             # Convert Lua result to Python list of dicts
             entities = []
@@ -561,7 +565,7 @@ class LuaPattern(VisualizationPattern):
                 if isinstance(result, tuple):
                     flat_result, entity_count = result
                 if flat_result is not None:
-                    entity_count = int(entity_count or 0)
+                    entity_count = min(target_count, max(0, int(entity_count or 0)))
                     entities = self._unpack_flat(flat_result, entity_count, dt, None)
                     seen_ids = {e["id"] for e in entities}
 
@@ -571,15 +575,14 @@ class LuaPattern(VisualizationPattern):
                 if isinstance(result, tuple):
                     flat_result, table_result, entity_count = result
                 if flat_result is not None:
-                    entity_count = int(entity_count or 0)
+                    entity_count = min(target_count, max(0, int(entity_count or 0)))
                     entities = self._unpack_flat(flat_result, entity_count, dt, table_result)
                     seen_ids = {e["id"] for e in entities}
 
             elif result is not None:
                 # Legacy path: table-of-tables (no flat_pack)
-                entities, seen_ids = self._unpack_tables(result, dt)
+                entities, seen_ids = self._unpack_tables(result, dt, target_count)
             # Enforce a strict entity budget for all patterns.
-            target_count = max(0, int(self.config.entity_count))
             if len(entities) > target_count:
                 entities = entities[:target_count]
             elif len(entities) < target_count:
@@ -678,18 +681,60 @@ _lib_cache: Optional[str] = None
 _cached_patterns: Optional[List[Dict[str, Any]]] = None
 
 
+def _canonical_patterns_root() -> Optional[Path]:
+    """Resolve the configured pattern root without retaining stale discovery state."""
+    try:
+        root = _PATTERNS_DIR.resolve(strict=True)
+    except OSError:
+        return None
+    return root if root.is_dir() else None
+
+
+def _read_contained_lua(lua_file: Path, patterns_root: Path) -> Optional[str]:
+    """Read a regular, non-symlinked Lua file directly beneath the canonical root."""
+    try:
+        if lua_file.is_symlink():
+            return None
+        resolved_file = lua_file.resolve(strict=True)
+        if resolved_file.parent != patterns_root or not resolved_file.is_file():
+            return None
+        return resolved_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+
+
+def _safe_pattern_id(lua_file: Path) -> Optional[str]:
+    """Return the canonical flat ID for a discovered file, rejecting path syntax."""
+    pattern_id = lua_file.stem
+    if not pattern_id or pattern_id in {".", ".."}:
+        return None
+    if "/" in pattern_id or "\\" in pattern_id or "\0" in pattern_id:
+        return None
+    return pattern_id
+
+
 def _preload_pattern_files() -> None:
     """Pre-load all pattern Lua files into memory to avoid blocking I/O in async context."""
-    global _lib_cache
-    if not _PATTERNS_DIR.is_dir():
+    global _file_cache, _lib_cache
+    discovered_patterns: Dict[str, str] = {}
+    discovered_lib = None
+    patterns_root = _canonical_patterns_root()
+    if patterns_root is None:
+        _file_cache = discovered_patterns
+        _lib_cache = discovered_lib
         return
-    lib_path = _PATTERNS_DIR / "lib.lua"
-    if lib_path.exists():
-        _lib_cache = lib_path.read_text(encoding="utf-8")
-    for lua_file in _PATTERNS_DIR.glob("*.lua"):
+
+    discovered_lib = _read_contained_lua(patterns_root / "lib.lua", patterns_root)
+    for lua_file in patterns_root.glob("*.lua"):
         if lua_file.name == "lib.lua":
             continue
-        _file_cache[lua_file.stem] = lua_file.read_text(encoding="utf-8")
+        pattern_id = _safe_pattern_id(lua_file)
+        pattern_text = _read_contained_lua(lua_file, patterns_root)
+        if pattern_id is not None and pattern_text is not None:
+            discovered_patterns[pattern_id] = pattern_text
+
+    _file_cache = discovered_patterns
+    _lib_cache = discovered_lib
 
 
 def refresh_pattern_cache() -> None:
@@ -730,23 +775,14 @@ def _extract_lua_bool(text: str, varname: str) -> Optional[bool]:
 
 
 def _build_pattern_list() -> List[Dict[str, Any]]:
-    """Scan patterns/*.lua and build pattern metadata list.
+    """Build metadata from safely discovered, pre-loaded pattern text.
 
     Uses lightweight regex extraction instead of creating Lua VMs,
     making startup ~100x faster (string parsing vs N Lua VM creations).
     """
     result = []
-    if not _PATTERNS_DIR.is_dir():
-        return result
-    for lua_file in sorted(_PATTERNS_DIR.glob("*.lua")):
-        if lua_file.name == "lib.lua":
-            continue
-        key = lua_file.stem
+    for key, text in sorted(_file_cache.items()):
         try:
-            text = _file_cache.get(key)
-            if text is None:
-                text = lua_file.read_text(encoding="utf-8")
-
             name = _extract_lua_string(text, "name") or key.replace("_", " ").title()
             description = _extract_lua_string(text, "description") or ""
             category = _extract_lua_string(text, "category") or ""
@@ -782,8 +818,10 @@ def _build_pattern_list() -> List[Dict[str, Any]]:
 
 
 def _lua_pattern_exists(key: str) -> bool:
-    """Check if a Lua pattern file exists for the given key."""
-    return (_PATTERNS_DIR / f"{key}.lua").exists()
+    """Check membership in the canonical safe-discovery cache."""
+    if _cached_patterns is None:
+        refresh_pattern_cache()
+    return isinstance(key, str) and key in _file_cache
 
 
 def get_pattern(name: str, config: PatternConfig = None) -> VisualizationPattern:
