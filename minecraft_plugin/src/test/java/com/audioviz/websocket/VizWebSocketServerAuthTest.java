@@ -16,6 +16,7 @@ import org.bukkit.Server;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.scheduler.BukkitScheduler;
+import org.bukkit.scheduler.BukkitTask;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.junit.jupiter.api.BeforeEach;
@@ -514,6 +515,91 @@ class VizWebSocketServerAuthTest {
         verify(connection, never()).send(anyString());
         server.onClose(connection, 4003, "Browser clients are not allowed", false);
         assertInactive(server);
+    }
+
+    @Test
+    void serverLevelErrorBeforeStartFailsStartupCompletion() {
+        VizWebSocketServer server = newServer("");
+        IllegalStateException failure = new IllegalStateException("bind failed");
+
+        server.onError(null, failure);
+
+        var completionFailure = assertThrows(
+            java.util.concurrent.CompletionException.class,
+            () -> server.startupCompletion().toCompletableFuture().join()
+        );
+        assertEquals(failure, completionFailure.getCause());
+    }
+
+    @Test
+    void startupCompletionObservationCannotCompleteServerStartup() {
+        VizWebSocketServer server = newServer("");
+
+        server.startupCompletion().toCompletableFuture().complete(null);
+
+        assertFalse(server.startupCompletion().toCompletableFuture().isDone());
+    }
+
+    @Test
+    void shutdownCancelsPendingStartupAndLateOnStartCannotScheduleTasks() throws Exception {
+        VizWebSocketServer server = spy(newServer(""));
+        doAnswer(invocation -> null).when(server).stop(3000);
+
+        server.shutdown();
+        server.onStart();
+
+        var startup = server.startupCompletion().toCompletableFuture();
+        assertTrue(startup.isCompletedExceptionally());
+        var cancellation = assertThrows(
+            java.util.concurrent.CompletionException.class,
+            startup::join
+        );
+        assertTrue(cancellation.getCause() instanceof java.util.concurrent.CancellationException);
+        verifyNoInteractions(scheduler);
+        verify(messageQueue).stop();
+    }
+
+    @Test
+    void confirmedStartCompletesStartupAndSchedulesHeartbeatAndMetrics() {
+        when(plugin.getServer()).thenReturn(bukkitServer);
+        when(bukkitServer.getScheduler()).thenReturn(scheduler);
+        VizWebSocketServer server = newServer("");
+
+        server.onStart();
+
+        var startup = server.startupCompletion().toCompletableFuture();
+        assertTrue(startup.isDone());
+        assertFalse(startup.isCompletedExceptionally());
+        verify(scheduler).runTaskTimerAsynchronously(
+            eq(plugin), any(Runnable.class), eq(300L), eq(300L));
+        verify(scheduler).runTaskTimerAsynchronously(
+            eq(plugin), any(Runnable.class), eq(6000L), eq(6000L));
+    }
+
+    @Test
+    void schedulerFailureFailsStartupAndCancelsPartiallyScheduledTasks() {
+        when(plugin.getServer()).thenReturn(bukkitServer);
+        when(bukkitServer.getScheduler()).thenReturn(scheduler);
+        BukkitTask heartbeatTask = org.mockito.Mockito.mock(BukkitTask.class);
+        when(scheduler.runTaskTimerAsynchronously(
+            eq(plugin), any(Runnable.class), eq(300L), eq(300L)
+        )).thenReturn(heartbeatTask);
+        RejectedExecutionException failure = new RejectedExecutionException("plugin disabled");
+        when(scheduler.runTaskTimerAsynchronously(
+            eq(plugin), any(Runnable.class), eq(6000L), eq(6000L)
+        )).thenThrow(failure);
+        VizWebSocketServer server = newServer("");
+
+        assertThrows(RejectedExecutionException.class, server::onStart);
+
+        var startup = server.startupCompletion().toCompletableFuture();
+        assertTrue(startup.isCompletedExceptionally());
+        var completionFailure = assertThrows(
+            java.util.concurrent.CompletionException.class,
+            startup::join
+        );
+        assertEquals(failure, completionFailure.getCause());
+        verify(heartbeatTask).cancel();
     }
 
     @Test
