@@ -198,6 +198,29 @@ const assertJsonAuditStepIsBlocking = (workflow, stepName) => {
 };
 
 /**
+ * Model the workflow-run provenance accepted by the release gate.
+ *
+ * @param {{
+ *   head_sha?: string,
+ *   head_branch?: string,
+ *   path?: string,
+ *   event?: string,
+ *   status?: string,
+ *   conclusion?: string,
+ * }} run
+ * @param {string} sha
+ * @param {string} workflowPath
+ * @returns {boolean}
+ */
+const isAuthorizedReleaseWorkflowRun = (run, sha, workflowPath) =>
+  run.head_sha === sha &&
+  run.head_branch === "main" &&
+  run.path === workflowPath &&
+  run.event === "push" &&
+  run.status === "completed" &&
+  run.conclusion === "success";
+
+/**
  * @param {unknown} permission
  * @returns {boolean}
  */
@@ -289,8 +312,8 @@ test("unsupported DJ and Docker distribution workflows are fail closed", () => {
   assert.equal((combinedRelease.match(/if-no-files-found:\s*error/g) ?? []).length, 2);
   assert.match(combinedRelease, /fail_on_unmatched_files:\s*true/);
   const releaseGate = yamlBlock(combinedRelease, "ci-gate", 2);
-  assert.match(releaseGate, /for REQUIRED_CHECK in "CI Passed" "Security Summary"/);
-  assert.match(releaseGate, /if \[ "\$CONCLUSION" != "success" \]/);
+  assert.match(releaseGate, /\.github\/workflows\/ci\.yml/);
+  assert.match(releaseGate, /\.github\/workflows\/security\.yml/);
 
   assert.doesNotMatch(
     djClientCi,
@@ -356,33 +379,100 @@ test("unsupported DJ and Docker distribution workflows are fail closed", () => {
   assert.doesNotMatch(dockerWorkflow, /docker\/login-action|packages:\s*write/);
 });
 
+test("primary CI requires community, protocol, and DJ containment contracts", () => {
+  const ci = readRepositoryFile(".github/workflows/ci.yml");
+  const communityBotJob = yamlBlock(ci, "community-bot-test", 2);
+  const protocolJob = yamlBlock(ci, "protocol-contract", 2);
+  const containmentJob = yamlBlock(ci, "dj-phase0-containment", 2);
+
+  assert.match(communityBotJob, /working-directory:\s*community_bot/);
+  assert.match(communityBotJob, /python -m pip install -e "\.\[dev\]"/);
+  assert.match(communityBotJob, /python -m pytest tests\/ -q/);
+  assert.match(protocolJob, /node --test protocol\/tests\/phase0-schemas\.test\.mjs/);
+  assert.match(containmentJob, /docker compose version/);
+  assert.match(containmentJob, /npm --prefix dj_client run test:containment/);
+
+  const summary = yamlBlock(ci, "ci-passed", 2);
+  for (const [jobName, label] of [
+    ["community-bot-test", "Community bot tests"],
+    ["protocol-contract", "Protocol contract"],
+    ["dj-phase0-containment", "DJ Phase 0 containment"],
+  ]) {
+    assert.match(summary, new RegExp(escapeRegExp(`\${{ needs.${jobName}.result }}`)));
+    assert.match(summary, new RegExp(`\\| ${escapeRegExp(label)} \\|`));
+  }
+});
+
+test("tag releases require main ancestry and exact workflow-run provenance", () => {
+  const release = readRepositoryFile(".github/workflows/release.yml");
+  const releaseGate = yamlBlock(release, "ci-gate", 2);
+
+  assert.match(release, /^\s{2}actions:\s*read\s*$/m);
+  assert.doesNotMatch(release, /^\s{2}checks:\s*read\s*$/m);
+  assert.match(releaseGate, /uses:\s*actions\/checkout@v4/);
+  assert.match(releaseGate, /fetch-depth:\s*0/);
+  assert.match(
+    releaseGate,
+    /- name: Require tagged commit on main\s*\n\s+run:\s*\|\s*\n\s+set -euo pipefail\s*\n\s+git fetch/,
+  );
+  assert.match(releaseGate, /git fetch --no-tags origin main:refs\/remotes\/origin\/main/);
+  assert.match(releaseGate, /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/);
+  assert.match(releaseGate, /"ci\.yml:\.github\/workflows\/ci\.yml"/);
+  assert.match(releaseGate, /"security\.yml:\.github\/workflows\/security\.yml"/);
+  assert.match(releaseGate, /actions\/workflows\/\$\{WORKFLOW_FILE\}/);
+  assert.match(releaseGate, /actions\/workflows\/\$\{WORKFLOW_ID\}\/runs/);
+  assert.match(releaseGate, /head_sha="\$GITHUB_SHA"/);
+  assert.match(releaseGate, /branch=main/);
+  assert.match(releaseGate, /status=completed/);
+  assert.match(releaseGate, /--arg workflow_path "\$EXPECTED_WORKFLOW_PATH"/);
+  assert.doesNotMatch(releaseGate, /EXPECTED_RUN_PATH|\.yml@main/);
+  assert.match(releaseGate, /\.head_branch == "main"/);
+  assert.match(releaseGate, /\.path == \$workflow_path/);
+  assert.match(releaseGate, /\.event == "push"/);
+  assert.match(releaseGate, /\.conclusion == "success"/);
+  assert.doesNotMatch(releaseGate, /check-runs|REQUIRED_CHECK|CI Passed|Security Summary/);
+});
+
+test("release provenance model rejects non-main and spoofed workflow runs", () => {
+  const release = readRepositoryFile(".github/workflows/release.yml");
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const workflowPath = ".github/workflows/ci.yml";
+  const validRun = {
+    head_sha: sha,
+    head_branch: "main",
+    path: workflowPath,
+    event: "push",
+    status: "completed",
+    conclusion: "success",
+  };
+
+  assert.equal(isAuthorizedReleaseWorkflowRun(validRun, sha, workflowPath), true);
+  for (const override of [
+    { head_branch: "feature/spoof" },
+    { path: ".github/workflows/spoof.yml", name: "CI" },
+    { path: `${workflowPath}@main` },
+    { head_sha: "ffffffffffffffffffffffffffffffffffffffff" },
+    { event: "workflow_dispatch" },
+    { status: "in_progress", conclusion: null },
+    { conclusion: "failure" },
+  ]) {
+    assert.equal(
+      isAuthorizedReleaseWorkflowRun({ ...validRun, ...override }, sha, workflowPath),
+      false,
+      `unexpectedly authorized provenance override: ${JSON.stringify(override)}`,
+    );
+  }
+
+  assert.match(release, /--arg workflow_path "\$EXPECTED_WORKFLOW_PATH"/);
+  assert.doesNotMatch(release, /EXPECTED_RUN_PATH|\.yml@main|check-runs/);
+});
+
 test("release and security gates reject masked or unsuccessful checks", () => {
   const combinedRelease = readRepositoryFile(".github/workflows/release.yml");
   const ci = readRepositoryFile(".github/workflows/ci.yml");
   const security = readRepositoryFile(".github/workflows/security.yml");
   const cargoAuditPolicy = read("src-tauri/.cargo/audit.toml");
-  const approvedRustSecExceptions = [
-    "RUSTSEC-2024-0370",
-    "RUSTSEC-2024-0411",
-    "RUSTSEC-2024-0412",
-    "RUSTSEC-2024-0413",
-    "RUSTSEC-2024-0414",
-    "RUSTSEC-2024-0415",
-    "RUSTSEC-2024-0416",
-    "RUSTSEC-2024-0417",
-    "RUSTSEC-2024-0418",
-    "RUSTSEC-2024-0419",
-    "RUSTSEC-2024-0420",
-    "RUSTSEC-2024-0429",
-    "RUSTSEC-2025-0057",
-    "RUSTSEC-2025-0075",
-    "RUSTSEC-2025-0080",
-    "RUSTSEC-2025-0081",
-    "RUSTSEC-2025-0098",
-    "RUSTSEC-2025-0100",
-    "RUSTSEC-2026-0097",
-    "RUSTSEC-2026-0150",
-  ];
+  const communityBotPyproject = readRepositoryFile("community_bot/pyproject.toml");
 
   for (const [name, workflow] of [
     ["release", combinedRelease],
@@ -397,20 +487,36 @@ test("release and security gates reject masked or unsuccessful checks", () => {
   assert.match(yamlBlock(security, "on", 0), /^\s+push:\s*\n\s+branches:\s*\[main\]\s*$/m);
   assert.equal((ci.match(/npm ci --ignore-scripts/g) ?? []).length, 4);
   assert.equal((security.match(/npm ci --ignore-scripts/g) ?? []).length, 4);
-  assert.deepEqual(
-    [...cargoAuditPolicy.matchAll(/RUSTSEC-\d{4}-\d{4}/g)]
-      .map((match) => match[0])
-      .sort(),
-    approvedRustSecExceptions,
+  assert.doesNotMatch(cargoAuditPolicy, /RUSTSEC-\d{4}-\d{4}/);
+  assert.doesNotMatch(cargoAuditPolicy, /^\s*ignore\s*=|^\s*deny\s*=.*warnings/m);
+  assert.match(communityBotPyproject, /^\[build-system\]$/m);
+  assert.match(communityBotPyproject, /^\[tool\.setuptools\]$/m);
+  assert.match(communityBotPyproject, /^packages\s*=\s*\["community_bot"\]\s*$/m);
+  assert.match(
+    communityBotPyproject,
+    /^package-dir\s*=\s*\{\s*community_bot\s*=\s*"\."\s*}\s*$/m,
   );
-  assert.match(cargoAuditPolicy, /^\[output\]\s*\n\s*deny\s*=\s*\["warnings"\]\s*$/m);
   for (const workflow of [ci, security]) {
-    assert.match(workflow, /cargo audit --json --deny warnings/);
+    assert.match(workflow, /cargo audit --json > cargo-audit-report\.json/);
+    assert.doesNotMatch(workflow, /cargo audit[^\n]*(?:--deny|--ignore)/);
+    assert.match(workflow, /python -m venv \.audit-venvs\/community-bot/);
+    assert.match(workflow, /\.audit-venvs\/community-bot\/bin\/python -m pip install -e "\.\/community_bot\[dev\]" pip-audit/);
+    assert.match(workflow, /community-bot-pip-audit-report\.json/);
+    assert.match(
+      workflow,
+      /- name: Install community_bot audit dependencies\s*\n\s+if:\s*always\(\)/,
+    );
   }
+  assert.match(assertJsonAuditStepIsBlocking(ci, "Audit community_bot package"), /^\s+if:\s*always\(\)\s*$/m);
+  assert.match(
+    assertJsonAuditStepIsBlocking(security, "community_bot pip-audit (JSON report)"),
+    /^\s+if:\s*always\(\)\s*$/m,
+  );
 
   for (const step of [
     "Run Bandit",
     "Run pip-audit",
+    "Audit community_bot package",
     "Audit root package",
     "Audit dj_client package",
     "Audit site package",
@@ -422,6 +528,7 @@ test("release and security gates reject masked or unsuccessful checks", () => {
 
   for (const step of [
     "pip-audit (JSON report)",
+    "community_bot pip-audit (JSON report)",
     "Audit root package",
     "Audit dj_client package",
     "Audit site package",
@@ -449,6 +556,9 @@ test("release and security gates reject masked or unsuccessful checks", () => {
     "coordinator-test",
     "vj-server-test",
     "dj-client-test",
+    "community-bot-test",
+    "protocol-contract",
+    "dj-phase0-containment",
     "python-sast",
     "python-audit",
     "java-audit",

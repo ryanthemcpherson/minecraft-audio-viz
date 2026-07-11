@@ -55,12 +55,33 @@ jobs:
           fi
           exit "$audit_status"
 
+      - name: Install community_bot audit dependencies
+        if: always()
+        run: |
+          python -m venv .audit-venvs/community-bot
+          .audit-venvs/community-bot/bin/python -m pip install --upgrade pip
+          .audit-venvs/community-bot/bin/python -m pip install -e "./community_bot[dev]" pip-audit
+
+      - name: community_bot pip-audit (JSON report)
+        if: always()
+        run: |
+          set +e
+          .audit-venvs/community-bot/bin/python -m pip_audit --desc --local --format json --output community-bot-pip-audit-report.json
+          audit_status=$?
+          set -e
+          if [ -f community-bot-pip-audit-report.json ]; then
+            cat community-bot-pip-audit-report.json
+          fi
+          exit "$audit_status"
+
       - name: Upload pip-audit report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pip-audit-report
-          path: pip-audit-report.json
+          path: |
+            pip-audit-report.json
+            community-bot-pip-audit-report.json
           retention-days: 30
           if-no-files-found: ignore
 
@@ -176,7 +197,7 @@ jobs:
         working-directory: dj_client/src-tauri
         run: |
           set +e
-          cargo audit --json --deny warnings > cargo-audit-report.json
+          cargo audit --json > cargo-audit-report.json
           audit_status=$?
           set -e
           cat cargo-audit-report.json

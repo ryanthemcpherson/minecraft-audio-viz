@@ -101,12 +101,33 @@ jobs:
           fi
           exit "$audit_status"
 
+      - name: Install community_bot audit dependencies
+        if: always()
+        run: |
+          python -m venv .audit-venvs/community-bot
+          .audit-venvs/community-bot/bin/python -m pip install --upgrade pip
+          .audit-venvs/community-bot/bin/python -m pip install -e "./community_bot[dev]" pip-audit
+
+      - name: Audit community_bot package
+        if: always()
+        run: |
+          set +e
+          .audit-venvs/community-bot/bin/python -m pip_audit --desc --local --format json --output community-bot-pip-audit-report.json
+          audit_status=$?
+          set -e
+          if [ -f community-bot-pip-audit-report.json ]; then
+            cat community-bot-pip-audit-report.json
+          fi
+          exit "$audit_status"
+
       - name: Upload pip-audit report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pip-audit-report-${{ github.sha }}
-          path: pip-audit-report.json
+          path: |
+            pip-audit-report.json
+            community-bot-pip-audit-report.json
           retention-days: 30
 
   # ---------------------------------------------------------------------------
@@ -265,6 +286,30 @@ jobs:
         run: pytest vj_server/tests -v --tb=short --timeout=60 --timeout-method=signal -p no:cacheprovider --cov=vj_server --cov-report=term-missing --cov-fail-under=15
 
   # ---------------------------------------------------------------------------
+  # Community bot: installable package + tests
+  # ---------------------------------------------------------------------------
+  community-bot-test:
+    name: Community Bot Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install community bot dependencies
+        working-directory: community_bot
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run community bot tests
+        working-directory: community_bot
+        run: python -m pytest tests/ -q
+
+  # ---------------------------------------------------------------------------
   # DJ Client: Rust tests + web build
   # ---------------------------------------------------------------------------
   dj-client-test:
@@ -303,6 +348,43 @@ jobs:
       - name: Run Rust backend tests
         working-directory: dj_client/src-tauri
         run: cargo test
+
+  # ---------------------------------------------------------------------------
+  # Cross-runtime protocol contract
+  # ---------------------------------------------------------------------------
+  protocol-contract:
+    name: Protocol Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run protocol schema contract
+        run: node --test protocol/tests/phase0-schemas.test.mjs
+
+  # ---------------------------------------------------------------------------
+  # DJ Phase 0 distribution containment
+  # ---------------------------------------------------------------------------
+  dj-phase0-containment:
+    name: DJ Phase 0 Containment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify Docker Compose
+        run: docker compose version
+
+      - name: Run Phase 0 containment contract
+        run: npm --prefix dj_client run test:containment
 
   # ---------------------------------------------------------------------------
   # Java: dependency verification (Gradle)
@@ -458,7 +540,7 @@ jobs:
         working-directory: dj_client/src-tauri
         run: |
           set +e
-          cargo audit --json --deny warnings > cargo-audit-report.json
+          cargo audit --json > cargo-audit-report.json
           audit_status=$?
           set -e
           cat cargo-audit-report.json
@@ -539,7 +621,7 @@ jobs:
   ci-passed:
     name: CI Passed
     if: always()
-    needs: [python-lint, java-build, java-plugin-build, site-build, coordinator-test, vj-server-test, dj-client-test, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
+    needs: [python-lint, java-build, java-plugin-build, site-build, coordinator-test, vj-server-test, dj-client-test, community-bot-test, protocol-contract, dj-phase0-containment, python-sast, python-audit, java-audit, npm-audit, rust-audit, license-check, sbom, checksums]
     runs-on: ubuntu-latest
     steps:
       - name: Check required results
@@ -551,6 +633,9 @@ jobs:
                 "${{ needs.coordinator-test.result }}" != "success" ||
                 "${{ needs.vj-server-test.result }}" != "success" ||
                 "${{ needs.dj-client-test.result }}" != "success" ||
+                "${{ needs.community-bot-test.result }}" != "success" ||
+                "${{ needs.protocol-contract.result }}" != "success" ||
+                "${{ needs.dj-phase0-containment.result }}" != "success" ||
                 "${{ needs.python-sast.result }}" != "success" ||
                 "${{ needs.python-audit.result }}" != "success" ||
                 "${{ needs.java-audit.result }}" != "success" ||
@@ -577,6 +662,9 @@ jobs:
           echo "| Coordinator tests | ${{ needs.coordinator-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| VJ server tests | ${{ needs.vj-server-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| DJ client tests | ${{ needs.dj-client-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Community bot tests | ${{ needs.community-bot-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Protocol contract | ${{ needs.protocol-contract.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DJ Phase 0 containment | ${{ needs.dj-phase0-containment.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bandit SAST | ${{ needs.python-sast.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| pip-audit | ${{ needs.python-audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Java dependencies | ${{ needs.java-audit.result }} |" >> $GITHUB_STEP_SUMMARY

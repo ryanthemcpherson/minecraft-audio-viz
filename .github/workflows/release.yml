@@ -5,7 +5,7 @@ on:
     tags: ['v*']
 
 permissions:
-  checks: read
+  actions: read
   contents: write
 
 jobs:
@@ -16,20 +16,60 @@ jobs:
     name: Verify CI Status
     runs-on: ubuntu-latest
     steps:
-      - name: Check required statuses for commit
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require tagged commit on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "ERROR: tagged commit $GITHUB_SHA is not reachable from origin/main."
+            exit 1
+          fi
+
+      - name: Require successful workflow runs for the exact main commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SHA="${GITHUB_SHA}"
-          echo "Checking required statuses for commit ${SHA}..."
-          for REQUIRED_CHECK in "CI Passed" "Security Summary"; do
-            CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${SHA}/check-runs?per_page=100" \
-              --jq "[.check_runs[] | select(.name == \"${REQUIRED_CHECK}\")] | first | .conclusion // \"not_found\"")
-            if [ "$CONCLUSION" != "success" ]; then
-              echo "ERROR: ${REQUIRED_CHECK} has not passed on this commit (status: ${CONCLUSION})."
+          set -euo pipefail
+          for WORKFLOW_SPEC in \
+            "ci.yml:.github/workflows/ci.yml" \
+            "security.yml:.github/workflows/security.yml"; do
+            IFS=: read -r WORKFLOW_FILE EXPECTED_WORKFLOW_PATH <<< "$WORKFLOW_SPEC"
+            WORKFLOW_METADATA=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW_FILE}")
+            WORKFLOW_ID=$(jq -r '.id' <<< "$WORKFLOW_METADATA")
+            WORKFLOW_PATH=$(jq -r '.path' <<< "$WORKFLOW_METADATA")
+
+            if [ "$WORKFLOW_PATH" != "$EXPECTED_WORKFLOW_PATH" ]; then
+              echo "ERROR: ${WORKFLOW_FILE} resolved to ${WORKFLOW_PATH}, not ${EXPECTED_WORKFLOW_PATH}."
               exit 1
             fi
-            echo "${REQUIRED_CHECK} passed on commit ${SHA}."
+
+            WORKFLOW_RUNS=$(gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW_ID}/runs" \
+              -f head_sha="$GITHUB_SHA" \
+              -f branch=main \
+              -f status=completed \
+              -f per_page=100)
+            MATCHING_RUNS=$(jq \
+              --arg sha "$GITHUB_SHA" \
+              --arg workflow_path "$EXPECTED_WORKFLOW_PATH" \
+              '[.workflow_runs[] | select(
+                .head_sha == $sha and
+                .head_branch == "main" and
+                .path == $workflow_path and
+                .event == "push" and
+                .status == "completed" and
+                .conclusion == "success"
+              )] | length' <<< "$WORKFLOW_RUNS")
+
+            if [ "$MATCHING_RUNS" -lt 1 ]; then
+              echo "ERROR: no successful ${EXPECTED_WORKFLOW_PATH} push run exists for main commit ${GITHUB_SHA}."
+              exit 1
+            fi
+            echo "${EXPECTED_WORKFLOW_PATH} passed with exact main-branch provenance for ${GITHUB_SHA}."
           done
 
   build-mod:
