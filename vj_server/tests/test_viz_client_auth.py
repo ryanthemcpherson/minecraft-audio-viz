@@ -28,6 +28,7 @@ class FakeWebSocket:
         self.sent_messages: list[dict[str, Any]] = []
         self.recv_tasks: list[asyncio.Task[Any] | None] = []
         self.closed = False
+        self.close_calls = 0
         self._responses: asyncio.Queue[dict[str, Any] | str | BaseException] = asyncio.Queue()
         self._on_send = on_send
         for response in responses:
@@ -52,6 +53,7 @@ class FakeWebSocket:
         return response if isinstance(response, str) else json.dumps(response)
 
     async def close(self) -> None:
+        self.close_calls += 1
         self.closed = True
 
 
@@ -258,6 +260,39 @@ async def test_connect_fails_closed_when_auth_requirement_is_missing(
     assert websocket.closed is True
 
 
+@pytest.mark.parametrize(
+    ("server_type", "include_server_type"),
+    [
+        pytest.param(None, False, id="missing"),
+        pytest.param("forge", True, id="unknown"),
+        pytest.param(7, True, id="wrong-type"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_rejects_invalid_renderer_server_type(
+    monkeypatch: pytest.MonkeyPatch,
+    server_type: Any,
+    include_server_type: bool,
+) -> None:
+    welcome: dict[str, Any] = {"type": "connected", "auth_required": False}
+    if include_server_type:
+        welcome["server_type"] = server_type
+    websocket = FakeWebSocket(welcome)
+    install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(connect_timeout=0.05, enable_heartbeat=True)
+
+    result = await client.connect()
+    connected_after_handshake = client.connected
+    server_type_after_handshake = client.server_type
+    await client.disconnect()
+
+    assert result is False
+    assert connected_after_handshake is False
+    assert server_type_after_handshake is None
+    assert websocket.closed is True
+    assert client.ws is None
+
+
 @pytest.mark.asyncio
 async def test_connect_rejects_non_connected_first_message(
     monkeypatch: pytest.MonkeyPatch,
@@ -380,6 +415,154 @@ async def test_heartbeat_receive_loop_is_sole_reader_and_starts_heartbeat_after_
     assert all(task is receive_task for task in websocket.recv_tasks)
 
     await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_disconnected_transport_and_clears_identity() -> None:
+    websocket = FakeWebSocket()
+    client = VizClient()
+    client.ws = websocket
+    client.server_type = "paper"
+
+    await client.disconnect()
+
+    assert websocket.close_calls == 1
+    assert client.ws is None
+    assert client.server_type is None
+    assert client.connected is False
+
+
+@pytest.mark.asyncio
+async def test_disconnect_awaits_tasks_cancels_requests_and_resets_receive_state() -> None:
+    async def wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    websocket = FakeWebSocket()
+    client = VizClient()
+    client.ws = websocket
+    client.server_type = "fabric"
+    client._connected = True
+    client._use_receive_loop = True
+    client._unmatched_responses.put_nowait({"type": "unsolicited"})
+    heartbeat_task = asyncio.create_task(wait_forever())
+    receive_task = asyncio.create_task(wait_forever())
+    client._heartbeat_task = heartbeat_task
+    client._receive_task = receive_task
+    first_future = asyncio.get_running_loop().create_future()
+    second_future = asyncio.get_running_loop().create_future()
+    client._pending_futures = {1: first_future, 2: second_future}
+    await asyncio.sleep(0)
+
+    await client.disconnect()
+    tasks_done_on_return = heartbeat_task.done() and receive_task.done()
+    await asyncio.gather(heartbeat_task, receive_task, return_exceptions=True)
+
+    assert tasks_done_on_return is True
+    assert heartbeat_task.cancelled() is True
+    assert receive_task.cancelled() is True
+    assert first_future.cancelled() is True
+    assert second_future.cancelled() is True
+    assert client._pending_futures == {}
+    assert client._heartbeat_task is None
+    assert client._receive_task is None
+    assert client._use_receive_loop is False
+    assert client._unmatched_responses.empty()
+    assert client.ws is None
+    assert client.server_type is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_is_idempotent() -> None:
+    websocket = FakeWebSocket()
+    client = VizClient()
+    client.ws = websocket
+    client.server_type = "paper"
+
+    await client.disconnect()
+    await client.disconnect()
+
+    assert websocket.close_calls == 1
+    assert client.ws is None
+    assert client.server_type is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_cancel_or_await_calling_transport_task() -> None:
+    client = VizClient()
+    other_task_started = asyncio.Event()
+
+    async def other_transport_task() -> None:
+        other_task_started.set()
+        await asyncio.Event().wait()
+
+    other_task = asyncio.create_task(other_transport_task())
+    await other_task_started.wait()
+    client._heartbeat_task = other_task
+
+    async def disconnect_from_receive_task() -> None:
+        client._receive_task = asyncio.current_task()
+        await client.disconnect()
+        await asyncio.sleep(0)
+
+    receive_task = asyncio.create_task(disconnect_from_receive_task())
+    await asyncio.wait_for(receive_task, timeout=0.2)
+
+    assert receive_task.cancelled() is False
+    assert other_task.done() is True
+    assert other_task.cancelled() is True
+    assert client._heartbeat_task is None
+    assert client._receive_task is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_cancels_spawned_reconnect_before_transport_can_reopen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reconnect_started = asyncio.Event()
+    allow_reconnect = asyncio.Event()
+    reconnect_tasks: list[asyncio.Task[Any]] = []
+
+    def fail_ping(_message: dict[str, Any]) -> None:
+        raise RuntimeError("ping failed")
+
+    websocket = FakeWebSocket(on_send=fail_ping)
+    reopened_websocket = FakeWebSocket()
+    client = VizClient(auto_reconnect=True)
+    client.ws = websocket
+    client.server_type = "paper"
+    client._connected = True
+
+    async def no_delay(_delay: float) -> None:
+        return None
+
+    async def delayed_reconnect() -> bool:
+        reconnect_task = asyncio.current_task()
+        assert reconnect_task is not None
+        reconnect_tasks.append(reconnect_task)
+        reconnect_started.set()
+        await allow_reconnect.wait()
+        client.ws = reopened_websocket
+        client.server_type = "paper"
+        client._connected = True
+        return True
+
+    monkeypatch.setattr(viz_client_module.asyncio, "sleep", no_delay)
+    monkeypatch.setattr(client, "reconnect", delayed_reconnect)
+
+    await client._heartbeat_loop()
+    await asyncio.wait_for(reconnect_started.wait(), timeout=0.2)
+    reconnect_task = reconnect_tasks[0]
+    await client.disconnect()
+    reconnect_done_on_return = reconnect_task.done()
+    if not reconnect_done_on_return:
+        allow_reconnect.set()
+    await asyncio.gather(reconnect_task, return_exceptions=True)
+
+    assert reconnect_done_on_return is True
+    assert reconnect_task.cancelled() is True
+    assert client.connected is False
+    assert client.ws is None
+    assert client.server_type is None
 
 
 @pytest.mark.parametrize("enable_heartbeat", [False, True])
