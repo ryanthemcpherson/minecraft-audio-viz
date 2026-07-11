@@ -1,6 +1,9 @@
 """Tests for the pattern engine and registry."""
 
-import os
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -112,6 +115,20 @@ class TestLuaPattern:
         result = lua.globals()["_test_os_avail"]
         assert result is False, "os module should be removed from the Lua runtime"
 
+    @pytest.mark.parametrize(
+        "global_name",
+        ("jit", "python", "coroutine", "loadstring", "getfenv", "setfenv", "__reset_hook"),
+    )
+    def test_dangerous_runtime_controls_sandboxed(self, global_name: str):
+        """Patterns cannot recover host access or disable timeout enforcement."""
+        pat = LuaPattern("spectrum")
+        lua = pat._lua
+        if lua is None:
+            pytest.skip("lupa not installed")
+        lua.execute(f"_test_global_avail = ({global_name} ~= nil)")
+        result = lua.globals()["_test_global_avail"]
+        assert result is False, f"{global_name} should be removed from the Lua runtime"
+
 
 # ============================================================================
 # Pattern padding logic
@@ -167,9 +184,6 @@ class TestPatternPadding:
 # ============================================================================
 
 
-_SKIP_TIMEOUT_TESTS = os.environ.get("SKIP_LUA_TIMEOUT_TESTS", "") == "1"
-
-
 class TestLuaTimeout:
     """Tests for instruction-count-based Lua timeout protection."""
 
@@ -184,19 +198,18 @@ class TestLuaTimeout:
             beat_phase=0.0,
         )
 
-    @pytest.mark.skipif(_SKIP_TIMEOUT_TESTS, reason="SKIP_LUA_TIMEOUT_TESTS=1")
-    def test_infinite_loop_returns_empty_entities(self):
-        """A pattern with an infinite loop should be caught by the instruction
-        limit and return an empty entity list instead of hanging forever."""
+    def test_over_budget_loop_returns_empty_entities(self):
+        """A pattern that exceeds its instruction budget should return no entities."""
         config = PatternConfig(entity_count=16)
         pat = LuaPattern("spectrum", config)
         if pat._lua is None:
             pytest.skip("lupa not installed")
 
-        # Inject an infinite-loop calculate function
+        # Exceed the instruction budget with a finite loop so a broken hook
+        # fails the assertion instead of hanging the entire test process.
         pat._lua.execute("""
             function calculate(audio, config, dt)
-                while true do end
+                for _ = 1, 10000000 do end
             end
         """)
         pat._calculate = pat._lua.globals()["calculate"]
@@ -204,9 +217,26 @@ class TestLuaTimeout:
 
         audio = self._make_audio()
         entities = pat.calculate_entities(audio)
-        assert entities == [], "Infinite loop should return empty entities, not hang"
+        assert entities == [], "Over-budget loop should return empty entities"
 
-    @pytest.mark.skipif(_SKIP_TIMEOUT_TESTS, reason="SKIP_LUA_TIMEOUT_TESTS=1")
+    def test_overridden_error_cannot_disable_timeout(self):
+        """The timeout hook must not resolve its error function through pattern globals."""
+        config = PatternConfig(entity_count=16)
+        pat = LuaPattern("spectrum", config)
+        if pat._lua is None:
+            pytest.skip("lupa not installed")
+
+        pat._lua.execute("""
+            error = function() end
+            function calculate(audio, config, dt)
+                for _ = 1, 10000000 do end
+            end
+        """)
+        pat._calculate = pat._lua.globals()["calculate"]
+        pat._flat_mode = None
+
+        assert pat.calculate_entities(self._make_audio()) == []
+
     def test_auto_disable_after_consecutive_timeouts(self):
         """After MAX_CONSECUTIVE_TIMEOUTS consecutive timeouts, the pattern
         should auto-disable (set _calculate to None)."""
@@ -217,10 +247,10 @@ class TestLuaTimeout:
         if pat._lua is None:
             pytest.skip("lupa not installed")
 
-        # Inject infinite loop
+        # Use a finite over-budget loop to keep hook regressions bounded.
         pat._lua.execute("""
             function calculate(audio, config, dt)
-                while true do end
+                for _ = 1, 10000000 do end
             end
         """)
         pat._calculate = pat._lua.globals()["calculate"]
@@ -252,7 +282,53 @@ class TestLuaTimeout:
         # Verify internal counter is 0 (no timeouts)
         assert pat._consecutive_timeouts == 0
 
-    @pytest.mark.skipif(_SKIP_TIMEOUT_TESTS, reason="SKIP_LUA_TIMEOUT_TESTS=1")
+    @pytest.mark.parametrize("runtime_module", ("lupa", "lupa.luajit21"))
+    def test_true_infinite_loop_is_interrupted_in_subprocess(self, runtime_module: str):
+        """Both supported runtimes must interrupt a true infinite loop."""
+        if importlib.util.find_spec(runtime_module) is None:
+            pytest.skip(f"{runtime_module} not installed")
+
+        probe = """
+import importlib
+import sys
+
+import vj_server.patterns as patterns
+from vj_server.patterns import AudioState, LuaPattern, PatternConfig
+
+runtime_module = importlib.import_module(sys.argv[1])
+patterns._resolved_lua_runtime = runtime_module.LuaRuntime
+patterns._resolved_lua_runtime_name = sys.argv[1]
+
+pattern = LuaPattern("spectrum", PatternConfig(entity_count=1))
+pattern._lua.execute("function calculate(audio, config, dt) while true do end end")
+pattern._calculate = pattern._lua.globals()["calculate"]
+pattern._flat_mode = None
+audio = AudioState(
+    bands=[0.5, 0.4, 0.3, 0.2, 0.1],
+    amplitude=0.5,
+    is_beat=False,
+    beat_intensity=0.0,
+    frame=1,
+    bpm=128.0,
+    beat_phase=0.0,
+)
+if pattern.calculate_entities(audio) != []:
+    raise SystemExit("infinite loop did not produce a timeout")
+"""
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", probe, runtime_module],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+                cwd=Path(__file__).resolve().parents[2],
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"{runtime_module} did not interrupt the infinite loop")
+
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+
     def test_success_between_timeouts_resets_counter(self):
         """A successful call between timeouts should reset the counter,
         preventing auto-disable from accumulating across non-consecutive failures."""
@@ -267,10 +343,10 @@ class TestLuaTimeout:
         good_calculate = pat._calculate
         good_flat_mode = pat._flat_mode
 
-        # Inject infinite loop
+        # Use a finite over-budget loop to keep hook regressions bounded.
         pat._lua.execute("""
             function _bad_calc(audio, config, dt)
-                while true do end
+                for _ = 1, 10000000 do end
             end
         """)
         bad_calculate = pat._lua.globals()["_bad_calc"]
