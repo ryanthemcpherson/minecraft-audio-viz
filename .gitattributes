@@ -1,3 +1,4 @@
 # Force LF line endings for shell scripts (prevent CRLF on Windows)
+* whitespace=cr-at-eol
 *.sh text eol=lf
 *.bash text eol=lf
