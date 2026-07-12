@@ -28,9 +28,14 @@ concurrency:
   group: update-minecraft-jar
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   update-jar:
     name: Update server jar on dev host
+    # Phase 0 quarantine: this targets the unused legacy minecraft.service,
+    # not the live Dockerized Minecraft 26.2 runtime under /home/ryan/mc.
+    if: ${{ false }}
     runs-on: [self-hosted, dev-server]
     timeout-minutes: 15
     permissions:
@@ -94,3 +99,14 @@ jobs:
             echo "- Minecraft version: \`${RESOLVED_MC_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "- Service: \`minecraft.service\`" >> "$GITHUB_STEP_SUMMARY"
+
+  update-quarantined:
+    name: MCAV_JAR_UPDATE_QUARANTINED
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain target quarantine
+        run: |
+          echo "The live dev host runs Dockerized Minecraft 26.2 under /home/ryan/mc."
+          echo "The retained updater targets the unused legacy minecraft.service and cannot safely mutate the live runtime."
+          echo "Choose and validate the intended server runtime before re-enabling jar updates."
+          exit 1
