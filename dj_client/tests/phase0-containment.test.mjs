@@ -494,7 +494,7 @@ test("vulnerable historical release tags are externally quarantined", () => {
   const ruleTypes = new Set(ruleset.rules?.map((rule) => rule.type));
   assert.equal(ruleTypes.has("creation"), true);
   const updateRule = ruleset.rules?.find((rule) => rule.type === "update");
-  assert.equal(updateRule?.parameters?.update_allows_fetch_and_merge, false);
+  assert.deepEqual(updateRule, { type: "update" });
   assert.equal(ruleTypes.has("deletion"), true);
   assert.equal(ruleTypes.has("non_fast_forward"), true);
   assert.equal(ruleTypes.has("required_status_checks"), false);
