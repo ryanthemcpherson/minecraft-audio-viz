@@ -251,6 +251,17 @@ These are not green public-release paths and remain work for later phases:
 - Maven Shade rewrites the tracked `dependency-reduced-pom.xml` during packaging; that generated residue was restored after verification. A later build cleanup should generate it under `target/` or stop tracking it.
 - Worker verification requires Node 22 or newer and still uses `wrangler.toml` with compatibility date `2026-02-01`; modernization is deferred to the platform-foundation phase.
 
+## PR Integration Verification
+
+Before merge review, current `origin/main` at `78e077db8552f4dd4291b4f5186a5b27aa42735e` was integrated by merge commit `3b571fa8d481158c2db1f7b18787c513c9e698e7`. The dependency-conflict resolution preserved Phase 0's newer site and Worker toolchains while also retaining upstream TypeScript `6.0.2` and the `@cloudflare/workers-types` `^4.20260331.1` range.
+
+The affected surfaces were reverified from clean installs after that merge:
+
+- Root `npm audit --audit-level=high` and the Vite production build passed with zero reported vulnerabilities.
+- Site `npm audit --audit-level=high`, 103 tests, lint, and the Next.js production build passed; lint retained the same 26 non-blocking warnings recorded above.
+- Worker `npm audit --audit-level=high`, `tsc --noEmit`, and `wrangler deploy --dry-run` passed under Node.js `22.16.0` with Wrangler `4.102.0` and zero reported vulnerabilities.
+- No release workflow, containment policy, runtime implementation, or public-distribution state changed during upstream integration.
+
 ## Final Disposition
 
 Phase 0 containment is verified at implementation HEAD `dcd18fa076cec13b8a6dec7fc6a7a2de378b0df8`; public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
