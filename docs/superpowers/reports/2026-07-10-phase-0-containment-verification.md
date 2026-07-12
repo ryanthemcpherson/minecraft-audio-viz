@@ -2,15 +2,15 @@
 
 Date: 2026-07-12 (America/New_York)
 
-Branch: `fix/phase-0-containment`
+Branch: `fix/quarantine-stale-dev-deploy` (follow-up to merged PR #243)
 
-Verified implementation HEAD before this report: `79f44eaa9501cbcd32a6c26139571e9ed3a092d1`
+Verified implementation HEAD before this report: `e389b21d903ae177e7f01b663a65db4d25324015`
 
 ## Result
 
-**PASS for Phase 0 containment.** Every listed Phase 0 test, lint, SAST, non-Java package audit, build, containment, and negative-security gate completed successfully from committed HEAD. The Paper and Fabric OWASP scanners are required and fail closed, but local unauthenticated NVD bootstrap failed before either scanner could produce a vulnerability report. This report therefore makes no vulnerability-clean claim for Java dependencies. The linked worktree was clean after generated build residue was restored. The original workspace retained its pre-existing untracked user work.
+**PASS for Phase 0 containment.** Every listed Phase 0 test, lint, SAST, non-Java package audit, build, containment, and negative-security gate completed successfully across PR #243's verified implementation commits and its post-merge SHA. The workflow-only follow-up at the implementation HEAD above passed its exact containment, YAML, and whitespace gates. The Paper and Fabric OWASP scanners are required and fail closed, but local unauthenticated NVD bootstrap failed before either scanner could produce a vulnerability report. This report therefore makes no vulnerability-clean claim for Java dependencies. The linked worktree was clean after generated build residue was restored. The original workspace retained its pre-existing untracked user work.
 
-The verified suites contain 2,090 passing tests:
+The verified suites contain 2,091 passing tests:
 
 - VJ server: 438
 - Community bot: 15
@@ -18,7 +18,7 @@ The verified suites contain 2,090 passing tests:
 - Site: 103
 - DJ Rust client: 48
 - Protocol schema contract: 5
-- Phase 0 release/Compose containment: 14
+- Phase 0 release/Compose containment: 15
 - Paper plugin: 947
 - Fabric mod: 268
 
@@ -126,6 +126,10 @@ This result does **not** authorize new public DJ-client, updater, container, Pap
 
 - `79f44ea test(paper): stabilize frame-limit close assertion`
 
+### Task 18 — Quarantine incompatible dev-host deployment
+
+- `e389b21 fix(ci): quarantine incompatible dev deployment`
+
 ## Toolchain
 
 |Tool|Verified version|
@@ -189,7 +193,7 @@ Audit remediation performed during this gate:
 - `npm --prefix site run lint` — exit `0`; zero errors and 26 existing warnings.
 - `npm --prefix site run build` — exit `0`; Next.js 16.2.10 compiled and generated 19 routes.
 - `node --test protocol/tests/phase0-schemas.test.mjs` — exit `0`; 5 passed.
-- `npm --prefix dj_client run test:containment` — exit `0`; 14 passed, including required CI/release provenance, historical-tag quarantine, publisher least privilege, Java scan policy, rendered Compose configuration, and actual dry-run service-plan assertions.
+- `npm --prefix dj_client run test:containment` — exit `0`; 15 passed, including required CI/release provenance, historical-tag quarantine, publisher least privilege, Java scan policy, rendered Compose configuration, actual dry-run service-plan assertions, and fail-closed dev-host workflow quarantine.
 - `npm --prefix dj_client run build` — exit `0`; TypeScript and Vite 7.3.6 production build passed.
 - `cargo fmt --manifest-path dj_client/src-tauri/Cargo.toml -- --check` — exit `0`.
 - `cargo test --manifest-path dj_client/src-tauri/Cargo.toml --locked` — exit `0`; 48 passed.
@@ -219,9 +223,9 @@ Additional repository assertions:
 - `git diff --check` — exit `0`.
 - `git diff cf901958672a6041d309dac1dd281c7e819e485b...HEAD --check` — exit `0`; repository whitespace attributes correctly recognize CRLF line endings while retaining trailing-whitespace detection.
 - `git status --short` — exit `0` with no output after build-residue cleanup; immediately before the documentation commit, its only output was the amended plan and this verification report.
-- YAML parsing of `ci.yml`, `security.yml`, `release.yml`, `release-dj-client.yml`, `release-plugin.yml`, `release-mod.yml`, `docker.yml`, and `dj-client-ci.yml` — all valid.
+- YAML parsing of `ci.yml`, `security.yml`, `release.yml`, `release-dj-client.yml`, `release-plugin.yml`, `release-mod.yml`, `docker.yml`, `dj-client-ci.yml`, `deploy.yml`, and `update-minecraft-jar.yml` — all valid.
 - `.github/rulesets/phase0-release-tags.json` and `.github/rulesets/paper-fabric-release-tags.json` parsed as JSON and match active repository rulesets `18824190` and `18833547`: tag targets, active enforcement, zero bypass actors, `v*`/`dj-v*` and `plugin-v*`/`mod-v*` coverage, plus creation/update/deletion/non-fast-forward restrictions.
-- GitHub workflow IDs `229324789` (`docker.yml`), `234725199` (`release-dj-client.yml`), `239555358` (`release-mod.yml`), and `239555359` (`release-plugin.yml`) report `disabled_manually`; the generic combined workflow `229324792` (`release.yml`) remains active but cannot receive a `v*` tag while the external quarantine is active.
+- GitHub workflow IDs `229324789` (`docker.yml`), `234725199` (`release-dj-client.yml`), `239555358` (`release-mod.yml`), `239555359` (`release-plugin.yml`), `231855317` (`deploy.yml`), and `232828527` (`update-minecraft-jar.yml`) report `disabled_manually`; the generic combined workflow `229324792` (`release.yml`) remains active but cannot receive a `v*` tag while the external quarantine is active.
 - DJ releases `286994513` (`dj-v1.0.0`) and `291202382` (`dj-v1.1.0`) are drafts with their assets retained for recovery; anonymous updater-metadata URLs return `404`.
 - The public GHCR package was deleted and remains restorable for 30 days; its package page returns `404` and anonymous token acquisition returns `403`.
 - The 130 historical Docker/DJ/combined release runs are no longer rerunnable: their newest run is from 2026-03-31, beyond GitHub's [documented 30-day rerun window](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs) as of this report.
@@ -249,6 +253,7 @@ The DJ executable is evidence of compile viability only. It is unsigned, unbundl
 - Paper owns listener startup completion and shutdown cancellation under one lifecycle lock, cancels pending main-thread futures before draining client work, and restores interruption state on timeout paths; Fabric clears equivalent worker and queue state on stop.
 - Coordinator metrics authentication rejects malformed and non-ASCII bearer credentials without raising an internal error.
 - The VJ deployment helper validates loopback configuration before mutation, verifies the launched process owns every configured listener, and requires renderer-connected health before reporting success.
+- Both retained dev-host mutation workflows are manual-only and hard-disable their self-hosted jobs with literal-false conditions. GitHub-hosted sentinel jobs explain the Minecraft-version/runtime mismatch and fail every dispatch; regression tests cover both paths.
 - Primary CI requires community-bot, protocol-contract, containment, Rust audit, and both fail-closed, distribution-scoped Java dependency-scan results. Tag releases require the tagged SHA to be on `main` and exact successful CI/security workflow runs for that SHA.
 - Current tag/main workflows cannot publish a DJ client, updater metadata, or Docker image during Phase 0. Active no-bypass repository rules prevent vulnerable `v*` and `dj-v*` tags from being created, moved, deleted, or force-updated against historical workflow revisions; the legacy remote DJ and Docker workflows are disabled.
 - Generic combined releases are quarantined with `v*`. Paper and Fabric release workflows retain exact-main CI/security provenance checks for a future trusted publisher, but `plugin-v*` and `mod-v*` creation is currently blocked with no bypass and both workflows are disabled to prevent historical-ref execution.
@@ -259,6 +264,7 @@ The DJ executable is evidence of compile viability only. It is unsigned, unbundl
 These are not green public-release paths and remain work for later phases:
 
 - Public DJ-client, updater, VJ-container, Docker, and new Paper/Fabric distribution remains disabled by design. Existing Paper/Fabric releases were preserved.
+- The live development host runs a Dockerized Fabric Minecraft 26.2 server, while the MCAV Fabric mod targets Minecraft 1.21.11. No compatible MCAV renderer is deployed there; deployment must remain quarantined until a compatible Paper-first target is selected or the mod is deliberately ported.
 - Repository rulesets `18824190` and `18833547` must remain active. DJ, Paper, and Fabric release workflows must remain disabled until signed distribution uses a trusted default-branch publisher; the Docker workflow may be re-enabled only after the fail-closed branch version reaches `main`.
 - Java dependency vulnerability status is not cleanly established locally: both OWASP scans failed closed while bootstrapping unauthenticated NVD data. CI has rolling caches and optional `NVD_API_KEY`, and remains blocking if feed retrieval or analysis fails.
 - `cargo audit` reports 20 visible report-only warnings: 18 unmaintained findings plus two unsound findings, `RUSTSEC-2024-0429` (`glib`) and `RUSTSEC-2026-0097` (`rand`). Blocking Rust vulnerabilities are zero, but the remaining dependency topology needs Phase 1 ownership before distribution reopens.
@@ -281,6 +287,12 @@ The affected surfaces were reverified from clean installs after that merge:
 - Worker `npm audit --audit-level=high`, `tsc --noEmit`, and `wrangler deploy --dry-run` passed under Node.js `22.16.0` with Wrangler `4.102.0` and zero reported vulnerabilities.
 - The upstream merge itself changed no release workflow, containment policy, runtime implementation, or public-distribution state. Final review remediation subsequently tightened the renderer transport, bounded routing, shutdown cancellation, release provenance, Java audit scope, and repository control plane described above.
 
+## Post-Merge Runtime Verification
+
+PR #243 merged to `main` as `5e414672b5006c3a12541c1428ab4218abb51039`. Its post-merge primary CI, DJ Client CI, and Security workflows completed successfully. The legacy dev deployment run failed while restarting Minecraft without disrupting the live Docker container and exposed a stale architecture assumption: it targeted `/home/ryan/minecraft-server` and `minecraft.service`, while the actual server is a healthy Dockerized Fabric Minecraft 26.2 runtime under `/home/ryan/mc`.
+
+The competing legacy Paper service was stopped and reset to inactive; the existing Docker container remained healthy and retained port 25565. No 1.21.11 MCAV artifact was copied into the live 26.2 mod directory. Follow-up commit `e389b21` removes the automatic `main` trigger, hard-disables both self-hosted legacy mutation jobs, adds failing GitHub-hosted quarantine sentinels, and corrects the operator runbook. Both workflows are also remotely disabled as an immediate reversible guardrail.
+
 ## Final Disposition
 
-Phase 0 containment is verified at implementation HEAD `79f44eaa9501cbcd32a6c26139571e9ed3a092d1`; anonymous DJ/container artifacts are withdrawn and new public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
+Phase 0 containment and the dev-host deployment quarantine are verified at implementation HEAD `e389b21d903ae177e7f01b663a65db4d25324015`; anonymous DJ/container artifacts are withdrawn, incompatible host mutation is blocked, and new public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
