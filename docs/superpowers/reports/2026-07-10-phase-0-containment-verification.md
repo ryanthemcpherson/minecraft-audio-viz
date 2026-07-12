@@ -1,26 +1,26 @@
 # Phase 0 Containment Verification
 
-Date: 2026-07-10 (America/New_York)
+Date: 2026-07-12 (America/New_York)
 
 Branch: `fix/phase-0-containment`
 
-Verified implementation HEAD before this report: `ddebe60b35d74563ee111d59fe7f10a31638f109`
+Verified implementation HEAD before this report: `dcd18fa076cec13b8a6dec7fc6a7a2de378b0df8`
 
 ## Result
 
-**PASS.** Every blocking Phase 0 test, lint, SAST, dependency-audit, build, containment, and negative-security gate completed successfully from committed HEAD. The linked worktree was clean after generated build residue was removed. The original workspace retained its pre-existing untracked user work.
+**PASS for Phase 0 containment.** Every listed Phase 0 test, lint, SAST, non-Java package audit, build, containment, and negative-security gate completed successfully from committed HEAD. The Paper and Fabric OWASP scanners are required and fail closed, but local unauthenticated NVD bootstrap failed before either scanner could produce a vulnerability report. This report therefore makes no vulnerability-clean claim for Java dependencies. The linked worktree was clean after generated build residue was restored. The original workspace retained its pre-existing untracked user work.
 
-The verified suites contain 1,896 passing tests:
+The verified suites contain 2,007 passing tests:
 
-- VJ server: 396
+- VJ server: 424
 - Community bot: 15
-- Coordinator: 250
-- Site: 86
+- Coordinator: 251
+- Site: 103
 - DJ Rust client: 48
 - Protocol schema contract: 5
-- Phase 0 release/Compose containment: 5
-- Paper plugin: 870
-- Fabric mod: 221
+- Phase 0 release/Compose containment: 10
+- Paper plugin: 913
+- Fabric mod: 238
 
 This result does **not** authorize public DJ-client, updater, or Docker distribution. Those release paths remain deliberately quarantined.
 
@@ -86,17 +86,43 @@ This result does **not** authorize public DJ-client, updater, or Docker distribu
 - `6edc690 chore(deps): update audited web toolchains`
 - `ddebe60 chore(git): recognize CRLF line endings`
 
+### Task 12 — Close whole-branch review findings
+
+- `d33d6a8 fix(security): contain static index resolution`
+- `67633a3 fix(security): cap Lua pattern memory`
+- `3aa9bbf fix(security): harden Minecraft relay failures`
+- `0ac9ad5 fix(protocol): declare relay route on code approval`
+- `7936628 fix(security): consume terminal OAuth state`
+- `65935ac fix(security): enforce final containment policies`
+- `0b85467 fix(security): close Paper lifecycle races`
+- `6713b38 fix(security): contain Lua pattern bridge`
+- `49138cf fix(security): consume direct OAuth callbacks`
+- `608f296 fix(security): harden Minecraft WebSocket frames`
+- `9466c07 fix(perf): bound Minecraft parser queues`
+- `73995a3 fix(lifecycle): own Paper WebSocket startup`
+- `bdf0c03 fix(lifecycle): drain VJ renderer transport`
+
+### Task 13 — Require release and dependency gates
+
+- `0105a62 fix(ci): require containment release gates`
+- `44fa140 fix(security): scan Java dependencies`
+
+### Task 14 — Quarantine historical release workflows
+
+- `e4e8104 fix(release): quarantine historical tag workflows`
+- `dcd18fa fix(release): canonicalize tag ruleset`
+
 ## Toolchain
 
 |Tool|Verified version|
 |-|-|
 |Git|2.53.0.windows.2|
 |Node.js (project default)|20.20.1|
-|Node.js (Worker verification)|24.14.0; CI audit jobs require 22|
-|npm|10.8.2|
+|Node.js (Worker verification)|22.16.0; Worker and CI audit jobs require 22 or newer|
+|npm|10.8.2 with project-default Node; 10.9.2 with Worker Node 22|
 |Python package venvs|3.12.13 under WSL for VJ, community bot, and coordinator|
 |uv|0.10.11|
-|Lupa|2.8, with LuaJIT 2.1 and PUC Lua 5.5 probes|
+|Lupa|2.8 with PUC Lua 5.5 runtime probes and a hard 16 MiB allocator limit|
 |Cargo|1.93.0|
 |rustc|1.93.0|
 |cargo-audit|0.22.1|
@@ -114,23 +140,27 @@ All commands below were run from the clean linked worktree unless a component di
 
 ### Python suites and linters
 
-- `cd vj_server && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check .` under WSL — exit `0`; 396 passed, 55.01% coverage, three upstream WebSockets deprecation warnings.
-- `cd community_bot && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check .` under WSL — exit `0`; 15 passed, one upstream `audioop` deprecation warning.
-- `cd coordinator && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check app tests` under WSL — exit `0`; 250 passed, 63.67% coverage against a 60% threshold.
+- `cd vj_server && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .` under WSL — exit `0`; 424 passed, 58.65% coverage, 37 files already formatted, and three upstream WebSockets deprecation warnings.
+- `cd community_bot && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .` under WSL — exit `0`; 15 passed, 11 files already formatted, and one upstream `audioop` deprecation warning.
+- `cd coordinator && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .` under WSL — exit `0`; 251 passed, 63.67% coverage against a 60% threshold, and 98 files already formatted.
+- `cd community_bot && .venv/bin/python -m pip check` under WSL — exit `0`; the editable `0.1.0` package resolves to this worktree with no broken requirements.
 
 ### SAST and dependency audits
 
-- `cd vj_server && .venv/bin/python -m bandit -r . -c ../pyproject.toml` under WSL — exit `0`; 9,010 project lines scanned, no issues.
-- `cd vj_server && .venv/bin/python -m pip_audit --local` under WSL — exit `0`; no known vulnerabilities. The editable local package itself is not published on PyPI and was reported as unauditable by name.
-- `cd community_bot && .venv/bin/python -m pip_audit --local` under WSL — exit `0`; no known vulnerabilities.
-- `cd coordinator && .venv/bin/python -m pip_audit --local` under WSL — exit `0`; no known vulnerabilities. The editable local package itself is not published on PyPI and was reported as unauditable by name.
+- `cd vj_server && .venv/bin/python -m bandit -r . -c ../pyproject.toml` under WSL — exit `0`; 9,176 project lines scanned, no issues, with one configured disabled-check finding suppressed.
+- `cd vj_server && .venv/bin/python -m pip_audit --local` under WSL — exit `0`; 47 dependencies audited with no known vulnerabilities.
+- `cd community_bot && .venv/bin/python -m pip_audit --local` under WSL — exit `0`; 45 dependencies audited with no known vulnerabilities.
+- `cd coordinator && .venv/bin/python -m pip_audit --local` under WSL — exit `0`; 74 dependencies audited with no known vulnerabilities.
+- Each first-party editable Python package was skipped by `pip-audit` because it is not published on PyPI.
 - `npm audit --audit-level=high` — exit `0`; zero vulnerabilities.
 - `npm --prefix dj_client audit --audit-level=high` — exit `0`; zero vulnerabilities.
 - `npm --prefix site audit --audit-level=high` — exit `0`; zero vulnerabilities.
 - `npm --prefix worker audit --audit-level=high` — exit `0`; zero vulnerabilities.
-- `cargo audit --file dj_client/src-tauri/Cargo.lock` — exit `0`; no blocking vulnerabilities, 18 allowed unmaintained warnings, and two allowed unsound warnings.
+- `cargo audit --json` from `dj_client/src-tauri` — exit `0`; zero vulnerabilities, 18 visible unmaintained warnings, and two visible unsound warnings. No advisory ignore list or warning suppression is active.
 - `JAVA_HOME=Temurin-21; cd minecraft_plugin && .\mvnw.cmd dependency:tree -B` — exit `0`.
 - `JAVA_HOME=Temurin-21; cd minecraft_mod && .\gradlew.bat dependencies --configuration runtimeClasspath` — exit `0`.
+- Paper and Fabric OWASP Dependency-Check 12.2.2 gates are pinned in both primary CI and the security workflow with CVSS `0`, `failOnError`, hosted suppressions disabled, JSON/SARIF artifacts, rolling NVD caches, and optional `NVD_API_KEY` acceleration.
+- Local Paper and Fabric Dependency-Check executions both failed closed during unauthenticated NVD bootstrap after API retry exhaustion. Neither produced a completed vulnerability report, so Java dependency vulnerability status remains unverified locally rather than clean.
 
 Audit remediation performed during this gate:
 
@@ -141,30 +171,30 @@ Audit remediation performed during this gate:
 
 ### Web, protocol, native-client, and Worker gates
 
-- `npm --prefix site test` — exit `0`; 86 passed.
+- `npm --prefix site test` — exit `0`; 103 passed.
 - `npm --prefix site run lint` — exit `0`; zero errors and 26 existing warnings.
 - `npm --prefix site run build` — exit `0`; Next.js 16.2.10 compiled and generated 19 routes.
 - `node --test protocol/tests/phase0-schemas.test.mjs` — exit `0`; 5 passed.
-- `npm --prefix dj_client run test:containment` — exit `0`; 5 passed, including rendered Compose configuration and actual dry-run service-plan assertions.
+- `npm --prefix dj_client run test:containment` — exit `0`; 10 passed, including required CI/release provenance, historical-tag quarantine, Java scan policy, rendered Compose configuration, and actual dry-run service-plan assertions.
 - `npm --prefix dj_client run build` — exit `0`; TypeScript and Vite 7.3.6 production build passed.
 - `cargo fmt --manifest-path dj_client/src-tauri/Cargo.toml -- --check` — exit `0`.
 - `cargo test --manifest-path dj_client/src-tauri/Cargo.toml --locked` — exit `0`; 48 passed.
 - `cargo clippy --manifest-path dj_client/src-tauri/Cargo.toml --locked -- -D warnings` — exit `0`.
 - `npm --prefix dj_client run tauri -- build --no-bundle --no-sign` — exit `0`; unsigned, unbundled executable built without an updater endpoint.
 - `npm run build` — exit `0`; root admin/preview production assets built with Vite 8.1.4.
-- `cd worker && tsc --noEmit` using Node 24.14.0 — exit `0`.
-- `cd worker && wrangler deploy --dry-run` using Node 24.14.0 — exit `0`; Worker compiled without uploading or changing remote state.
+- `cd worker && npx tsc --noEmit` using Node 22.16.0 — exit `0`.
+- `cd worker && npx wrangler deploy --dry-run` using Node 22.16.0 — exit `0`; Wrangler 4.102.0 compiled a 7.25 KiB upload without uploading or changing remote state.
 
 ### Minecraft artifact gates
 
-- `JAVA_HOME=Temurin-21; cd minecraft_plugin && .\mvnw.cmd clean test package` — exit `0`; 870 passed, zero failures/errors/skips, shaded Paper JAR built.
-- `JAVA_HOME=Temurin-21; cd minecraft_mod && .\gradlew.bat clean test build` — exit `0`; 221 passed, zero failures/errors/skips, remapped Fabric JAR built.
+- `JAVA_HOME=Temurin-21; cd minecraft_plugin && .\mvnw.cmd clean test package -B` — exit `0`; 913 test-case results, zero failures/errors/skips, shaded Paper JAR built.
+- `JAVA_HOME=Temurin-21; cd minecraft_mod && .\gradlew.bat clean test build --no-daemon` — exit `0`; 238 passed, zero failures/errors/skips, remapped Fabric JAR built.
 
 ### Negative security assertions
 
 The following searches intentionally return `1`, meaning no forbidden pattern was found:
 
-- `rg -n "pending_pattern_scripts|route\.pattern_scripts|pub mod patterns|mlua|tauri_plugin_updater|plugin-updater|tauri-plugin-updater|releases/latest/download/latest.json" vj_server/dj_manager.py protocol/schemas/messages/stream-route.schema.json dj_client/src dj_client/package.json dj_client/package-lock.json dj_client/src-tauri --glob '!patterns.rs'` — exit `1`.
+- `rg -n "pending_pattern_scripts|route\.pattern_scripts|pub mod patterns|mlua|tauri_plugin_updater|plugin-updater|tauri-plugin-updater|releases/latest/download/latest.json" vj_server/dj_manager.py protocol/schemas/messages/stream-route.schema.json dj_client/src dj_client/package.json dj_client/package-lock.json dj_client/src-tauri --glob '!patterns.rs' --glob '!**/target/**'` — exit `1`.
 - `rg -n "if \(storedState && storedState !== state\)" site/src` — exit `1`.
 - `rg -n "secret != bot.config.webhook_secret|settings.metrics_token is None.*return" community_bot coordinator` — exit `1`.
 - `rg -n "continue-on-error|\|\| true" .github/workflows/ci.yml .github/workflows/security.yml .github/workflows/release.yml .github/workflows/release-dj-client.yml .github/workflows/docker.yml` — exit `1`.
@@ -172,30 +202,37 @@ The following searches intentionally return `1`, meaning no forbidden pattern wa
 Additional repository assertions:
 
 - `git diff --check` — exit `0`.
-- `git diff main...HEAD --check` — exit `0`; repository whitespace attributes correctly recognize CRLF line endings while retaining trailing-whitespace detection.
-- `git status --short` — exit `0` with no output after build-residue cleanup; immediately before the documentation commit, its only output was the untracked verification report.
+- `git diff cf901958672a6041d309dac1dd281c7e819e485b...HEAD --check` — exit `0`; repository whitespace attributes correctly recognize CRLF line endings while retaining trailing-whitespace detection.
+- `git status --short` — exit `0` with no output after build-residue cleanup; immediately before the documentation commit, its only output was the amended plan and this verification report.
 - YAML parsing of `ci.yml`, `security.yml`, `release.yml`, `release-dj-client.yml`, `docker.yml`, and `dj-client-ci.yml` — all valid.
+- `.github/rulesets/phase0-release-tags.json` parsed as JSON and matches active repository ruleset `18824190`: tag target, active enforcement, zero bypass actors, `v*`/`dj-v*` coverage, and creation/update/deletion/non-fast-forward restrictions.
+- GitHub workflow IDs `229324789` (`docker.yml`) and `234725199` (`release-dj-client.yml`) report `disabled_manually`; the Paper/Fabric-only combined workflow `229324792` (`release.yml`) remains active but cannot receive a `v*` tag while the external quarantine is active.
+- The 130 historical Docker/DJ/combined release runs are no longer rerunnable: their newest run is from 2026-03-31, beyond GitHub's [documented 30-day rerun window](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs) as of this report.
 - The original workspace status still contained only its known pre-existing untracked user work; no original-workspace path was staged or committed.
 
 ## Artifact Evidence
 
 |Artifact|Bytes|SHA-256|
 |-|-|-|
-|`minecraft_plugin/target/audioviz-plugin-1.0.0-SNAPSHOT.jar`|1,117,943|`C027EA29B395000CE9BA27B650C87A83C3F8E2EE4BA84E24EA4698F62B915DE9`|
-|`minecraft_mod/build/libs/audioviz-mod-1.0.0.jar`|1,030,541|`C3776990F8827AF55702B2F8F8B98FB943E643F472C3616F33CF62DAD800A755`|
-|`dj_client/src-tauri/target/release/dj-client.exe`|6,739,968|`E81B023A6523FF12F05310392C4038E85E5DDAA9FC5933E0A7AA0839584AB982`|
+|`minecraft_plugin/target/audioviz-plugin-1.0.0-SNAPSHOT.jar`|1,136,370|`F080204D9CE6B469AB916B6C5156EB481025A00EDB0C3BEB8067164F3E50EF86`|
+|`minecraft_mod/build/libs/audioviz-mod-1.0.0.jar`|1,031,988|`7AE3648BAA0659E478C47D6E5E7B672F7A494DFAB370B4708A6B66C5E3093AE1`|
+|`dj_client/src-tauri/target/release/dj-client.exe`|6,739,968|`90E8A9519036F546F8CFCCBA73FFDAC2F70BE185631DB598767B9F227E8ABE52`|
 
 The DJ executable is evidence of compile viability only. It is unsigned, unbundled, and not approved for distribution.
 
 ## Security Outcome Confirmations
 
 - Hostile legacy `stream_route` payloads continue to deserialize for compatibility, but script fields are ignored and no source-execution path remains. Protocol and Rust containment tests cover this behavior.
-- Lua patterns run without the Lupa Python bridge, Python attribute traversal, JIT control, coroutines, legacy loaders, or public timeout-reset controls. Timeout errors and reset closures are private upvalues. True infinite-loop probes pass under both LuaJIT and PUC Lua in killable subprocesses.
-- Missing, mismatched, empty, replayed, or otherwise invalid OAuth state fails before any authorization-code exchange.
+- Static content and Lua pattern IDs are canonicalized beneath their configured roots; traversal, absolute paths, Windows device basenames, backslashes, and symlink escapes are rejected.
+- Lua patterns run without Python attribute traversal, JIT control, coroutines, legacy loaders, or public timeout-reset controls. The trusted Python bridge captures safe packers before untrusted pattern code, bounds iteration before unpacking, and executes under a hard 16 MiB allocator limit. Timeout and infinite-loop probes pass under PUC Lua 5.5 in killable subprocesses.
+- Missing, mismatched, empty, malformed, replayed, or terminal OAuth callbacks fail before any authorization-code exchange and consume state exactly once across both callback surfaces.
 - Community webhook and coordinator metrics authentication fail closed when their secrets/tokens are absent or invalid.
-- Minecraft relay connections authenticate before use, and peer-controlled transport errors cannot disclose relay secrets.
-- Paper and Fabric non-loopback WebSocket listeners remain offline without a configured shared secret. Admission, queue, and lifecycle transitions are serialized and guarded.
-- Tag/main workflows cannot publish a DJ client, updater metadata, or Docker image during Phase 0. Combined releases are limited to Paper and Fabric artifacts.
+- Minecraft relay connections authenticate before use, declare their renderer route after code approval, drain owned pending work on disconnect, and redact peer-controlled transport failures.
+- Paper and Fabric non-loopback WebSocket listeners remain offline without a configured shared secret. Closed auth envelopes, 256 KiB frame limits, bounded two-worker parser queues, constant-time drop-oldest backpressure, sanitized close reasons, and guarded admission/lifecycle transitions prevent unauthenticated work and unbounded growth.
+- Paper owns listener startup completion and shutdown cancellation under one lifecycle lock; Fabric clears equivalent worker and queue state on stop.
+- Primary CI requires community-bot, protocol-contract, containment, Rust audit, and both Java dependency-scan results. Tag releases require the tagged SHA to be on `main` and exact successful CI/security workflow runs for that SHA.
+- Current tag/main workflows cannot publish a DJ client, updater metadata, or Docker image during Phase 0. Active no-bypass repository rules prevent vulnerable `v*` and `dj-v*` tags from being created, moved, deleted, or force-updated against historical workflow revisions; the legacy remote DJ and Docker workflows are disabled.
+- Generic combined releases are quarantined with `v*`; supported `plugin-v*` and `mod-v*` release routes remain available for Paper and Fabric artifacts.
 - VJ and demo Compose services require the explicit `phase0-quarantined` profile and are absent from the default dry-run plan.
 
 ## Non-Phase-0 Limitations
@@ -203,14 +240,17 @@ The DJ executable is evidence of compile viability only. It is unsigned, unbundl
 These are not green public-release paths and remain work for later phases:
 
 - Public DJ-client, updater, VJ-container, and Docker distribution remains disabled by design.
-- `cargo audit` reports 20 allowed warnings: 18 unmaintained findings plus two unsound findings, `RUSTSEC-2024-0429` (`glib`) and `RUSTSEC-2026-0097` (`rand`). Blocking Rust vulnerabilities are zero, but the remaining dependency topology needs Phase 1 ownership.
+- Repository ruleset `18824190` must remain active. The DJ workflow should remain disabled until signed distribution is deliberately reopened; the Docker workflow may be re-enabled only after the fail-closed branch version reaches `main`.
+- Java dependency vulnerability status is not cleanly established locally: both OWASP scans failed closed while bootstrapping unauthenticated NVD data. CI has rolling caches and optional `NVD_API_KEY`, and remains blocking if feed retrieval or analysis fails.
+- `cargo audit` reports 20 visible report-only warnings: 18 unmaintained findings plus two unsound findings, `RUSTSEC-2024-0429` (`glib`) and `RUSTSEC-2026-0097` (`rand`). Blocking Rust vulnerabilities are zero, but the remaining dependency topology needs Phase 1 ownership before distribution reopens.
+- Renderer authentication is bearer-secret based; any non-loopback deployment must use trusted WSS transport and secret rotation because plaintext `ws://` permits capture and replay.
+- Local Lua patterns still execute in the VJ server process. Path containment, sandboxing, instruction limits, and memory limits reduce exposure, while OS-level isolation remains future hardening.
 - Site lint exits successfully with 26 existing warnings, including generated Fengari code and several unused imports. The root Vite build also warns about classic scripts that cannot be bundled as ES modules.
 - VJ uses deprecated WebSockets compatibility APIs, and the community bot depends on Python's deprecated `audioop` through Discord.py.
 - Paper emits Mockito dynamic-agent, deprecated API, and shaded-resource overlap warnings. Fabric emits deprecated API and Gradle-10 compatibility warnings.
 - Maven Shade rewrites the tracked `dependency-reduced-pom.xml` during packaging; that generated residue was restored after verification. A later build cleanup should generate it under `target/` or stop tracking it.
 - Worker verification requires Node 22 or newer and still uses `wrangler.toml` with compatibility date `2026-02-01`; modernization is deferred to the platform-foundation phase.
-- The community-bot editable-install packaging layout remains a separate maintenance issue; its WSL test environment and dependency audit are green.
 
 ## Final Disposition
 
-Phase 0 containment is verified and ready for branch-level review. The next authorized engineering step is a new plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
+Phase 0 containment is verified at implementation HEAD `dcd18fa076cec13b8a6dec7fc6a7a2de378b0df8`; public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.

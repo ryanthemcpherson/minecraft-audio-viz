@@ -1038,7 +1038,7 @@ npm --prefix dj_client run test:containment
 npm --prefix dj_client run build
 cargo test --manifest-path dj_client/src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path dj_client/src-tauri/Cargo.toml --locked -- -D warnings
-rg -n "plugin-updater|tauri-plugin-updater|tauri_plugin_updater|createUpdaterArtifacts.: true|releases/latest/download/latest.json|updater:" dj_client/src dj_client/package.json dj_client/package-lock.json dj_client/src-tauri
+rg -n "plugin-updater|tauri-plugin-updater|tauri_plugin_updater|createUpdaterArtifacts.: true|releases/latest/download/latest.json|updater:" dj_client/src dj_client/package.json dj_client/package-lock.json dj_client/src-tauri --glob '!**/target/**'
 ```
 
 Expected: tests/build/Clippy exit 0; `rg` exits 1 with no active updater matches, including generated schemas.
@@ -1227,7 +1227,7 @@ Expected: all tests pass and both production JARs build under Java 21.
 - [ ] **Step 5: Run negative security assertions**
 
 ```powershell
-rg -n "pending_pattern_scripts|route\.pattern_scripts|pub mod patterns|mlua|tauri_plugin_updater|plugin-updater|tauri-plugin-updater|releases/latest/download/latest.json" vj_server/dj_manager.py protocol/schemas/messages/stream-route.schema.json dj_client/src dj_client/package.json dj_client/package-lock.json dj_client/src-tauri --glob '!patterns.rs'
+rg -n "pending_pattern_scripts|route\.pattern_scripts|pub mod patterns|mlua|tauri_plugin_updater|plugin-updater|tauri-plugin-updater|releases/latest/download/latest.json" vj_server/dj_manager.py protocol/schemas/messages/stream-route.schema.json dj_client/src dj_client/package.json dj_client/package-lock.json dj_client/src-tauri --glob '!patterns.rs' --glob '!**/target/**'
 rg -n "if \(storedState && storedState !== state\)" site/src
 rg -n "secret != bot.config.webhook_secret|settings.metrics_token is None.*return" community_bot coordinator
 rg -n "continue-on-error|\|\| true" .github/workflows/ci.yml .github/workflows/security.yml .github/workflows/release.yml .github/workflows/release-dj-client.yml .github/workflows/docker.yml
