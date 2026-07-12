@@ -7,15 +7,15 @@ Last reviewed: 2026-02-11
 For a private server with 1-10 players, forward only what is required:
 
 | Port | Forward from router? | Why |
-|---|---|---|
+|-|-|-|
 | `25565/tcp` | Yes | Player Minecraft connections |
 | `25575/tcp` (RCON) | No | Admin-only control; keep local/VPN only |
-| `8765/tcp` (AudioViz WS) | No (usually) | Needed only between trusted MCAV components |
+| `8765/tcp` (AudioViz WS) | Never | Renderer control is loopback-only; tunnel it when VJ runs elsewhere |
 | `8766/tcp` | No | Browser preview channel |
 | `9000/tcp` | No | DJ relay input |
 | `8080/tcp`, `8081/tcp` | No | Admin/preview HTTP |
 
-If you need remote AudioViz ingestion, prefer a private tunnel/VPN instead of direct router forwarding.
+If the VJ server runs elsewhere, use an encrypted TCP tunnel that terminates at `127.0.0.1:8765` on the Minecraft host. A VPN route by itself is not sufficient because the renderer intentionally rejects non-loopback binds. Never forward port 8765 from the router.
 
 ## Recommended Server Settings (1-10 players)
 

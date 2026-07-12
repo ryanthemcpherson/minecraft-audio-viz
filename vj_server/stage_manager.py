@@ -330,25 +330,6 @@ class StageManagerMixin:
             config = AUDIO_PRESETS[preset_name]
             await self._broadcast_preset_to_djs(config.to_dict(), preset_name)
 
-    # --- Pattern scripts ---
-
-    def _get_pattern_scripts(self) -> dict:
-        """Load all Lua pattern scripts for sending to DJs."""
-        scripts = {}
-        patterns_dir = Path(__file__).parent.parent / "patterns"
-        if not patterns_dir.exists():
-            return scripts
-        # Load lib.lua
-        lib_path = patterns_dir / "lib.lua"
-        if lib_path.exists():
-            scripts["lib"] = lib_path.read_text(encoding="utf-8")
-        # Load all pattern files
-        for lua_file in patterns_dir.glob("*.lua"):
-            if lua_file.name != "lib.lua":
-                key = lua_file.stem
-                scripts[key] = lua_file.read_text(encoding="utf-8")
-        return scripts
-
     # --- Bitmap & Zone Rendering ---
 
     async def _auto_init_bitmap_zones(self, zone_names: list[str]):

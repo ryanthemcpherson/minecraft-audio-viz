@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -29,14 +30,14 @@ async def _verify_metrics_token(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> None:
-    """Check Bearer token on /metrics when metrics_token is configured and env != development."""
-    if settings.metrics_token is None:
-        return
-    if settings.mcav_env.lower() == "development":
-        return
+    """Require the configured Bearer token on the metrics endpoint."""
+    token = (settings.metrics_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=503, detail="Metrics authentication is not configured")
 
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer ") or auth[7:] != settings.metrics_token:
+    authorization = request.headers.get("authorization", "")
+    provided = authorization[7:] if authorization.startswith("Bearer ") else ""
+    if not provided or not hmac.compare_digest(provided.encode(), token.encode()):
         raise HTTPException(status_code=401, detail="Invalid or missing metrics token")
 
 

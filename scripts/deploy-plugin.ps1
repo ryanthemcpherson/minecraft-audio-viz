@@ -181,7 +181,7 @@ if (-not $ModOnly) {
         }
 
         # Start fresh VJ server
-        ssh $SshTarget "cd '${RemoteProject}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host ${Server} > /tmp/vj_server.log 2>&1 &"
+        ssh $SshTarget "cd '${RemoteProject}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
         Start-Sleep -Seconds 3
 
         # Verify
@@ -201,7 +201,7 @@ if (-not $ModOnly) {
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  Deploy complete!" -ForegroundColor Green
-Write-Host "  WebSocket:     ws://${Server}:8765" -ForegroundColor Gray
+Write-Host "  Renderer link: ws://127.0.0.1:8765 (remote host only)" -ForegroundColor Gray
 Write-Host "  Admin Panel:   http://${Server}:8081" -ForegroundColor Gray
 Write-Host "  Preview:       http://${Server}:8080" -ForegroundColor Gray
 Write-Host "  VJ Server:     ws://${Server}:9000" -ForegroundColor Gray

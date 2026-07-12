@@ -50,10 +50,14 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 
 /**
@@ -63,6 +67,9 @@ public class MessageHandler {
 
     private final AudioVizPlugin plugin;
     private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
+    private final Object pendingMainThreadCallsLock = new Object();
+    private final Set<Future<?>> pendingMainThreadCalls = new HashSet<>();
+    private boolean acceptingMainThreadCalls = true;
 
     /** Valid zone/stage name: 1-64 alphanumeric characters, underscores, and hyphens. */
     private static final Pattern VALID_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
@@ -70,6 +77,19 @@ public class MessageHandler {
 
     public MessageHandler(AudioVizPlugin plugin) {
         this.plugin = plugin;
+    }
+
+    /**
+     * Cancel synchronous Bukkit calls that cannot complete while plugin shutdown owns
+     * the main thread. New calls remain disabled because this handler is not reused.
+     */
+    public void cancelPendingMainThreadCalls() {
+        List<Future<?>> callsToCancel;
+        synchronized (pendingMainThreadCallsLock) {
+            acceptingMainThreadCalls = false;
+            callsToCancel = new ArrayList<>(pendingMainThreadCalls);
+        }
+        callsToCancel.forEach(call -> call.cancel(false));
     }
 
     /**
@@ -1576,17 +1596,43 @@ public class MessageHandler {
             return createError("Stage not found: " + stageName);
         }
 
-        // Schedule on main thread since world.getBlockAt() requires it
+        // Schedule on main thread since world.getBlockAt() requires it.
+        Future<JsonObject> pendingScan = null;
         try {
-            return plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
-                return scanStageBlocksSync(stage, stageName);
-            }).get(15, java.util.concurrent.TimeUnit.SECONDS);
+            synchronized (pendingMainThreadCallsLock) {
+                if (!acceptingMainThreadCalls) {
+                    return createError("Stage block scan cancelled during shutdown");
+                }
+                pendingScan = plugin.getServer().getScheduler().callSyncMethod(
+                    plugin,
+                    () -> scanStageBlocksSync(stage, stageName)
+                );
+                pendingMainThreadCalls.add(pendingScan);
+            }
+            return pendingScan.get(15, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (CancellationException e) {
+            return createError("Stage block scan cancelled during shutdown");
+        } catch (InterruptedException e) {
+            if (pendingScan != null) {
+                pendingScan.cancel(false);
+            }
+            Thread.currentThread().interrupt();
+            return createError("Stage block scan interrupted");
         } catch (java.util.concurrent.TimeoutException e) {
+            if (pendingScan != null) {
+                pendingScan.cancel(false);
+            }
             plugin.getLogger().warning("Stage block scan timed out for: " + stageName);
             return createError("Stage block scan timed out");
         } catch (Exception e) {
             plugin.getLogger().warning("Stage block scan failed for " + stageName + ": " + e.getMessage());
             return createError("Scan failed: " + e.getMessage());
+        } finally {
+            if (pendingScan != null) {
+                synchronized (pendingMainThreadCallsLock) {
+                    pendingMainThreadCalls.remove(pendingScan);
+                }
+            }
         }
     }
 

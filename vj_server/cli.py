@@ -11,6 +11,8 @@ import os
 import signal
 import sys
 
+from vj_server.config import validate_http_bind_host
+
 # Fix Windows console encoding for unicode characters
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -31,7 +33,11 @@ def validate_port(value: str) -> int:
 
 def validate_hostname(value: str) -> str:
     """Validate hostname or IP address."""
-    if not value or len(value) > 253:
+    try:
+        value = validate_http_bind_host(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    if len(value) > 253:
         raise argparse.ArgumentTypeError(f"Invalid hostname: {value}")
     valid_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]")
     if not all(c in valid_chars for c in value):
@@ -54,7 +60,8 @@ def vj_server():
 Examples:
   audioviz-vj                           # Start VJ server on default ports
   audioviz-vj --port 9000               # Custom DJ connection port
-  audioviz-vj --minecraft-host mc.local # Connect to remote Minecraft
+  audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765
+                                        # Use a local encrypted-tunnel endpoint
         """,
     )
 
@@ -70,7 +77,10 @@ Examples:
         "--minecraft-host",
         type=validate_hostname,
         default=os.environ.get("MINECRAFT_HOST", "localhost"),
-        help="Minecraft server host (default: localhost or $MINECRAFT_HOST)",
+        help=(
+            "Minecraft loopback host or local encrypted-tunnel endpoint "
+            "(default: localhost or $MINECRAFT_HOST)"
+        ),
     )
     parser.add_argument(
         "--minecraft-port",
@@ -79,10 +89,21 @@ Examples:
         help="Minecraft WebSocket port (default: 8765 or $MINECRAFT_PORT)",
     )
     parser.add_argument(
+        "--minecraft-ws-secret",
+        default=os.environ.get("MINECRAFT_WS_SECRET"),
+        help="Shared secret for the Minecraft WebSocket",
+    )
+    parser.add_argument(
         "--broadcast-port",
         type=validate_port,
         default=8766,
         help="WebSocket port for browser clients (default: 8766)",
+    )
+    parser.add_argument(
+        "--http-host",
+        type=validate_hostname,
+        default=os.environ.get("HTTP_HOST", "127.0.0.1"),
+        help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
     )
     parser.add_argument(
         "--auth-file",
@@ -213,7 +234,9 @@ Examples:
         dj_port=args.port,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
+        minecraft_ws_secret=args.minecraft_ws_secret,
         broadcast_port=args.broadcast_port,
+        http_host=args.http_host,
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,

@@ -48,6 +48,7 @@ except ImportError:
     HAS_LINK = False
 
 from vj_server.beat_predictor import BeatPredictor
+from vj_server.config import validate_http_bind_host
 from vj_server.coordinator_client import CoordinatorClient
 from vj_server.dj_manager import DJManagerMixin
 from vj_server.models import (
@@ -91,8 +92,10 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         dj_port: int = 9000,
         broadcast_port: int = 8766,
         http_port: int = 8080,
+        http_host: str = "127.0.0.1",
         minecraft_host: str = "localhost",
         minecraft_port: int = 8765,
+        minecraft_ws_secret: str | None = None,
         zone: str = "main",
         entity_count: int = 16,
         auth_config: Optional[DJAuthConfig] = None,
@@ -106,8 +109,10 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
         self.http_port = http_port
+        self.http_host = validate_http_bind_host(http_host)
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
+        self.minecraft_ws_secret = minecraft_ws_secret
         self.zone = zone
         self.entity_count = entity_count
         self.auth_config = auth_config or DJAuthConfig()
@@ -1004,12 +1009,12 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             project_root = Path(__file__).parent.parent
             http_thread = threading.Thread(
                 target=run_http_server,
-                args=(self.http_port, str(project_root)),
+                args=(self.http_port, str(project_root), self.http_host),
                 daemon=True,
             )
             http_thread.start()
-            logger.info(f"Admin panel: http://localhost:{self.http_port}/")
-            logger.info(f"3D Preview: http://localhost:{self.http_port}/preview/")
+            logger.info(f"Admin panel: http://{self.http_host}:{self.http_port}/")
+            logger.info(f"3D Preview: http://{self.http_host}:{self.http_port}/preview/")
 
         # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
         dj_server = await ws_serve(
@@ -1168,9 +1173,12 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             except asyncio.CancelledError:
                 pass
 
-        if self.viz_client and self.viz_client.connected:
-            await self.viz_client.set_visible(self.zone, False)
-            await self.viz_client.disconnect()
+        if self.viz_client:
+            try:
+                if self.viz_client.connected:
+                    await self.viz_client.set_visible(self.zone, False)
+            finally:
+                await self.viz_client.disconnect()
 
         if self.spectrograph:
             self.spectrograph.clear()
@@ -1185,6 +1193,14 @@ def _validate_port(value: str) -> int:
     if not 1 <= port <= 65535:
         raise argparse.ArgumentTypeError(f"Port must be between 1 and 65535, got: {port}")
     return port
+
+
+def _validate_http_host(value: str) -> str:
+    """Validate the legacy CLI's HTTP bind host."""
+    try:
+        return validate_http_bind_host(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _validate_positive_int(value: str) -> int:
@@ -1220,14 +1236,25 @@ async def main():
         help="HTTP port for admin panel (default: 8080)",
     )
     parser.add_argument(
+        "--http-host",
+        type=_validate_http_host,
+        default=os.environ.get("HTTP_HOST", "127.0.0.1"),
+        help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
+    )
+    parser.add_argument(
         "--minecraft-host",
         "--host",
         type=str,
         default="localhost",
-        help="Minecraft server host",
+        help="Minecraft loopback host or local encrypted-tunnel endpoint",
     )
     parser.add_argument(
         "--port", type=_validate_port, default=8765, help="Minecraft WebSocket port"
+    )
+    parser.add_argument(
+        "--minecraft-ws-secret",
+        default=os.environ.get("MINECRAFT_WS_SECRET"),
+        help="Shared secret for the Minecraft WebSocket",
     )
     parser.add_argument("--zone", type=str, default="main", help="Visualization zone")
     parser.add_argument("--entities", type=_validate_positive_int, default=16, help="Entity count")
@@ -1269,8 +1296,10 @@ async def main():
         dj_port=args.dj_port,
         broadcast_port=args.broadcast_port,
         http_port=args.http_port,
+        http_host=args.http_host,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.port,
+        minecraft_ws_secret=args.minecraft_ws_secret,
         zone=args.zone,
         entity_count=args.entities,
         auth_config=auth_config,

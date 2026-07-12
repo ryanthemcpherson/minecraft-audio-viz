@@ -5,33 +5,72 @@ on:
     tags: ['v*']
 
 permissions:
+  actions: read
   contents: write
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Verify CI passed on this commit before releasing
+  # Verify both blocking gates passed on this commit before releasing.
   # ---------------------------------------------------------------------------
   ci-gate:
     name: Verify CI Status
     runs-on: ubuntu-latest
     steps:
-      - name: Check CI status for commit
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require tagged commit on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "ERROR: tagged commit $GITHUB_SHA is not reachable from origin/main."
+            exit 1
+          fi
+
+      - name: Require successful workflow runs for the exact main commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SHA="${GITHUB_SHA}"
-          echo "Checking CI status for commit ${SHA}..."
-          CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${SHA}/check-runs" \
-            --jq '[.check_runs[] | select(.name == "CI Passed")] | first | .conclusion // "not_found"')
-          if [ "$CONCLUSION" != "success" ]; then
-            echo "ERROR: CI has not passed on this commit (status: ${CONCLUSION})."
-            echo "Push to main and wait for CI to pass before tagging a release."
-            exit 1
-          fi
-          echo "CI passed on commit ${SHA}."
+          set -euo pipefail
+          for WORKFLOW_SPEC in \
+            "ci.yml:.github/workflows/ci.yml" \
+            "security.yml:.github/workflows/security.yml"; do
+            IFS=: read -r WORKFLOW_FILE EXPECTED_WORKFLOW_PATH <<< "$WORKFLOW_SPEC"
+            WORKFLOW_METADATA=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW_FILE}")
+            WORKFLOW_ID=$(jq -r '.id' <<< "$WORKFLOW_METADATA")
+            WORKFLOW_PATH=$(jq -r '.path' <<< "$WORKFLOW_METADATA")
+
+            if [ "$WORKFLOW_PATH" != "$EXPECTED_WORKFLOW_PATH" ]; then
+              echo "ERROR: ${WORKFLOW_FILE} resolved to ${WORKFLOW_PATH}, not ${EXPECTED_WORKFLOW_PATH}."
+              exit 1
+            fi
+
+            WORKFLOW_RUNS=$(gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW_ID}/runs" \
+              -f head_sha="$GITHUB_SHA" \
+              -f branch=main \
+              -f status=completed \
+              -f per_page=100)
+            MATCHING_RUNS=$(jq \
+              --arg sha "$GITHUB_SHA" \
+              --arg workflow_path "$EXPECTED_WORKFLOW_PATH" \
+              '[.workflow_runs[] | select(
+                .head_sha == $sha and
+                .head_branch == "main" and
+                .path == $workflow_path and
+                .event == "push" and
+                .status == "completed" and
+                .conclusion == "success"
+              )] | length' <<< "$WORKFLOW_RUNS")
+
+            if [ "$MATCHING_RUNS" -lt 1 ]; then
+              echo "ERROR: no successful ${EXPECTED_WORKFLOW_PATH} push run exists for main commit ${GITHUB_SHA}."
+              exit 1
+            fi
+            echo "${EXPECTED_WORKFLOW_PATH} passed with exact main-branch provenance for ${GITHUB_SHA}."
+          done
 
   build-mod:
     name: Build Minecraft Mod
@@ -56,6 +95,7 @@ jobs:
         with:
           name: minecraft-mod
           path: minecraft_mod/build/libs/audioviz-mod-*.jar
+          if-no-files-found: error
 
   build-plugin:
     name: Build Minecraft Plugin
@@ -82,165 +122,11 @@ jobs:
           path: |
             minecraft_plugin/target/audioviz-plugin-*.jar
             !minecraft_plugin/target/original-*.jar
-
-  build-dj-client:
-    name: Build DJ Client (${{ matrix.platform }})
-    needs: [ci-gate]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
-            artifact_name: dj-client-linux-x64
-          - platform: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            artifact_name: dj-client-windows-x64
-          - platform: macos-latest
-            rust_target: x86_64-apple-darwin
-            artifact_name: dj-client-macos-x64
-          - platform: macos-latest
-            rust_target: aarch64-apple-darwin
-            artifact_name: dj-client-macos-arm64
-
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
-
-      # --- Windows Code Signing Setup (Certum / Authenticode) ---
-      - name: Import Windows code signing certificate
-        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        shell: pwsh
-        run: |
-          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
-          $certPath = Join-Path $env:RUNNER_TEMP "certificate.pfx"
-          [IO.File]::WriteAllBytes($certPath, $certBytes)
-          # Import to CurrentUser store so signtool can find it
-          $securePass = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePass
-          # Export thumbprint for signtool
-          $cert = Get-PfxCertificate -FilePath $certPath
-          echo "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
-          Remove-Item $certPath
-
-      # --- macOS Code Signing Setup (Apple Developer) ---
-      - name: Import macOS code signing certificate
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE_BASE64 != ''
-        env:
-          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          rm "$CERTIFICATE_PATH"
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: dj_client/src-tauri
-
-      - name: Install frontend dependencies
-        working-directory: dj_client
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: dj_client
-        run: npm run build
-
-      - name: Disable updater artifacts when signing key is missing
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            node -e "const fs=require('fs'); const path='dj_client/src-tauri/tauri.conf.json'; const conf=JSON.parse(fs.readFileSync(path,'utf8')); if (conf.bundle && conf.bundle.createUpdaterArtifacts) { conf.bundle.createUpdaterArtifacts=false; fs.writeFileSync(path, JSON.stringify(conf, null, 2)+'\n'); console.log('Disabled bundle.createUpdaterArtifacts for unsigned build'); }"
-          fi
-
-      # Set Windows sign command if certificate was imported
-      - name: Configure Windows code signing command
-        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_THUMBPRINT != ''
-        shell: bash
-        run: |
-          echo "TAURI_WINDOWS_SIGN_COMMAND=signtool sign /sha1 $WINDOWS_CERTIFICATE_THUMBPRINT /fd sha256 /td sha256 /tr http://time.certum.pl \"%1\"" >> $GITHUB_ENV
-
-      - name: Build Tauri app
-        working-directory: dj_client
-        run: npm run tauri build -- --target ${{ matrix.rust_target }}
-        env:
-          # Tauri updater signing (minisign)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS signing identity
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # macOS notarization
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-      # Collect all platform-specific bundles
-      - name: Collect Linux bundles
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          mkdir -p release-artifacts
-          cp dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage/*.AppImage release-artifacts/ || true
-          cp dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb/*.deb release-artifacts/ || true
-
-      - name: Collect Windows bundles
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path release-artifacts
-          Copy-Item "dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/msi/*.msi" release-artifacts/ -ErrorAction SilentlyContinue
-          Copy-Item "dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis/*.exe" release-artifacts/ -ErrorAction SilentlyContinue
-
-      - name: Collect macOS bundles
-        if: matrix.platform == 'macos-latest'
-        run: |
-          mkdir -p release-artifacts
-          cp dj_client/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg release-artifacts/ || true
-
-      # --- macOS Keychain Cleanup ---
-      - name: Cleanup macOS keychain
-        if: runner.os == 'macOS' && always()
-        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: release-artifacts/
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Create Release
-    needs: [build-mod, build-plugin, build-dj-client]
+    needs: [build-mod, build-plugin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -257,34 +143,6 @@ jobs:
           name: minecraft-plugin
           path: plugin/
 
-      - name: Download DJ Client Windows
-        uses: actions/download-artifact@v8
-        with:
-          name: dj-client-windows-x64
-          path: dj-client/windows/
-        continue-on-error: true
-
-      - name: Download DJ Client Linux
-        uses: actions/download-artifact@v8
-        with:
-          name: dj-client-linux-x64
-          path: dj-client/linux/
-        continue-on-error: true
-
-      - name: Download DJ Client macOS x64
-        uses: actions/download-artifact@v8
-        with:
-          name: dj-client-macos-x64
-          path: dj-client/macos-x64/
-        continue-on-error: true
-
-      - name: Download DJ Client macOS ARM64
-        uses: actions/download-artifact@v8
-        with:
-          name: dj-client-macos-arm64
-          path: dj-client/macos-arm64/
-        continue-on-error: true
-
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -292,17 +150,9 @@ jobs:
       - name: List artifacts
         run: |
           echo "=== Minecraft mod ==="
-          ls -la mod/ || true
+          ls -la mod/
           echo "=== Minecraft plugin ==="
-          ls -la plugin/ || true
-          echo "=== DJ Client Windows ==="
-          ls -la dj-client/windows/ || true
-          echo "=== DJ Client Linux ==="
-          ls -la dj-client/linux/ || true
-          echo "=== DJ Client macOS x64 ==="
-          ls -la dj-client/macos-x64/ || true
-          echo "=== DJ Client macOS ARM64 ==="
-          ls -la dj-client/macos-arm64/ || true
+          ls -la plugin/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -311,10 +161,7 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             mod/*.jar
             plugin/*.jar
-            dj-client/windows/*
-            dj-client/linux/*
-            dj-client/macos-x64/*
-            dj-client/macos-arm64/*

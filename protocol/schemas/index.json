@@ -1,6 +1,9 @@
 {
   "protocol_version": "1.0.0",
   "messages": {
+    "connected": "messages/connected.schema.json",
+    "ws_auth": "messages/ws-auth.schema.json",
+    "ws_auth_ok": "messages/ws-auth-ok.schema.json",
     "ping": "messages/ping.schema.json",
     "pong": "messages/pong.schema.json",
     "error": "messages/error.schema.json",

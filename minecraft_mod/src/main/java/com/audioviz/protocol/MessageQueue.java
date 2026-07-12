@@ -1,15 +1,15 @@
 package com.audioviz.protocol;
 
 import com.audioviz.AudioVizMod;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,32 +26,71 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class MessageQueue {
 
+    @FunctionalInterface
+    public interface MessageGuard {
+        /** Runs {@code operation} atomically with the guard check when still valid. */
+        boolean runIfValid(Runnable operation);
+    }
+
+    @FunctionalInterface
+    public interface ParsedMessageAdmission {
+        /** Dispatches one parsed message without reparsing the raw frame. */
+        void admit(JsonObject message, MessageGuard guard);
+    }
+
+    @FunctionalInterface
+    public interface ParseFailureHandler {
+        void onFailure(RuntimeException exception);
+    }
+
+    private static final MessageGuard ALLOW_ALL = operation -> {
+        operation.run();
+        return true;
+    };
+    private static final Runnable NO_OP = () -> { };
+
     private final MessageHandler messageHandler;
 
     // Queue for parsed JSON messages
-    private final ConcurrentLinkedQueue<JsonObject> queue = new ConcurrentLinkedQueue<>();
+    private final ArrayBlockingQueue<QueuedMessage> queue;
 
     // Dedicated thread pool for JSON parsing
-    private final ExecutorService jsonExecutor;
+    private final ThreadPoolExecutor jsonExecutor;
+    private final Object intakeLock = new Object();
+    private boolean acceptingMessages = true;
 
     // Stats
     private final AtomicLong messagesProcessed = new AtomicLong(0);
     private final AtomicLong batchesSent = new AtomicLong(0);
     private final AtomicLong messagesDropped = new AtomicLong(0);
+    private final AtomicLong messagesErrored = new AtomicLong(0);
 
+    private static final int JSON_PARSER_THREADS = 2;
+    private static final int MAX_RAW_QUEUE_SIZE = 64;
     private static final int MAX_QUEUE_SIZE = 1000;
 
     // Reusable per-tick maps — cleared each tick
-    private final HashMap<String, JsonObject> latestBatchByZone = new HashMap<>(4);
-    private final HashMap<String, JsonObject> latestBitmapFrameByZone = new HashMap<>(4);
+    private final HashMap<String, ArrayDeque<QueuedMessage>> batchCandidatesByZone =
+        new HashMap<>(4);
+    private final HashMap<String, ArrayDeque<QueuedMessage>> bitmapCandidatesByZone =
+        new HashMap<>(4);
 
     public MessageQueue(MessageHandler messageHandler) {
         this.messageHandler = messageHandler;
-        this.jsonExecutor = Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "AudioViz-JSON-Parser");
-            t.setDaemon(true);
-            return t;
-        });
+        this.queue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
+        this.jsonExecutor = new ThreadPoolExecutor(
+            JSON_PARSER_THREADS,
+            JSON_PARSER_THREADS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(MAX_RAW_QUEUE_SIZE),
+            runnable -> {
+                Thread thread = new Thread(runnable, "AudioViz-JSON-Parser");
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy()
+        );
     }
 
     /**
@@ -59,32 +98,135 @@ public class MessageQueue {
      * Called from WebSocket thread — must be thread-safe and non-blocking.
      */
     public void enqueueRaw(String rawJson) {
-        jsonExecutor.submit(() -> {
+        enqueueRaw(rawJson, ALLOW_ALL);
+    }
+
+    /**
+     * Enqueue raw JSON with a guard that remains attached through parsing and execution.
+     */
+    public void enqueueRaw(String rawJson, MessageGuard guard) {
+        parseAndDispatch(
+            rawJson,
+            guard,
+            (json, messageGuard) -> offer(new QueuedMessage(json, messageGuard)),
+            exception -> AudioVizMod.LOGGER.warn("Failed to parse JSON message", exception)
+        );
+    }
+
+    /**
+     * Admit a raw frame to the bounded parser executor, then dispatch its parsed object once.
+     */
+    public void parseAndDispatch(
+        String rawJson,
+        MessageGuard guard,
+        ParsedMessageAdmission admission,
+        ParseFailureHandler failureHandler
+    ) {
+        Runnable parseTask = () -> {
             try {
-                JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
-                if (queue.size() >= MAX_QUEUE_SIZE) {
-                    queue.poll();
-                    long dropped = messagesDropped.incrementAndGet();
-                    if (dropped % 100 == 1) {
-                        AudioVizMod.LOGGER.warn("MessageQueue backpressure: dropped (total: {})", dropped);
-                    }
+                if (!guard.runIfValid(NO_OP)) {
+                    messagesDropped.incrementAndGet();
+                    return;
                 }
-                queue.offer(json);
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Failed to parse JSON message", e);
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+                return;
             }
-        });
+
+            JsonObject json;
+            try {
+                json = JsonParser.parseString(rawJson).getAsJsonObject();
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+                return;
+            }
+
+            try {
+                admission.admit(json, guard);
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+            }
+        };
+
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            try {
+                jsonExecutor.execute(parseTask);
+            } catch (RejectedExecutionException exception) {
+                recordDroppedMessage();
+            }
+        }
     }
 
     /**
      * Enqueue an already-parsed JSON object.
      */
     public void enqueue(JsonObject json) {
-        if (queue.size() >= MAX_QUEUE_SIZE) {
-            queue.poll();
-            messagesDropped.incrementAndGet();
+        enqueue(json, ALLOW_ALL);
+    }
+
+    /**
+     * Enqueue parsed JSON with a guard checked atomically around handler execution.
+     */
+    public void enqueue(JsonObject json, MessageGuard guard) {
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            offer(new QueuedMessage(json, guard));
         }
-        queue.offer(json);
+    }
+
+    private void offer(QueuedMessage message) {
+        synchronized (queue) {
+            if (queue.offer(message)) {
+                return;
+            }
+
+            QueuedMessage discarded = queue.poll();
+            if (!queue.offer(message)) {
+                recordDroppedMessage();
+                return;
+            }
+            if (discarded != null) {
+                recordDroppedMessage();
+            }
+        }
+    }
+
+    private void notifyFailure(
+        ParseFailureHandler failureHandler,
+        RuntimeException exception
+    ) {
+        try {
+            failureHandler.onFailure(exception);
+        } catch (RuntimeException callbackException) {
+            AudioVizMod.LOGGER.warn(
+                "Failed to report JSON message error",
+                callbackException
+            );
+        }
+    }
+
+    private void discardQueuedParserTasks() {
+        int discardedTasks = jsonExecutor.shutdownNow().size();
+        if (discardedTasks > 0) {
+            messagesDropped.addAndGet(discardedTasks);
+        }
+    }
+
+    private void recordDroppedMessage() {
+        long dropped = messagesDropped.incrementAndGet();
+        if (dropped % 100 == 1) {
+            AudioVizMod.LOGGER.warn(
+                "MessageQueue backpressure: dropped (total: {})",
+                dropped
+            );
+        }
     }
 
     /**
@@ -92,66 +234,133 @@ public class MessageQueue {
      * Called on the server thread from AudioVizMod.tick().
      */
     public void processTick() {
-        latestBatchByZone.clear();
-        latestBitmapFrameByZone.clear();
+        batchCandidatesByZone.clear();
+        bitmapCandidatesByZone.clear();
 
-        // Drain queue, keeping only latest batch_update/bitmap_frame per zone
-        JsonObject msg;
-        while ((msg = queue.poll()) != null) {
+        // Keep fallback candidates so a stale newest message cannot suppress
+        // an older valid update for the same zone.
+        QueuedMessage queuedMessage;
+        while ((queuedMessage = queue.poll()) != null) {
             messagesProcessed.incrementAndGet();
 
-            String type = msg.has("type") ? msg.get("type").getAsString() : "unknown";
-
-            if ("batch_update".equals(type)) {
-                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                JsonObject replaced = latestBatchByZone.put(zoneName, msg);
-                if (replaced != null) messagesDropped.incrementAndGet();
-            } else if ("bitmap_frame".equals(type)) {
-                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                JsonObject replaced = latestBitmapFrameByZone.put(zoneName, msg);
-                if (replaced != null) messagesDropped.incrementAndGet();
-            } else {
-                try {
-                    messageHandler.handleMessage(type, msg);
-                } catch (Exception e) {
-                    AudioVizMod.LOGGER.warn("Error handling message type: {}", type, e);
+            QueuedMessage current = queuedMessage;
+            try {
+                boolean accepted = current.guard().runIfValid(
+                    () -> classifyAndHandle(current)
+                );
+                if (!accepted) {
+                    messagesDropped.incrementAndGet();
                 }
+            } catch (Exception exception) {
+                messagesDropped.incrementAndGet();
+                messagesErrored.incrementAndGet();
+                AudioVizMod.LOGGER.warn(
+                    "Dropped queued message after processing error ({})",
+                    exception.getClass().getSimpleName()
+                );
             }
         }
 
-        // Process latest batch_update per zone
-        for (Map.Entry<String, JsonObject> entry : latestBatchByZone.entrySet()) {
-            try {
-                messageHandler.handleMessage("batch_update", entry.getValue());
-                batchesSent.incrementAndGet();
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Error handling batch_update for zone {}", entry.getKey(), e);
-            }
-        }
+        processCoalesced("batch_update", batchCandidatesByZone);
+        processCoalesced("bitmap_frame", bitmapCandidatesByZone);
+    }
 
-        // Process latest bitmap_frame per zone
-        for (JsonObject frame : latestBitmapFrameByZone.values()) {
-            try {
-                messageHandler.handleMessage("bitmap_frame", frame);
-                batchesSent.incrementAndGet();
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Error handling bitmap_frame", e);
-            }
+    private void classifyAndHandle(QueuedMessage queuedMessage) {
+        JsonObject message = queuedMessage.message();
+        String type = message.has("type")
+            ? message.get("type").getAsString()
+            : "unknown";
+
+        if ("batch_update".equals(type)) {
+            String zoneName = message.has("zone")
+                ? message.get("zone").getAsString()
+                : "main";
+            batchCandidatesByZone
+                .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                .addLast(queuedMessage);
+        } else if ("bitmap_frame".equals(type)) {
+            String zoneName = message.has("zone")
+                ? message.get("zone").getAsString()
+                : "main";
+            bitmapCandidatesByZone
+                .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                .addLast(queuedMessage);
+        } else {
+            messageHandler.handleMessage(type, message);
         }
     }
+
+    private void processCoalesced(
+        String type,
+        Map<String, ArrayDeque<QueuedMessage>> candidatesByZone
+    ) {
+        for (Map.Entry<String, ArrayDeque<QueuedMessage>> entry : candidatesByZone.entrySet()) {
+            ArrayDeque<QueuedMessage> candidates = entry.getValue();
+            int candidateCount = candidates.size();
+            boolean selected = false;
+
+            QueuedMessage candidate;
+            while ((candidate = candidates.pollLast()) != null) {
+                QueuedMessage current = candidate;
+                try {
+                    boolean executed = current.guard().runIfValid(
+                        () -> messageHandler.handleMessage(type, current.message())
+                    );
+                    if (executed) {
+                        batchesSent.incrementAndGet();
+                        selected = true;
+                        break;
+                    }
+                } catch (Exception exception) {
+                    AudioVizMod.LOGGER.warn(
+                        "Dropped coalesced {} message after processing error ({})",
+                        type,
+                        exception.getClass().getSimpleName()
+                    );
+                    messagesErrored.incrementAndGet();
+                    break;
+                }
+            }
+
+            messagesDropped.addAndGet(selected ? candidateCount - 1L : candidateCount);
+        }
+    }
+
+    private record QueuedMessage(JsonObject message, MessageGuard guard) { }
 
     /**
      * Stop the message processor.
      */
     public void stop() {
-        jsonExecutor.shutdown();
-        try {
-            if (!jsonExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                jsonExecutor.shutdownNow();
-                AudioVizMod.LOGGER.warn("MessageQueue JSON executor did not terminate gracefully");
+        synchronized (intakeLock) {
+            acceptingMessages = false;
+            jsonExecutor.shutdown();
+        }
+        boolean interrupted = false;
+        boolean forcedShutdownLogged = false;
+        while (!jsonExecutor.isTerminated()) {
+            try {
+                if (jsonExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    break;
+                }
+                discardQueuedParserTasks();
+                if (!forcedShutdownLogged) {
+                    AudioVizMod.LOGGER.warn(
+                        "MessageQueue JSON executor did not terminate gracefully"
+                    );
+                    forcedShutdownLogged = true;
+                }
+            } catch (InterruptedException exception) {
+                interrupted = true;
+                discardQueuedParserTasks();
             }
-        } catch (InterruptedException e) {
-            jsonExecutor.shutdownNow();
+        }
+
+        queue.clear();
+        batchCandidatesByZone.clear();
+        bitmapCandidatesByZone.clear();
+
+        if (interrupted) {
             Thread.currentThread().interrupt();
         }
         long dropped = messagesDropped.get();
@@ -167,6 +376,10 @@ public class MessageQueue {
                 ", Queue: " + queue.size();
         if (dropped > 0) {
             stats += ", Dropped: " + dropped;
+        }
+        long errors = messagesErrored.get();
+        if (errors > 0) {
+            stats += ", Errors: " + errors;
         }
         return stats;
     }

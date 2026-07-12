@@ -1,6 +1,8 @@
 """Tests for vj_server.config — audio presets, AudioConfig roundtrip, defaults."""
 
-from vj_server.config import PRESETS, AudioConfig, get_preset, list_presets
+import pytest
+
+from vj_server.config import PRESETS, AudioConfig, ServerConfig, get_preset, list_presets
 
 # ============================================================================
 # Preset field-range validation
@@ -123,3 +125,27 @@ class TestDefaultPresetValues:
         assert default.attack == auto.attack
         assert default.release == auto.release
         assert default.beat_threshold == auto.beat_threshold
+
+
+class TestServerConfig:
+    def test_http_host_defaults_to_loopback(self):
+        assert ServerConfig().http_host == "127.0.0.1"
+
+    def test_http_host_allows_explicit_non_loopback(self, monkeypatch):
+        monkeypatch.setenv("HTTP_HOST", "0.0.0.0")
+        assert ServerConfig.from_env().http_host == "0.0.0.0"
+
+    @pytest.mark.parametrize("host", ["", " \t "])
+    def test_http_host_rejects_blank_environment_value(self, monkeypatch, host):
+        monkeypatch.setenv("HTTP_HOST", host)
+
+        with pytest.raises(ValueError, match="HTTP bind host"):
+            ServerConfig.from_env()
+
+    def test_minecraft_ws_secret_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("MINECRAFT_WS_SECRET", raising=False)
+        assert ServerConfig.from_env().minecraft_ws_secret is None
+
+    def test_minecraft_ws_secret_loads_from_environment(self, monkeypatch):
+        monkeypatch.setenv("MINECRAFT_WS_SECRET", "shared-secret")
+        assert ServerConfig.from_env().minecraft_ws_secret == "shared-secret"

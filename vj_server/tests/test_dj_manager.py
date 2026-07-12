@@ -1,5 +1,10 @@
 """Tests for DJManagerMixin — pure logic functions (no WebSocket)."""
 
+import json
+from unittest.mock import AsyncMock
+
+import pytest
+
 from vj_server.models import ConnectCode, DJConnection
 
 # ============================================================================
@@ -33,6 +38,52 @@ class FakeDJManager:
     _get_dj_roster = DJManagerMixin._get_dj_roster
     _check_auth_rate_limit = DJManagerMixin._check_auth_rate_limit
     _cleanup_expired_codes = DJManagerMixin._cleanup_expired_codes
+
+
+def test_stream_route_is_relay_only_and_omits_pattern_scripts() -> None:
+    from vj_server.vj_server import VJServer
+
+    server = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    dj = DJConnection(
+        dj_id="dj-1",
+        dj_name="Containment DJ",
+        websocket=None,
+        direct_mode=True,
+    )
+    server._djs[dj.dj_id] = dj
+    server._active_dj_id = dj.dj_id
+
+    route = server._build_stream_route_message(dj.dj_id, dj)
+
+    assert route["route_mode"] == "relay"
+    assert route["reason"] == "phase0_remote_execution_disabled"
+    assert "pattern_scripts" not in route
+    assert "minecraft_host" not in route
+    assert "minecraft_port" not in route
+
+
+@pytest.mark.asyncio
+async def test_connect_code_approval_identifies_relay_route_immediately() -> None:
+    from vj_server.vj_server import VJServer
+
+    server = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    websocket = AsyncMock()
+    server._pending_djs["dj-code"] = {
+        "dj_name": "Connect Code DJ",
+        "websocket": websocket,
+        "priority": 10,
+        "direct_mode": False,
+    }
+    server._active_dj_id = "existing-active-dj"
+    server._broadcast_dj_roster = AsyncMock()
+    server._broadcast_stream_routes = AsyncMock()
+    server._broadcast_to_browsers = AsyncMock()
+
+    await server._approve_pending_dj("dj-code")
+
+    auth_success = json.loads(websocket.send.await_args.args[0])
+    assert auth_success["type"] == "auth_success"
+    assert auth_success["route_mode"] == "relay"
 
 
 # ============================================================================

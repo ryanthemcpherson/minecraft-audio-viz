@@ -55,11 +55,6 @@
       },
       "description": "Pattern configuration parameters."
     },
-    "pattern_scripts": {
-      "type": "object",
-      "additionalProperties": { "type": "string" },
-      "description": "Map of pattern name to Lua script source."
-    },
     "band_sensitivity": {
       "type": "array",
       "items": { "type": "number" },

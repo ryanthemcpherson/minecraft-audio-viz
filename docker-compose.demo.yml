@@ -1,16 +1,16 @@
 # MCAV Full-Stack Demo
 #
-# Quick start: docker compose -f docker-compose.demo.yml up
+# Phase 0 quarantine: unsupported development verification only.
+# Explicit opt-in:
+#   docker compose -f docker-compose.demo.yml --profile phase0-quarantined up
 # Then open in your browser:
 #   - http://localhost:8080 - Admin Panel (DJ controls, served by VJ server)
 #   - http://localhost:8081 - 3D Preview (Three.js visualization, served by nginx)
 #
-# This demo runs:
+# Historical design (currently incomplete):
 #   1. VJ Server - Pattern engine and WebSocket hub (no-auth mode)
-#   2. Audio Simulator - Sends simulated DJ audio frames at 128 BPM
-#   3. Nginx - Serves 3D preview tool
-#
-# The visualization runs entirely in your browser with simulated audio.
+#   2. Audio Simulator - not currently defined as a Compose service
+#   3. Nginx - serves the 3D preview tool
 # For Minecraft integration, see README.md
 #
 # Note: Admin panel is served by VJ server on port 8080, preview is on nginx:8081
@@ -20,6 +20,8 @@ version: '3.8'
 services:
   # VJ Server - Multi-DJ visualization server with built-in HTTP server
   vj_server:
+    profiles:
+      - phase0-quarantined
     build:
       context: .
       dockerfile: Dockerfile
@@ -49,6 +51,8 @@ services:
 
   # Preview Web Server - Serves 3D preview tool
   preview:
+    profiles:
+      - phase0-quarantined
     image: nginx:alpine
     container_name: mcav-preview
     ports:

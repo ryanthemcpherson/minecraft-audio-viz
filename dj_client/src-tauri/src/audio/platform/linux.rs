@@ -135,7 +135,7 @@ pub fn list_audio_applications() -> Result<Vec<AudioSource>, String> {
     }
 
     // Sort by name
-    sources.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    sources.sort_by_key(|source| source.name.to_lowercase());
 
     Ok(sources)
 }

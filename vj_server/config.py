@@ -14,6 +14,15 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
+def validate_http_bind_host(value: str) -> str:
+    """Reject bind hosts that socketserver would interpret as a wildcard."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("HTTP bind host must not be empty or whitespace")
+    if value != value.strip():
+        raise ValueError("HTTP bind host must not contain surrounding whitespace")
+    return value
+
+
 @dataclass
 class AudioConfig:
     """Audio processing configuration."""
@@ -204,12 +213,14 @@ class ServerConfig:
     # Minecraft connection
     minecraft_host: str = "localhost"
     minecraft_port: int = 8765
+    minecraft_ws_secret: str | None = None
 
     # VJ server
     vj_server_port: int = 9000
 
     # Preview server
     preview_port: int = 8766
+    http_host: str = "127.0.0.1"
     http_port: int = 8080
 
     # Authentication
@@ -221,14 +232,19 @@ class ServerConfig:
     coordinator_server_name: str = "VJ Server"  # display name in coordinator
     coordinator_ws_url: Optional[str] = None  # public WS URL DJs connect to
 
+    def __post_init__(self) -> None:
+        self.http_host = validate_http_bind_host(self.http_host)
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Load configuration from environment variables."""
         return cls(
             minecraft_host=os.environ.get("MINECRAFT_HOST", "localhost"),
             minecraft_port=int(os.environ.get("MINECRAFT_PORT", "8765")),
+            minecraft_ws_secret=os.environ.get("MINECRAFT_WS_SECRET") or None,
             vj_server_port=int(os.environ.get("VJ_SERVER_PORT", "9000")),
             preview_port=int(os.environ.get("PREVIEW_PORT", "8766")),
+            http_host=os.environ.get("HTTP_HOST", "127.0.0.1"),
             http_port=int(os.environ.get("HTTP_PORT", "8080")),
             dj_auth_file=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
             coordinator_url=os.environ.get("COORDINATOR_URL"),

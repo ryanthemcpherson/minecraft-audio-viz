@@ -19,6 +19,8 @@ const {
   storeOAuthState,
   getStoredOAuthState,
   clearStoredOAuthState,
+  consumeAndValidateOAuthState,
+  exchangeOAuthCodeWithValidatedState,
 } = authModule;
 
 // ---------------------------------------------------------------------------
@@ -318,6 +320,60 @@ describe("localStorage helpers", () => {
       storeOAuthState("state_xyz");
       clearStoredOAuthState();
       expect(getStoredOAuthState()).toBeNull();
+    });
+
+    it("rejects a callback when no state was stored", () => {
+      expect(consumeAndValidateOAuthState("received")).toBe(false);
+    });
+
+    it("rejects and consumes a mismatched state", () => {
+      storeOAuthState("expected");
+      expect(consumeAndValidateOAuthState("received")).toBe(false);
+      expect(getStoredOAuthState()).toBeNull();
+    });
+
+    it("rejects empty states", () => {
+      storeOAuthState("");
+      expect(consumeAndValidateOAuthState("")).toBe(false);
+    });
+
+    it("accepts an exact state once", () => {
+      storeOAuthState("state_abc");
+      expect(consumeAndValidateOAuthState("state_abc")).toBe(true);
+      expect(consumeAndValidateOAuthState("state_abc")).toBe(false);
+    });
+
+    it("does not exchange a code when callback state is missing", async () => {
+      const exchange = vi.fn().mockResolvedValue({ access_token: "unused" });
+      await expect(
+        exchangeOAuthCodeWithValidatedState("code", "received", exchange)
+      ).rejects.toThrow("Security validation failed");
+      expect(exchange).not.toHaveBeenCalled();
+    });
+
+    it("does not exchange a code when callback state mismatches", async () => {
+      storeOAuthState("expected");
+      const exchange = vi.fn().mockResolvedValue({ access_token: "unused" });
+      await expect(
+        exchangeOAuthCodeWithValidatedState("code", "received", exchange)
+      ).rejects.toThrow("Security validation failed");
+      expect(exchange).not.toHaveBeenCalled();
+    });
+
+    it("does not exchange a code when callback state is replayed", async () => {
+      storeOAuthState("state_abc");
+      const initialExchange = vi.fn().mockResolvedValue({ access_token: "used" });
+      const replayExchange = vi.fn().mockResolvedValue({ access_token: "unused" });
+
+      await expect(
+        exchangeOAuthCodeWithValidatedState("code", "state_abc", initialExchange)
+      ).resolves.toEqual({ access_token: "used" });
+      await expect(
+        exchangeOAuthCodeWithValidatedState("code", "state_abc", replayExchange)
+      ).rejects.toThrow("Security validation failed");
+
+      expect(initialExchange).toHaveBeenCalledOnce();
+      expect(replayExchange).not.toHaveBeenCalled();
     });
   });
 });

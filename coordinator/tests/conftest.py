@@ -10,8 +10,9 @@ import asyncio
 import os
 from typing import AsyncIterator
 
-# Prevent noisy warning from default insecure secret when app.main imports create_app().
+# Configure required test-only secrets before app.main imports create_app().
 os.environ.setdefault("MCAV_USER_JWT_SECRET", "test-user-jwt-env-secret-for-pytest-32+chars")
+os.environ["MCAV_METRICS_TOKEN"] = "test-metrics-token"  # nosec B105
 os.environ.setdefault("MCAV_ENV", "development")
 
 import pytest
@@ -56,6 +57,7 @@ def settings() -> Settings:
         rate_limit_auth_per_minute=100,  # relaxed for tests
         cors_origins="http://localhost:3000",
         user_jwt_secret="test-user-jwt-secret-for-tests-32+chars",  # nosec B106
+        metrics_token="test-metrics-token",  # nosec B106
         user_jwt_expiry_minutes=60,
         refresh_token_expiry_days=30,
         discord_client_id="test-discord-id",

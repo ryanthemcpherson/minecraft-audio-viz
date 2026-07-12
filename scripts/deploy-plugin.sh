@@ -188,7 +188,7 @@ if [ "$MOD_ONLY" = false ]; then
         fi
 
         # Start fresh VJ server in background
-        ssh "$SSH_TARGET" "cd '${REMOTE_PROJECT}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host ${SERVER} > /tmp/vj_server.log 2>&1 &"
+        ssh "$SSH_TARGET" "cd '${REMOTE_PROJECT}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
         sleep 3
 
         # Verify it started
@@ -208,7 +208,7 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "  Deploy complete!"
-echo "  WebSocket:     ws://${SERVER}:8765"
+echo "  Renderer link: ws://127.0.0.1:8765 (remote host only)"
 echo "  Admin Panel:   http://${SERVER}:8081"
 echo "  Preview:       http://${SERVER}:8080"
 echo "  VJ Server:     ws://${SERVER}:9000"
