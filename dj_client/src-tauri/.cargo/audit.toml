@@ -1,0 +1,8 @@
+# Vulnerabilities remain blocking under cargo-audit's default exit policy.
+# Informational warnings stay visible in the JSON report without being
+# suppressed or promoted to release-gate failures while DJ distribution is
+# quarantined.
+
+[output]
+quiet = false
+show_tree = true

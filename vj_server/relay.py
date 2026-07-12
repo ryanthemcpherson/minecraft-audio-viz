@@ -1546,98 +1546,122 @@ class RelayMixin:
             try:
                 await self.viz_client.disconnect()
             except Exception as e:
-                logger.debug(f"Error disconnecting old Minecraft client: {e}")
+                logger.debug(
+                    "Error disconnecting old Minecraft client (error_type=%s)",
+                    type(e).__name__,
+                )
             self.viz_client = None
 
         logger.info(f"Connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}...")
-        self.viz_client = VizClient(self.minecraft_host, self.minecraft_port, enable_heartbeat=True)
-        self.viz_client.on("stage_zone_configs", self._handle_stage_zone_configs)
-        self.viz_client.on("bitmap_frame", self._relay_bitmap_frame)
-
+        candidate = VizClient(
+            self.minecraft_host,
+            self.minecraft_port,
+            enable_heartbeat=True,
+            auth_token=self.minecraft_ws_secret,
+        )
+        self.viz_client = candidate
+        setup_succeeded = False
         try:
-            # 10 second timeout for initial connection
-            connected = await asyncio.wait_for(self.viz_client.connect(), timeout=10.0)
-            if not connected:
+            candidate.on("stage_zone_configs", self._handle_stage_zone_configs)
+            candidate.on("bitmap_frame", self._relay_bitmap_frame)
+            try:
+                # 10 second timeout for initial connection
+                connected = await asyncio.wait_for(candidate.connect(), timeout=10.0)
+                if not connected:
+                    logger.error(
+                        f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
+                    )
+                    return False
+            except asyncio.TimeoutError:
                 logger.error(
-                    f"Failed to connect to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
+                    f"Timeout connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
                 )
                 return False
-        except asyncio.TimeoutError:
-            logger.error(
-                f"Timeout connecting to Minecraft at {self.minecraft_host}:{self.minecraft_port}"
-            )
-            return False
 
-        logger.info(f"Connected to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
+            logger.info(f"Connected to Minecraft at {self.minecraft_host}:{self.minecraft_port}")
 
-        try:
-            # 5 second timeout for zone query
-            zones = await asyncio.wait_for(self.viz_client.get_zones(), timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.error("Timeout getting zones from Minecraft")
-            return False
-
-        zone_names = [z["name"] for z in zones] if zones else []
-
-        if self.zone not in zone_names:
-            if zone_names:
-                self.zone = zone_names[0]
-                logger.info(f"Using zone: {self.zone}")
-            else:
-                logger.error("No zones available!")
+            try:
+                # 5 second timeout for zone query
+                zones = await asyncio.wait_for(candidate.get_zones(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.error("Timeout getting zones from Minecraft")
                 return False
 
-        # Initialize per-zone pattern states for all discovered zones
-        for zn in zone_names:
-            self._get_zone_state(zn)
+            zone_names = [z["name"] for z in zones] if zones else []
 
-        # Pull active stage config so reconnect/startup preserves expected
-        # pattern + entity-count state before pools/bitmaps are initialized.
-        await self._rehydrate_zone_states_from_active_stage()
+            if self.zone not in zone_names:
+                if zone_names:
+                    self.zone = zone_names[0]
+                    logger.info(f"Using zone: {self.zone}")
+                else:
+                    logger.error("No zones available!")
+                    return False
 
-        # Re-init each zone based on its current render_mode.
-        # New zones default to block mode (Display Entities).
-        # Zones already in bitmap mode get re-initialized as bitmap.
-        for zn in zone_names:
-            zs = self._get_zone_state(zn)
-            if zs.render_mode == "bitmap":
-                pattern = zs.pattern_name if zs.pattern_name.startswith("bmp_") else "bmp_spectrum"
-                try:
-                    response = await asyncio.wait_for(
-                        self.viz_client.init_bitmap(zn, pattern=pattern),
-                        timeout=10.0,
+            # Initialize per-zone pattern states for all discovered zones
+            for zn in zone_names:
+                self._get_zone_state(zn)
+
+            # Pull active stage config so reconnect/startup preserves expected
+            # pattern + entity-count state before pools/bitmaps are initialized.
+            await self._rehydrate_zone_states_from_active_stage()
+
+            # Re-init each zone based on its current render_mode.
+            # New zones default to block mode (Display Entities).
+            # Zones already in bitmap mode get re-initialized as bitmap.
+            for zn in zone_names:
+                zs = self._get_zone_state(zn)
+                if zs.render_mode == "bitmap":
+                    pattern = (
+                        zs.pattern_name if zs.pattern_name.startswith("bmp_") else "bmp_spectrum"
                     )
-                    if response and response.get("type") == "bitmap_initialized":
-                        zs.bitmap_initialized = True
-                        zs.bitmap_width = response.get("width", 0)
-                        zs.bitmap_height = response.get("height", 0)
-                        logger.info(
-                            f"Bitmap re-init: zone '{zn}' → "
-                            f"{zs.bitmap_width}x{zs.bitmap_height} pattern={pattern}"
+                    try:
+                        response = await asyncio.wait_for(
+                            candidate.init_bitmap(zn, pattern=pattern),
+                            timeout=10.0,
                         )
-                        await self._broadcast_to_browsers(_json_str(response))
-                except asyncio.TimeoutError:
-                    logger.warning(f"Bitmap re-init: timeout for zone '{zn}'")
-                except Exception as e:
-                    logger.warning(f"Bitmap re-init: failed for zone '{zn}': {e}")
-            else:
-                # Block mode: init entity pool
+                        if response and response.get("type") == "bitmap_initialized":
+                            zs.bitmap_initialized = True
+                            zs.bitmap_width = response.get("width", 0)
+                            zs.bitmap_height = response.get("height", 0)
+                            logger.info(
+                                f"Bitmap re-init: zone '{zn}' → "
+                                f"{zs.bitmap_width}x{zs.bitmap_height} pattern={pattern}"
+                            )
+                            await self._broadcast_to_browsers(_json_str(response))
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Bitmap re-init: timeout for zone '{zn}'")
+                    except Exception as e:
+                        logger.warning(f"Bitmap re-init: failed for zone '{zn}': {e}")
+                else:
+                    # Block mode: init entity pool
+                    try:
+                        await candidate.init_pool(zn, zs.entity_count, zs.block_type)
+                    except Exception as e:
+                        logger.warning(f"Block pool init failed for zone '{zn}': {e}")
+
+            # Cache bitmap patterns from MC plugin for unified pattern list
+            try:
+                self._bitmap_pattern_cache = await asyncio.wait_for(
+                    candidate.get_bitmap_patterns(), timeout=5.0
+                )
+                logger.info(f"Cached {len(self._bitmap_pattern_cache)} bitmap patterns from MC")
+            except Exception as e:
+                logger.warning(f"Failed to cache bitmap patterns: {e}")
+                self._bitmap_pattern_cache = []
+
+            setup_succeeded = True
+            return True
+        finally:
+            if not setup_succeeded:
+                if self.viz_client is candidate:
+                    self.viz_client = None
                 try:
-                    await self.viz_client.init_pool(zn, zs.entity_count, zs.block_type)
+                    await candidate.disconnect()
                 except Exception as e:
-                    logger.warning(f"Block pool init failed for zone '{zn}': {e}")
-
-        # Cache bitmap patterns from MC plugin for unified pattern list
-        try:
-            self._bitmap_pattern_cache = await asyncio.wait_for(
-                self.viz_client.get_bitmap_patterns(), timeout=5.0
-            )
-            logger.info(f"Cached {len(self._bitmap_pattern_cache)} bitmap patterns from MC")
-        except Exception as e:
-            logger.warning(f"Failed to cache bitmap patterns: {e}")
-            self._bitmap_pattern_cache = []
-
-        return True
+                    logger.debug(
+                        "Error disconnecting failed Minecraft candidate (error_type=%s)",
+                        type(e).__name__,
+                    )
 
     async def _minecraft_reconnect_loop(self):
         """

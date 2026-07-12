@@ -17,7 +17,7 @@ const tocItems = [
   { id: "start-vj-server", label: "Start the VJ Server", indent: true },
   { id: "in-game-setup", label: "In-Game Setup", indent: true },
   { id: "dj-setup", label: "For DJs" },
-  { id: "download-dj-client", label: "Download DJ Client", indent: true },
+  { id: "dj-client-availability", label: "DJ Client Availability", indent: true },
   { id: "connect", label: "Connect", indent: true },
   { id: "troubleshooting", label: "Troubleshooting" },
   { id: "next-steps", label: "Next Steps" },
@@ -73,7 +73,7 @@ export default function GettingStartedPage() {
                 <h3 className="font-bold text-lg">DJ</h3>
               </div>
               <p className="text-sm text-text-secondary">
-                Download the DJ Client app and connect to a server with a connect code.
+                Review the Phase 0 distribution status and source-only development path.
               </p>
             </a>
           </div>
@@ -413,9 +413,19 @@ pip install -e ".[full]"`}
 
                   <CodeBlock
                     title="Terminal"
-                    code={`# Start the VJ server on port 9000
-audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
+                    code={`# Same host as Minecraft (recommended)
+audioviz-vj --port 9000
+
+# Separate VJ host: Terminal 1 creates an encrypted tunnel
+ssh -N -L 18765:127.0.0.1:8765 operator@YOUR_MC_SERVER
+
+# Terminal 2 connects only to that local tunnel endpoint
+audioviz-vj --port 9000 --minecraft-host 127.0.0.1 --minecraft-port 18765`}
                   />
+
+                  <p className="text-sm text-text-secondary">
+                    The Minecraft renderer port is loopback-only. A shared secret authenticates the tunneled connection but never enables plaintext LAN access.
+                  </p>
 
                   <div className="callout-tip text-sm text-text-secondary">
                     <strong className="text-white">Dev mode:</strong> For quick testing without authentication, add the{" "}
@@ -476,69 +486,38 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                   For DJs
                 </h2>
                 <p className="mt-3 text-text-secondary max-w-2xl">
-                  Connect to a server and start streaming your audio for real-time visualization in Minecraft.
+                  Review the current remote-session availability before preparing a DJ setup.
                 </p>
               </div>
 
-              {/* Step 1: Download DJ Client */}
-              <div id="download-dj-client" className="mb-16">
+              {/* Step 1: DJ Client availability */}
+              <div id="dj-client-availability" className="mb-16">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-blue to-noteblock-amber text-white font-bold text-sm">
                     01
                   </div>
-                  <h3 className="text-xl font-bold">Download the DJ Client</h3>
+                  <h3 className="text-xl font-bold">DJ Client Distribution Paused</h3>
                 </div>
 
                 <div className="space-y-6 pl-0 sm:pl-16">
                   <p className="text-text-secondary">
-                    The DJ Client is a lightweight desktop app that captures your audio, performs real-time FFT analysis, and streams it to the VJ server. No Python or command line needed.
+                    Prebuilt DJ Client distribution is paused during Phase 0. Remote DJ sessions are not supported for general use until signed release, rollback, and clean-install gates pass.
                   </p>
 
-                  {/* Platform download buttons */}
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="glass-card rounded-xl border border-noteblock-amber/20 p-6">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-noteblock-amber">
+                      Development verification only
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                      Contributors who need to verify remote workflows can build and run the unsigned client from source. These local builds are unsupported and are not published release artifacts.
+                    </p>
                     <a
-                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
+                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/dj_client/README.md"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="glass-card rounded-xl p-4 text-center hover:border-disc-cyan/30"
+                      className="mt-5 inline-flex items-center gap-2 rounded-lg border border-noteblock-amber/30 bg-noteblock-amber/5 px-4 py-2 text-sm font-semibold text-noteblock-amber transition-colors hover:bg-noteblock-amber/10"
                     >
-                      <div className="mb-2 text-2xl">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="mx-auto text-disc-cyan">
-                          <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
-                        </svg>
-                      </div>
-                      <p className="text-sm font-semibold">Windows</p>
-                      <p className="text-xs text-text-secondary">.msi installer</p>
-                    </a>
-
-                    <a
-                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="glass-card rounded-xl p-4 text-center hover:border-disc-blue/30"
-                    >
-                      <div className="mb-2 text-2xl">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="mx-auto text-disc-blue">
-                          <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-                        </svg>
-                      </div>
-                      <p className="text-sm font-semibold">macOS</p>
-                      <p className="text-xs text-text-secondary">.dmg</p>
-                    </a>
-
-                    <a
-                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="glass-card rounded-xl p-4 text-center hover:border-noteblock-amber/30"
-                    >
-                      <div className="mb-2 text-2xl">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="mx-auto text-noteblock-amber">
-                          <path d="M12.504 0c-.155 0-.311.015-.466.044-3.046.547-4.728 3.994-5.188 5.5-.458 1.499-1.498 4.062-3.282 5.84-.02.019-.035.043-.057.063l-.008.007C1.466 13.445 0 16.048 0 18c0 3.314 2.686 6 6 6 1.5 0 2.863-.555 3.916-1.466.172-.149.347-.293.531-.428A5.989 5.989 0 0 0 12 22.5a5.989 5.989 0 0 0 1.553-.394c.184.135.359.28.531.428A5.977 5.977 0 0 0 18 24c3.314 0 6-2.686 6-6 0-1.952-1.466-4.555-3.503-6.546l-.008-.007c-.022-.02-.037-.044-.057-.063-1.784-1.778-2.824-4.341-3.282-5.84-.46-1.506-2.142-4.953-5.188-5.5A3.525 3.525 0 0 0 12.504 0z" />
-                        </svg>
-                      </div>
-                      <p className="text-sm font-semibold">Linux</p>
-                      <p className="text-xs text-text-secondary">.deb / AppImage</p>
+                      Open the source development guide
                     </a>
                   </div>
                 </div>
@@ -624,8 +603,8 @@ audioviz-vj --port 9000 --minecraft-host YOUR_MC_SERVER_IP`}
                   </summary>
                   <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>Verify the server IP address and port are correct</li>
-                      <li>Check that port <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">8765</code> (Minecraft WebSocket) and <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">9000</code> (VJ server) are open in your firewall</li>
+                      <li>Verify the VJ server is using the Minecraft host&apos;s loopback listener or a working local encrypted-tunnel endpoint</li>
+                      <li>Never open renderer port <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">8765</code> in a firewall; split-host setups must tunnel it. Restrict VJ port <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">9000</code> to intended DJs</li>
                       <li>Run <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz status</code> in Minecraft to check the mod status</li>
                       <li>Make sure the Minecraft mod loaded successfully — check server logs for errors</li>
                     </ul>

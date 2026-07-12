@@ -26,6 +26,7 @@ import com.audioviz.stages.StageManager;
 import com.audioviz.stages.StageZonePlacementManager;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
+import com.audioviz.websocket.WebSocketSecurityPolicy;
 import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
@@ -40,6 +41,7 @@ import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 
 public class AudioVizPlugin extends JavaPlugin implements Listener {
@@ -47,7 +49,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private static AudioVizPlugin instance;
     private ZoneManager zoneManager;
     private EntityPoolManager entityPoolManager;
-    private volatile VizWebSocketServer webSocketServer;
+    private volatile WebSocketStartupManager<VizWebSocketServer> webSocketStartupManager;
     private MenuManager menuManager;
     private ChatInputManager chatInputManager;
     private BeatEventManager beatEventManager;
@@ -205,7 +207,17 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
         // Start WebSocket server with retry (port may linger briefly after restart)
         int wsPort = getConfig().getInt("websocket.port", 8765);
-        startWebSocketWithRetry(wsPort, 5, 2000);
+        String wsAddress = getConfig().getString("websocket.address", "127.0.0.1");
+        String wsSecret = getConfig().getString("ws-secret", "");
+        if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, wsSecret)) {
+            startWebSocketWithRetry(wsAddress.strip(), wsPort, 5, 2000);
+        } else {
+            getLogger().severe(
+                "AudioViz WebSocket listener is offline: bind to a loopback address " +
+                "(127.0.0.1, localhost, or ::1). For a remote VJ server, use an " +
+                "encrypted tunnel whose Minecraft-side endpoint is loopback."
+            );
+        }
 
         getLogger().info("AudioViz plugin enabled!");
     }
@@ -215,36 +227,108 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
      * previous process (e.g. zombie Java after restart). Each attempt waits
      * {@code delayMs} before retrying, up to {@code maxRetries} times.
      */
-    private void startWebSocketWithRetry(int port, int maxRetries, long delayMs) {
-        getServer().getScheduler().runTaskAsynchronously(this, () -> {
-            for (int attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    VizWebSocketServer server = new VizWebSocketServer(this, port);
-                    server.start();
-                    // Wait briefly to let the selector thread bind
-                    Thread.sleep(500);
-                    // Check if it actually started by verifying onStart was reached
-                    webSocketServer = server;
-                    getLogger().info("WebSocket server started on port " + port +
-                        (attempt > 1 ? " (attempt " + attempt + ")" : ""));
-                    return;
-                } catch (Exception e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                    if (attempt < maxRetries) {
-                        getLogger().warning("WebSocket bind attempt " + attempt + "/" + maxRetries +
-                            " failed: " + msg + " — retrying in " + (delayMs / 1000) + "s");
-                        try { Thread.sleep(delayMs); } catch (InterruptedException ignored) { return; }
-                    } else {
-                        getLogger().log(Level.SEVERE,
-                            "Failed to start WebSocket server after " + maxRetries + " attempts", e);
+    private void startWebSocketWithRetry(
+        String bindAddress,
+        int port,
+        int maxRetries,
+        long delayMs
+    ) {
+        WebSocketStartupManager<VizWebSocketServer> startupManager =
+            new WebSocketStartupManager<>(
+                maxRetries,
+                delayMs,
+                () -> {
+                    VizWebSocketServer server = new VizWebSocketServer(
+                        this,
+                        bindAddress,
+                        port
+                    );
+                    return new WebSocketStartupManager.Candidate<>() {
+                        @Override
+                        public VizWebSocketServer value() {
+                            return server;
+                        }
+
+                        @Override
+                        public void start() {
+                            server.start();
+                        }
+
+                        @Override
+                        public CompletionStage<Void> startupCompletion() {
+                            return server.startupCompletion();
+                        }
+
+                        @Override
+                        public void shutdown() {
+                            server.shutdown();
+                        }
+                    };
+                },
+                task -> {
+                    Thread thread = new Thread(task, "AudioViz-WebSocket-Startup");
+                    thread.setDaemon(true);
+                    thread.start();
+                    return thread;
+                },
+                Thread::sleep,
+                new WebSocketStartupManager.Events<>() {
+                    @Override
+                    public void onStarted(VizWebSocketServer server, int attempt) {
+                        getLogger().info("WebSocket server started on port " + port +
+                            (attempt > 1 ? " (attempt " + attempt + ")" : ""));
+                    }
+
+                    @Override
+                    public void onRetry(
+                        int attempt,
+                        int maxAttempts,
+                        long retryDelayMillis,
+                        Throwable failure
+                    ) {
+                        getLogger().warning("WebSocket bind attempt " + attempt + "/" + maxAttempts +
+                            " failed: " + failureMessage(failure) + " — retrying in " +
+                            (retryDelayMillis / 1000) + "s");
+                    }
+
+                    @Override
+                    public void onExhausted(int maxAttempts, Throwable failure) {
+                        getLogger().log(
+                            Level.SEVERE,
+                            "Failed to start WebSocket server after " + maxAttempts + " attempts",
+                            failure
+                        );
+                    }
+
+                    @Override
+                    public void onShutdownFailure(Throwable failure) {
+                        getLogger().warning(
+                            "Error stopping WebSocket server: " + failureMessage(failure));
                     }
                 }
-            }
-        });
+            );
+        webSocketStartupManager = startupManager;
+        startupManager.start();
+    }
+
+    private static String failureMessage(Throwable failure) {
+        if (failure.getMessage() != null) {
+            return failure.getMessage();
+        }
+        return failure.getClass().getSimpleName();
     }
 
     @Override
     public void onDisable() {
+        // Close the startup boundary first so no candidate can publish, retry,
+        // or schedule server tasks while the rest of plugin teardown runs.
+        WebSocketStartupManager<VizWebSocketServer> startupManager = webSocketStartupManager;
+        if (startupManager != null) {
+            if (startupManager.stop()) {
+                getLogger().info("WebSocket server stopped");
+            }
+        }
+
         // Unregister all event listeners to prevent leaks on plugin reload
         HandlerList.unregisterAll((org.bukkit.plugin.Plugin) this);
 
@@ -305,25 +389,12 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             connectionStateListener.stop();
         }
 
-        // Shutdown voice chat integration before WebSocket server
+        // Shutdown voice chat integration
         if (voicechatIntegration != null) {
             try {
                 voicechatIntegration.shutdown();
             } catch (Exception e) {
                 getLogger().warning("Error shutting down voice chat integration: " + e.getMessage());
-            }
-        }
-
-        // Stop WebSocket server - must complete BEFORE classloader closes the JAR
-        // otherwise background threads (WebSocketWorker, WebSocketSelector) crash
-        // with "zip file closed" when they try to load classes from the old JAR
-        if (webSocketServer != null) {
-            try {
-                // Full shutdown stops heartbeat tasks, message queue, and socket threads.
-                webSocketServer.shutdown();
-                getLogger().info("WebSocket server stopped");
-            } catch (Exception e) {
-                getLogger().warning("Error stopping WebSocket server: " + e.getMessage());
             }
         }
 
@@ -396,7 +467,8 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     }
 
     public VizWebSocketServer getWebSocketServer() {
-        return webSocketServer;
+        WebSocketStartupManager<VizWebSocketServer> startupManager = webSocketStartupManager;
+        return startupManager == null ? null : startupManager.active();
     }
 
     public MenuManager getMenuManager() {

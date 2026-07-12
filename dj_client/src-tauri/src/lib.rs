@@ -9,7 +9,6 @@
 
 pub mod audio;
 pub mod content_filter;
-pub mod patterns;
 pub mod protocol;
 pub mod state;
 pub mod voice;
@@ -215,7 +214,6 @@ async fn run_bridge(
         // all zones (multi-zone, transitions, crossfades). The DJ client sends
         // audio frames to the VJ server which relays to Minecraft authoritatively.
         let mut last_phase_predicted_beat_at = 0.0_f64;
-        let mut pattern_engine: Option<patterns::PatternEngine> = None;
         // Throttle UI events: audio-levels ~30fps, status/voice ~4fps
         let mut last_audio_emit = Instant::now() - Duration::from_secs(1);
         let mut last_status_emit = Instant::now() - Duration::from_secs(1);
@@ -386,47 +384,6 @@ async fn run_bridge(
                                     app_state.active_preset = preset.name.clone();
                                     preset_event = Some(preset.name.clone());
                                 }
-
-                        // Consume pending pattern data from server
-                        if let Some(ref client) = app_state.client {
-                            // Load pattern scripts
-                            if let Some(scripts) = client.take_pending_pattern_scripts() {
-                                let engine = pattern_engine.get_or_insert_with(patterns::PatternEngine::new);
-                                // Look for lib script first
-                                if let Some(lib_src) = scripts.get("lib")
-                                    && let Err(e) = engine.load_lib(lib_src) {
-                                        log::warn!("Failed to load lib.lua: {}", e);
-                                    }
-                                for (name, src) in &scripts {
-                                    if name != "lib" {
-                                        engine.load_pattern(name, src);
-                                    }
-                                }
-                                log::info!("Loaded {} pattern scripts from server", scripts.len());
-                            }
-
-                            // Switch pattern
-                            if let Some(pattern_name) = client.take_pending_pattern_change()
-                                && let Some(ref mut engine) = pattern_engine
-                                    && let Err(e) = engine.set_pattern(&pattern_name) {
-                                        log::warn!("Failed to switch pattern: {}", e);
-                                    }
-
-                            // Update band sensitivity
-                            if let Some(sensitivity) = client.take_pending_band_sensitivity()
-                                && let Some(ref mut engine) = pattern_engine {
-                                    engine.set_band_sensitivity(sensitivity);
-                                }
-
-                            // Update config (entity_count, zone)
-                            if let Some((entity_count, _zone)) = client.take_pending_config_change()
-                                && let Some(ref mut engine) = pattern_engine {
-                                    engine.set_config(patterns::PatternConfig {
-                                        entity_count,
-                                        ..Default::default()
-                                    });
-                                }
-                        }
 
                         // Consume pending DJ roster
                         let roster = app_state.client.as_ref()
@@ -1030,7 +987,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
         .invoke_handler(tauri::generate_handler![
             list_audio_sources,

@@ -11,7 +11,6 @@ import json
 import logging
 import math
 import os
-import posixpath
 import re
 import secrets
 import socketserver
@@ -20,10 +19,13 @@ import time
 import urllib.parse
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
+from http import HTTPStatus
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import msgspec
+
+from vj_server.config import validate_http_bind_host
 
 if TYPE_CHECKING:
     import websockets
@@ -584,32 +586,184 @@ class DJAuthConfig:
         return vj
 
 
+_REJECTED_STATIC_PATH = ".mcav-rejected-static-path"
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+    *(f"COM{number}" for number in "¹²³"),
+    *(f"LPT{number}" for number in "¹²³"),
+}
+
+
+def _static_path_parts(raw_path: str) -> tuple[str, ...] | None:
+    """Return validated, normalized path parts without touching the filesystem."""
+    try:
+        parsed = urllib.parse.urlsplit(raw_path)
+    except ValueError:
+        return None
+    if parsed.scheme or parsed.netloc:
+        return None
+
+    decoded = urllib.parse.unquote(parsed.path)
+    if "\x00" in decoded:
+        return None
+
+    normalized = decoded.replace("\\", "/")
+    if "//" in normalized:
+        return None
+
+    relative_text = normalized.lstrip("/")
+    windows_path = PureWindowsPath(relative_text)
+    if windows_path.drive or windows_path.root:
+        return None
+
+    parts = tuple(part for part in PurePosixPath(relative_text).parts if part not in ("", "."))
+    if ".." in parts:
+        return None
+
+    for part in parts:
+        windows_name = part.rstrip(" .")
+        if not windows_name or windows_name != part:
+            return None
+        device_name = windows_name.split(".", 1)[0].rstrip(" .").upper()
+        if ":" in windows_name or device_name in _WINDOWS_RESERVED_NAMES:
+            return None
+
+    return parts
+
+
+def _resolve_static_path(base: str | Path, raw_path: str) -> Path | None:
+    """Resolve an HTTP path beneath a static root using cross-platform rules."""
+    parts = _static_path_parts(raw_path)
+    if parts is None:
+        return None
+
+    try:
+        root = Path(base).resolve(strict=True)
+        candidate = root
+        for part in parts:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                return None
+        candidate = candidate.resolve(strict=True)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
+def _rejected_static_path(directory_map: dict, default_directory: str | None = None) -> str:
+    """Return a fixed absent path beneath one of the handler's configured roots."""
+    if "/" in directory_map:
+        root = directory_map["/"]
+    elif directory_map:
+        root = next(iter(directory_map.values()))
+    else:
+        root = default_directory or os.getcwd()
+    return str(Path(root).resolve() / _REJECTED_STATIC_PATH)
+
+
+class _StaticRequestHandlerMixin:
+    """Reject invalid static requests before the base handler touches the filesystem."""
+
+    _static_path_rejected = False
+    _static_path_override: str | None = None
+
+    def _reject_static_path(
+        self,
+        directory_map: dict,
+        default_directory: str | None = None,
+    ) -> str:
+        self._static_path_rejected = True
+        return _rejected_static_path(directory_map, default_directory)
+
+    def _take_static_path_override(self) -> str | None:
+        translated_path = self._static_path_override
+        self._static_path_override = None
+        return translated_path
+
+    def _resolve_static_response_path(self, translated_path: str) -> str:
+        request_path = urllib.parse.urlsplit(self.path).path
+        if not request_path.endswith("/") or not Path(translated_path).is_dir():
+            return translated_path
+
+        for index_name in ("index.html", "index.htm"):
+            if not (Path(translated_path) / index_name).is_file():
+                continue
+
+            resolved_index = _resolve_static_path(translated_path, index_name)
+            if resolved_index is None:
+                self._static_path_rejected = True
+                return translated_path
+            return str(resolved_index)
+
+        return translated_path
+
+    def send_head(self):
+        self._static_path_rejected = False
+        self._static_path_override = None
+        translated_path = self.translate_path(self.path)
+        if self._static_path_rejected:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
+
+        translated_path = self._resolve_static_response_path(translated_path)
+        if self._static_path_rejected:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
+
+        self._static_path_override = translated_path
+        try:
+            return super().send_head()
+        finally:
+            self._static_path_override = None
+
+
 def _make_directory_handler(directory_map: dict):
     """Create a handler class with its own directory_map to avoid shared mutable state."""
 
-    class _Handler(http.server.SimpleHTTPRequestHandler):
+    class _Handler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRequestHandler):
         """HTTP handler that serves from multiple directories."""
 
         _directory_map = directory_map
 
         def _safe_join(self, base: str, path: str) -> str:
-            path = path.split("?", 1)[0].split("#", 1)[0]
-            path = posixpath.normpath(urllib.parse.unquote(path))
-            words = [word for word in path.split("/") if word not in ("", ".", "..")]
-            full_path = base
-            for word in words:
-                full_path = os.path.join(full_path, word)
-            return full_path
+            resolved_path = _resolve_static_path(base, path)
+            if resolved_path is None:
+                return self._reject_static_path({"/": base})
+            return str(resolved_path)
 
         def translate_path(self, path):
-            path = path.split("?", 1)[0].split("#", 1)[0]
+            translated_path = self._take_static_path_override()
+            if translated_path is not None:
+                return translated_path
+
+            self._static_path_rejected = False
+            if _static_path_parts(path) is None:
+                return self._reject_static_path(
+                    self._directory_map,
+                    getattr(self, "directory", None),
+                )
+
+            path = urllib.parse.urlsplit(path).path
             for url_prefix, fs_directory in self._directory_map.items():
                 if path == url_prefix or path.startswith(f"{url_prefix}/"):
-                    relative_path = path[len(url_prefix) :].lstrip("/")
+                    relative_path = path[len(url_prefix) :]
+                    if relative_path.startswith("/"):
+                        relative_path = relative_path[1:]
                     return self._safe_join(fs_directory, relative_path)
             if "/" in self._directory_map:
                 return self._safe_join(self._directory_map["/"], path)
-            return super().translate_path(path)
+            return self._reject_static_path(
+                self._directory_map,
+                getattr(self, "directory", None),
+            )
 
         def log_message(self, format, *args):
             pass
@@ -617,7 +771,7 @@ def _make_directory_handler(directory_map: dict):
     return _Handler
 
 
-class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
+class MultiDirectoryHandler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRequestHandler):
     """HTTP handler that serves from multiple directories (legacy, prefer _make_directory_handler)."""
 
     def __init__(self, *args, **kwargs):
@@ -626,30 +780,45 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def _safe_join(self, base: str, path: str) -> str:
-        path = path.split("?", 1)[0].split("#", 1)[0]
-        path = posixpath.normpath(urllib.parse.unquote(path))
-        words = [word for word in path.split("/") if word not in ("", ".", "..")]
-        full_path = base
-        for word in words:
-            full_path = os.path.join(full_path, word)
-        return full_path
+        resolved_path = _resolve_static_path(base, path)
+        if resolved_path is None:
+            return self._reject_static_path({"/": base})
+        return str(resolved_path)
 
     def translate_path(self, path):
-        path = path.split("?", 1)[0].split("#", 1)[0]
+        translated_path = self._take_static_path_override()
+        if translated_path is not None:
+            return translated_path
+
+        self._static_path_rejected = False
+        if _static_path_parts(path) is None:
+            return self._reject_static_path(
+                self.directory_map,
+                getattr(self, "directory", None),
+            )
+
+        path = urllib.parse.urlsplit(path).path
         for url_prefix, fs_directory in self.directory_map.items():
             if path == url_prefix or path.startswith(f"{url_prefix}/"):
-                relative_path = path[len(url_prefix) :].lstrip("/")
+                relative_path = path[len(url_prefix) :]
+                if relative_path.startswith("/"):
+                    relative_path = relative_path[1:]
                 return self._safe_join(fs_directory, relative_path)
         if "/" in self.directory_map:
             return self._safe_join(self.directory_map["/"], path)
-        return super().translate_path(path)
+        return self._reject_static_path(
+            self.directory_map,
+            getattr(self, "directory", None),
+        )
 
     def log_message(self, format, *args):
         pass
 
 
-def run_http_server(port: int, directory: str):
+def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
     """Run HTTP server for admin panel."""
+    host = validate_http_bind_host(host)
+
     # directory is the project root
     project_root = Path(directory)
     admin_dir = project_root / "admin_panel"
@@ -657,8 +826,8 @@ def run_http_server(port: int, directory: str):
 
     # Admin panel at root, preview at /preview (absolute paths, no os.chdir)
     dir_map = {
-        "/preview": str(frontend_dir) if frontend_dir.exists() else str(directory),
-        "/": str(admin_dir) if admin_dir.exists() else str(directory),
+        "/preview": str(frontend_dir),
+        "/": str(admin_dir),
     }
     handler_cls = _make_directory_handler(dir_map)
 
@@ -667,7 +836,7 @@ def run_http_server(port: int, directory: str):
         allow_reuse_address = True
 
     try:
-        with ReusableTCPServer(("", port), handler_cls) as httpd:
+        with ReusableTCPServer((host, port), handler_cls) as httpd:
             httpd.serve_forever()
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")

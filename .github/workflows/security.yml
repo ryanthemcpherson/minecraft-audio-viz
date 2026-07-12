@@ -6,6 +6,9 @@ on:
     - cron: '0 6 * * 1'
   # Also run on-demand
   workflow_dispatch:
+  # Required by the release gate on the exact main-branch commit being tagged
+  push:
+    branches: [main]
   # Run on PRs that touch dependency files
   pull_request:
     paths:
@@ -19,6 +22,10 @@ on:
       - 'site/package.json'
       - 'worker/package.json'
       - 'minecraft_plugin/pom.xml'
+      - 'minecraft_mod/build.gradle'
+      - 'minecraft_mod/gradle.properties'
+      - 'minecraft_mod/settings.gradle'
+      - 'minecraft_mod/gradle/wrapper/gradle-wrapper.properties'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -43,24 +50,54 @@ jobs:
 
       - name: pip-audit (JSON report)
         run: |
-          pip-audit --desc --local --format json --output pip-audit-report.json || true
-          pip-audit --desc --local || true
+          set +e
+          pip-audit --desc --local --format json --output pip-audit-report.json
+          audit_status=$?
+          set -e
+          if [ -f pip-audit-report.json ]; then
+            cat pip-audit-report.json
+          fi
+          exit "$audit_status"
+
+      - name: Install community_bot audit dependencies
+        if: always()
+        run: |
+          python -m venv .audit-venvs/community-bot
+          .audit-venvs/community-bot/bin/python -m pip install --upgrade pip
+          .audit-venvs/community-bot/bin/python -m pip install -e "./community_bot[dev]" pip-audit
+
+      - name: community_bot pip-audit (JSON report)
+        if: always()
+        run: |
+          set +e
+          .audit-venvs/community-bot/bin/python -m pip_audit --desc --local --format json --output community-bot-pip-audit-report.json
+          audit_status=$?
+          set -e
+          if [ -f community-bot-pip-audit-report.json ]; then
+            cat community-bot-pip-audit-report.json
+          fi
+          exit "$audit_status"
 
       - name: Upload pip-audit report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pip-audit-report
-          path: pip-audit-report.json
+          path: |
+            pip-audit-report.json
+            community-bot-pip-audit-report.json
           retention-days: 30
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
-  # Java: Maven dependency check (Paper plugin)
+  # Java: OWASP dependency checks (Paper + Fabric)
   # ---------------------------------------------------------------------------
   java-security:
-    name: Java Security Audit (Maven)
+    name: Paper OWASP Dependency-Check
     runs-on: ubuntu-latest
+    env:
+      DEPENDENCY_CHECK_DATA_DIR: ${{ github.workspace }}/.dependency-check-data
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,10 +108,116 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Verify dependencies
+      - name: Restore NVD data cache
+        id: nvd-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: owasp-dependency-check-12.2.2-${{ runner.os }}-${{ github.run_id }}-paper
+          restore-keys: |
+            owasp-dependency-check-12.2.2-${{ runner.os }}-
+
+      - name: Run Paper OWASP Dependency-Check
+        id: dependency-check
         working-directory: minecraft_plugin
-        continue-on-error: true
-        run: mvn dependency:tree -B
+        run: |
+          nvd_args=()
+          if [[ -n "${NVD_API_KEY:-}" ]]; then
+            nvd_args+=("-DnvdApiKeyEnvironmentVariable=NVD_API_KEY")
+          fi
+          set +e
+          ./mvnw -B \
+            org.owasp:dependency-check-maven:12.2.2:check \
+            -DfailBuildOnCVSS=0 \
+            -DfailOnError=true \
+            -DskipProvidedScope=true \
+            -DhostedSuppressionsEnabled=false \
+            -Dformats=JSON,SARIF \
+            -DdataDirectory="$DEPENDENCY_CHECK_DATA_DIR" \
+            -Dodc.outputDirectory=target/dependency-check \
+            "${nvd_args[@]}"
+          audit_status=$?
+          set -e
+          if [[ -f target/dependency-check/dependency-check-report.json &&
+                -f target/dependency-check/dependency-check-report.sarif ]]; then
+            echo "reports-generated=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$audit_status"
+
+      - name: Save NVD data cache
+        if: always() && steps.dependency-check.outputs.reports-generated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: ${{ steps.nvd-cache.outputs.cache-primary-key }}
+
+      - name: Upload dependency-check reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-dependency-check-${{ github.sha }}
+          path: |
+            minecraft_plugin/target/dependency-check/dependency-check-report.json
+            minecraft_plugin/target/dependency-check/dependency-check-report.sarif
+          retention-days: 30
+          if-no-files-found: warn
+
+  fabric-java-security:
+    name: Fabric OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    env:
+      DEPENDENCY_CHECK_DATA_DIR: ${{ github.workspace }}/.dependency-check-data
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Restore NVD data cache
+        id: nvd-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: owasp-dependency-check-12.2.2-${{ runner.os }}-${{ github.run_id }}-fabric
+          restore-keys: |
+            owasp-dependency-check-12.2.2-${{ runner.os }}-
+
+      - name: Run Fabric OWASP Dependency-Check
+        id: dependency-check
+        working-directory: minecraft_mod
+        run: |
+          set +e
+          ./gradlew dependencyCheckAnalyze
+          audit_status=$?
+          set -e
+          if [[ -f build/reports/dependency-check/dependency-check-report.json &&
+                -f build/reports/dependency-check/dependency-check-report.sarif ]]; then
+            echo "reports-generated=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$audit_status"
+
+      - name: Save NVD data cache
+        if: always() && steps.dependency-check.outputs.reports-generated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: ${{ steps.nvd-cache.outputs.cache-primary-key }}
+
+      - name: Upload dependency-check reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fabric-dependency-check-${{ github.sha }}
+          path: |
+            minecraft_mod/build/reports/dependency-check/dependency-check-report.json
+            minecraft_mod/build/reports/dependency-check/dependency-check-report.sarif
+          retention-days: 30
+          if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # Node.js: npm audit
@@ -88,34 +231,53 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Audit root package
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-root.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-root.json
+          audit_status=$?
+          set -e
+          cat npm-audit-root.json
+          exit "$audit_status"
 
       - name: Audit dj_client package
+        if: always()
         working-directory: dj_client
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-djclient.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-djclient.json
+          audit_status=$?
+          set -e
+          cat npm-audit-djclient.json
+          exit "$audit_status"
 
       - name: Audit site package
+        if: always()
         working-directory: site
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-site.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-site.json
+          audit_status=$?
+          set -e
+          cat npm-audit-site.json
+          exit "$audit_status"
 
       - name: Audit worker package
+        if: always()
         working-directory: worker
         run: |
-          npm install --package-lock-only
-          npm audit --audit-level=high --json > npm-audit-worker.json || true
-          npm audit --audit-level=high || true
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high --json > npm-audit-worker.json
+          audit_status=$?
+          set -e
+          cat npm-audit-worker.json
+          exit "$audit_status"
 
       - name: Upload npm audit reports
         if: always()
@@ -148,8 +310,12 @@ jobs:
       - name: cargo-audit (JSON report)
         working-directory: dj_client/src-tauri
         run: |
-          cargo audit --json > cargo-audit-report.json || true
-          cargo audit || true
+          set +e
+          cargo audit --json > cargo-audit-report.json
+          audit_status=$?
+          set -e
+          cat cargo-audit-report.json
+          exit "$audit_status"
 
       - name: Upload cargo-audit report
         if: always()
@@ -166,7 +332,7 @@ jobs:
   security-summary:
     name: Security Summary
     if: always()
-    needs: [python-security, java-security, npm-security, rust-security]
+    needs: [python-security, java-security, fabric-java-security, npm-security, rust-security]
     runs-on: ubuntu-latest
     steps:
       - name: Summary
@@ -174,8 +340,21 @@ jobs:
           echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Ecosystem | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "|-|-|" >> $GITHUB_STEP_SUMMARY
           echo "| Python (pip-audit) | ${{ needs.python-security.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Java (Maven) | ${{ needs.java-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Paper dependency-check | ${{ needs.java-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fabric dependency-check | ${{ needs.fabric-java-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| npm | ${{ needs.npm-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rust (cargo-audit) | ${{ needs.rust-security.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check required results
+        run: |
+          if [[ "${{ needs.python-security.result }}" != "success" ||
+                "${{ needs.java-security.result }}" != "success" ||
+                "${{ needs.fabric-java-security.result }}" != "success" ||
+                "${{ needs.npm-security.result }}" != "success" ||
+                "${{ needs.rust-security.result }}" != "success" ]]; then
+            echo "One or more required security jobs did not succeed."
+            exit 1
+          fi
+          echo "All required security checks passed."

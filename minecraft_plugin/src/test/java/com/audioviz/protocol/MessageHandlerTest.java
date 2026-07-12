@@ -8,18 +8,23 @@ import com.audioviz.entities.EntityUpdate;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererBackendType;
 import com.audioviz.render.RendererRegistry;
+import com.audioviz.stages.Stage;
+import com.audioviz.stages.StageManager;
 import com.audioviz.zones.VisualizationZone;
 import com.audioviz.zones.ZoneManager;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.bukkit.Location;
+import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -27,6 +32,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -81,6 +94,96 @@ class MessageHandlerTest {
         assertEquals("pong", response.get("type").getAsString());
         assertTrue(response.has("timestamp"));
         assertTrue(response.get("timestamp").getAsLong() > 0);
+    }
+
+    @Test
+    @DisplayName("shutdown cancellation releases a pending main-thread stage scan")
+    void shutdownCancellationReleasesPendingMainThreadStageScan() throws Exception {
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        StageManager stageManager = mock(StageManager.class);
+        Stage stage = mock(Stage.class);
+        FutureTask<JsonObject> pendingScan = new FutureTask<>(() -> {
+            throw new AssertionError("Cancelled stage scan must not execute");
+        });
+        CountDownLatch scanScheduled = new CountDownLatch(1);
+
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(plugin.getStageManager()).thenReturn(stageManager);
+        when(stageManager.getStage("main")).thenReturn(stage);
+        when(scheduler.callSyncMethod(eq(plugin), ArgumentMatchers.<Callable<JsonObject>>any()))
+            .thenAnswer(invocation -> {
+                scanScheduled.countDown();
+                return pendingScan;
+            });
+
+        JsonObject request = new JsonObject();
+        request.addProperty("stage", "main");
+        CompletableFuture<JsonObject> response = CompletableFuture.supplyAsync(
+            () -> handler.handleMessage("scan_stage_blocks", request)
+        );
+        assertTrue(scanScheduled.await(1, TimeUnit.SECONDS));
+
+        handler.cancelPendingMainThreadCalls();
+
+        JsonObject result = response.get(1, TimeUnit.SECONDS);
+        assertEquals("error", result.get("type").getAsString());
+        assertTrue(result.get("message").getAsString().contains("cancelled"));
+        assertTrue(pendingScan.isCancelled());
+    }
+
+    @Test
+    @DisplayName("a timed-out stage scan cannot execute later")
+    void timedOutStageScanCancelsScheduledFuture() throws Exception {
+        @SuppressWarnings("unchecked")
+        Future<JsonObject> pendingScan = mock(Future.class);
+        stubPendingStageScan(pendingScan);
+        when(pendingScan.get(15, TimeUnit.SECONDS)).thenThrow(new TimeoutException());
+        JsonObject request = new JsonObject();
+        request.addProperty("stage", "main");
+
+        JsonObject result = handler.handleMessage("scan_stage_blocks", request);
+
+        assertEquals("error", result.get("type").getAsString());
+        assertTrue(result.get("message").getAsString().contains("timed out"));
+        verify(pendingScan).cancel(false);
+    }
+
+    @Test
+    @DisplayName("an interrupted stage scan is cancelled and preserves interrupt status")
+    void interruptedStageScanCancelsScheduledFuture() throws Exception {
+        @SuppressWarnings("unchecked")
+        Future<JsonObject> pendingScan = mock(Future.class);
+        stubPendingStageScan(pendingScan);
+        when(pendingScan.get(15, TimeUnit.SECONDS)).thenThrow(new InterruptedException());
+        JsonObject request = new JsonObject();
+        request.addProperty("stage", "main");
+
+        try {
+            JsonObject result = handler.handleMessage("scan_stage_blocks", request);
+
+            assertEquals("error", result.get("type").getAsString());
+            assertTrue(result.get("message").getAsString().contains("interrupted"));
+            assertTrue(Thread.currentThread().isInterrupted());
+            verify(pendingScan).cancel(false);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private void stubPendingStageScan(Future<JsonObject> pendingScan) {
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        StageManager stageManager = mock(StageManager.class);
+        Stage stage = mock(Stage.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(plugin.getStageManager()).thenReturn(stageManager);
+        when(plugin.getLogger()).thenReturn(Logger.getLogger(getClass().getName()));
+        when(stageManager.getStage("main")).thenReturn(stage);
+        when(scheduler.callSyncMethod(eq(plugin), ArgumentMatchers.<Callable<JsonObject>>any()))
+            .thenReturn(pendingScan);
     }
 
     // --- Unknown message type ---

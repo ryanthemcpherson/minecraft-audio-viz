@@ -17,6 +17,21 @@ This directory is the contract source of truth for cross-runtime messages in Aud
 5. Audio band payloads are fixed to 5 bands unless major version changes.
 6. Renderer backend values are stable contract keys, not UI labels.
 
+## Phase 0 routing containment
+
+Phase 0 servers always emit relay-only `stream_route` messages and never deliver
+Lua pattern source or direct Minecraft connection details to DJ clients. Legacy
+clients may still send or receive the optional `minecraft_host` and
+`minecraft_port` fields, but Phase 0 servers do not use them for direct rendering.
+
+## Minecraft WebSocket authentication
+
+The VJ client and Minecraft renderer use this handshake before renderer traffic:
+`connected(auth_required)` → optional `auth(token)` → `auth_ok`. Bad or missing
+credentials close the connection with code 4001. The five-second authentication
+deadline closes with code 4002. Browser-style handshakes carrying an `Origin`
+header close with code 4003 before the renderer sends `connected`.
+
 ## Layout
 - `protocol/schemas/index.json`: schema inventory
 - `protocol/schemas/types/`: shared reusable types
@@ -32,6 +47,7 @@ This directory is the contract source of truth for cross-runtime messages in Aud
 ## Message Coverage
 
 ### Core (Plugin ↔ Processor)
+- `connected` / `ws_auth` / `ws_auth_ok` — Minecraft connection authentication
 - `ping` / `pong` — Liveness heartbeat
 - `error` — Error response for any failed request
 - `get_zones` / `zones` — Zone listing

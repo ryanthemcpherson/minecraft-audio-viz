@@ -162,7 +162,7 @@ if [ "$JAR_ONLY" = false ]; then
             sleep 2
         fi
 
-        ssh "$SSH_TARGET" "cd '${REMOTE_PROJECT}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host ${SERVER} > /tmp/vj_server.log 2>&1 &"
+        ssh "$SSH_TARGET" "cd '${REMOTE_PROJECT}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
         sleep 3
 
         VJ_CHECK=$(ssh "$SSH_TARGET" "ps aux | grep 'vj_server.cli' | grep -v grep | grep python" 2>/dev/null) || true
@@ -178,7 +178,7 @@ fi
 
 echo ""
 echo "  Deploy complete! (Paper)"
-echo "  WebSocket:     ws://${SERVER}:8765"
+echo "  Renderer link: ws://127.0.0.1:8765 (remote host only)"
 echo "  Admin Panel:   http://${SERVER}:8081"
 echo "  Preview:       http://${SERVER}:8080"
 echo "  VJ Server:     ws://${SERVER}:9000"

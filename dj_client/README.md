@@ -1,3 +1,5 @@
+> **Phase 0 containment:** Prebuilt DJ-client releases, automatic updates, the VJ Docker image, and the zero-install Docker demo are temporarily unavailable. Source builds are for development verification only until signed release, rollback, clean-install, and end-to-end demo gates pass.
+
 # AudioViz DJ Client
 
 A lightweight, cross-platform desktop application for DJs to connect to AudioViz VJ servers and stream real-time audio visualizations.
@@ -16,7 +18,9 @@ A lightweight, cross-platform desktop application for DJs to connect to AudioViz
 - Rust 1.70+ and Cargo
 - Node.js 18+ and npm
 
-## Development Setup
+## Development Setup (Unsigned Verification Only)
+
+These commands produce local, unsigned development builds. Do not distribute their output as a release.
 
 1. **Install Rust dependencies:**
    ```bash
@@ -34,19 +38,12 @@ A lightweight, cross-platform desktop application for DJs to connect to AudioViz
    npm run tauri dev
    ```
 
-4. **Build for production (local, unsigned):**
+4. **Build locally for unsigned development verification:**
    ```bash
    npm run tauri:build
    ```
 
-5. **Build for production (signed release artifacts):**
-   ```bash
-   # Required for updater signatures:
-   # TAURI_SIGNING_PRIVATE_KEY + optional TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-   npm run tauri:build:signed
-   ```
-
-6. **Run automated tests:**
+5. **Run automated tests:**
    ```bash
    npm test
    ```
@@ -125,19 +122,13 @@ Messages use JSON over WebSocket:
 {"type": "dj_audio_frame", "seq": 123, "bands": [0.8, 0.6, 0.4, 0.3, 0.2], "peak": 0.8, "beat": true, "bpm": 128}
 ```
 
-## Distribution
+## Distribution (Phase 0 Quarantined)
 
-Built binaries are available in the `target/release` folder:
-- Windows: `dj-client.exe` (~3MB) or `.msi` installer
-- macOS: `AudioViz DJ.app` or `.dmg`
-- Linux: AppImage or `.deb`
+Prebuilt binaries and installers are not available during Phase 0. A local unsigned build may leave platform-specific output under `src-tauri/target/release`, but that output is for development verification only and must not be treated as a supported artifact.
 
-## Auto Updates
+## Automatic Updates (Phase 0 Quarantined)
 
-- The app checks GitHub release metadata at startup and periodically while running.
-- Update endpoint is configured in `dj_client/src-tauri/tauri.conf.json`.
-- Signed updater artifacts require `TAURI_SIGNING_PRIVATE_KEY` during release builds.
-- For local packaging without signing, use `npm run tauri:build` (`--no-sign`).
+The updater is absent from the active runtime during Phase 0. The client does not check release metadata or download updates. Re-enabling updates requires signed updater artifacts, rollback support, and clean-install release gates.
 
 ## License
 

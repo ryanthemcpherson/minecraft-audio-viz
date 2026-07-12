@@ -588,7 +588,7 @@ class DJManagerMixin:
                 "dj_id": dj_id,
                 "dj_name": dj_name,
                 "is_active": self._active_dj_id == dj_id,
-                # Pattern info for direct mode
+                "route_mode": "relay",
                 "current_pattern": self._pattern_name,
                 "pattern_config": {
                     "entity_count": self.entity_count,
@@ -598,17 +598,6 @@ class DJManagerMixin:
                     "max_scale": self._pattern_config.max_scale,
                 },
             }
-
-            # Include Minecraft connection info for direct mode DJs
-            if direct_mode:
-                auth_response["minecraft_host"] = self.minecraft_host
-                auth_response["minecraft_port"] = self.minecraft_port
-                auth_response["zone"] = self.zone
-                auth_response["entity_count"] = self.entity_count
-            # Initial route hint for newer clients (legacy clients ignore unknown fields)
-            auth_response["route_mode"] = (
-                "dual" if (direct_mode and self._active_dj_id == dj_id) else "relay"
-            )
 
             await websocket.send(_json_str(auth_response))
             logger.info(f"[DJ AUTH SUCCESS] {dj_name} ({dj_id}) authenticated, priority={priority}")
@@ -952,6 +941,7 @@ class DJManagerMixin:
                         "dj_id": dj_id,
                         "dj_name": dj.dj_name,
                         "is_active": self._active_dj_id == dj_id,
+                        "route_mode": "relay",
                         "current_pattern": self._pattern_name,
                         "pattern_config": {
                             "entity_count": self.entity_count,
@@ -1055,21 +1045,12 @@ class DJManagerMixin:
         return config.to_dict()
 
     def _build_stream_route_message(self, dj_id: str, dj: DJConnection) -> dict:
-        """Build stream routing policy for a DJ client.
-
-        route_mode:
-        - relay: DJ sends audio to VJ only (default / standby DJs)
-        - dual: DJ sends audio to VJ and publishes visualization directly to Minecraft
-        """
+        """Build the Phase 0 relay-only routing policy for a DJ client."""
         is_active = self._active_dj_id == dj_id
-        route_mode = "dual" if (dj.direct_mode and is_active) else "relay"
-
         return {
             "type": "stream_route",
-            "route_mode": route_mode,
+            "route_mode": "relay",
             "is_active": is_active,
-            "minecraft_host": self.minecraft_host,
-            "minecraft_port": self.minecraft_port,
             "zone": self.zone,
             "entity_count": self.entity_count,
             "current_pattern": self._pattern_name,
@@ -1080,11 +1061,10 @@ class DJManagerMixin:
                 "base_scale": self._pattern_config.base_scale,
                 "max_scale": self._pattern_config.max_scale,
             },
-            "pattern_scripts": self._get_pattern_scripts(),
             "band_sensitivity": list(self._band_sensitivity),
             "preset": self._current_preset_name,
             "relay_fallback": True,
-            "reason": "active_direct_dj" if route_mode == "dual" else "standby_or_relay_mode",
+            "reason": "phase0_remote_execution_disabled",
         }
 
     async def _broadcast_stream_routes(self):

@@ -6,11 +6,25 @@ on:
     paths:
       - 'dj_client/**'
       - '.github/workflows/dj-client-ci.yml'
+      - '.github/workflows/release-dj-client.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/docker.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/security.yml'
+      - 'docker-compose.yml'
+      - 'docker-compose.demo.yml'
   pull_request:
     branches: [main]
     paths:
       - 'dj_client/**'
       - '.github/workflows/dj-client-ci.yml'
+      - '.github/workflows/release-dj-client.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/docker.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/security.yml'
+      - 'docker-compose.yml'
+      - 'docker-compose.demo.yml'
 
 concurrency:
   group: dj-client-ci-${{ github.ref }}
@@ -49,6 +63,13 @@ jobs:
       - name: Install frontend dependencies
         working-directory: dj_client
         run: npm ci
+
+      - name: Verify Docker Compose availability
+        run: docker compose version
+
+      - name: Verify Phase 0 containment
+        working-directory: dj_client
+        run: npm run test:containment
 
       - name: Lint frontend
         working-directory: dj_client
@@ -119,24 +140,14 @@ jobs:
         working-directory: dj_client
         run: npm run build
 
-      - name: Disable updater artifacts when signing key is missing
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            node -e "const fs=require('fs'); const path='dj_client/src-tauri/tauri.conf.json'; const conf=JSON.parse(fs.readFileSync(path,'utf8')); if (conf.bundle && conf.bundle.createUpdaterArtifacts) { conf.bundle.createUpdaterArtifacts=false; fs.writeFileSync(path, JSON.stringify(conf, null, 2)+'\n'); console.log('Disabled bundle.createUpdaterArtifacts for unsigned CI build'); }"
-          fi
-
-      - name: Build Tauri app
+      - name: Build Tauri app (unsigned validation)
         working-directory: dj_client
-        run: npm run tauri build -- --target ${{ matrix.rust_target }}
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri:build -- --target ${{ matrix.rust_target }} --no-bundle
 
+      # Phase 0 quarantine: preserve the future distribution layout, but never
+      # create downloadable unsigned installers from CI.
       - name: Upload artifacts (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: ${{ false && matrix.platform == 'ubuntu-22.04' }}
         uses: actions/upload-artifact@v7
         with:
           name: dj-client-linux-x64
@@ -146,7 +157,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload artifacts (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: ${{ false && matrix.platform == 'windows-latest' }}
         uses: actions/upload-artifact@v7
         with:
           name: dj-client-windows-x64
@@ -156,7 +167,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload artifacts (macOS x64)
-        if: matrix.platform == 'macos-latest' && matrix.rust_target == 'x86_64-apple-darwin'
+        if: ${{ false && matrix.platform == 'macos-latest' && matrix.rust_target == 'x86_64-apple-darwin' }}
         uses: actions/upload-artifact@v7
         with:
           name: dj-client-macos-x64
@@ -165,7 +176,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload artifacts (macOS ARM64)
-        if: matrix.platform == 'macos-latest' && matrix.rust_target == 'aarch64-apple-darwin'
+        if: ${{ false && matrix.platform == 'macos-latest' && matrix.rust_target == 'aarch64-apple-darwin' }}
         uses: actions/upload-artifact@v7
         with:
           name: dj-client-macos-arm64

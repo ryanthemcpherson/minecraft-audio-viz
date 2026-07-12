@@ -1,24 +1,28 @@
+> **Phase 0 containment:** Prebuilt DJ-client releases, automatic updates, the VJ Docker image, and the zero-install Docker demo are temporarily unavailable. Source builds are for development verification only until signed release, rollback, clean-install, and end-to-end demo gates pass.
+
 # MCAV Full-Stack Demo
 
-Try MCAV (Minecraft Audio Visualizer) in your browser with zero installation using Docker Compose.
+The Docker demo is quarantined during Phase 0 and is not a supported installation or evaluation path.
 
-## Quick Start
+## Unsupported Development Verification (Phase 0 Quarantined)
+
+The following command is retained only for contributors investigating the incomplete Compose setup. It requires an explicit quarantine profile and does not constitute an end-to-end acceptance test.
 
 ```bash
 # From the project root
-docker compose -f docker-compose.demo.yml up
+docker compose -f docker-compose.demo.yml --profile phase0-quarantined up
 ```
 
 Then open in your browser:
 - **http://localhost:8080** - Admin Panel (DJ controls)
 - **http://localhost:8081** - 3D Preview (Three.js visualization)
 
-The demo will automatically:
+The historical demo design intended to:
 1. Start the VJ server with authentication disabled
 2. Launch an audio simulator sending 128 BPM beats
 3. Serve the web interfaces
 
-## What You'll See
+## Historical Expected Behavior
 
 - **3D Preview**: Real-time visualization of simulated audio with 5 frequency bands
 - **Admin Panel**: Full DJ controls including pattern selection, entity count, and audio meters
@@ -104,31 +108,28 @@ ports:
 
 ### No Visualization Showing
 1. Check browser console for WebSocket errors
-2. Verify VJ server is healthy: `docker compose -f docker-compose.demo.yml ps`
-3. Check audio simulator logs: `docker logs mcav-audio-simulator`
+2. Verify VJ server is healthy: `docker compose -f docker-compose.demo.yml --profile phase0-quarantined ps`
+3. The Compose file does not currently define the audio simulator; simulated frames must be supplied separately during development.
 
 ### WebSocket Connection Failed
 The preview/admin frontends connect to `ws://localhost:8766`. If running on a remote host, you'll need to access via the host's IP address instead of localhost.
 
-## Next Steps
+## Re-enablement Requirements
 
-- **Add Minecraft**: Follow the main [README.md](../README.md) to connect a Minecraft server
-- **Run a Real DJ Client**: Install the Rust DJ client from `dj_client/` to capture real audio
-- **Explore Patterns**: Browse the 28 patterns in `patterns/` or create your own Lua pattern
-- **Deploy to Production**: See `coordinator/` for multi-tenant setup with authentication
+- Signed DJ-client release and updater artifacts with rollback support
+- Clean-install verification for supported client platforms
+- A working audio simulator wired into the Compose topology
+- Automated end-to-end checks for the VJ server, preview, and Minecraft integration
 
-## Development
+## Unsupported Development Reference
 
 To modify the demo setup:
 
-1. **Audio Simulator**: Edit `demo/audio_simulator.py` and rebuild:
-   ```bash
-   docker compose -f docker-compose.demo.yml up --build audio_simulator
-   ```
+1. **Audio Simulator**: `demo/audio_simulator.py` is retained as source, but the quarantined Compose file does not currently define an `audio_simulator` service.
 
 2. **VJ Server**: The VJ server uses the main `Dockerfile` - changes to `vj_server/` require rebuilding:
    ```bash
-   docker compose -f docker-compose.demo.yml up --build vj_server
+   docker compose -f docker-compose.demo.yml --profile phase0-quarantined up --build vj_server
    ```
 
 3. **Frontend**: Preview tool changes are live (nginx serves from `preview_tool/frontend/`):

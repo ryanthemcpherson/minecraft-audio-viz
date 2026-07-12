@@ -15,14 +15,17 @@ import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
@@ -37,17 +40,42 @@ import java.util.logging.Level;
  */
 public class MessageQueue {
 
+    @FunctionalInterface
+    public interface MessageGuard {
+        /** Runs {@code operation} atomically with the guard check when still valid. */
+        boolean runIfValid(Runnable operation);
+    }
+
+    @FunctionalInterface
+    public interface ParsedMessageAdmission {
+        /** Dispatches one parsed message without reparsing the raw frame. */
+        void admit(JsonObject message, MessageGuard guard);
+    }
+
+    @FunctionalInterface
+    public interface ParseFailureHandler {
+        void onFailure(RuntimeException exception);
+    }
+
+    private static final MessageGuard ALLOW_ALL = operation -> {
+        operation.run();
+        return true;
+    };
+    private static final Runnable NO_OP = () -> { };
+
     private final AudioVizPlugin plugin;
     private final MessageHandler messageHandler;
 
     // Queue for parsed JSON messages
-    private final ConcurrentLinkedQueue<JsonObject> messageQueue;
+    private final ArrayBlockingQueue<QueuedMessage> messageQueue;
 
     // Queue for batched entity updates (collected across messages)
     private final ConcurrentLinkedQueue<EntityUpdate> entityUpdateQueue;
 
     // Dedicated thread pool for JSON parsing
-    private final ExecutorService jsonExecutor;
+    private final ThreadPoolExecutor jsonExecutor;
+    private final Object intakeLock = new Object();
+    private boolean acceptingMessages = true;
 
     // Tick processor task
     private BukkitTask processorTask;
@@ -59,6 +87,8 @@ public class MessageQueue {
     private final Map<String, Long> lastBeatTimestampByZone = new ConcurrentHashMap<>();
 
     // Backpressure limit
+    private static final int JSON_PARSER_THREADS = 2;
+    private static final int MAX_RAW_QUEUE_SIZE = 64;
     private static final int MAX_QUEUE_SIZE = 1000;
 
     // Pre-allocated identity rotation (immutable, safe to share across all entities).
@@ -72,8 +102,10 @@ public class MessageQueue {
 
     // Reusable per-tick maps — cleared each tick instead of re-allocated.
     private final HashMap<String, List<EntityUpdate>> updatesByZone = new HashMap<>(4);
-    private final HashMap<String, JsonObject> latestBatchByZone = new HashMap<>(4);
-    private final HashMap<String, JsonObject> latestBitmapFrameByZone = new HashMap<>(4);
+    private final HashMap<String, ArrayDeque<QueuedMessage>> batchCandidatesByZone =
+        new HashMap<>(4);
+    private final HashMap<String, ArrayDeque<QueuedMessage>> bitmapCandidatesByZone =
+        new HashMap<>(4);
 
     // Shared lambda for computeIfAbsent to avoid per-call lambda allocation
     private static final java.util.function.Function<String, List<EntityUpdate>> NEW_UPDATE_LIST = k -> new ArrayList<>();
@@ -88,13 +120,21 @@ public class MessageQueue {
     public MessageQueue(AudioVizPlugin plugin, MessageHandler messageHandler) {
         this.plugin = plugin;
         this.messageHandler = messageHandler;
-        this.messageQueue = new ConcurrentLinkedQueue<>();
+        this.messageQueue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
         this.entityUpdateQueue = new ConcurrentLinkedQueue<>();
-        this.jsonExecutor = Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "AudioViz-JSON-Parser");
-            t.setDaemon(true);
-            return t;
-        });
+        this.jsonExecutor = new ThreadPoolExecutor(
+            JSON_PARSER_THREADS,
+            JSON_PARSER_THREADS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(MAX_RAW_QUEUE_SIZE),
+            runnable -> {
+                Thread thread = new Thread(runnable, "AudioViz-JSON-Parser");
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy()
+        );
     }
 
     /**
@@ -114,15 +154,42 @@ public class MessageQueue {
             processorTask.cancel();
             processorTask = null;
         }
-        jsonExecutor.shutdown();
-        try {
-            // Wait up to 5 seconds for pending JSON parsing to complete
-            if (!jsonExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                jsonExecutor.shutdownNow();
-                plugin.getLogger().warning("MessageQueue JSON executor did not terminate gracefully");
+        synchronized (intakeLock) {
+            acceptingMessages = false;
+            jsonExecutor.shutdown();
+        }
+        boolean interrupted = false;
+        boolean forcedShutdownLogged = false;
+        while (!jsonExecutor.isTerminated()) {
+            try {
+                if (jsonExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    break;
+                }
+                discardQueuedParserTasks();
+                if (!forcedShutdownLogged) {
+                    plugin.getLogger().warning(
+                        "MessageQueue JSON executor did not terminate gracefully"
+                    );
+                    forcedShutdownLogged = true;
+                }
+            } catch (InterruptedException e) {
+                interrupted = true;
+                discardQueuedParserTasks();
             }
-        } catch (InterruptedException e) {
-            jsonExecutor.shutdownNow();
+        }
+
+        // Parser termination is a hard boundary: no task can repopulate these
+        // queues after the session has been invalidated.
+        messageQueue.clear();
+        entityUpdateQueue.clear();
+        batchCandidatesByZone.clear();
+        bitmapCandidatesByZone.clear();
+        updatesByZone.values().forEach(List::clear);
+        updatesByZone.clear();
+        trigCache.clear();
+        lastBeatTimestampByZone.clear();
+
+        if (interrupted) {
             Thread.currentThread().interrupt();
         }
         long dropped = messagesDropped.get();
@@ -138,32 +205,139 @@ public class MessageQueue {
      * If the queue is full, the oldest message is dropped to apply backpressure.
      */
     public void enqueueRaw(String rawJson) {
-        jsonExecutor.submit(() -> {
+        enqueueRaw(rawJson, ALLOW_ALL);
+    }
+
+    /**
+     * Enqueue raw JSON with a guard that remains attached through parsing and execution.
+     */
+    public void enqueueRaw(String rawJson, MessageGuard guard) {
+        parseAndDispatch(
+            rawJson,
+            guard,
+            (json, messageGuard) -> offer(new QueuedMessage(json, messageGuard)),
+            exception -> plugin.getLogger().log(
+                Level.WARNING,
+                "Failed to parse JSON message",
+                exception
+            )
+        );
+    }
+
+    /**
+     * Admit a raw frame to the bounded parser executor, then dispatch its parsed object once.
+     */
+    public void parseAndDispatch(
+        String rawJson,
+        MessageGuard guard,
+        ParsedMessageAdmission admission,
+        ParseFailureHandler failureHandler
+    ) {
+        Runnable parseTask = () -> {
             try {
-                JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
-                if (messageQueue.size() >= MAX_QUEUE_SIZE) {
-                    messageQueue.poll(); // Drop oldest
-                    long dropped = messagesDropped.incrementAndGet();
-                    if (dropped % 100 == 1) {
-                        plugin.getLogger().warning("MessageQueue backpressure: dropped message (total dropped: " + dropped + ")");
-                    }
+                if (!guard.runIfValid(NO_OP)) {
+                    messagesDropped.incrementAndGet();
+                    return;
                 }
-                messageQueue.offer(json);
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "Failed to parse JSON message", e);
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+                return;
             }
-        });
+
+            JsonObject json;
+            try {
+                json = JsonParser.parseString(rawJson).getAsJsonObject();
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+                return;
+            }
+
+            try {
+                admission.admit(json, guard);
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+            }
+        };
+
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            try {
+                jsonExecutor.execute(parseTask);
+            } catch (RejectedExecutionException exception) {
+                recordDroppedMessage();
+            }
+        }
     }
 
     /**
      * Enqueue an already-parsed JSON object.
      */
     public void enqueue(JsonObject json) {
-        if (messageQueue.size() >= MAX_QUEUE_SIZE) {
-            messageQueue.poll(); // Drop oldest
-            messagesDropped.incrementAndGet();
+        enqueue(json, ALLOW_ALL);
+    }
+
+    /**
+     * Enqueue parsed JSON with a guard checked atomically around handler execution.
+     */
+    public void enqueue(JsonObject json, MessageGuard guard) {
+        synchronized (intakeLock) {
+            if (!acceptingMessages) {
+                recordDroppedMessage();
+                return;
+            }
+            offer(new QueuedMessage(json, guard));
         }
-        messageQueue.offer(json);
+    }
+
+    private void offer(QueuedMessage message) {
+        synchronized (messageQueue) {
+            if (messageQueue.offer(message)) {
+                return;
+            }
+
+            QueuedMessage discarded = messageQueue.poll();
+            if (!messageQueue.offer(message)) {
+                recordDroppedMessage();
+                return;
+            }
+            if (discarded != null) {
+                recordDroppedMessage();
+            }
+        }
+    }
+
+    private void notifyFailure(
+        ParseFailureHandler failureHandler,
+        RuntimeException exception
+    ) {
+        try {
+            failureHandler.onFailure(exception);
+        } catch (RuntimeException callbackException) {
+            plugin.getLogger().log(
+                Level.WARNING,
+                "Failed to report JSON message error",
+                callbackException
+            );
+        }
+    }
+
+    private void discardQueuedParserTasks() {
+        int discardedTasks = jsonExecutor.shutdownNow().size();
+        if (discardedTasks > 0) {
+            messagesDropped.addAndGet(discardedTasks);
+        }
+    }
+
+    private void recordDroppedMessage() {
+        long dropped = messagesDropped.incrementAndGet();
+        if (dropped % 100 == 1) {
+            plugin.getLogger().warning(
+                "MessageQueue backpressure: dropped message (total dropped: " + dropped + ")"
+            );
+        }
     }
 
     /**
@@ -174,58 +348,30 @@ public class MessageQueue {
         // Clear per-tick caches and reusable maps
         trigCache.clear();
         updatesByZone.values().forEach(List::clear);
-        latestBatchByZone.clear();
-        latestBitmapFrameByZone.clear();
+        batchCandidatesByZone.clear();
+        bitmapCandidatesByZone.clear();
 
         // Process all queued messages
-        JsonObject msg;
-        while ((msg = messageQueue.poll()) != null) {
+        QueuedMessage queuedMessage;
+        while ((queuedMessage = messageQueue.poll()) != null) {
             messagesProcessed.incrementAndGet();
 
-            String type = msg.has("type") ? msg.get("type").getAsString() : "unknown";
-
-            // Handle batch_update specially for performance
-            if ("batch_update".equals(type)) {
-                // Keep only the latest frame for each zone to avoid replaying stale updates.
-                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                JsonObject replaced = latestBatchByZone.put(zoneName, msg);
-                if (replaced != null) {
-                    messagesDropped.incrementAndGet();
-                }
-            } else if ("bitmap_frame".equals(type)) {
-                // Bitmap frames are also high-frequency; keep only the latest per zone.
-                String zoneName = msg.has("zone") ? msg.get("zone").getAsString() : "main";
-                JsonObject replaced = latestBitmapFrameByZone.put(zoneName, msg);
-                if (replaced != null) {
-                    messagesDropped.incrementAndGet();
-                }
-            } else {
-                // Process other message types through normal handler
-                try {
-                    messageHandler.handleMessage(type, msg);
-                } catch (Exception e) {
-                    plugin.getLogger().log(Level.WARNING, "Error handling message type: " + type, e);
-                }
-            }
-        }
-
-        // Process only the freshest batch_update per zone this tick.
-        for (Map.Entry<String, JsonObject> entry : latestBatchByZone.entrySet()) {
-            String zoneName = entry.getKey();
-            JsonObject batch = entry.getValue();
-            List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(zoneName, NEW_UPDATE_LIST);
-            extractEntityUpdates(batch, zoneName, zoneUpdates);
-            processAudioInfo(batch, zoneName);
-        }
-
-        // Process only the freshest bitmap_frame per zone this tick.
-        for (JsonObject frame : latestBitmapFrameByZone.values()) {
+            QueuedMessage current = queuedMessage;
             try {
-                messageHandler.handleMessage("bitmap_frame", frame);
+                boolean accepted = current.guard().runIfValid(
+                    () -> classifyMessage(current)
+                );
+                if (!accepted) {
+                    messagesDropped.incrementAndGet();
+                }
             } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "Error handling message type: bitmap_frame", e);
+                messagesDropped.incrementAndGet();
+                plugin.getLogger().log(Level.WARNING, "Error handling queued message", e);
             }
         }
+
+        processBatchCandidates();
+        processBitmapCandidates();
 
         // Also drain the entity update queue (these are from direct enqueue calls)
         EntityUpdate update;
@@ -242,6 +388,100 @@ public class MessageQueue {
             }
         }
     }
+
+    private void classifyMessage(QueuedMessage queuedMessage) {
+        JsonObject message = queuedMessage.message();
+        String type = message.has("type") ? message.get("type").getAsString() : "unknown";
+
+        if ("batch_update".equals(type)) {
+            String zoneName = message.has("zone") ? message.get("zone").getAsString() : "main";
+            batchCandidatesByZone
+                .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                .addLast(queuedMessage);
+        } else if ("bitmap_frame".equals(type)) {
+            String zoneName = message.has("zone") ? message.get("zone").getAsString() : "main";
+            bitmapCandidatesByZone
+                .computeIfAbsent(zoneName, ignored -> new ArrayDeque<>())
+                .addLast(queuedMessage);
+        } else {
+            messageHandler.handleMessage(type, message);
+        }
+    }
+
+    private void processBatchCandidates() {
+        for (Map.Entry<String, ArrayDeque<QueuedMessage>> entry : batchCandidatesByZone.entrySet()) {
+            String zoneName = entry.getKey();
+            ArrayDeque<QueuedMessage> candidates = entry.getValue();
+            int candidateCount = candidates.size();
+            boolean selected = false;
+
+            QueuedMessage candidate;
+            while ((candidate = candidates.pollLast()) != null) {
+                QueuedMessage current = candidate;
+                try {
+                    boolean executed = current.guard().runIfValid(() -> {
+                        JsonObject batch = current.message();
+                        List<EntityUpdate> zoneUpdates = updatesByZone.computeIfAbsent(
+                            zoneName,
+                            NEW_UPDATE_LIST
+                        );
+                        try {
+                            extractEntityUpdates(batch, zoneName, zoneUpdates);
+                            processAudioInfo(batch, zoneName);
+                            if (!zoneUpdates.isEmpty()) {
+                                plugin.getEntityPoolManager().batchUpdateEntities(
+                                    zoneName,
+                                    zoneUpdates
+                                );
+                                batchesSent.incrementAndGet();
+                            }
+                        } finally {
+                            // Never let an invalidated generation leak extracted updates
+                            // into the unguarded direct-update drain below.
+                            zoneUpdates.clear();
+                        }
+                    });
+                    if (executed) {
+                        selected = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().log(Level.WARNING, "Error handling message type: batch_update", e);
+                    break;
+                }
+            }
+
+            messagesDropped.addAndGet(selected ? candidateCount - 1L : candidateCount);
+        }
+    }
+
+    private void processBitmapCandidates() {
+        for (ArrayDeque<QueuedMessage> candidates : bitmapCandidatesByZone.values()) {
+            int candidateCount = candidates.size();
+            boolean selected = false;
+
+            QueuedMessage candidate;
+            while ((candidate = candidates.pollLast()) != null) {
+                QueuedMessage current = candidate;
+                try {
+                    boolean executed = current.guard().runIfValid(
+                        () -> messageHandler.handleMessage("bitmap_frame", current.message())
+                    );
+                    if (executed) {
+                        selected = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().log(Level.WARNING, "Error handling message type: bitmap_frame", e);
+                    break;
+                }
+            }
+
+            messagesDropped.addAndGet(selected ? candidateCount - 1L : candidateCount);
+        }
+    }
+
+    private record QueuedMessage(JsonObject message, MessageGuard guard) { }
 
     /**
      * Extract entity updates from a batch_update message.

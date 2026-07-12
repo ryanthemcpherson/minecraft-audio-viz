@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "connected.schema.json",
+  "title": "MinecraftConnectedMessage",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "type": { "const": "connected" },
+    "v": { "type": "string" },
+    "auth_required": { "type": "boolean" },
+    "message": { "type": "string" },
+    "version": { "type": "string" },
+    "server_type": { "enum": ["paper", "fabric"] }
+  },
+  "required": ["type", "auth_required", "server_type"]
+}
