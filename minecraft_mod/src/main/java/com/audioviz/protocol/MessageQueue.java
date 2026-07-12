@@ -32,6 +32,17 @@ public class MessageQueue {
         boolean runIfValid(Runnable operation);
     }
 
+    @FunctionalInterface
+    public interface ParsedMessageAdmission {
+        /** Dispatches one parsed message without reparsing the raw frame. */
+        void admit(JsonObject message, MessageGuard guard);
+    }
+
+    @FunctionalInterface
+    public interface ParseFailureHandler {
+        void onFailure(RuntimeException exception);
+    }
+
     private static final MessageGuard ALLOW_ALL = operation -> {
         operation.run();
         return true;
@@ -94,16 +105,46 @@ public class MessageQueue {
      * Enqueue raw JSON with a guard that remains attached through parsing and execution.
      */
     public void enqueueRaw(String rawJson, MessageGuard guard) {
+        parseAndDispatch(
+            rawJson,
+            guard,
+            (json, messageGuard) -> offer(new QueuedMessage(json, messageGuard)),
+            exception -> AudioVizMod.LOGGER.warn("Failed to parse JSON message", exception)
+        );
+    }
+
+    /**
+     * Admit a raw frame to the bounded parser executor, then dispatch its parsed object once.
+     */
+    public void parseAndDispatch(
+        String rawJson,
+        MessageGuard guard,
+        ParsedMessageAdmission admission,
+        ParseFailureHandler failureHandler
+    ) {
         Runnable parseTask = () -> {
             try {
                 if (!guard.runIfValid(NO_OP)) {
                     messagesDropped.incrementAndGet();
                     return;
                 }
-                JsonObject json = JsonParser.parseString(rawJson).getAsJsonObject();
-                offer(new QueuedMessage(json, guard));
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Failed to parse JSON message", e);
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+                return;
+            }
+
+            JsonObject json;
+            try {
+                json = JsonParser.parseString(rawJson).getAsJsonObject();
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
+                return;
+            }
+
+            try {
+                admission.admit(json, guard);
+            } catch (RuntimeException exception) {
+                notifyFailure(failureHandler, exception);
             }
         };
 
@@ -154,6 +195,20 @@ public class MessageQueue {
             if (discarded != null) {
                 recordDroppedMessage();
             }
+        }
+    }
+
+    private void notifyFailure(
+        ParseFailureHandler failureHandler,
+        RuntimeException exception
+    ) {
+        try {
+            failureHandler.onFailure(exception);
+        } catch (RuntimeException callbackException) {
+            AudioVizMod.LOGGER.warn(
+                "Failed to report JSON message error",
+                callbackException
+            );
         }
     }
 

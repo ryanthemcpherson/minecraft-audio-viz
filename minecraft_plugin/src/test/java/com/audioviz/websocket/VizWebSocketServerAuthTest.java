@@ -117,6 +117,23 @@ class VizWebSocketServerAuthTest {
         lenient().when(connection.getRemoteSocketAddress())
             .thenReturn(new InetSocketAddress("127.0.0.1", 54321));
         lenient().when(connection.isOpen()).thenReturn(true);
+        lenient().doAnswer(invocation -> {
+            String rawJson = invocation.getArgument(0);
+            MessageQueue.MessageGuard guard = invocation.getArgument(1);
+            MessageQueue.ParsedMessageAdmission admission = invocation.getArgument(2);
+            MessageQueue.ParseFailureHandler failureHandler = invocation.getArgument(3);
+            try {
+                admission.admit(JsonParser.parseString(rawJson).getAsJsonObject(), guard);
+            } catch (RuntimeException exception) {
+                failureHandler.onFailure(exception);
+            }
+            return null;
+        }).when(messageQueue).parseAndDispatch(
+            anyString(),
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
+        );
         authTimeoutTasks = new ArrayList<>();
     }
 
@@ -133,9 +150,11 @@ class VizWebSocketServerAuthTest {
         verify(connectionStateListener).onDjConnect(connection.getRemoteSocketAddress().toString());
 
         server.onMessage(connection, BATCH_UPDATE);
-        verify(messageQueue).enqueueRaw(
+        verify(messageQueue).parseAndDispatch(
             eq(BATCH_UPDATE),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
 
         server.onClose(connection, 1000, "closed", true);
@@ -181,9 +200,11 @@ class VizWebSocketServerAuthTest {
 
         verify(connection).close(4001, "Authentication failed");
         verifyNoInteractions(messageHandler);
-        verify(messageQueue, never()).enqueueRaw(
+        verify(messageQueue, never()).parseAndDispatch(
             anyString(),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
     }
 
@@ -299,9 +320,11 @@ class VizWebSocketServerAuthTest {
         assertEquals(1, server.getConnectionCount());
 
         server.onMessage(connection, BATCH_UPDATE);
-        verify(messageQueue).enqueueRaw(
+        verify(messageQueue).parseAndDispatch(
             eq(BATCH_UPDATE),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
     }
 
@@ -341,6 +364,22 @@ class VizWebSocketServerAuthTest {
         authentication.get(5, TimeUnit.SECONDS);
         assertEquals(1, server.getConnectionCount());
         verify(connectionStateListener).onDjConnect(connection.getRemoteSocketAddress().toString());
+    }
+
+    @Test
+    void constructorRejectsNonLoopbackBindEvenWithAuthentication() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new VizWebSocketServer(
+                plugin,
+                "0.0.0.0",
+                0,
+                messageHandler,
+                messageQueue,
+                new WebSocketSecurityPolicy("secret"),
+                authTimeoutTasks::add
+            )
+        );
     }
 
     @Test
@@ -636,36 +675,43 @@ class VizWebSocketServerAuthTest {
     void concurrentHandlersCanReenterBroadcastWithoutCrossClientDeadlock() throws Exception {
         WebSocket secondConnection = mockConnection(54322);
         ClientHandshake secondHandshake = org.mockito.Mockito.mock(ClientHandshake.class);
-        VizWebSocketServer server = newServer("");
-        server.onOpen(connection, handshake);
-        server.onOpen(secondConnection, secondHandshake);
-        clearInvocations(connection, secondConnection);
-
+        MessageQueue realQueue = new MessageQueue(plugin, messageHandler);
+        VizWebSocketServer server = newServer("", realQueue);
         CountDownLatch handlersEntered = new CountDownLatch(2);
+        CountDownLatch handlersCompleted = new CountDownLatch(2);
         JsonObject notice = new JsonObject();
         notice.addProperty("type", "server_notice");
         doAnswer(invocation -> {
-            handlersEntered.countDown();
-            if (!handlersEntered.await(5, TimeUnit.SECONDS)) {
-                throw new AssertionError("Timed out waiting for concurrent handlers");
+            try {
+                handlersEntered.countDown();
+                if (!handlersEntered.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting for concurrent handlers");
+                }
+                assertEquals(2, server.broadcast(notice));
+                return null;
+            } finally {
+                handlersCompleted.countDown();
             }
-            assertEquals(2, server.broadcast(notice));
-            return null;
         }).when(messageHandler).handleMessage(anyString(), any(JsonObject.class));
 
-        CompletableFuture<Void> first = CompletableFuture.runAsync(
-            () -> server.onMessage(connection, "{\"type\":\"get_status\"}"));
-        CompletableFuture<Void> second = CompletableFuture.runAsync(
-            () -> server.onMessage(secondConnection, "{\"type\":\"get_status\"}"));
+        try {
+            server.onOpen(connection, handshake);
+            server.onOpen(secondConnection, secondHandshake);
+            clearInvocations(connection, secondConnection);
 
-        first.get(5, TimeUnit.SECONDS);
-        second.get(5, TimeUnit.SECONDS);
+            server.onMessage(connection, "{\"type\":\"get_status\"}");
+            server.onMessage(secondConnection, "{\"type\":\"get_status\"}");
+
+            assertTrue(handlersCompleted.await(5, TimeUnit.SECONDS));
+        } finally {
+            realQueue.stop();
+        }
     }
 
     @Test
     void slowClientCloseDoesNotConvoyUnrelatedAdmission() throws Exception {
-        VizWebSocketServer server = newServer("");
-        server.onOpen(connection, handshake);
+        MessageQueue realQueue = new MessageQueue(plugin, messageHandler);
+        VizWebSocketServer server = newServer("", realQueue);
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
         doAnswer(invocation -> {
@@ -676,35 +722,39 @@ class VizWebSocketServerAuthTest {
             return null;
         }).when(messageHandler).handleMessage(anyString(), any(JsonObject.class));
 
-        CompletableFuture<Void> message = CompletableFuture.runAsync(
-            () -> server.onMessage(connection, "{\"type\":\"get_status\"}"));
-        assertTrue(handlerEntered.await(5, TimeUnit.SECONDS));
-        AtomicReference<Thread> closeThread = new AtomicReference<>();
-        CompletableFuture<Void> close = CompletableFuture.runAsync(() -> {
-            closeThread.set(Thread.currentThread());
-            server.onClose(connection, 1000, "closed", true);
-        });
-        awaitBlockedOrComplete(close, closeThread);
-
-        WebSocket secondConnection = mockConnection(54322);
-        ClientHandshake secondHandshake = org.mockito.Mockito.mock(ClientHandshake.class);
-        CompletableFuture<Void> admission = CompletableFuture.runAsync(
-            () -> server.onOpen(secondConnection, secondHandshake));
-        boolean admittedWithoutWaitingForFirstClient;
         try {
-            admission.get(1, TimeUnit.SECONDS);
-            admittedWithoutWaitingForFirstClient = true;
-        } catch (TimeoutException exception) {
-            admittedWithoutWaitingForFirstClient = false;
+            server.onOpen(connection, handshake);
+            server.onMessage(connection, "{\"type\":\"get_status\"}");
+            assertTrue(handlerEntered.await(5, TimeUnit.SECONDS));
+            AtomicReference<Thread> closeThread = new AtomicReference<>();
+            CompletableFuture<Void> close = CompletableFuture.runAsync(() -> {
+                closeThread.set(Thread.currentThread());
+                server.onClose(connection, 1000, "closed", true);
+            });
+            awaitBlockedOrComplete(close, closeThread);
+
+            WebSocket secondConnection = mockConnection(54322);
+            ClientHandshake secondHandshake = org.mockito.Mockito.mock(ClientHandshake.class);
+            CompletableFuture<Void> admission = CompletableFuture.runAsync(
+                () -> server.onOpen(secondConnection, secondHandshake));
+            boolean admittedWithoutWaitingForFirstClient;
+            try {
+                admission.get(1, TimeUnit.SECONDS);
+                admittedWithoutWaitingForFirstClient = true;
+            } catch (TimeoutException exception) {
+                admittedWithoutWaitingForFirstClient = false;
+            } finally {
+                releaseHandler.countDown();
+            }
+
+            close.get(5, TimeUnit.SECONDS);
+            admission.get(5, TimeUnit.SECONDS);
+            assertTrue(admittedWithoutWaitingForFirstClient);
+            assertEquals(1, server.getConnectionCount());
         } finally {
             releaseHandler.countDown();
+            realQueue.stop();
         }
-
-        message.get(5, TimeUnit.SECONDS);
-        close.get(5, TimeUnit.SECONDS);
-        admission.get(5, TimeUnit.SECONDS);
-        assertTrue(admittedWithoutWaitingForFirstClient);
-        assertEquals(1, server.getConnectionCount());
     }
 
     @Test
@@ -726,9 +776,11 @@ class VizWebSocketServerAuthTest {
         try {
             assertEquals(0, server.getConnectionCount());
             server.onMessage(connection, BATCH_UPDATE);
-            verify(messageQueue, never()).enqueueRaw(
+            verify(messageQueue, never()).parseAndDispatch(
                 eq(BATCH_UPDATE),
-                any(MessageQueue.MessageGuard.class)
+                any(MessageQueue.MessageGuard.class),
+                any(MessageQueue.ParsedMessageAdmission.class),
+                any(MessageQueue.ParseFailureHandler.class)
             );
             verify(connection, never()).close(4001, "Authentication failed");
         } finally {
@@ -738,9 +790,11 @@ class VizWebSocketServerAuthTest {
         open.get(5, TimeUnit.SECONDS);
         assertEquals(1, server.getConnectionCount());
         server.onMessage(connection, BATCH_UPDATE);
-        verify(messageQueue).enqueueRaw(
+        verify(messageQueue).parseAndDispatch(
             eq(BATCH_UPDATE),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
     }
 
@@ -781,6 +835,45 @@ class VizWebSocketServerAuthTest {
         open.get(5, TimeUnit.SECONDS);
         shutdown.get(5, TimeUnit.SECONDS);
         verify(connection).close(1001, "Server shutting down");
+        verify(server).stop(3000);
+        verify(messageQueue).stop();
+    }
+
+    @Test
+    void shutdownCancelsPendingMainThreadHandlerBeforeDrainingClientLease() throws Exception {
+        VizWebSocketServer server = spy(newServer(""));
+        doAnswer(invocation -> null).when(server).stop(3000);
+        server.onOpen(connection, handshake);
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch releaseHandler = new CountDownLatch(1);
+        when(messageHandler.handleMessage(eq("scan_stage_blocks"), any(JsonObject.class)))
+            .thenAnswer(invocation -> {
+                handlerEntered.countDown();
+                if (!releaseHandler.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting for shutdown cancellation");
+                }
+                return null;
+            });
+        doAnswer(invocation -> {
+            releaseHandler.countDown();
+            return null;
+        }).when(messageHandler).cancelPendingMainThreadCalls();
+
+        String scan = "{\"type\":\"scan_stage_blocks\",\"stage\":\"main\"}";
+        CompletableFuture<Void> handling = CompletableFuture.runAsync(
+            () -> server.onMessage(connection, scan)
+        );
+        assertTrue(handlerEntered.await(1, TimeUnit.SECONDS));
+
+        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(server::shutdown);
+        try {
+            shutdown.get(1, TimeUnit.SECONDS);
+        } finally {
+            releaseHandler.countDown();
+        }
+        handling.get(1, TimeUnit.SECONDS);
+
+        verify(messageHandler).cancelPendingMainThreadCalls();
         verify(server).stop(3000);
         verify(messageQueue).stop();
     }
@@ -988,7 +1081,8 @@ class VizWebSocketServerAuthTest {
         assertEquals(0, server.getConnectionCount());
         verify(connection).close(1001, "Server shutting down");
         assertDoesNotThrow(() -> invokeProcessTick(realQueue));
-        verifyNoInteractions(messageHandler);
+        verify(messageHandler).cancelPendingMainThreadCalls();
+        org.mockito.Mockito.verifyNoMoreInteractions(messageHandler);
     }
 
     @Test
@@ -1035,9 +1129,11 @@ class VizWebSocketServerAuthTest {
                 throw new AssertionError("Timed out waiting to release queue acceptance");
             }
             return null;
-        }).when(messageQueue).enqueueRaw(
+        }).when(messageQueue).parseAndDispatch(
             eq(BATCH_UPDATE),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
 
         CompletableFuture<Void> message = CompletableFuture.runAsync(
@@ -1188,17 +1284,21 @@ class VizWebSocketServerAuthTest {
         doAnswer(invocation -> null).when(server).stop(3000);
         server.onOpen(connection, handshake);
         lenient().doThrow(new RejectedExecutionException("queue stopped"))
-            .when(messageQueue).enqueueRaw(
+            .when(messageQueue).parseAndDispatch(
                 eq(BATCH_UPDATE),
-                any(MessageQueue.MessageGuard.class)
+                any(MessageQueue.MessageGuard.class),
+                any(MessageQueue.ParsedMessageAdmission.class),
+                any(MessageQueue.ParseFailureHandler.class)
             );
 
         server.shutdown();
 
         assertDoesNotThrow(() -> server.onMessage(connection, BATCH_UPDATE));
-        verify(messageQueue, never()).enqueueRaw(
+        verify(messageQueue, never()).parseAndDispatch(
             eq(BATCH_UPDATE),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
     }
 
@@ -1219,9 +1319,11 @@ class VizWebSocketServerAuthTest {
                 throw new RejectedExecutionException("queue stopped before submission drained");
             }
             return null;
-        }).when(messageQueue).enqueueRaw(
+        }).when(messageQueue).parseAndDispatch(
             eq(BATCH_UPDATE),
-            any(MessageQueue.MessageGuard.class)
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
         );
         doAnswer(invocation -> {
             shutdownEvents.add("client-close");
@@ -1269,6 +1371,7 @@ class VizWebSocketServerAuthTest {
     private VizWebSocketServer newServer(String secret, MessageQueue queue) {
         return new VizWebSocketServer(
             plugin,
+            "127.0.0.1",
             0,
             messageHandler,
             queue,

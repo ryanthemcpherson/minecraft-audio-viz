@@ -4,6 +4,7 @@ Connects to Minecraft plugin via WebSocket to control visualizations.
 """
 
 import asyncio
+import ipaddress
 import logging
 import time
 from typing import Any, Callable, Optional
@@ -16,6 +17,32 @@ from websockets.frames import Frame
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _normalize_host(host: str) -> str:
+    """Normalize a configured renderer host without performing DNS resolution."""
+    normalized = host.strip()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        return normalized[1:-1]
+    return normalized
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether a renderer host is explicitly local to this machine."""
+    normalized = _normalize_host(host)
+    if normalized.rstrip(".").casefold() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _renderer_uri(host: str, port: int) -> str:
+    """Build a loopback WebSocket URI, including brackets for IPv6 literals."""
+    normalized = _normalize_host(host)
+    uri_host = f"[{normalized}]" if ":" in normalized else normalized
+    return f"ws://{uri_host}:{port}"
 
 
 class _SecretRedactingLogger(logging.LoggerAdapter):
@@ -112,9 +139,9 @@ class VizClient:
         enable_heartbeat: bool = False,  # Enable background heartbeat (requires receive loop)
         auth_token: str | None = None,
     ):
-        self.host = host
+        self.host = _normalize_host(host)
         self.port = port
-        self.uri = f"ws://{host}:{port}"
+        self.uri = _renderer_uri(self.host, port)
         self.ws: Optional[WebSocketClientProtocol] = None
         self._connected = False
         self._message_handlers: dict[str, Callable] = {}
@@ -246,12 +273,21 @@ class VizClient:
         """Connect and complete the Minecraft WebSocket authentication handshake."""
         self._connected = False
         self.server_type = None
+        endpoint_host, endpoint_port = self.host, self.port
+        if not _is_loopback_host(endpoint_host):
+            logger.error(
+                "Refusing insecure Minecraft renderer transport: host must be loopback; "
+                "use an encrypted tunnel bound to localhost for a remote renderer"
+            )
+            return False
+        endpoint_uri = _renderer_uri(endpoint_host, endpoint_port)
+        self.uri = endpoint_uri
         try:
             # Use open_timeout instead of asyncio.wait_for — the latter wraps
             # the awaitable in a Task which breaks websockets 14+'s internal
             # reader setup, causing recv() to block forever.
             self.ws = await websockets.connect(
-                self.uri,
+                endpoint_uri,
                 open_timeout=self.connect_timeout,
                 max_size=10 * 1024 * 1024,  # 10MB — stage block scans can be large
                 logger=_SecretRedactingLogger(
@@ -315,7 +351,7 @@ class VizClient:
             return True
 
         except asyncio.TimeoutError:
-            logger.error("Minecraft WebSocket handshake timed out to %s", self.uri)
+            logger.error("Minecraft WebSocket handshake timed out to %s", endpoint_uri)
             await self._close_failed_connection()
             return False
 

@@ -259,6 +259,48 @@ const isAuthorizedReleaseWorkflowRun = (run, sha, workflowPath) =>
   run.conclusion === "success";
 
 /**
+ * @param {string} release
+ * @param {string} workflowPath
+ */
+const assertExactReleaseProvenanceGate = (release, workflowPath) => {
+  const releaseGate = yamlBlock(release, "ci-gate", 2);
+
+  assert.doesNotMatch(release, /^\s{2}checks:\s*read\s*$/m);
+  assert.match(releaseGate, /uses:\s*actions\/checkout@v4/);
+  assert.match(releaseGate, /fetch-depth:\s*0/);
+  assert.match(
+    releaseGate,
+    /- name: Require tagged commit on main\s*\n\s+run:\s*\|\s*\n\s+set -euo pipefail\s*\n\s+git fetch/,
+  );
+  assert.match(releaseGate, /git fetch --no-tags origin main:refs\/remotes\/origin\/main/);
+  assert.match(releaseGate, /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/);
+  assert.deepEqual(
+    [...releaseGate.matchAll(/"([^":]+\.yml):(\.github\/workflows\/[^"\s]+\.yml)"/g)].map(
+      ([, workflowFile, expectedPath]) => `${workflowFile}:${expectedPath}`,
+    ),
+    [
+      "ci.yml:.github/workflows/ci.yml",
+      "security.yml:.github/workflows/security.yml",
+    ],
+    `${workflowPath} must require exactly the CI and Security workflows`,
+  );
+  assert.match(releaseGate, /actions\/workflows\/\$\{WORKFLOW_FILE\}/);
+  assert.match(releaseGate, /actions\/workflows\/\$\{WORKFLOW_ID\}\/runs/);
+  assert.match(releaseGate, /head_sha="\$GITHUB_SHA"/);
+  assert.match(releaseGate, /branch=main/);
+  assert.match(releaseGate, /status=completed/);
+  assert.match(releaseGate, /--arg workflow_path "\$EXPECTED_WORKFLOW_PATH"/);
+  assert.doesNotMatch(releaseGate, /EXPECTED_RUN_PATH|\.yml@main/);
+  assert.match(releaseGate, /\.head_sha == \$sha/);
+  assert.match(releaseGate, /\.head_branch == "main"/);
+  assert.match(releaseGate, /\.path == \$workflow_path/);
+  assert.match(releaseGate, /\.event == "push"/);
+  assert.match(releaseGate, /\.status == "completed"/);
+  assert.match(releaseGate, /\.conclusion == "success"/);
+  assert.doesNotMatch(releaseGate, /check-runs|REQUIRED_CHECK|CI Passed|Security Summary/);
+};
+
+/**
  * @param {unknown} permission
  * @returns {boolean}
  */
@@ -442,33 +484,120 @@ test("primary CI requires community, protocol, and DJ containment contracts", ()
 });
 
 test("tag releases require main ancestry and exact workflow-run provenance", () => {
-  const release = readRepositoryFile(".github/workflows/release.yml");
-  const releaseGate = yamlBlock(release, "ci-gate", 2);
+  for (const workflowPath of [
+    ".github/workflows/release.yml",
+    ".github/workflows/release-plugin.yml",
+    ".github/workflows/release-mod.yml",
+  ]) {
+    assertExactReleaseProvenanceGate(readRepositoryFile(workflowPath), workflowPath);
+  }
 
-  assert.match(release, /^\s{2}actions:\s*read\s*$/m);
-  assert.doesNotMatch(release, /^\s{2}checks:\s*read\s*$/m);
-  assert.match(releaseGate, /uses:\s*actions\/checkout@v4/);
-  assert.match(releaseGate, /fetch-depth:\s*0/);
-  assert.match(
-    releaseGate,
-    /- name: Require tagged commit on main\s*\n\s+run:\s*\|\s*\n\s+set -euo pipefail\s*\n\s+git fetch/,
+  const combinedRelease = readRepositoryFile(".github/workflows/release.yml");
+  assert.match(combinedRelease, /^\s{2}actions:\s*read\s*$/m);
+  assert.match(combinedRelease, /^\s{2}contents:\s*write\s*$/m);
+});
+
+test("Paper and Fabric release workflows remain quarantined from historical refs", () => {
+  for (const { workflowPath, tagPattern } of [
+    { workflowPath: ".github/workflows/release-plugin.yml", tagPattern: "plugin-v*" },
+    { workflowPath: ".github/workflows/release-mod.yml", tagPattern: "mod-v*" },
+  ]) {
+    const release = readRepositoryFile(workflowPath);
+    const triggers = yamlBlock(release, "on", 0);
+    const releaseGate = yamlBlock(release, "ci-gate", 2);
+    const build = yamlBlock(release, "build", 2);
+    const releaseJob = yamlBlock(release, "release", 2);
+
+    assert.match(triggers, new RegExp(`^\\s+tags: \\['${escapeRegExp(tagPattern)}'\\]$`, "m"));
+    assert.doesNotMatch(triggers, /workflow_dispatch/);
+    assert.match(release, /^permissions:\s*\{\}\s*$/m);
+    assert.match(releaseGate, /^\s{4}permissions:\s*$/m);
+    assert.match(releaseGate, /^\s{6}actions:\s*read\s*$/m);
+    assert.match(releaseGate, /^\s{6}contents:\s*read\s*$/m);
+    assert.match(build, /^\s+needs:\s*\[ci-gate\]\s*$/m);
+    assert.match(build, /^\s{4}permissions:\s*$/m);
+    assert.match(build, /^\s{6}contents:\s*read\s*$/m);
+    assert.match(build, /persist-credentials:\s*false/);
+    assert.match(build, /uses:\s*actions\/upload-artifact@v7/);
+    assert.match(build, /if-no-files-found:\s*error/);
+    assert.match(releaseJob, /^\s{4}permissions:\s*$/m);
+    assert.match(releaseJob, /^\s{6}actions:\s*read\s*$/m);
+    assert.match(releaseJob, /^\s{6}contents:\s*write\s*$/m);
+    assert.doesNotMatch(releaseJob, /uses:\s*actions\/checkout/);
+  }
+});
+
+test("Paper and Fabric release tags cannot be created or rewritten", () => {
+  const rulesetPath = path.join(
+    repositoryRoot,
+    ".github/rulesets/paper-fabric-release-tags.json",
   );
-  assert.match(releaseGate, /git fetch --no-tags origin main:refs\/remotes\/origin\/main/);
-  assert.match(releaseGate, /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/);
-  assert.match(releaseGate, /"ci\.yml:\.github\/workflows\/ci\.yml"/);
-  assert.match(releaseGate, /"security\.yml:\.github\/workflows\/security\.yml"/);
-  assert.match(releaseGate, /actions\/workflows\/\$\{WORKFLOW_FILE\}/);
-  assert.match(releaseGate, /actions\/workflows\/\$\{WORKFLOW_ID\}\/runs/);
-  assert.match(releaseGate, /head_sha="\$GITHUB_SHA"/);
-  assert.match(releaseGate, /branch=main/);
-  assert.match(releaseGate, /status=completed/);
-  assert.match(releaseGate, /--arg workflow_path "\$EXPECTED_WORKFLOW_PATH"/);
-  assert.doesNotMatch(releaseGate, /EXPECTED_RUN_PATH|\.yml@main/);
-  assert.match(releaseGate, /\.head_branch == "main"/);
-  assert.match(releaseGate, /\.path == \$workflow_path/);
-  assert.match(releaseGate, /\.event == "push"/);
-  assert.match(releaseGate, /\.conclusion == "success"/);
-  assert.doesNotMatch(releaseGate, /check-runs|REQUIRED_CHECK|CI Passed|Security Summary/);
+  assert.equal(fs.existsSync(rulesetPath), true, "Missing Paper/Fabric release tag ruleset");
+  const ruleset = JSON.parse(fs.readFileSync(rulesetPath, "utf8"));
+
+  assert.equal(ruleset.target, "tag");
+  assert.equal(ruleset.enforcement, "active");
+  assert.deepEqual(ruleset.bypass_actors, []);
+  assert.deepEqual(ruleset.conditions?.ref_name?.include, [
+    "refs/tags/plugin-v*",
+    "refs/tags/mod-v*",
+  ]);
+  assert.deepEqual(ruleset.conditions?.ref_name?.exclude, []);
+  assert.deepEqual(
+    ruleset.rules?.map((rule) => rule.type).sort(),
+    ["creation", "deletion", "non_fast_forward", "update"],
+  );
+  for (const rule of ruleset.rules ?? []) {
+    assert.deepEqual(rule, { type: rule.type });
+  }
+});
+
+test("public onboarding surfaces do not advertise DJ binary distribution", () => {
+  const gettingStarted = readRepositoryFile("site/src/app/getting-started/page.tsx");
+  const onboarding = readRepositoryFile("site/src/app/onboarding/page.tsx");
+
+  for (const [surface, source] of [
+    ["getting started", gettingStarted],
+    ["onboarding", onboarding],
+  ]) {
+    assert.doesNotMatch(source, /Download(?: the)? DJ Client/i, `${surface} has a DJ download CTA`);
+    assert.doesNotMatch(
+      source,
+      /(?:\.msi\b|\.dmg\b|\.deb\b|AppImage|\binstaller\b)/i,
+      `${surface} advertises an installer format`,
+    );
+    assert.match(source, /Phase 0/i);
+    assert.match(source, /development/i);
+    assert.match(source, /dj_client\/README\.md/);
+  }
+
+  const releaseLinks = [
+    ...gettingStarted.matchAll(
+      /<a\s+[\s\S]*?href="https:\/\/github\.com\/ryanthemcpherson\/minecraft-audio-viz\/releases"[\s\S]*?<\/a>/g,
+    ),
+  ].map(([anchor]) => anchor);
+  assert.equal(releaseLinks.length, 2, "Only Paper and Fabric release links may remain");
+  assert.match(releaseLinks[0], /Download Fabric Mod/);
+  assert.match(releaseLinks[1], /Download Paper Plugin/);
+  assert.doesNotMatch(onboarding, /minecraft-audio-viz\/releases/);
+});
+
+test("VJ dev deployment requires numeric loopback and a renderer handshake", () => {
+  const deploy = readRepositoryFile("scripts/deploy-vj-dev.sh");
+
+  assert.match(deploy, /ipaddress\.ip_address/);
+  assert.match(deploy, /\.is_loopback/);
+  assert.doesNotMatch(deploy, /localhost\|127\.\*\|::1/);
+  assert.match(deploy, /\/health/);
+  assert.match(deploy, /minecraft_connected/);
+  assert.match(deploy, /exec \.venv\/bin\/python -m vj_server\.cli/);
+  assert.match(deploy, /#\{pane_pid\}/);
+  assert.match(deploy, /tmux has-session/);
+  assert.match(deploy, /pid=\$\{VJ_PID\}/);
+  assert.match(deploy, /--port '\$DJ_PORT'/);
+  assert.match(deploy, /--broadcast-port '\$BROADCAST_PORT'/);
+  assert.match(deploy, /ERROR: VJ server did not authenticate with the Minecraft renderer/);
+  assert.match(deploy, /exit 1/);
 });
 
 test("vulnerable historical release tags are externally quarantined", () => {

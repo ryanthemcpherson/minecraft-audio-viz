@@ -1246,7 +1246,7 @@ async def main():
         "--host",
         type=str,
         default="localhost",
-        help="Minecraft server host",
+        help="Minecraft loopback host or local encrypted-tunnel endpoint",
     )
     parser.add_argument(
         "--port", type=_validate_port, default=8765, help="Minecraft WebSocket port"

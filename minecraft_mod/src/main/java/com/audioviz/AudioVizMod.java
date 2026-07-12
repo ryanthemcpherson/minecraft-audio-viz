@@ -279,8 +279,8 @@ public class AudioVizMod implements DedicatedServerModInitializer {
                 wsServer = null;
                 LOGGER.error(
                     "AudioViz WebSocket listener is offline: bind to a loopback address " +
-                    "(127.0.0.1, localhost, or ::1) or configure a non-empty " +
-                    "websocketSecret before using a non-loopback websocketAddress."
+                    "(127.0.0.1, localhost, or ::1). For a remote VJ server, use an " +
+                    "encrypted tunnel whose Minecraft-side endpoint is loopback."
                 );
             }
         );

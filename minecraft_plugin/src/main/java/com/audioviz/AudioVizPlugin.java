@@ -210,12 +210,12 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         String wsAddress = getConfig().getString("websocket.address", "127.0.0.1");
         String wsSecret = getConfig().getString("ws-secret", "");
         if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, wsSecret)) {
-            startWebSocketWithRetry(wsPort, 5, 2000);
+            startWebSocketWithRetry(wsAddress.strip(), wsPort, 5, 2000);
         } else {
             getLogger().severe(
                 "AudioViz WebSocket listener is offline: bind to a loopback address " +
-                "(127.0.0.1, localhost, or ::1) or configure a non-empty ws-secret before " +
-                "using a non-loopback websocket.address."
+                "(127.0.0.1, localhost, or ::1). For a remote VJ server, use an " +
+                "encrypted tunnel whose Minecraft-side endpoint is loopback."
             );
         }
 
@@ -227,13 +227,22 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
      * previous process (e.g. zombie Java after restart). Each attempt waits
      * {@code delayMs} before retrying, up to {@code maxRetries} times.
      */
-    private void startWebSocketWithRetry(int port, int maxRetries, long delayMs) {
+    private void startWebSocketWithRetry(
+        String bindAddress,
+        int port,
+        int maxRetries,
+        long delayMs
+    ) {
         WebSocketStartupManager<VizWebSocketServer> startupManager =
             new WebSocketStartupManager<>(
                 maxRetries,
                 delayMs,
                 () -> {
-                    VizWebSocketServer server = new VizWebSocketServer(this, port);
+                    VizWebSocketServer server = new VizWebSocketServer(
+                        this,
+                        bindAddress,
+                        port
+                    );
                     return new WebSocketStartupManager.Candidate<>() {
                         @Override
                         public VizWebSocketServer value() {
