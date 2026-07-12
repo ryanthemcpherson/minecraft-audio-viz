@@ -77,8 +77,15 @@ class VizWebSocketServerFrameLimitTest {
 
             payloadShape.send(client);
 
+            assertTrue(server.closed.await(5, TimeUnit.SECONDS));
+            assertEquals(CloseFrame.TOOBIG, server.closeCode.get());
             assertTrue(client.closed.await(5, TimeUnit.SECONDS));
-            assertEquals(CloseFrame.TOOBIG, client.closeCode.get());
+            int clientCloseCode = client.closeCode.get();
+            assertTrue(
+                clientCloseCode == CloseFrame.TOOBIG
+                    || clientCloseCode == CloseFrame.ABNORMAL_CLOSE,
+                "Client must observe the 1009 close frame or the equivalent TCP-reset 1006"
+            );
             assertEquals(0, server.textCallbacks.get());
             assertEquals(0, server.binaryCallbacks.get());
         } finally {
@@ -157,6 +164,8 @@ class VizWebSocketServerFrameLimitTest {
 
     private static final class ProbeServer extends VizWebSocketServer {
         private final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch closed = new CountDownLatch(1);
+        private final AtomicInteger closeCode = new AtomicInteger(Integer.MIN_VALUE);
         private final AtomicInteger textCallbacks = new AtomicInteger();
         private final AtomicInteger binaryCallbacks = new AtomicInteger();
 
@@ -185,7 +194,10 @@ class VizWebSocketServerFrameLimitTest {
         public void onOpen(WebSocket connection, ClientHandshake handshake) { }
 
         @Override
-        public void onClose(WebSocket connection, int code, String reason, boolean remote) { }
+        public void onClose(WebSocket connection, int code, String reason, boolean remote) {
+            closeCode.set(code);
+            closed.countDown();
+        }
 
         @Override
         public void onMessage(WebSocket connection, String message) {
