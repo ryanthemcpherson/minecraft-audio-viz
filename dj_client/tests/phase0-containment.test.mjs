@@ -198,6 +198,44 @@ const assertJsonAuditStepIsBlocking = (workflow, stepName) => {
 };
 
 /**
+ * Assert one Java dependency scan has a persistent NVD cache, preserves its
+ * scanner exit status, and publishes both machine-readable reports.
+ *
+ * @param {string} workflow
+ * @param {{jobName: string, scanStep: string, reportDirectory: string}} options
+ */
+const assertJavaDependencyCheckJob = (
+  workflow,
+  { jobName, scanStep, reportDirectory },
+) => {
+  const job = yamlBlock(workflow, jobName, 2);
+  const scan = assertJsonAuditStepIsBlocking(workflow, scanStep);
+
+  assert.match(job, /DEPENDENCY_CHECK_DATA_DIR:\s*\$\{\{ github\.workspace \}\}\/\.dependency-check-data/);
+  assert.match(job, /NVD_API_KEY:\s*\$\{\{ secrets\.NVD_API_KEY \}\}/);
+  assert.match(job, /uses:\s*actions\/cache\/restore@v4/);
+  assert.match(job, /uses:\s*actions\/cache\/save@v4/);
+  assert.match(job, /owasp-dependency-check-12\.2\.2-/);
+  assert.match(job, /restore-keys:/);
+  assert.match(
+    job,
+    new RegExp(`- name: ${escapeRegExp(scanStep)}\\s*\\n\\s+id: dependency-check`),
+  );
+  assert.match(scan, /reports-generated=true.*GITHUB_OUTPUT/);
+  assert.match(
+    job,
+    /- name: Save NVD data cache\s*\n\s+if:\s*always\(\) && steps\.dependency-check\.outputs\.reports-generated == 'true'/,
+  );
+  assert.match(job, /- name: Upload dependency-check reports\s*\n\s+if:\s*always\(\)/);
+  assert.match(job, /uses:\s*actions\/upload-artifact@v7/);
+  assert.match(job, new RegExp(`${escapeRegExp(reportDirectory)}/dependency-check-report\\.json`));
+  assert.match(job, new RegExp(`${escapeRegExp(reportDirectory)}/dependency-check-report\\.sarif`));
+  assert.doesNotMatch(job, /continue-on-error\s*:|\|\|\s*true/);
+  assert.doesNotMatch(job, /dependency:tree|gradlew\s+dependencies/);
+  assert.match(scan, /audit_status=\$\?/);
+};
+
+/**
  * Model the workflow-run provenance accepted by the release gate.
  *
  * @param {{
@@ -467,6 +505,89 @@ test("release provenance model rejects non-main and spoofed workflow runs", () =
   assert.doesNotMatch(release, /EXPECTED_RUN_PATH|\.yml@main|check-runs/);
 });
 
+test("Paper and Fabric dependency scans fail closed with unsuppressed OWASP reports", () => {
+  const ci = readRepositoryFile(".github/workflows/ci.yml");
+  const security = readRepositoryFile(".github/workflows/security.yml");
+  const fabricBuild = readRepositoryFile("minecraft_mod/build.gradle");
+  const paperPom = readRepositoryFile("minecraft_plugin/pom.xml");
+
+  assert.match(
+    fabricBuild,
+    /id\s+['"]org\.owasp\.dependencycheck['"]\s+version\s+['"]12\.2\.2['"]/,
+  );
+  assert.match(fabricBuild, /failBuildOnCVSS\s*=\s*0(?:\.0)?\b/);
+  assert.match(fabricBuild, /failOnError\s*=\s*true\b/);
+  assert.match(fabricBuild, /formats\s*=\s*\[['"]JSON['"],\s*['"]SARIF['"]\]/);
+  assert.match(fabricBuild, /data\.directory\s*=/);
+  assert.match(fabricBuild, /hostedSuppressions\s*\{[\s\S]*?enabled\s*=\s*false/);
+  assert.match(fabricBuild, /System\.getenv\(['"]NVD_API_KEY['"]\)\?\.trim\(\)/);
+  assert.match(fabricBuild, /if\s*\(nvdApiKey\)\s*\{[\s\S]*?nvd\.apiKey\s*=\s*nvdApiKey/);
+  assert.doesNotMatch(
+    fabricBuild,
+    /(?:implementation|runtimeOnly|modImplementation)[^\n]*dependency-check/i,
+  );
+  assert.doesNotMatch(paperPom, /dependency-check-maven/);
+
+  for (const workflow of [ci, security]) {
+    assert.equal(
+      (workflow.match(/org\.owasp:dependency-check-maven:12\.2\.2:check/g) ?? []).length,
+      1,
+    );
+    assert.match(workflow, /-DfailBuildOnCVSS=0\b/);
+    assert.match(workflow, /-DfailOnError=true\b/);
+    assert.match(workflow, /-DhostedSuppressionsEnabled=false\b/);
+    assert.match(workflow, /-Dformats=JSON,SARIF\b/);
+    assert.match(workflow, /-Dodc\.outputDirectory=target\/dependency-check\b/);
+    assert.match(workflow, /if \[\[ -n "\$\{NVD_API_KEY:-\}" \]\]; then/);
+    assert.match(
+      workflow,
+      /nvd_args\+=\("-DnvdApiKeyEnvironmentVariable=NVD_API_KEY"\)/,
+    );
+    assert.match(workflow, /\.\/gradlew dependencyCheckAnalyze/);
+    assert.doesNotMatch(workflow, /(?:suppressionFile|suppressionFiles)\s*=/);
+  }
+
+  assertJavaDependencyCheckJob(ci, {
+    jobName: "java-plugin-audit",
+    scanStep: "Run Paper OWASP Dependency-Check",
+    reportDirectory: "minecraft_plugin/target/dependency-check",
+  });
+  assertJavaDependencyCheckJob(ci, {
+    jobName: "java-audit",
+    scanStep: "Run Fabric OWASP Dependency-Check",
+    reportDirectory: "minecraft_mod/build/reports/dependency-check",
+  });
+  assertJavaDependencyCheckJob(security, {
+    jobName: "java-security",
+    scanStep: "Run Paper OWASP Dependency-Check",
+    reportDirectory: "minecraft_plugin/target/dependency-check",
+  });
+  assertJavaDependencyCheckJob(security, {
+    jobName: "fabric-java-security",
+    scanStep: "Run Fabric OWASP Dependency-Check",
+    reportDirectory: "minecraft_mod/build/reports/dependency-check",
+  });
+
+  const ciSummary = yamlBlock(ci, "ci-passed", 2);
+  assert.match(ciSummary, /Fabric dependency-check[^\n]*needs\.java-audit\.result/);
+  assert.match(ciSummary, /Paper dependency-check[^\n]*needs\.java-plugin-audit\.result/);
+  const securitySummary = yamlBlock(security, "security-summary", 2);
+  assert.match(securitySummary, /Paper dependency-check[^\n]*needs\.java-security\.result/);
+  assert.match(
+    securitySummary,
+    /Fabric dependency-check[^\n]*needs\.fabric-java-security\.result/,
+  );
+
+  for (const fabricTrigger of [
+    "minecraft_mod/build.gradle",
+    "minecraft_mod/gradle.properties",
+    "minecraft_mod/settings.gradle",
+    "minecraft_mod/gradle/wrapper/gradle-wrapper.properties",
+  ]) {
+    assert.match(yamlBlock(security, "on", 0), new RegExp(`['"]${escapeRegExp(fabricTrigger)}['"]`));
+  }
+});
+
 test("release and security gates reject masked or unsuccessful checks", () => {
   const combinedRelease = readRepositoryFile(".github/workflows/release.yml");
   const ci = readRepositoryFile(".github/workflows/ci.yml");
@@ -562,6 +683,7 @@ test("release and security gates reject masked or unsuccessful checks", () => {
     "python-sast",
     "python-audit",
     "java-audit",
+    "java-plugin-audit",
     "npm-audit",
     "rust-audit",
     "license-check",
@@ -571,6 +693,7 @@ test("release and security gates reject masked or unsuccessful checks", () => {
   assertSummaryRequiresEveryNeedToSucceed(security, "security-summary", [
     "python-security",
     "java-security",
+    "fabric-java-security",
     "npm-security",
     "rust-security",
   ]);
