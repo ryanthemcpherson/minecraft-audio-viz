@@ -75,3 +75,15 @@ async def test_metrics_endpoint_requires_configured_bearer_token(
     response = await client.get("/metrics", headers=headers)
 
     assert response.status_code == expected_status
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_rejects_non_ascii_bearer_token(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(
+        "/metrics",
+        headers=[(b"Authorization", b"Bearer \xff")],
+    )
+
+    assert response.status_code == 401

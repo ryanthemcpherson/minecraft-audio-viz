@@ -37,7 +37,7 @@ async def _verify_metrics_token(
 
     authorization = request.headers.get("authorization", "")
     provided = authorization[7:] if authorization.startswith("Bearer ") else ""
-    if not provided or not hmac.compare_digest(provided, token):
+    if not provided or not hmac.compare_digest(provided.encode(), token.encode()):
         raise HTTPException(status_code=401, detail="Invalid or missing metrics token")
 
 
