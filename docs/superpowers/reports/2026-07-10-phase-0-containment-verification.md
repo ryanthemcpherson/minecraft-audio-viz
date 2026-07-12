@@ -4,7 +4,7 @@ Date: 2026-07-12 (America/New_York)
 
 Branch: `fix/phase-0-containment`
 
-Verified implementation HEAD before this report: `32d01581bc58152b93391e3323b880f59e97eedc`
+Verified implementation HEAD before this report: `79f44eaa9501cbcd32a6c26139571e9ed3a092d1`
 
 ## Result
 
@@ -122,6 +122,10 @@ This result does **not** authorize new public DJ-client, updater, container, Pap
 
 - `32d0158 fix(ci): audit shipped Java dependencies`
 
+### Task 17 — Stabilize the Paper frame-limit transport assertion
+
+- `79f44ea test(paper): stabilize frame-limit close assertion`
+
 ## Toolchain
 
 |Tool|Verified version|
@@ -199,6 +203,7 @@ Audit remediation performed during this gate:
 
 - `JAVA_HOME=Temurin-21; cd minecraft_plugin && .\mvnw.cmd clean test package -B` — exit `0`; 947 test-case results, zero failures/errors/skips, shaded Paper JAR built.
 - `JAVA_HOME=Temurin-21; cd minecraft_mod && .\gradlew.bat clean test build --no-daemon` — exit `0`; 268 passed, zero failures/errors/skips, remapped Fabric JAR built.
+- `JAVA_HOME=Temurin-21; cd minecraft_plugin && .\mvnw.cmd -Dtest=VizWebSocketServerFrameLimitTest test -B` plus 10 consecutive quiet stress iterations — exit `0` throughout; the server-side limit reason remained `1009` for all four payload shapes while the peer accepted only `1009` or the transport-equivalent synthetic `1006`.
 
 ### Negative security assertions
 
@@ -278,4 +283,4 @@ The affected surfaces were reverified from clean installs after that merge:
 
 ## Final Disposition
 
-Phase 0 containment is verified at implementation HEAD `32d01581bc58152b93391e3323b880f59e97eedc`; anonymous DJ/container artifacts are withdrawn and new public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
+Phase 0 containment is verified at implementation HEAD `79f44eaa9501cbcd32a6c26139571e9ed3a092d1`; anonymous DJ/container artifacts are withdrawn and new public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
