@@ -4,7 +4,7 @@ Date: 2026-07-12 (America/New_York)
 
 Branch: `fix/phase-0-containment`
 
-Verified implementation HEAD before this report: `9f0b77b3fe2379a38d9f831d160a50845c286faa`
+Verified implementation HEAD before this report: `32d01581bc58152b93391e3323b880f59e97eedc`
 
 ## Result
 
@@ -118,6 +118,10 @@ This result does **not** authorize new public DJ-client, updater, container, Pap
 - `2524c32 fix(dj-client): satisfy Linux Clippy`
 - `9f0b77b fix(security): close final containment review gaps`
 
+### Task 16 — Scope Java audits to distributed components
+
+- `32d0158 fix(ci): audit shipped Java dependencies`
+
 ## Toolchain
 
 |Tool|Verified version|
@@ -165,7 +169,7 @@ All commands below were run from the clean linked worktree unless a component di
 - `cargo audit --json` from `dj_client/src-tauri` — exit `0`; zero vulnerabilities, 18 visible unmaintained warnings, and two visible unsound warnings. No advisory ignore list or warning suppression is active.
 - `JAVA_HOME=Temurin-21; cd minecraft_plugin && .\mvnw.cmd dependency:tree -B` — exit `0`.
 - `JAVA_HOME=Temurin-21; cd minecraft_mod && .\gradlew.bat dependencies --configuration runtimeClasspath` — exit `0`.
-- Paper and Fabric OWASP Dependency-Check 12.2.2 gates are pinned in both primary CI and the security workflow with CVSS `0`, `failOnError`, hosted suppressions disabled, JSON/SARIF artifacts, rolling NVD caches, and optional `NVD_API_KEY` acceleration.
+- Paper and Fabric OWASP Dependency-Check 12.2.2 gates are pinned in both primary CI and the security workflow with CVSS `0`, `failOnError`, hosted suppressions disabled, JSON/SARIF artifacts, rolling NVD caches, and optional `NVD_API_KEY` acceleration. Paper excludes host-provided APIs; Fabric scans Loom's resolvable `includeInternal` configuration, which contains exactly the three JARs nested in the distributed mod.
 - Local Paper and Fabric Dependency-Check executions both failed closed during unauthenticated NVD bootstrap after API retry exhaustion. Neither produced a completed vulnerability report, so Java dependency vulnerability status remains unverified locally rather than clean.
 
 Audit remediation performed during this gate:
@@ -240,7 +244,7 @@ The DJ executable is evidence of compile viability only. It is unsigned, unbundl
 - Paper owns listener startup completion and shutdown cancellation under one lifecycle lock, cancels pending main-thread futures before draining client work, and restores interruption state on timeout paths; Fabric clears equivalent worker and queue state on stop.
 - Coordinator metrics authentication rejects malformed and non-ASCII bearer credentials without raising an internal error.
 - The VJ deployment helper validates loopback configuration before mutation, verifies the launched process owns every configured listener, and requires renderer-connected health before reporting success.
-- Primary CI requires community-bot, protocol-contract, containment, Rust audit, and both Java dependency-scan results. Tag releases require the tagged SHA to be on `main` and exact successful CI/security workflow runs for that SHA.
+- Primary CI requires community-bot, protocol-contract, containment, Rust audit, and both fail-closed, distribution-scoped Java dependency-scan results. Tag releases require the tagged SHA to be on `main` and exact successful CI/security workflow runs for that SHA.
 - Current tag/main workflows cannot publish a DJ client, updater metadata, or Docker image during Phase 0. Active no-bypass repository rules prevent vulnerable `v*` and `dj-v*` tags from being created, moved, deleted, or force-updated against historical workflow revisions; the legacy remote DJ and Docker workflows are disabled.
 - Generic combined releases are quarantined with `v*`. Paper and Fabric release workflows retain exact-main CI/security provenance checks for a future trusted publisher, but `plugin-v*` and `mod-v*` creation is currently blocked with no bypass and both workflows are disabled to prevent historical-ref execution.
 - VJ and demo Compose services require the explicit `phase0-quarantined` profile and are absent from the default dry-run plan.
@@ -270,8 +274,8 @@ The affected surfaces were reverified from clean installs after that merge:
 - Root `npm audit --audit-level=high` and the Vite production build passed with zero reported vulnerabilities.
 - Site `npm audit --audit-level=high`, 103 tests, lint, and the Next.js production build passed; lint retained the same 26 non-blocking warnings recorded above.
 - Worker `npm audit --audit-level=high`, `tsc --noEmit`, and `wrangler deploy --dry-run` passed under Node.js `22.16.0` with Wrangler `4.102.0` and zero reported vulnerabilities.
-- The upstream merge itself changed no release workflow, containment policy, runtime implementation, or public-distribution state. Final review remediation subsequently tightened the renderer transport, bounded routing, shutdown cancellation, release provenance, and repository control plane described above.
+- The upstream merge itself changed no release workflow, containment policy, runtime implementation, or public-distribution state. Final review remediation subsequently tightened the renderer transport, bounded routing, shutdown cancellation, release provenance, Java audit scope, and repository control plane described above.
 
 ## Final Disposition
 
-Phase 0 containment is verified at implementation HEAD `9f0b77b3fe2379a38d9f831d160a50845c286faa`; anonymous DJ/container artifacts are withdrawn and new public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
+Phase 0 containment is verified at implementation HEAD `32d01581bc58152b93391e3323b880f59e97eedc`; anonymous DJ/container artifacts are withdrawn and new public distribution remains quarantined in code and in the GitHub repository control plane. The next engineering step is a plan-first Phase 1 foundation design covering workspace boundaries, a canonical protocol envelope, benchmark/latency harnesses, and the first Rust Show Engine skeleton.
