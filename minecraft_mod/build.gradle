@@ -64,6 +64,7 @@ dependencyCheck {
     formats = ['JSON', 'SARIF']
     outputDirectory = file("$buildDir/reports/dependency-check").absolutePath
     data.directory = dependencyCheckDataDirectory
+    scanConfigurations = ['includeInternal']
     hostedSuppressions {
         enabled = false
     }

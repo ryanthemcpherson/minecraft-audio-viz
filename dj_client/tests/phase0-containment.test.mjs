@@ -683,6 +683,10 @@ test("Paper and Fabric dependency scans fail closed with unsuppressed OWASP repo
   assert.match(fabricBuild, /failOnError\s*=\s*true\b/);
   assert.match(fabricBuild, /formats\s*=\s*\[['"]JSON['"],\s*['"]SARIF['"]\]/);
   assert.match(fabricBuild, /data\.directory\s*=/);
+  assert.match(
+    fabricBuild,
+    /scanConfigurations\s*=\s*\[['"]includeInternal['"]\]/,
+  );
   assert.match(fabricBuild, /hostedSuppressions\s*\{[\s\S]*?enabled\s*=\s*false/);
   assert.match(fabricBuild, /System\.getenv\(['"]NVD_API_KEY['"]\)\?\.trim\(\)/);
   assert.match(fabricBuild, /if\s*\(nvdApiKey\)\s*\{[\s\S]*?nvd\.apiKey\s*=\s*nvdApiKey/);
@@ -699,6 +703,7 @@ test("Paper and Fabric dependency scans fail closed with unsuppressed OWASP repo
     );
     assert.match(workflow, /-DfailBuildOnCVSS=0\b/);
     assert.match(workflow, /-DfailOnError=true\b/);
+    assert.match(workflow, /-DskipProvidedScope=true\b/);
     assert.match(workflow, /-DhostedSuppressionsEnabled=false\b/);
     assert.match(workflow, /-Dformats=JSON,SARIF\b/);
     assert.match(workflow, /-Dodc\.outputDirectory=target\/dependency-check\b/);
