@@ -1,8 +1,6 @@
 name: Deploy to Dev Server
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       skip_tests:
@@ -16,6 +14,8 @@ concurrency:
   group: deploy-dev
   cancel-in-progress: false
 
+permissions: {}
+
 env:
   DEPLOY_PATH: /home/ryan/minecraft-audio-viz
   MODS_DIR: /home/ryan/minecraft-server/mods
@@ -27,6 +27,8 @@ jobs:
   # ---------------------------------------------------------------------------
   build-mod:
     name: Build Mod JAR
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +56,8 @@ jobs:
   test-python:
     name: Python Tests
     if: ${{ github.event.inputs.skip_tests != 'true' }}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +83,11 @@ jobs:
   deploy:
     name: Deploy to Dev Server
     needs: [build-mod, test-python]
-    if: always() && needs.build-mod.result == 'success' && (needs.test-python.result == 'success' || needs.test-python.result == 'skipped')
+    # Phase 0 quarantine: the live host runs Dockerized Minecraft 26.2 while
+    # this workflow builds a 1.21.11 mod and targets an unused legacy service.
+    if: ${{ false }}
+    permissions:
+      contents: read
     runs-on: [self-hosted, dev-server]
     environment: dev-server
     timeout-minutes: 10
@@ -225,3 +233,14 @@ jobs:
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  deployment-quarantined:
+    name: MCAV_DEV_DEPLOYMENT_QUARANTINED
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain target quarantine
+        run: |
+          echo "The live dev host runs Dockerized Minecraft 26.2 under /home/ryan/mc."
+          echo "MCAV currently builds a Minecraft 1.21.11 mod and the retained deploy job targets an unused legacy service."
+          echo "Choose and validate a compatible Paper-first target or port the mod before re-enabling deployment."
+          exit 1
