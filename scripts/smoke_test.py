@@ -7,7 +7,8 @@ verifying that the plugin responds correctly to each message type.
 
 Usage:
     python scripts/smoke_test.py                    # localhost:8765
-    python scripts/smoke_test.py --host 192.168.1.204 --port 8765
+    ssh -N -L 18765:127.0.0.1:8765 operator@minecraft-host
+    python scripts/smoke_test.py --host 127.0.0.1 --port 18765  # encrypted tunnel
     python scripts/smoke_test.py --quick            # ping-only check
 
 Requires: websockets (pip install websockets)

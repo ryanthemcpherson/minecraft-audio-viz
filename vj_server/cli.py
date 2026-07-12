@@ -60,7 +60,8 @@ def vj_server():
 Examples:
   audioviz-vj                           # Start VJ server on default ports
   audioviz-vj --port 9000               # Custom DJ connection port
-  audioviz-vj --minecraft-host mc.local # Connect to remote Minecraft
+  audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765
+                                        # Use a local encrypted-tunnel endpoint
         """,
     )
 
@@ -76,7 +77,10 @@ Examples:
         "--minecraft-host",
         type=validate_hostname,
         default=os.environ.get("MINECRAFT_HOST", "localhost"),
-        help="Minecraft server host (default: localhost or $MINECRAFT_HOST)",
+        help=(
+            "Minecraft loopback host or local encrypted-tunnel endpoint "
+            "(default: localhost or $MINECRAFT_HOST)"
+        ),
     )
     parser.add_argument(
         "--minecraft-port",

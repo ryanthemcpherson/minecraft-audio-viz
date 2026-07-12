@@ -64,17 +64,75 @@ def install_websocket_factory(
     connect_calls: list[dict[str, Any]] = []
 
     async def fake_connect(*_args: Any, **_kwargs: Any) -> FakeWebSocket:
-        connect_calls.append(_kwargs)
+        connect_calls.append({"uri": _args[0], **_kwargs})
         return pending.pop(0)
 
     monkeypatch.setattr(viz_client_module.websockets, "connect", fake_connect)
     return connect_calls
 
 
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "192.168.1.25", "mc.local", "8.8.8.8", "::ffff:192.168.1.25"],
+)
+@pytest.mark.asyncio
+async def test_connect_rejects_non_loopback_transport_before_opening_socket(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    websocket = FakeWebSocket(
+        {
+            "type": "connected",
+            "auth_required": False,
+            "server_type": "paper",
+        }
+    )
+    connect_calls = install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(host=host, connect_timeout=0.05)
+
+    assert await client.connect() is False
+    assert client.connected is False
+    assert connect_calls == []
+    assert websocket.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_connect_derives_actual_destination_from_validated_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakeWebSocket(
+        {
+            "type": "connected",
+            "auth_required": False,
+            "server_type": "paper",
+        }
+    )
+    connect_calls = install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(host="127.0.0.1", port=8765, connect_timeout=0.05)
+    client.uri = "ws://8.8.8.8:8765"
+
+    assert await client.connect() is True
+    assert connect_calls[0]["uri"] == "ws://127.0.0.1:8765"
+
+    await client.disconnect()
+
+
 @pytest.mark.parametrize("enable_heartbeat", [False, True])
+@pytest.mark.parametrize(
+    ("host", "expected_uri"),
+    [
+        ("localhost", "ws://localhost:8765"),
+        ("localhost.", "ws://localhost.:8765"),
+        ("127.0.0.42", "ws://127.0.0.42:8765"),
+        ("::1", "ws://[::1]:8765"),
+        ("[::1]", "ws://[::1]:8765"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_loopback_connects_without_token_when_server_disables_auth(
-    monkeypatch: pytest.MonkeyPatch, enable_heartbeat: bool
+    monkeypatch: pytest.MonkeyPatch,
+    enable_heartbeat: bool,
+    host: str,
+    expected_uri: str,
 ) -> None:
     websocket = FakeWebSocket(
         {
@@ -85,11 +143,12 @@ async def test_loopback_connects_without_token_when_server_disables_auth(
     )
     install_websocket_factory(monkeypatch, websocket)
     client = VizClient(
-        host="127.0.0.1",
+        host=host,
         connect_timeout=0.05,
         enable_heartbeat=enable_heartbeat,
     )
 
+    assert client.uri == expected_uri
     assert await client.connect() is True
     assert client.connected is True
     assert client.server_type == "paper"

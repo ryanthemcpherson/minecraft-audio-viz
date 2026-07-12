@@ -2,12 +2,14 @@
 
 # WebSocket server settings
 websocket:
-  # Bind address for the WebSocket server. Non-loopback addresses require ws-secret.
+  # Bind address for the WebSocket server. Only explicit loopback addresses are accepted.
+  # For a remote VJ server, use an encrypted tunnel that terminates on this loopback listener.
   address: "127.0.0.1"
   # Port for the WebSocket server
   port: 8765
 
-# Shared secret for WebSocket authentication. Empty is allowed only for loopback development.
+# Shared secret for WebSocket authentication. This authenticates a local or tunneled client;
+# it never permits a plaintext non-loopback listener.
 ws-secret: ""
 
 # Default visualization settings

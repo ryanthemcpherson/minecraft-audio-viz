@@ -70,6 +70,28 @@ graph TD
 | **9000** | WebSocket | VJ Server ← DJs | Remote DJ connections. Receives audio frames from remote DJs for centralized mixing. |
 | **8080** | HTTP | VJ Server | Admin panel web interface. Serves static files for DJ control panel. |
 
+## Secure Renderer Transport
+
+The Minecraft renderer listener on port 8765 is a native control endpoint and accepts explicit loopback binds only. Paper, Fabric, and the Python `VizClient` all reject direct LAN, wildcard, hostname, and public renderer targets. A shared secret authenticates the client but does not make plaintext `ws://` safe outside the host.
+
+When the VJ server runs on the Minecraft host, keep the defaults:
+
+```bash
+audioviz-vj
+```
+
+For split-host deployments, establish an encrypted tunnel from the VJ host to the Minecraft host's loopback listener. This SSH example reserves local port 18765 on the VJ host:
+
+```bash
+# Terminal 1 on the VJ host
+ssh -N -L 18765:127.0.0.1:8765 operator@minecraft-host
+
+# Terminal 2 on the VJ host
+audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765
+```
+
+Keep the tunnel process supervised for production use and restrict SSH credentials to the minimum required access. Do not expose or port-forward 8765 directly.
+
 ## Reconnection Behavior
 
 All WebSocket connections implement exponential backoff with jitter to prevent thundering herd problems.
@@ -263,8 +285,8 @@ config = DJRelayConfig(
 from vj_server.viz_client import VizClient
 
 client = VizClient(
-    host="localhost",
-    port=8765,
+    host="127.0.0.1",          # Same host or local encrypted-tunnel endpoint only
+    port=8765,                 # Use the tunnel's local port for split-host deployments
     connect_timeout=10.0,      # Connection timeout (seconds)
     auto_reconnect=False,      # Enable auto-reconnection
     max_reconnect_attempts=10  # Reconnection attempts

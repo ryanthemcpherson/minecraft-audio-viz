@@ -26,16 +26,41 @@ public final class WebSocketSecurityPolicy {
         );
     }
 
-    public static boolean isSafeConfiguration(String address, String secret) {
-        String normalizedSecret = secret == null ? "" : secret.strip();
+    public static boolean isSafeConfiguration(String address, String ignoredSecret) {
         if (address == null || address.isBlank()) {
             return false;
         }
-        if (!normalizedSecret.isEmpty()) {
+
+        String normalizedAddress = address.strip();
+        if (normalizedAddress.equalsIgnoreCase("localhost")
+            || normalizedAddress.equalsIgnoreCase("localhost.")) {
             return true;
         }
+
+        if (normalizedAddress.matches("[0-9.]+")) {
+            String[] octets = normalizedAddress.split("\\.", -1);
+            if (octets.length != 4) {
+                return false;
+            }
+            try {
+                for (String octet : octets) {
+                    int value = Integer.parseInt(octet);
+                    if (value < 0 || value > 255) {
+                        return false;
+                    }
+                }
+                return Integer.parseInt(octets[0]) == 127;
+            } catch (NumberFormatException exception) {
+                return false;
+            }
+        }
+
+        if (!normalizedAddress.contains(":")
+            || !normalizedAddress.matches("[0-9a-fA-F:.]+")) {
+            return false;
+        }
         try {
-            return InetAddress.getByName(address).isLoopbackAddress();
+            return InetAddress.getByName(normalizedAddress).isLoopbackAddress();
         } catch (UnknownHostException exception) {
             return false;
         }

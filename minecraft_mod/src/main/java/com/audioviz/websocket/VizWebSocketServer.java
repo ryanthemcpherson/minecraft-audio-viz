@@ -75,7 +75,7 @@ public class VizWebSocketServer extends WebSocketServer {
         Executor serverExecutor,
         ConnectionStateListener connectionStateListener
     ) {
-        super(new InetSocketAddress(address, port), transportDrafts());
+        super(new InetSocketAddress(requireSafeBindAddress(address), port), transportDrafts());
         this.messageHandler = messageHandler;
         this.messageQueue = messageQueue;
         this.serverExecutor = serverExecutor;
@@ -84,6 +84,15 @@ public class VizWebSocketServer extends WebSocketServer {
 
         setReuseAddr(true);
         setConnectionLostTimeout(0);
+    }
+
+    private static String requireSafeBindAddress(String bindAddress) {
+        if (!WebSocketSecurityPolicy.isSafeConfiguration(bindAddress, "")) {
+            throw new IllegalArgumentException(
+                "Minecraft renderer WebSocket must bind to an explicit loopback address"
+            );
+        }
+        return bindAddress.strip();
     }
 
     /**
@@ -287,83 +296,11 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        // Handle pong responses using only the message prefix so payload data cannot spoof a pong.
-        String prefix = message.substring(0, Math.min(64, message.length()));
-        if (prefix.contains("\"type\":\"pong\"") || prefix.contains("\"type\": \"pong\"")) {
-            updatePongForActiveClient(conn, clientInfo);
-            return;
-        }
-
-        if (asyncEnabled && isHighFrequencyMessage(message)) {
-            try {
-                enqueueForActiveClient(conn, clientInfo, message);
-            } catch (RejectedExecutionException exception) {
-                if (acceptingMessages) {
-                    throw exception;
-                }
-            }
-        } else {
-            try {
-                JsonObject json = JsonParser.parseString(message).getAsJsonObject();
-                String type = json.has("type") ? json.get("type").getAsString() : "unknown";
-                final int seq = json.has("_seq") ? json.get("_seq").getAsInt() : -1;
-
-                if ("get_ws_metrics".equals(type)) {
-                    JsonObject response = getMetrics();
-                    if (seq >= 0) response.addProperty("_seq", seq);
-                    sendToActiveClient(conn, clientInfo, gson.toJson(response));
-                    return;
-                }
-
-                // Echo correlation ID (_seq) from request to response so the
-                // VJ server can match responses to the correct caller.
-                // Schedule handler on the server thread to avoid thread-safety issues
-                // (entity spawning, world access, etc. must happen on the server thread).
-                // Response is sent asynchronously when the server thread completes.
-                CompletableFuture<JsonObject> future = new CompletableFuture<>();
-                boolean submitted = submitForActiveClient(
-                    conn,
-                    clientInfo,
-                    () -> executeHandlerForActiveClient(
-                        conn,
-                        clientInfo,
-                        type,
-                        json,
-                        future
-                    )
-                );
-                if (!submitted) {
-                    return;
-                }
-
-                future.whenComplete((result, ex) -> {
-                    try {
-                        if (ex != null) {
-                            JsonObject error = new JsonObject();
-                            error.addProperty("type", "error");
-                            error.addProperty("message", ex.getMessage());
-                            if (seq >= 0) error.addProperty("_seq", seq);
-                            sendToActiveClient(conn, clientInfo, gson.toJson(error));
-                        } else if (result != null) {
-                            if (seq >= 0) result.addProperty("_seq", seq);
-                            sendToActiveClient(conn, clientInfo, gson.toJson(result));
-                        }
-                    } catch (Exception sendEx) {
-                        AudioVizMod.LOGGER.warn("Failed to send response: {}", sendEx.getMessage());
-                        totalSendFailures.incrementAndGet();
-                    }
-                });
-            } catch (Exception e) {
-                AudioVizMod.LOGGER.warn("Error processing WebSocket message", e);
-                try {
-                    JsonObject error = new JsonObject();
-                    error.addProperty("type", "error");
-                    error.addProperty("message", e.getMessage());
-                    sendToActiveClient(conn, clientInfo, gson.toJson(error));
-                } catch (Exception sendEx) {
-                    AudioVizMod.LOGGER.warn("Failed to send error response: {}", sendEx.getMessage());
-                    totalSendFailures.incrementAndGet();
-                }
+        try {
+            enqueueForActiveClient(conn, clientInfo, message);
+        } catch (RejectedExecutionException exception) {
+            if (acceptingMessages) {
+                throw exception;
             }
         }
     }
@@ -504,9 +441,106 @@ public class VizWebSocketServer extends WebSocketServer {
                 }
                 MessageQueue.MessageGuard guard = operation ->
                     runForActiveClient(conn, info, operation);
-                messageQueue.enqueueRaw(message, guard);
+                messageQueue.parseAndDispatch(
+                    message,
+                    guard,
+                    (parsed, parsedGuard) -> dispatchParsedMessage(
+                        conn,
+                        info,
+                        parsed,
+                        parsedGuard
+                    ),
+                    exception -> handleMessageFailure(conn, info, exception)
+                );
                 return true;
             }
+        }
+    }
+
+    private void dispatchParsedMessage(
+        WebSocket conn,
+        ClientInfo info,
+        JsonObject message,
+        MessageQueue.MessageGuard guard
+    ) {
+        try {
+            String type = topLevelType(message);
+            if ("pong".equals(type)) {
+                updatePongForActiveClient(conn, info);
+                return;
+            }
+
+            if (requiresBoundedQueue(type) || (asyncEnabled && isLegacyAsyncType(type))) {
+                messageQueue.enqueue(message, guard);
+                return;
+            }
+
+            int seq = message.has("_seq") ? message.get("_seq").getAsInt() : -1;
+            if ("get_ws_metrics".equals(type)) {
+                JsonObject response = getMetrics();
+                if (seq >= 0) {
+                    response.addProperty("_seq", seq);
+                }
+                sendToActiveClient(conn, info, gson.toJson(response));
+                return;
+            }
+
+            CompletableFuture<JsonObject> future = new CompletableFuture<>();
+            boolean submitted = submitForActiveClient(
+                conn,
+                info,
+                () -> executeHandlerForActiveClient(conn, info, type, message, future)
+            );
+            if (!submitted) {
+                return;
+            }
+
+            future.whenComplete((result, exception) -> {
+                try {
+                    if (exception != null) {
+                        JsonObject error = new JsonObject();
+                        error.addProperty("type", "error");
+                        error.addProperty("message", exception.getMessage());
+                        if (seq >= 0) {
+                            error.addProperty("_seq", seq);
+                        }
+                        sendToActiveClient(conn, info, gson.toJson(error));
+                    } else if (result != null) {
+                        if (seq >= 0) {
+                            result.addProperty("_seq", seq);
+                        }
+                        sendToActiveClient(conn, info, gson.toJson(result));
+                    }
+                } catch (RuntimeException sendException) {
+                    AudioVizMod.LOGGER.warn(
+                        "Failed to send response: {}",
+                        sendException.getMessage()
+                    );
+                    totalSendFailures.incrementAndGet();
+                }
+            });
+        } catch (RuntimeException exception) {
+            handleMessageFailure(conn, info, exception);
+        }
+    }
+
+    private void handleMessageFailure(
+        WebSocket conn,
+        ClientInfo info,
+        RuntimeException exception
+    ) {
+        AudioVizMod.LOGGER.warn("Error processing WebSocket message", exception);
+        try {
+            JsonObject error = new JsonObject();
+            error.addProperty("type", "error");
+            error.addProperty("message", exception.getMessage());
+            sendToActiveClient(conn, info, gson.toJson(error));
+        } catch (RuntimeException sendException) {
+            AudioVizMod.LOGGER.warn(
+                "Failed to send error response: {}",
+                sendException.getMessage()
+            );
+            totalSendFailures.incrementAndGet();
         }
     }
 
@@ -577,27 +611,24 @@ public class VizWebSocketServer extends WebSocketServer {
         }
     }
 
-    private boolean isHighFrequencyMessage(String message) {
-        int limit = Math.min(message.length(), 60);
-        return containsWithin(message, "\"type\":\"batch_update\"", limit) ||
-               containsWithin(message, "\"type\": \"batch_update\"", limit) ||
-               containsWithin(message, "\"type\":\"bitmap_frame\"", limit) ||
-               containsWithin(message, "\"type\": \"bitmap_frame\"", limit) ||
-               containsWithin(message, "\"type\":\"audio_state\"", limit) ||
-               containsWithin(message, "\"type\": \"audio_state\"", limit) ||
-               containsWithin(message, "\"type\":\"voice_audio\"", limit) ||
-               containsWithin(message, "\"type\": \"voice_audio\"", limit);
+    private static String topLevelType(JsonObject message) {
+        JsonElement type = message.get("type");
+        return isJsonString(type) ? type.getAsString() : "unknown";
     }
 
-    private static boolean containsWithin(String haystack, String needle, int limit) {
-        int maxStart = limit - needle.length();
-        if (maxStart < 0) return false;
-        for (int i = 0; i <= maxStart; i++) {
-            if (haystack.regionMatches(i, needle, 0, needle.length())) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean requiresBoundedQueue(String type) {
+        return switch (type) {
+            case "batch_update", "audio", "dj_audio_frame", "audio_frame",
+                "bitmap_frame", "audio_state", "voice_audio" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isLegacyAsyncType(String type) {
+        return switch (type) {
+            case "bitmap_frame", "audio_state", "voice_audio" -> true;
+            default -> false;
+        };
     }
 
     @Override

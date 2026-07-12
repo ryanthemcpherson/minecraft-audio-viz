@@ -75,12 +75,26 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final int MAX_AUTH_TOKEN_LENGTH = 1_024;
 
     public VizWebSocketServer(AudioVizPlugin plugin, int port) {
-        this(plugin, port, new MessageHandler(plugin));
-    }
-
-    private VizWebSocketServer(AudioVizPlugin plugin, int port, MessageHandler messageHandler) {
         this(
             plugin,
+            plugin.getConfig().getString("websocket.address", "127.0.0.1"),
+            port
+        );
+    }
+
+    public VizWebSocketServer(AudioVizPlugin plugin, String bindAddress, int port) {
+        this(plugin, bindAddress, port, new MessageHandler(plugin));
+    }
+
+    private VizWebSocketServer(
+        AudioVizPlugin plugin,
+        String bindAddress,
+        int port,
+        MessageHandler messageHandler
+    ) {
+        this(
+            plugin,
+            bindAddress,
             port,
             messageHandler,
             new MessageQueue(plugin, messageHandler),
@@ -93,6 +107,7 @@ public class VizWebSocketServer extends WebSocketServer {
 
     VizWebSocketServer(
         AudioVizPlugin plugin,
+        String bindAddress,
         int port,
         MessageHandler messageHandler,
         MessageQueue messageQueue,
@@ -101,7 +116,7 @@ public class VizWebSocketServer extends WebSocketServer {
     ) {
         super(
             new InetSocketAddress(
-                plugin.getConfig().getString("websocket.address", "127.0.0.1"),
+                requireSafeBindAddress(bindAddress),
                 port
             ),
             transportDrafts()
@@ -128,6 +143,15 @@ public class VizWebSocketServer extends WebSocketServer {
         // websockets 16.x (Python) doesn't respond to java-websocket's protocol
         // pings, causing spurious 35s disconnects.
         setConnectionLostTimeout(0);
+    }
+
+    private static String requireSafeBindAddress(String bindAddress) {
+        if (!WebSocketSecurityPolicy.isSafeConfiguration(bindAddress, "")) {
+            throw new IllegalArgumentException(
+                "Minecraft renderer WebSocket must bind to an explicit loopback address"
+            );
+        }
+        return bindAddress.strip();
     }
 
     @Override
@@ -298,52 +322,11 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
-        // Handle pong responses for heartbeat (check only prefix to avoid
-        // crafted messages with "pong" buried in payload data)
-        String prefix = message.substring(0, Math.min(64, message.length()));
-        if (prefix.contains("\"type\":\"pong\"") || prefix.contains("\"type\": \"pong\"")) {
-            updatePongForActiveClient(conn, clientInfo);
-            return;
-        }
-
-        // High-frequency messages (batch_update, audio) go through async queue
-        // Other messages are processed synchronously for immediate response
-        if (asyncEnabled && isHighFrequencyMessage(message)) {
-            try {
-                enqueueForActiveClient(conn, clientInfo, message);
-            } catch (RejectedExecutionException exception) {
-                if (acceptingMessages) {
-                    throw exception;
-                }
-            }
-        } else {
-            // Synchronous processing for commands that need immediate response
-            try {
-                JsonObject json = JsonParser.parseString(message).getAsJsonObject();
-                String type = json.has("type") ? json.get("type").getAsString() : "unknown";
-
-                // Echo correlation ID (_seq) from request to response so the
-                // VJ server can match responses to the correct caller.
-                final int seq = json.has("_seq") ? json.get("_seq").getAsInt() : -1;
-
-                // Handle metrics request
-                if ("get_ws_metrics".equals(type)) {
-                    JsonObject response = getMetrics();
-                    if (seq >= 0) response.addProperty("_seq", seq);
-                    sendToActiveClient(conn, clientInfo, gson.toJson(response));
-                    return;
-                }
-
-                handleForActiveClient(conn, clientInfo, type, json, seq);
-
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "Error processing WebSocket message", e);
-
-                // Send error response
-                JsonObject error = new JsonObject();
-                error.addProperty("type", "error");
-                error.addProperty("message", e.getMessage());
-                sendToActiveClient(conn, clientInfo, gson.toJson(error));
+        try {
+            enqueueForActiveClient(conn, clientInfo, message);
+        } catch (RejectedExecutionException exception) {
+            if (acceptingMessages) {
+                throw exception;
             }
         }
     }
@@ -486,12 +469,72 @@ public class VizWebSocketServer extends WebSocketServer {
             try {
                 MessageQueue.MessageGuard guard = operation ->
                     runForActiveClient(conn, info, operation);
-                messageQueue.enqueueRaw(message, guard);
+                messageQueue.parseAndDispatch(
+                    message,
+                    guard,
+                    (parsed, parsedGuard) -> dispatchParsedMessage(
+                        conn,
+                        info,
+                        parsed,
+                        parsedGuard
+                    ),
+                    exception -> handleMessageFailure(conn, info, exception)
+                );
                 return true;
             } finally {
                 info.endOperation();
             }
         }
+    }
+
+    private void dispatchParsedMessage(
+        WebSocket conn,
+        ClientInfo info,
+        JsonObject message,
+        MessageQueue.MessageGuard guard
+    ) {
+        try {
+            String type = topLevelType(message);
+            if ("pong".equals(type)) {
+                updatePongForActiveClient(conn, info);
+                return;
+            }
+
+            if (requiresBoundedQueue(type) || (asyncEnabled && isLegacyAsyncType(type))) {
+                messageQueue.enqueue(message, guard);
+                return;
+            }
+
+            int seq = message.has("_seq") ? message.get("_seq").getAsInt() : -1;
+            if ("get_ws_metrics".equals(type)) {
+                JsonObject response = getMetrics();
+                if (seq >= 0) {
+                    response.addProperty("_seq", seq);
+                }
+                sendToActiveClient(conn, info, gson.toJson(response));
+                return;
+            }
+
+            handleForActiveClient(conn, info, type, message, seq);
+        } catch (RuntimeException exception) {
+            handleMessageFailure(conn, info, exception);
+        }
+    }
+
+    private void handleMessageFailure(
+        WebSocket conn,
+        ClientInfo info,
+        RuntimeException exception
+    ) {
+        plugin.getLogger().log(
+            Level.WARNING,
+            "Error processing WebSocket message",
+            exception
+        );
+        JsonObject error = new JsonObject();
+        error.addProperty("type", "error");
+        error.addProperty("message", exception.getMessage());
+        sendToActiveClient(conn, info, gson.toJson(error));
     }
 
     private void handleForActiveClient(
@@ -573,39 +616,24 @@ public class VizWebSocketServer extends WebSocketServer {
         }
     }
 
-    /**
-     * Check if a message is high-frequency and should be processed asynchronously.
-     * Only checks the first 60 chars (where the "type" field is) to avoid
-     * false-matching keywords in payload data.
-     */
-    private boolean isHighFrequencyMessage(String message) {
-        // Check the prefix where the "type" field appears in serialized JSON.
-        // Use indexOf with a limit to avoid allocating a substring every call.
-        int limit = Math.min(message.length(), 60);
-        return containsWithin(message, "\"type\":\"batch_update\"", limit) ||
-               containsWithin(message, "\"type\": \"batch_update\"", limit) ||
-               containsWithin(message, "\"type\":\"bitmap_frame\"", limit) ||
-               containsWithin(message, "\"type\": \"bitmap_frame\"", limit) ||
-               containsWithin(message, "\"type\":\"audio_state\"", limit) ||
-               containsWithin(message, "\"type\": \"audio_state\"", limit) ||
-               containsWithin(message, "\"type\":\"voice_audio\"", limit) ||
-               containsWithin(message, "\"type\": \"voice_audio\"", limit);
+    private static String topLevelType(JsonObject message) {
+        JsonElement type = message.get("type");
+        return isJsonString(type) ? type.getAsString() : "unknown";
     }
 
-    /**
-     * Check if {@code needle} appears within the first {@code limit} characters of {@code haystack},
-     * without allocating a substring.
-     */
-    private static boolean containsWithin(String haystack, String needle, int limit) {
-        int maxStart = limit - needle.length();
-        if (maxStart < 0) return false;
-        // regionMatches does char-by-char comparison with no allocation
-        for (int i = 0; i <= maxStart; i++) {
-            if (haystack.regionMatches(i, needle, 0, needle.length())) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean requiresBoundedQueue(String type) {
+        return switch (type) {
+            case "batch_update", "audio", "dj_audio_frame", "audio_frame",
+                "bitmap_frame", "audio_state", "voice_audio" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isLegacyAsyncType(String type) {
+        return switch (type) {
+            case "bitmap_frame", "audio_state", "voice_audio" -> true;
+            default -> false;
+        };
     }
 
     @Override
@@ -817,6 +845,11 @@ public class VizWebSocketServer extends WebSocketServer {
             acceptingMessages = false;
             startupCompletion.cancel(false);
         }
+
+        // A control handler may be waiting for Bukkit's main thread while shutdown
+        // itself owns that thread. Cancel those calls before waiting on intake or
+        // client leases so plugin disable cannot inherit their 15-second timeout.
+        messageHandler.cancelPendingMainThreadCalls();
 
         // Drain any submission that crossed the intake gate before shutdown.
         synchronized (messageIntakeLock) {

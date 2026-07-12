@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WebSocketSecurityPolicyTest {
 
     @ParameterizedTest
-    @ValueSource(strings = {"127.0.0.1", "localhost", "::1"})
+    @ValueSource(strings = {"127.0.0.1", "127.0.0.42", "localhost", "localhost.", "::1", "0:0:0:0:0:0:0:1"})
     void allowsLoopbackBindingWithoutSecret(String address) {
         assertTrue(WebSocketSecurityPolicy.isSafeConfiguration(address, ""));
         assertTrue(WebSocketSecurityPolicy.isSafeConfiguration(address, "   "));
@@ -32,9 +32,9 @@ class WebSocketSecurityPolicyTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"0.0.0.0", "192.168.1.25", "audio-viz.internal"})
-    void allowsNonLoopbackBindingWithSecret(String address) {
-        assertTrue(WebSocketSecurityPolicy.isSafeConfiguration(address, "secret"));
+    @ValueSource(strings = {"0.0.0.0", "192.168.1.25", "audio-viz.internal", "2130706433"})
+    void rejectsNonLoopbackBindingEvenWithSecret(String address) {
+        assertFalse(WebSocketSecurityPolicy.isSafeConfiguration(address, "secret"));
     }
 
     @ParameterizedTest

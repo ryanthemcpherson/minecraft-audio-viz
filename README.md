@@ -120,10 +120,18 @@ cd minecraft_plugin && mvn package
 # No additional dependencies required
 ```
 
-Then point the VJ server at your Minecraft server:
+Run the VJ server on the same host as Minecraft (the default renderer endpoint is loopback-only):
 ```bash
-audioviz-vj --minecraft-host your-mc-server
+audioviz-vj
 ```
+
+When the VJ and Minecraft servers are on different machines, create an encrypted tunnel first. For example, from the VJ host:
+```bash
+ssh -N -L 18765:127.0.0.1:8765 operator@your-mc-server
+audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765
+```
+
+The Minecraft renderer listener never accepts plaintext LAN or public binds, even when a shared secret is configured. See [Connectivity](docs/CONNECTIVITY.md#secure-renderer-transport) for deployment details.
 
 See [Minecraft Integration](#minecraft-integration) for a detailed comparison.
 
@@ -370,7 +378,7 @@ Flat 2D pixel-grid patterns. The Fabric mod renders these via map tile displays 
 # Start VJ server (multi-DJ mode)
 audioviz-vj                               # start on default port 9000
 audioviz-vj --port 9000                   # custom DJ port
-audioviz-vj --minecraft-host mc.local     # connect to Minecraft server
+audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765  # local tunnel
 audioviz-vj --no-auth                     # dev mode - skip authentication
 audioviz-vj --metrics-port 9001           # health metrics endpoint
 ```

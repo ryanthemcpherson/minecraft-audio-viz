@@ -131,7 +131,7 @@ cd vj_server && pip install -e .
 
 # Run VJ server (multi-DJ mode)
 audioviz-vj
-audioviz-vj --port 9000 --minecraft-host mc.local
+audioviz-vj --port 9000 --minecraft-host 127.0.0.1 --minecraft-port 18765  # encrypted tunnel endpoint
 audioviz-vj --no-auth                        # Dev only - skip authentication
 audioviz-vj --metrics-port 9001              # Health metrics on port 9001 (default)
 audioviz-vj --no-metrics                     # Disable metrics endpoint

@@ -257,7 +257,7 @@ export default function OnboardingPage() {
                   I&apos;m a DJ and want to perform at MCAV events
                 </p>
                 <p className="mt-1 text-xs text-text-secondary/70">
-                  Download the DJ client, get connect codes, and perform live
+                  Create a profile and review the Phase 0 source-development path
                 </p>
               </button>
             </div>
@@ -629,15 +629,18 @@ export default function OnboardingPage() {
               <h1 className="mb-2 text-2xl font-bold">
                 <span className="text-disc-cyan">Profile created!</span>
               </h1>
-              <p className="mb-8 text-text-secondary">
-                You&apos;re all set to start performing at MCAV events.
+              <p className="mb-4 text-text-secondary">
+                Your DJ profile is ready. Prebuilt client distribution remains paused during Phase 0.
+              </p>
+              <p className="mb-8 rounded-lg border border-noteblock-amber/20 bg-noteblock-amber/5 px-4 py-3 text-sm text-text-secondary">
+                Remote workflow verification is limited to unsupported local builds from source. The development guide does not provide a signed release artifact.
               </p>
 
               <div className="mb-6 text-left">
                 <h3 className="mb-3 text-sm font-semibold text-text-secondary uppercase tracking-wider">Next steps</h3>
                 <div className="flex flex-col gap-2">
                   {[
-                    { label: "Download the DJ client", icon: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" },
+                    { label: "Review the DJ source development guide", icon: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" },
                     { label: "Get a connect code from a server", icon: "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" },
                     { label: "Perform at your first show", icon: "M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" },
                   ].map((item) => (
@@ -652,12 +655,14 @@ export default function OnboardingPage() {
               </div>
 
               <div className="flex flex-col gap-3">
-                <Link
-                  href="/getting-started"
+                <a
+                  href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/dj_client/README.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                 >
-                  Download DJ Client
-                </Link>
+                  Open DJ Development Guide
+                </a>
 
                 {createdProfileSlug && (
                   <Link
