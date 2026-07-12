@@ -471,6 +471,41 @@ test("tag releases require main ancestry and exact workflow-run provenance", () 
   assert.doesNotMatch(releaseGate, /check-runs|REQUIRED_CHECK|CI Passed|Security Summary/);
 });
 
+test("vulnerable historical release tags are externally quarantined", () => {
+  const ci = readRepositoryFile(".github/workflows/ci.yml");
+  assert.doesNotMatch(ci, /^\s{2}release-eligibility:\s*$/m);
+
+  const rulesetPath = path.join(
+    repositoryRoot,
+    ".github/rulesets/phase0-release-tags.json",
+  );
+  assert.equal(fs.existsSync(rulesetPath), true, "Missing versioned Phase 0 tag ruleset");
+  const ruleset = JSON.parse(fs.readFileSync(rulesetPath, "utf8"));
+
+  assert.equal(ruleset.target, "tag");
+  assert.equal(ruleset.enforcement, "active");
+  assert.deepEqual(ruleset.bypass_actors, []);
+  assert.deepEqual(ruleset.conditions?.ref_name?.include, [
+    "refs/tags/v*",
+    "refs/tags/dj-v*",
+  ]);
+  assert.deepEqual(ruleset.conditions?.ref_name?.exclude, []);
+
+  const ruleTypes = new Set(ruleset.rules?.map((rule) => rule.type));
+  assert.equal(ruleTypes.has("creation"), true);
+  const updateRule = ruleset.rules?.find((rule) => rule.type === "update");
+  assert.equal(updateRule?.parameters?.update_allows_fetch_and_merge, false);
+  assert.equal(ruleTypes.has("deletion"), true);
+  assert.equal(ruleTypes.has("non_fast_forward"), true);
+  assert.equal(ruleTypes.has("required_status_checks"), false);
+  assert.deepEqual([...ruleTypes].sort(), [
+    "creation",
+    "deletion",
+    "non_fast_forward",
+    "update",
+  ]);
+});
+
 test("release provenance model rejects non-main and spoofed workflow runs", () => {
   const release = readRepositoryFile(".github/workflows/release.yml");
   const sha = "0123456789abcdef0123456789abcdef01234567";
