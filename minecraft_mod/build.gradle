@@ -1,6 +1,7 @@
 plugins {
     id 'fabric-loom' version '1.15.4'
     id 'java'
+    id 'org.owasp.dependencycheck' version '12.2.2'
 }
 
 version = '1.0.0'
@@ -49,6 +50,26 @@ java {
 
 test {
     useJUnitPlatform()
+}
+
+def dependencyCheckDataDirectory = System.getenv('DEPENDENCY_CHECK_DATA_DIR')?.trim()
+if (!dependencyCheckDataDirectory) {
+    dependencyCheckDataDirectory = new File(gradle.gradleUserHomeDir, 'dependency-check-data').absolutePath
+}
+def nvdApiKey = System.getenv('NVD_API_KEY')?.trim()
+
+dependencyCheck {
+    failBuildOnCVSS = 0.0
+    failOnError = true
+    formats = ['JSON', 'SARIF']
+    outputDirectory = file("$buildDir/reports/dependency-check").absolutePath
+    data.directory = dependencyCheckDataDirectory
+    hostedSuppressions {
+        enabled = false
+    }
+    if (nvdApiKey) {
+        nvd.apiKey = nvdApiKey
+    }
 }
 
 processResources {

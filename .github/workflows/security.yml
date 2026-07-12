@@ -22,6 +22,10 @@ on:
       - 'site/package.json'
       - 'worker/package.json'
       - 'minecraft_plugin/pom.xml'
+      - 'minecraft_mod/build.gradle'
+      - 'minecraft_mod/gradle.properties'
+      - 'minecraft_mod/settings.gradle'
+      - 'minecraft_mod/gradle/wrapper/gradle-wrapper.properties'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -86,11 +90,14 @@ jobs:
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
-  # Java: Maven dependency check (Paper plugin)
+  # Java: OWASP dependency checks (Paper + Fabric)
   # ---------------------------------------------------------------------------
   java-security:
-    name: Java Security Audit (Maven)
+    name: Paper OWASP Dependency-Check
     runs-on: ubuntu-latest
+    env:
+      DEPENDENCY_CHECK_DATA_DIR: ${{ github.workspace }}/.dependency-check-data
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -101,9 +108,115 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Verify dependencies
+      - name: Restore NVD data cache
+        id: nvd-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: owasp-dependency-check-12.2.2-${{ runner.os }}-${{ github.run_id }}-paper
+          restore-keys: |
+            owasp-dependency-check-12.2.2-${{ runner.os }}-
+
+      - name: Run Paper OWASP Dependency-Check
+        id: dependency-check
         working-directory: minecraft_plugin
-        run: mvn dependency:tree -B
+        run: |
+          nvd_args=()
+          if [[ -n "${NVD_API_KEY:-}" ]]; then
+            nvd_args+=("-DnvdApiKeyEnvironmentVariable=NVD_API_KEY")
+          fi
+          set +e
+          ./mvnw -B \
+            org.owasp:dependency-check-maven:12.2.2:check \
+            -DfailBuildOnCVSS=0 \
+            -DfailOnError=true \
+            -DhostedSuppressionsEnabled=false \
+            -Dformats=JSON,SARIF \
+            -DdataDirectory="$DEPENDENCY_CHECK_DATA_DIR" \
+            -Dodc.outputDirectory=target/dependency-check \
+            "${nvd_args[@]}"
+          audit_status=$?
+          set -e
+          if [[ -f target/dependency-check/dependency-check-report.json &&
+                -f target/dependency-check/dependency-check-report.sarif ]]; then
+            echo "reports-generated=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$audit_status"
+
+      - name: Save NVD data cache
+        if: always() && steps.dependency-check.outputs.reports-generated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: ${{ steps.nvd-cache.outputs.cache-primary-key }}
+
+      - name: Upload dependency-check reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-dependency-check-${{ github.sha }}
+          path: |
+            minecraft_plugin/target/dependency-check/dependency-check-report.json
+            minecraft_plugin/target/dependency-check/dependency-check-report.sarif
+          retention-days: 30
+          if-no-files-found: warn
+
+  fabric-java-security:
+    name: Fabric OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    env:
+      DEPENDENCY_CHECK_DATA_DIR: ${{ github.workspace }}/.dependency-check-data
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Restore NVD data cache
+        id: nvd-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: owasp-dependency-check-12.2.2-${{ runner.os }}-${{ github.run_id }}-fabric
+          restore-keys: |
+            owasp-dependency-check-12.2.2-${{ runner.os }}-
+
+      - name: Run Fabric OWASP Dependency-Check
+        id: dependency-check
+        working-directory: minecraft_mod
+        run: |
+          set +e
+          ./gradlew dependencyCheckAnalyze
+          audit_status=$?
+          set -e
+          if [[ -f build/reports/dependency-check/dependency-check-report.json &&
+                -f build/reports/dependency-check/dependency-check-report.sarif ]]; then
+            echo "reports-generated=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$audit_status"
+
+      - name: Save NVD data cache
+        if: always() && steps.dependency-check.outputs.reports-generated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPENDENCY_CHECK_DATA_DIR }}
+          key: ${{ steps.nvd-cache.outputs.cache-primary-key }}
+
+      - name: Upload dependency-check reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fabric-dependency-check-${{ github.sha }}
+          path: |
+            minecraft_mod/build/reports/dependency-check/dependency-check-report.json
+            minecraft_mod/build/reports/dependency-check/dependency-check-report.sarif
+          retention-days: 30
+          if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # Node.js: npm audit
@@ -218,7 +331,7 @@ jobs:
   security-summary:
     name: Security Summary
     if: always()
-    needs: [python-security, java-security, npm-security, rust-security]
+    needs: [python-security, java-security, fabric-java-security, npm-security, rust-security]
     runs-on: ubuntu-latest
     steps:
       - name: Summary
@@ -228,7 +341,8 @@ jobs:
           echo "| Ecosystem | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-|-|" >> $GITHUB_STEP_SUMMARY
           echo "| Python (pip-audit) | ${{ needs.python-security.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Java (Maven) | ${{ needs.java-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Paper dependency-check | ${{ needs.java-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fabric dependency-check | ${{ needs.fabric-java-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| npm | ${{ needs.npm-security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rust (cargo-audit) | ${{ needs.rust-security.result }} |" >> $GITHUB_STEP_SUMMARY
 
@@ -236,6 +350,7 @@ jobs:
         run: |
           if [[ "${{ needs.python-security.result }}" != "success" ||
                 "${{ needs.java-security.result }}" != "success" ||
+                "${{ needs.fabric-java-security.result }}" != "success" ||
                 "${{ needs.npm-security.result }}" != "success" ||
                 "${{ needs.rust-security.result }}" != "success" ]]; then
             echo "One or more required security jobs did not succeed."
