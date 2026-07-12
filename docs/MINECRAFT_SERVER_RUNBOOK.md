@@ -56,32 +56,25 @@ Use `scripts/start-minecraft-server.sh` or `scripts/start-minecraft-server.ps1` 
 
 **Previous flags (kept for reference):** The old G1GC flags (`-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200`) work on Java 17 but ZGC is strongly preferred on Java 21+ for AudioViz workloads.
 
-## Plugin Auto-Update Status
+## Dev Deployment Status
 
-`deploy.yml` now:
-- builds plugin jar on every push to `main`
-- removes old `audioviz-plugin-*.jar`
-- copies the new jar
-- restarts `minecraft.service`
-- verifies `AudioViz` is loaded via RCON when `MCAV_RCON_PASSWORD` secret is set
+`.github/workflows/deploy.yml` is quarantined and manual-only. Its hosted build and test jobs are retained for diagnosis, but the self-hosted mutation job is hard-disabled and every manual run ends with `MCAV_DEV_DEPLOYMENT_QUARANTINED`.
 
-Required secret for plugin verification:
-- `MCAV_RCON_PASSWORD`
+The previous workflow no longer matches the live host:
 
-## Paper/Modded Jar Auto-Update
+- The live server is Dockerized Minecraft 26.2 under `/home/ryan/mc`.
+- The MCAV Fabric mod currently targets Minecraft 1.21.11.
+- The retained deploy implementation targets the unused legacy `/home/ryan/minecraft-server` systemd service.
 
-Use workflow: `.github/workflows/update-minecraft-jar.yml`
+Do not re-enable deployment until a compatible Paper-first target is selected and verified, or the Fabric mod is deliberately ported to the live Minecraft version. The replacement workflow must deploy to the actual runtime, restart only its owning service/container, and require a renderer-connected health check before success.
 
-- Scheduled daily (`09:17 UTC`)
-- Manual dispatch supported
-- Supports:
-  - `provider=paper` (default, pulls latest Paper build)
-  - `provider=url` (custom modded jar URL, optional SHA256)
+## Legacy Jar Updater Status
 
-Core updater script:
-- `scripts/update-minecraft-jar.sh`
+`.github/workflows/update-minecraft-jar.yml` is also manual-only and quarantined. Its self-hosted update job is hard-disabled because it writes to the unused legacy `/home/ryan/minecraft-server` installation and restarts `minecraft.service`, which competes with the live Docker container for port 25565. Every dispatch ends with `MCAV_JAR_UPDATE_QUARANTINED` and cannot mutate the host.
 
-Example manual runs:
+The underlying `scripts/update-minecraft-jar.sh` utility remains available for deliberate, operator-controlled recovery of the legacy installation. It must not be run against the live host until the intended runtime, Minecraft version, backup/rollback procedure, and owning service or container have been explicitly validated.
+
+Legacy recovery examples (not live deployment commands):
 
 ```bash
 # Paper (auto-detect current MC version from version_history.json)

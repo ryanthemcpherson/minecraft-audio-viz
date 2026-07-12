@@ -459,6 +459,37 @@ test("unsupported DJ and Docker distribution workflows are fail closed", () => {
   assert.doesNotMatch(dockerWorkflow, /docker\/login-action|packages:\s*write/);
 });
 
+test("incompatible dev deployment remains manual and fail closed", () => {
+  const deployment = readRepositoryFile(".github/workflows/deploy.yml");
+  const triggers = yamlBlock(deployment, "on", 0);
+  const deployJob = yamlBlock(deployment, "deploy", 2);
+  const quarantineJob = yamlBlock(deployment, "deployment-quarantined", 2);
+  const jarUpdate = readRepositoryFile(".github/workflows/update-minecraft-jar.yml");
+  const jarUpdateTriggers = yamlBlock(jarUpdate, "on", 0);
+  const jarUpdateJob = yamlBlock(jarUpdate, "update-jar", 2);
+  const jarUpdateQuarantineJob = yamlBlock(jarUpdate, "update-quarantined", 2);
+
+  assert.match(triggers, /^\s+workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(triggers, /^\s+push:\s*$/m);
+  assert.match(deployment, /^permissions:\s*\{\}\s*$/m);
+  assert.match(deployJob, /^\s{4}if:\s*\$\{\{\s*false\s*\}\}\s*$/m);
+  assert.match(deployJob, /runs-on:\s*\[self-hosted, dev-server\]/);
+  assert.match(quarantineJob, /MCAV_DEV_DEPLOYMENT_QUARANTINED/);
+  assert.match(quarantineJob, /Minecraft 26\.2/);
+  assert.match(quarantineJob, /1\.21\.11/);
+  assert.match(quarantineJob, /\bexit 1\b/);
+
+  assert.match(jarUpdateTriggers, /^\s+workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(jarUpdateTriggers, /^\s+(?:push|schedule):\s*$/m);
+  assert.match(jarUpdate, /^permissions:\s*\{\}\s*$/m);
+  assert.match(jarUpdateJob, /^\s{4}if:\s*\$\{\{\s*false\s*\}\}\s*$/m);
+  assert.match(jarUpdateJob, /runs-on:\s*\[self-hosted, dev-server\]/);
+  assert.match(jarUpdateQuarantineJob, /MCAV_JAR_UPDATE_QUARANTINED/);
+  assert.match(jarUpdateQuarantineJob, /Dockerized Minecraft 26\.2/);
+  assert.match(jarUpdateQuarantineJob, /legacy minecraft\.service/);
+  assert.match(jarUpdateQuarantineJob, /\bexit 1\b/);
+});
+
 test("primary CI requires community, protocol, and DJ containment contracts", () => {
   const ci = readRepositoryFile(".github/workflows/ci.yml");
   const communityBotJob = yamlBlock(ci, "community-bot-test", 2);
