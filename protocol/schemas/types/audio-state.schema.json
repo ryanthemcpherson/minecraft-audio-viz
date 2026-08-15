@@ -17,20 +17,41 @@
     },
     "amplitude": {
       "type": "number",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 1
     },
     "is_beat": {
       "type": "boolean"
     },
     "beat_intensity": {
       "type": "number",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 1
     },
     "bpm": {
       "type": "number",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 300
+    },
+    "tempo_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "beat_phase": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
     },
     "frame": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_time_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "generated_time_ns": {
       "type": "integer",
       "minimum": 0
     }

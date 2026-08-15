@@ -1,5 +1,7 @@
 package com.audioviz.protocol;
 
+import com.audioviz.render.RenderProtocolLimits;
+
 /**
  * Shared input validation utilities for WebSocket message data.
  *
@@ -46,12 +48,13 @@ public final class InputSanitizer {
 
     /** Entity local coordinates (normalized 0-1). */
     public static double sanitizeCoordinate(double value) {
-        return sanitizeDouble(value, 0.0, 1.0, 0.5);
+        return sanitizeDouble(value, RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX, 0.5);
     }
 
     /** Entity scale (0-4, per entity-update.schema.json). */
     public static float sanitizeScale(float value) {
-        return sanitizeFloat(value, 0.0f, 4.0f, 0.5f);
+        return sanitizeFloat(value, (float) RenderProtocolLimits.UNIT_MIN,
+                RenderProtocolLimits.ENTITY_SCALE_MAX, 0.5f);
     }
 
     /** Entity rotation in degrees. */
@@ -61,21 +64,37 @@ public final class InputSanitizer {
 
     /** Minecraft block light level (0-15). */
     public static int sanitizeBrightness(int value) {
-        return sanitizeInt(value, 0, 15, 15);
+        return sanitizeInt(value, RenderProtocolLimits.BRIGHTNESS_MIN,
+                RenderProtocolLimits.BRIGHTNESS_MAX, RenderProtocolLimits.BRIGHTNESS_MAX);
     }
 
     /** Interpolation duration in ticks. */
     public static int sanitizeInterpolation(int value) {
-        return sanitizeInt(value, 0, 100, 3);
+        return sanitizeInt(value, RenderProtocolLimits.INTERPOLATION_TICKS_MIN,
+                RenderProtocolLimits.INTERPOLATION_TICKS_MAX, 3);
     }
 
     /** Audio band value (normalized 0-1). */
     public static double sanitizeBandValue(double value) {
-        return sanitizeDouble(value, 0.0, 1.0, 0.0);
+        return sanitizeDouble(value, RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX,
+                RenderProtocolLimits.UNIT_MIN);
     }
 
-    /** Audio amplitude (non-negative). */
+    /** Audio amplitude (normalized 0-1). */
     public static double sanitizeAmplitude(double value) {
-        return sanitizeDouble(value, 0.0, 5.0, 0.0);
+        return sanitizeDouble(value, RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX,
+                RenderProtocolLimits.UNIT_MIN);
+    }
+
+    /** Beat intensity (normalized 0-1). */
+    public static double sanitizeBeatIntensity(double value) {
+        return sanitizeDouble(value, RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX,
+                RenderProtocolLimits.UNIT_MIN);
+    }
+
+    /** Beats per minute (0-300). */
+    public static double sanitizeBpm(double value) {
+        return sanitizeDouble(value, RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.BPM_MAX,
+                RenderProtocolLimits.UNIT_MIN);
     }
 }

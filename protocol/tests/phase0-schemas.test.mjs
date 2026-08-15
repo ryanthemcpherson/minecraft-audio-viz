@@ -168,3 +168,20 @@ test("ws-auth-ok schema accepts only the versioned or unversioned acknowledgemen
   assertInvalid(schema, { type: "auth_ok", v: 1 });
   assertInvalid(schema, { type: "auth_ok", accepted: true });
 });
+
+test("render audio values have one canonical domain", () => {
+  const batch = readJson(
+    resolve(repositoryRoot, "protocol", "schemas", "messages", "batch-update.schema.json"),
+  );
+  for (const name of ["amplitude", "beat_intensity", "tempo_confidence", "beat_phase"]) {
+    assert.equal(batch.properties[name].minimum, 0);
+    assert.equal(batch.properties[name].maximum, 1);
+  }
+  assert.deepEqual(batch.properties.bands.items, {
+    type: "number",
+    minimum: 0,
+    maximum: 1,
+  });
+  assert.equal(batch.properties.bpm.maximum, 300);
+  assert.equal(batch.properties.frame.minimum, 0);
+});

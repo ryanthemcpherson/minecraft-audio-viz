@@ -23,6 +23,15 @@ defaults:
   # Entity interpolation duration (ticks)
   interpolation_duration: 1
 
+  # Duration a beat-driven glow remains active (milliseconds)
+  glow_duration_ms: 150
+
+  # Shortest interval allowed between beat-driven effects (milliseconds)
+  beat_cooldown_min_ms: 120
+
+  # Fraction of each BPM-derived period used as the beat cooldown
+  beat_cooldown_fraction: 0.60
+
 # Bitmap LED wall settings
 bitmap:
   # Maximum total pixels (TextDisplay entities) per bitmap zone
@@ -40,6 +49,15 @@ bitmap:
 performance:
   # Maximum entities per zone (block displays for Lua patterns)
   max_entities_per_zone: 256
+
+  # Maximum concurrently configured visualization zones
+  max_zones: 32
+
+  # Maximum particles emitted by the renderer during one server tick
+  max_particles_per_tick: 2000
+
+  # Number of background threads reserved for render protocol decoding
+  render_decoder_threads: 2
 
   # Batch update interval (ticks) - entities will be updated at most this often
   min_update_interval: 1

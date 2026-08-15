@@ -155,8 +155,24 @@ class InputSanitizerTest {
         void sanitizeAmplitude() {
             assertEquals(1.0, InputSanitizer.sanitizeAmplitude(1.0));
             assertEquals(0.0, InputSanitizer.sanitizeAmplitude(-1.0));
-            assertEquals(5.0, InputSanitizer.sanitizeAmplitude(10.0));
+            assertEquals(1.0, InputSanitizer.sanitizeAmplitude(10.0));
             assertEquals(0.0, InputSanitizer.sanitizeAmplitude(Double.NaN));
+        }
+
+        @Test
+        void sanitizeBeatIntensity() {
+            assertEquals(0.5, InputSanitizer.sanitizeBeatIntensity(0.5));
+            assertEquals(0.0, InputSanitizer.sanitizeBeatIntensity(-0.3));
+            assertEquals(1.0, InputSanitizer.sanitizeBeatIntensity(1.5));
+            assertEquals(0.0, InputSanitizer.sanitizeBeatIntensity(Double.NaN));
+        }
+
+        @Test
+        void sanitizeBpm() {
+            assertEquals(120.0, InputSanitizer.sanitizeBpm(120.0));
+            assertEquals(0.0, InputSanitizer.sanitizeBpm(-1.0));
+            assertEquals(300.0, InputSanitizer.sanitizeBpm(301.0));
+            assertEquals(0.0, InputSanitizer.sanitizeBpm(Double.NaN));
         }
     }
 }
