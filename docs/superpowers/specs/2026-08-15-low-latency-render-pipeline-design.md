@@ -408,10 +408,18 @@ The implementation does not add HdrHistogram initially. A fixed-memory rolling h
 
 Production dependencies are intentionally narrow:
 
-- Real Logic SBE for the canonical schema and generated Java codecs.
-- Agrona for direct-buffer flyweights and low-allocation primitives.
+- Real Logic SBE `1.39.0` for the canonical schema and generated Java codecs.
+- Agrona `2.5.0` for direct-buffer flyweights and low-allocation primitives.
 - Existing Java-WebSocket for the connection and binary callback.
 - Existing Gson and Python `msgspec` for JSON control and fallback traffic.
+
+SBE `1.39.0` is paired with Agrona `2.5.0` by the upstream release. Agrona's `UnsafeApi` fast buffers require the Paper JVM to start with:
+
+```text
+--add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+```
+
+The plugin probes this capability during startup before constructing the binary codec. When the module is open, the plugin advertises `sbe.v1`. When it is not open, the plugin advertises only `json.v1`, remains fully operational, and emits one actionable warning containing the exact JVM flag. It must not fail plugin enablement or attempt illegal reflective access. The production smoke test covers both startup modes; the `sbe.v1` performance gates run with the required flag.
 
 Test and benchmark dependencies:
 
