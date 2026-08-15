@@ -167,3 +167,5 @@ Desktop.ini
 # Community bot
 community_bot/.venv/
 .worktrees/
+# Maven Shade generated metadata (disabled in minecraft_plugin/pom.xml)
+minecraft_plugin/dependency-reduced-pom.xml
