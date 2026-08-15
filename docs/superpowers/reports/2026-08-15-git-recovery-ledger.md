@@ -102,9 +102,9 @@ The 27 paths under `.codex/`, `.superpowers/`, and root `AGENTS.md` are local op
 |`chore/dj-client-major-deps`|Clean at `a012b52`; upstream configuration points at `origin/main`|Push exact head after reachability audit|Unmapped|
 |`feat/site-real-tests`|Clean at `825a17d`|Push exact head after reachability audit|Unmapped|
 |`fix/remove-drei-ghost-dep`|Clean at `dbccbda`|Push exact head after reachability audit|Unmapped|
-|`refactor/split-dj-client-app`|Dirty lockfile: 2 insertions and 2 deletions|Commit and push exact branch|Unmapped|
+|`refactor/split-dj-client-app`|Dirty lockfile: 2 insertions and 2 deletions|Exact branch pushed at `76d3374668721b09ad088e43bfbe4114731c1273`|Preserved and pushed|
 |`fix/a11y-focus-motion-labels`|Clean at `3743ae3`|Push exact head after reachability audit|Unmapped|
-|`fix/error-handling-and-abort-controllers`|Dirty across four coordinator files: 23 insertions and 11 deletions|Verify, commit, and push exact branch|Unmapped|
+|`fix/error-handling-and-abort-controllers`|Dirty across four coordinator files: 23 insertions and 11 deletions|Exact branch pushed at `671f0a2d42318341cdf7bac28c373421351ce519`|Preserved and pushed; generated `coordinator/uv.lock` remains untracked|
 |`refactor/coordinator-service-layer`|Clean at `a2aa80d`|Push exact head after reachability audit|Unmapped|
 |`feature/low-latency-renderer`|Initially at `ed25bc3` with two untracked render tests; concurrent work committed the tests and their implementation as `a90d3b6`|Exact branch pushed at `a90d3b64387a7fad567dabce1ff95aab29c12951`|Preserved and pushed|
 |`chore/security-hardening`|Local at `0821754`, one commit ahead of `origin/chore/security-hardening` at `e00c9a2`; PR 143 is dirty|Preserve local head as `recovery/security-hardening-local` without changing PR 143|Unmapped|
@@ -145,8 +145,8 @@ minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
 |`stash@{0}` plus paired product paths|`recovery/stash-0-refactor`|Remote head equals `0b100510046dc261ef9d42183f97b7f0ca234834`; all 45 copied files match their primary-worktree SHA-256; stash object remains present|Preserved|
 |`stash@{1}`|`recovery/stash-1-security`|Remote head equals `f76c1dbc1697291b8cefc7381f44dc21d4433a77`; committed tree exactly equals stash tree; stash object remains present|Preserved|
 |Low-latency untracked tests|`feature/low-latency-renderer`|Concurrent commit `a90d3b6` contains both tests; Java 25 focused suite passed 12 tests and full suite passed 978 tests; remote head equals `a90d3b64387a7fad567dabce1ff95aab29c12951`|Preserved|
-|Split-DJ dirty lockfile|`refactor/split-dj-client-app`|Lock integrity, commit, push|Pending|
-|Coordinator error-handling changes|`fix/error-handling-and-abort-controllers`|Relevant coordinator tests, commit, push|Pending|
+|Split-DJ dirty lockfile|`refactor/split-dj-client-app`|`npm install --package-lock-only --ignore-scripts --no-audit` confirmed the lock was current; remote head equals `76d3374668721b09ad088e43bfbe4114731c1273`|Preserved|
+|Coordinator error-handling changes|`fix/error-handling-and-abort-controllers`|WSL-native Python 3.12 tests passed: 29/29 across `test_auth_api.py` and `test_auth_errors.py`; Ruff and Bandit passed; remote head equals `671f0a2d42318341cdf7bac28c373421351ce519`|Preserved|
 |Clean/local-only branch heads|Exact branch or named recovery ref|Remote contains exact commit|Pending|
 |Two root untracked documents|`recovery/root-untracked-2026-08-15`|Commit, push, originals retained|Pending|
 
@@ -159,3 +159,4 @@ No stash drop, worktree removal, branch deletion, untracked-file deletion, pull-
 - The `stash@{0}` preservation commit intentionally retained the historical snapshot byte-for-byte. Repository hooks that would alter that snapshot were skipped: trailing whitespace, Ruff, and Ruff format. Bandit was also skipped because it flags 71 low-severity hardcoded test credentials in the recovered coordinator tests. Site ESLint and TypeScript hooks were skipped because this isolated historical-base worktree has no installed site dependencies; TypeScript therefore reported missing React, Next, Three.js, and Vitest modules. Non-mutating YAML, JSON, large-file, merge-conflict, private-key, and end-of-file hooks passed.
 - The `stash@{1}` preservation commit also retained the exact stash tree. The end-of-file hook attempted to rewrite four generated Tauri schema files, so those hook changes were discarded from the recovery worktree and the mutating hook was skipped. JSON, large-file, merge-conflict, and private-key checks passed.
 - While recovery was in progress, concurrent work advanced `feature/low-latency-renderer` from `ed25bc3` to `a90d3b6` and committed the two formerly untracked tests alongside four render implementation classes. Recovery adopted the new clean head, verified it on Java 25, and pushed that exact commit without rewriting it.
+- The coordinator test environment created an untracked `coordinator/uv.lock`. It was not part of the original dirty-worktree recovery scope, was not committed, and has not been deleted. The Ruff formatter attempted to rewrite one recovered file; that hook change was discarded and the exact original dirty snapshot was committed after Ruff lint and Bandit passed.
