@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 import resend
@@ -9,6 +10,11 @@ import resend
 from app.config import Settings
 
 _logger = logging.getLogger(__name__)
+
+
+def _hash_email(email: str) -> str:
+    """Return a short SHA-256 hash of an email address for safe logging."""
+    return hashlib.sha256(email.encode()).hexdigest()[:12]
 
 
 def _ensure_configured(settings: Settings) -> None:
@@ -54,7 +60,7 @@ async def send_password_reset_email(
         }
     )
 
-    _logger.info("Password reset email sent to %s", to_email)
+    _logger.info("Password reset email sent to %s", _hash_email(to_email))
 
 
 async def send_verification_email(
@@ -94,4 +100,4 @@ async def send_verification_email(
         }
     )
 
-    _logger.info("Verification email sent to %s", to_email)
+    _logger.info("Verification email sent to %s", _hash_email(to_email))

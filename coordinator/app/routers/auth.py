@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json as _json
 import logging
 import secrets
@@ -54,6 +55,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _OAUTH_STATE_TTL = 600  # seconds
 _EXCHANGE_CODE_TTL = 60  # seconds
+
+
+def _hash_email(email: str) -> str:
+    """Return a short SHA-256 hash of an email address for safe logging."""
+    return hashlib.sha256(email.encode()).hexdigest()[:12]
 
 
 async def _cleanup_expired_exchange_codes(session: AsyncSession) -> None:
@@ -160,7 +166,7 @@ async def register(
 
     result = reg_result.auth
 
-    log_auth_event("register", user_id=str(result.user_id), email=body.email, ip_address=ip)
+    log_auth_event("register", user_id=str(result.user_id), email_hash=_hash_email(body.email), ip_address=ip)
 
     # Send verification email (best-effort — don't block registration)
     if reg_result.verification_token:
@@ -171,7 +177,7 @@ async def register(
                 settings=settings,
             )
         except Exception:
-            logger.warning("Failed to send verification email to %s", body.email, exc_info=True)
+            logger.warning("Failed to send verification email to %s", _hash_email(body.email), exc_info=True)
 
     # Re-fetch user for response
     user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
@@ -218,15 +224,15 @@ async def login(
     except ValueError as exc:
         detail = str(exc)
         if "locked" in detail.lower():
-            log_auth_event("login_locked", email=body.email, ip_address=ip)
+            log_auth_event("login_locked", email_hash=_hash_email(body.email), ip_address=ip)
         else:
-            log_auth_event("login_failed", email=body.email, ip_address=ip)
+            log_auth_event("login_failed", email_hash=_hash_email(body.email), ip_address=ip)
         await session.commit()  # persist failed_login_attempts increment
         raise HTTPException(status_code=401, detail=detail)
 
     await session.commit()
 
-    log_auth_event("login", user_id=str(result.user_id), email=body.email, ip_address=ip)
+    log_auth_event("login", user_id=str(result.user_id), email_hash=_hash_email(body.email), ip_address=ip)
 
     user = (await session.execute(select(User).where(User.id == result.user_id))).scalar_one()
 
@@ -637,7 +643,7 @@ async def forgot_password(
         expiry_minutes=settings.password_reset_expiry_minutes,
     )
 
-    log_auth_event("password_reset_request", email=body.email, ip_address=ip)
+    log_auth_event("password_reset_request", email_hash=_hash_email(body.email), ip_address=ip)
 
     # Commit the token first, then send email as best-effort.
     # This prevents dirty session state if the email send raises an
