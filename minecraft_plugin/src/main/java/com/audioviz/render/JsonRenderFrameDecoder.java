@@ -20,7 +20,7 @@ public final class JsonRenderFrameDecoder {
     };
     private static final Set<String> ROOT_FIELDS = Set.of(
         "type", "v", "zone", "entities", "particles", "bands", "amplitude",
-        "is_beat", "is_kick", "beat_intensity", "bpm", "tempo_confidence",
+        "is_beat", "is_kick", "beat_intensity", "bpm", "tempo_confidence", "tempo_conf",
         "beat_phase", "frame", "source_time_ns", "generated_time_ns");
     private static final Set<String> ENTITY_FIELDS = Set.of(
         "id", "x", "y", "z", "scale", "rotation", "band", "visible", "text",
@@ -33,6 +33,7 @@ public final class JsonRenderFrameDecoder {
 
     private final RenderFrameHub hub;
     private final RenderProtocolLimits limits;
+    private final long particleEventStride;
 
     public JsonRenderFrameDecoder(RenderFrameHub hub) {
         this(hub, hub == null ? null : hub.limits());
@@ -44,6 +45,7 @@ public final class JsonRenderFrameDecoder {
         }
         this.hub = hub;
         this.limits = limits;
+        particleEventStride = (long) limits.maxParticlesPerTick() + 1L;
     }
 
     /** Testable allow-all entry point; production ingress uses {@link RenderFrameHub}. */
@@ -99,10 +101,17 @@ public final class JsonRenderFrameDecoder {
             }
             populateSnapshot(message, entities, snapshot, receivedNanos);
             validateParticles(message);
-            long eventSequence = message.has("frame")
+            validateParticleEventIds(message, ingressOrdinal);
+            long beatEventSequence = message.has("frame")
                 ? requireNonNegativeLong(message, "frame")
                 : ingressOrdinal;
-            return zoneEntry.commit(snapshot, message, eventSequence, guard);
+            return zoneEntry.commit(
+                snapshot,
+                message,
+                beatEventSequence,
+                ingressOrdinal,
+                particleEventStride,
+                guard);
         } catch (DecodeFailure | ArithmeticException | NumberFormatException failure) {
             zoneEntry.releaseAfterFailedWrite(snapshot);
             return RenderDecodeResult.rejected(failure.getMessage());
@@ -147,9 +156,15 @@ public final class JsonRenderFrameDecoder {
             RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX));
         snapshot.bpm(optionalNumber(
             message, "bpm", 0, 0, RenderProtocolLimits.BPM_MAX));
-        snapshot.tempoConfidence(optionalNumber(
-            message, "tempo_confidence", 0,
-            RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX));
+        double tempoConfidence = optionalNumber(
+            message, "tempo_conf", 0,
+            RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX);
+        if (message.has("tempo_confidence")) {
+            tempoConfidence = optionalNumber(
+                message, "tempo_confidence", 0,
+                RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX);
+        }
+        snapshot.tempoConfidence(tempoConfidence);
         snapshot.beatPhase(optionalNumber(
             message, "beat_phase", 0,
             RenderProtocolLimits.UNIT_MIN, RenderProtocolLimits.UNIT_MAX));
@@ -163,15 +178,14 @@ public final class JsonRenderFrameDecoder {
             JsonObject entity = element.getAsJsonObject();
             rejectUnknownFields(entity, ENTITY_FIELDS, "entities[" + index + "]");
             String entityId = requireNonEmptyString(entity, "id");
-            if (entity.has("text")) {
-                requireString(entity, "text");
-                throw invalid("text entity updates are not supported by render snapshots");
-            }
             if (entity.has("band")) {
                 requireInteger(entity, "band", 0, RenderProtocolLimits.BAND_COUNT - 1);
             }
 
             snapshot.entityIds()[index] = entityId;
+            snapshot.textValues()[index] = entity.has("text")
+                ? requireString(entity, "text")
+                : null;
             snapshot.x()[index] = (float) optionalNumber(entity, "x", 0.5, 0, 1);
             snapshot.y()[index] = (float) optionalNumber(entity, "y", 0.5, 0, 1);
             snapshot.z()[index] = (float) optionalNumber(entity, "z", 0.5, 0, 1);
@@ -188,7 +202,7 @@ public final class JsonRenderFrameDecoder {
             snapshot.interpolationTicks()[index] = (byte) optionalInteger(
                 entity,
                 "interpolation",
-                1,
+                ZoneRenderSnapshot.INTERPOLATION_UNSPECIFIED,
                 RenderProtocolLimits.INTERPOLATION_TICKS_MIN,
                 RenderProtocolLimits.INTERPOLATION_TICKS_MAX);
 
@@ -241,17 +255,28 @@ public final class JsonRenderFrameDecoder {
         }
     }
 
+    private void validateParticleEventIds(JsonObject message, long ingressOrdinal) {
+        if (!message.has("particles") || message.getAsJsonArray("particles").isEmpty()) {
+            return;
+        }
+        int lastParticleOrdinal = message.getAsJsonArray("particles").size() - 1;
+        long eventBase = Math.multiplyExact(ingressOrdinal, particleEventStride);
+        Math.addExact(eventBase, lastParticleOrdinal);
+    }
+
     static void latchValidatedEvents(
             RenderEventLatch latch,
             JsonObject message,
-            long eventSequence,
+            long beatEventSequence,
+            long particleIngressOrdinal,
+            long particleEventStride,
             MessageQueue.MessageGuard guard
     ) {
         boolean beat = optionalBoolean(message, "is_beat", false);
         boolean kick = optionalBoolean(message, "is_kick", false);
         if (beat || kick) {
             latch.latchBeat(
-                eventSequence,
+                beatEventSequence,
                 beat,
                 kick,
                 optionalNumber(message, "beat_intensity", 0, 0, 1),
@@ -267,8 +292,9 @@ public final class JsonRenderFrameDecoder {
             String particleName = particle.get("particle").getAsString()
                 .toUpperCase(Locale.ROOT);
             latch.offerParticle(new RenderParticleEvent(
-                particleEventId(eventSequence, index),
-                jsonParticleTypeId(particleName),
+                particleEventId(particleIngressOrdinal, particleEventStride, index),
+                0,
+                particleName,
                 (float) optionalNumber(particle, "x", 0.5, 0, 1),
                 (float) optionalNumber(particle, "y", 0.5, 0, 1),
                 (float) optionalNumber(particle, "z", 0.5, 0, 1),
@@ -276,18 +302,14 @@ public final class JsonRenderFrameDecoder {
         }
     }
 
-    private static long particleEventId(long eventSequence, int index) {
-        return Long.rotateLeft(eventSequence, 17) ^ Integer.toUnsignedLong(index);
-    }
-
-    private static int jsonParticleTypeId(String name) {
-        int hash = 0x811c9dc5;
-        for (int index = 0; index < name.length(); index++) {
-            hash ^= name.charAt(index);
-            hash *= 0x01000193;
-        }
-        hash &= Integer.MAX_VALUE;
-        return hash == 0 ? 1 : hash;
+    private static long particleEventId(
+            long ingressOrdinal,
+            long particleEventStride,
+            int particleOrdinal
+    ) {
+        return Math.addExact(
+            Math.multiplyExact(ingressOrdinal, particleEventStride),
+            particleOrdinal);
     }
 
     private static float normalizeRotation(double degrees) {

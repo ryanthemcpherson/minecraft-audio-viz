@@ -23,9 +23,9 @@ class RenderEventLatchTest {
         latch.latchBeat(7, true, true, 0.4, ALLOW_ALL);
         latch.latchBeat(8, true, false, 0.9, ALLOW_ALL);
         assertTrue(latch.offerParticle(
-            new RenderParticleEvent(12, 1, .5f, .5f, .5f, 20), ALLOW_ALL));
+            new RenderParticleEvent(12, 0, "NOTE", .5f, .5f, .5f, 20), ALLOW_ALL));
         assertFalse(latch.offerParticle(
-            new RenderParticleEvent(12, 1, .5f, .5f, .5f, 20), ALLOW_ALL));
+            new RenderParticleEvent(12, 0, "NOTE", .5f, .5f, .5f, 20), ALLOW_ALL));
 
         DrainedRenderEvents drained = new DrainedRenderEvents(4);
         latch.drainInto(drained);
@@ -34,6 +34,8 @@ class RenderEventLatchTest {
         assertTrue(drained.kick());
         assertEquals(0.9, drained.beatIntensity(), 1e-9);
         assertEquals(1, drained.particleCount());
+        assertEquals(0, drained.particle(0).particleTypeId());
+        assertEquals("NOTE", drained.particle(0).particleName());
         latch.drainInto(drained);
         assertFalse(drained.beat());
         assertEquals(0, drained.particleCount());

@@ -156,7 +156,9 @@ public final class RenderFrameHub {
         synchronized RenderDecodeResult commit(
                 ZoneRenderSnapshot snapshot,
                 JsonObject message,
-                long eventSequence,
+                long beatEventSequence,
+                long particleIngressOrdinal,
+                long particleEventStride,
                 MessageQueue.MessageGuard guard
         ) {
             if (!valid) {
@@ -168,7 +170,9 @@ public final class RenderFrameHub {
             JsonRenderFrameDecoder.latchValidatedEvents(
                 eventLatch,
                 message,
-                eventSequence,
+                beatEventSequence,
+                particleIngressOrdinal,
+                particleEventStride,
                 guard);
             return mailbox.publish(snapshot)
                 ? RenderDecodeResult.accepted(snapshot)

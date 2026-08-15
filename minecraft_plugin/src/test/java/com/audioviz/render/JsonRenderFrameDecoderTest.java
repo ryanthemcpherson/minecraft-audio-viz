@@ -120,7 +120,7 @@ class JsonRenderFrameDecoderTest {
     void sparseIdsPreserveValidatedFallbackNames() {
         RenderDecodeResult result = decoder.decode(json("""
             {"type":"batch_update","zone":"main","entities":[
-              {"id":"left-speaker","x":0.1},
+              {"id":"left-speaker","x":0.1,"text":"Now Playing"},
               {"id":"block_0","x":0.9}]}
             """), 8, 80);
 
@@ -128,6 +128,10 @@ class JsonRenderFrameDecoderTest {
         assertFalse(result.snapshot().densePool());
         assertEquals("left-speaker", result.snapshot().entityIds()[0]);
         assertEquals("block_0", result.snapshot().entityIds()[1]);
+        assertEquals("Now Playing", result.snapshot().textValues()[0]);
+        assertNull(result.snapshot().textValues()[1]);
+        assertEquals(ZoneRenderSnapshot.INTERPOLATION_UNSPECIFIED,
+            result.snapshot().interpolationTicks()[0]);
         try (ZoneRenderDrain ignored = hub.take("main")) {
             // Return the accepted slot after inspection.
         }
@@ -159,8 +163,65 @@ class JsonRenderFrameDecoderTest {
         assertTrue(decoder.decode(bounded, 10, 100).accepted());
         try (ZoneRenderDrain drain = hub.take("main")) {
             assertEquals(2, drain.events().particleCount());
+            assertEquals(110, drain.events().particle(0).eventId());
+            assertEquals(111, drain.events().particle(1).eventId());
+            assertEquals(0, drain.events().particle(0).particleTypeId());
+            assertEquals("NOTE", drain.events().particle(0).particleName());
+            assertEquals("FLAME", drain.events().particle(1).particleName());
             assertEquals(4, drain.events().particle(0).count());
             assertEquals(6, drain.events().particle(1).count());
+        }
+    }
+
+    @Test
+    void legacyTempoAliasIsValidatedAndCanonicalValueTakesPrecedence() {
+        JsonObject aliasOnly = validFrame(0.5);
+        aliasOnly.addProperty("tempo_conf", 0.35);
+        RenderDecodeResult aliasResult = decoder.decode(aliasOnly, 12, 120);
+        assertTrue(aliasResult.accepted());
+        assertEquals(0.35, aliasResult.snapshot().tempoConfidence(), 1e-9);
+        try (ZoneRenderDrain ignored = hub.take("main")) {
+            // Return the accepted slot before the next publication.
+        }
+
+        JsonObject both = validFrame(0.5);
+        both.addProperty("tempo_conf", 0.2);
+        both.addProperty("tempo_confidence", 0.8);
+        RenderDecodeResult canonicalResult = decoder.decode(both, 13, 130);
+        assertTrue(canonicalResult.accepted());
+        assertEquals(0.8, canonicalResult.snapshot().tempoConfidence(), 1e-9);
+        try (ZoneRenderDrain ignored = hub.take("main")) {
+            // Return the accepted slot after inspection.
+        }
+
+        JsonObject invalidAlias = validFrame(0.5);
+        invalidAlias.addProperty("tempo_conf", 1.1);
+        assertEquals(RenderDecodeResult.Status.REJECTED,
+            decoder.decode(invalidAlias, 14, 140).status());
+    }
+
+    @Test
+    void particleEventIdOverflowRejectsWithoutLeakingSlotsOrEvents() {
+        JsonObject message = json("""
+            {"type":"batch_update","zone":"main","frame":7,"is_beat":true,
+             "beat_intensity":0.9,"entities":[],
+             "particles":[{"particle":"NOTE","count":1}]}
+            """);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertEquals(RenderDecodeResult.Status.REJECTED,
+                decoder.decode(message, Long.MAX_VALUE, 150 + attempt).status());
+        }
+        try (ZoneRenderDrain rejected = hub.take("main")) {
+            assertNull(rejected.snapshot());
+            assertEquals(0, rejected.events().beatCount());
+            assertEquals(0, rejected.events().particleCount());
+        }
+
+        RenderDecodeResult valid = decoder.decode(validFrame(0.5), 15, 160);
+        assertTrue(valid.accepted(), "overflow rejection must release every claimed slot");
+        try (ZoneRenderDrain ignored = hub.take("main")) {
+            // Return the accepted slot after inspection.
         }
     }
 

@@ -173,10 +173,17 @@ test("render audio values have one canonical domain", () => {
   const batch = readJson(
     resolve(repositoryRoot, "protocol", "schemas", "messages", "batch-update.schema.json"),
   );
+  const sharedAudio = readJson(
+    resolve(repositoryRoot, "protocol", "schemas", "types", "audio-state.schema.json"),
+  );
   for (const name of ["amplitude", "beat_intensity", "tempo_confidence", "beat_phase"]) {
     assert.equal(batch.properties[name].minimum, 0);
     assert.equal(batch.properties[name].maximum, 1);
   }
+  assert.deepEqual(batch.properties.is_kick, { type: "boolean" });
+  assert.deepEqual(sharedAudio.properties.is_kick, { type: "boolean" });
+  assert.equal(batch.properties.tempo_conf.minimum, 0);
+  assert.equal(batch.properties.tempo_conf.maximum, 1);
   assert.deepEqual(batch.properties.bands.items, {
     type: "number",
     minimum: 0,
@@ -184,4 +191,11 @@ test("render audio values have one canonical domain", () => {
   });
   assert.equal(batch.properties.bpm.maximum, 300);
   assert.equal(batch.properties.frame.minimum, 0);
+  assertValid(batch, {
+    type: "batch_update",
+    zone: "main",
+    entities: [],
+    is_kick: true,
+    tempo_conf: 0.75,
+  });
 });

@@ -22,6 +22,7 @@ public final class ZoneRenderSnapshot {
 
     public static final byte ENTITY_VISIBLE = 1;
     public static final byte ENTITY_GLOW = 1 << 1;
+    public static final byte INTERPOLATION_UNSPECIFIED = -1;
 
     private final ZoneSnapshotMailbox owner;
     private final String zoneName;
@@ -36,6 +37,7 @@ public final class ZoneRenderSnapshot {
     private final byte[] interpolationTicks;
     private final byte[] entityFlags;
     private final String[] entityIds;
+    private final String[] textValues;
     private final String[] materialNames;
     private final int[] materialIds;
     private final double[] bands = new double[RenderProtocolLimits.BAND_COUNT];
@@ -82,6 +84,7 @@ public final class ZoneRenderSnapshot {
         interpolationTicks = new byte[entityCapacity];
         entityFlags = new byte[entityCapacity];
         entityIds = new String[entityCapacity];
+        textValues = new String[entityCapacity];
         materialNames = new String[entityCapacity];
         materialIds = new int[entityCapacity];
         Arrays.fill(materialIds, defaultMaterialId);
@@ -193,6 +196,10 @@ public final class ZoneRenderSnapshot {
 
     public String[] entityIds() {
         return entityIds;
+    }
+
+    public String[] textValues() {
+        return textValues;
     }
 
     public String[] materialNames() {

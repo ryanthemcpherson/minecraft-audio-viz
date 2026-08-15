@@ -23,6 +23,9 @@
     "is_beat": {
       "type": "boolean"
     },
+    "is_kick": {
+      "type": "boolean"
+    },
     "beat_intensity": {
       "type": "number",
       "minimum": 0,

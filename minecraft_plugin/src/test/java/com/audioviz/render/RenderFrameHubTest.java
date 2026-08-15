@@ -106,6 +106,24 @@ class RenderFrameHubTest {
         }
     }
 
+    @Test
+    void repeatedRemoteFrameUsesCollisionFreeLocalParticleEventIds() {
+        RenderFrameHub hub = hubWithMainZone();
+        JsonObject first = particleFrame(7, "NOTE");
+        JsonObject second = particleFrame(7, "FLAME");
+
+        assertTrue(hub.publishJson(first, ALLOW_ALL, 10).accepted());
+        assertTrue(hub.publishJson(second, ALLOW_ALL, 20).accepted());
+
+        try (ZoneRenderDrain drain = hub.take("main")) {
+            assertEquals(2, drain.events().particleCount());
+            assertEquals(11, drain.events().particle(0).eventId());
+            assertEquals(22, drain.events().particle(1).eventId());
+            assertEquals("NOTE", drain.events().particle(0).particleName());
+            assertEquals("FLAME", drain.events().particle(1).particleName());
+        }
+    }
+
     private static RenderFrameHub hubWithMainZone() {
         RenderFrameHub hub = new RenderFrameHub(new RenderProtocolLimits(2, 4, 10, 1));
         assertTrue(hub.registerZone("main", 4, 0));
@@ -118,5 +136,12 @@ class RenderFrameHubTest {
              "is_beat":%s,"beat_intensity":%s,
              "entities":[{"id":"block_0","x":0.5,"y":0.5,"z":0.5}]}
             """.formatted(sequence, beat, intensity)).getAsJsonObject();
+    }
+
+    private static JsonObject particleFrame(long sequence, String particleName) {
+        return JsonParser.parseString("""
+            {"type":"batch_update","zone":"main","frame":%d,"entities":[],
+             "particles":[{"particle":"%s","count":1}]}
+            """.formatted(sequence, particleName)).getAsJsonObject();
     }
 }
