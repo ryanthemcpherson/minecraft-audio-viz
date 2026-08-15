@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import queue
 import subprocess
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from scripts.release.paper_harness import PaperManifest, PaperServer, verify_sha256
+from scripts.release.paper_harness import (
+    PaperManifest,
+    PaperServer,
+    download_paper,
+    verify_sha256,
+)
 
 READY_LINE = '[Server thread/INFO]: Done (1.234s)! For help, type "help"'
 
@@ -121,6 +128,47 @@ def test_verify_download_rejects_wrong_hash(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Paper SHA-256 mismatch"):
         verify_sha256(server_jar, "0" * 64)
+
+
+def test_download_uses_identified_https_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"pinned-paper"
+    manifest = PaperManifest(
+        project="paper",
+        minecraft_version="26.2",
+        build=112,
+        channel="STABLE",
+        file="paper.jar",
+        sha256=hashlib.sha256(content).hexdigest(),
+        url="https://fill-data.papermc.io/v1/objects/hash/paper.jar",
+    )
+
+    class FakeResponse:
+        def __init__(self) -> None:
+            self._remaining = content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_arguments: object) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            chunk, self._remaining = self._remaining, b""
+            return chunk
+
+    def fake_urlopen(request: object, timeout: int):
+        assert isinstance(request, urllib.request.Request)
+        assert request.get_header("User-agent") == "MCAV-Release-Verification/1.0"
+        assert timeout == 60
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    downloaded = download_paper(manifest, tmp_path / "cache")
+
+    assert downloaded.read_bytes() == content
 
 
 def test_startup_timeout_reports_sanitized_tail(

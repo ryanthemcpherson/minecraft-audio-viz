@@ -52,6 +52,7 @@ configs/dj_auth.json
 minecraft_mod/build/
 minecraft_mod/eu/
 minecraft_plugin/target/
+scripts/release/probe/target/
 *.jar
 
 # Node modules (if any frontend build tools)

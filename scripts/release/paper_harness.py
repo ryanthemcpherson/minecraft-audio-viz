@@ -115,9 +115,14 @@ def download_paper(manifest: PaperManifest, cache_dir: Path) -> Path:
     )
     os.close(file_descriptor)
     temporary_path = Path(temporary_name)
+    request = urllib.request.Request(
+        manifest.url,
+        headers={"User-Agent": "MCAV-Release-Verification/1.0"},
+        method="GET",
+    )
     try:
         with (
-            urllib.request.urlopen(manifest.url, timeout=60) as response,  # nosec B310
+            urllib.request.urlopen(request, timeout=60) as response,  # nosec B310
             temporary_path.open("wb") as output_file,
         ):
             while chunk := response.read(1024 * 1024):
