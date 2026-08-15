@@ -477,6 +477,29 @@ async def test_heartbeat_receive_loop_is_sole_reader_and_starts_heartbeat_after_
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_receive_loop_routes_correlated_pong_to_ping_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket: FakeWebSocket
+
+    def respond_to_ping(message: dict[str, Any]) -> None:
+        if message.get("type") == "ping":
+            websocket.queue_response({"type": "pong", "_seq": message["_seq"]})
+
+    websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": False, "server_type": "paper"},
+        on_send=respond_to_ping,
+    )
+    install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(connect_timeout=0.05, enable_heartbeat=True)
+
+    assert await client.connect() is True
+    assert await client.ping() is True
+
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_disconnect_closes_disconnected_transport_and_clears_identity() -> None:
     websocket = FakeWebSocket()
     client = VizClient()
