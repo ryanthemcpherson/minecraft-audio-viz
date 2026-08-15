@@ -21,7 +21,7 @@ The release worktree is `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\ph
 
 |Source|Object and base|Contents|Recovery target|Status|
 |-|-|-|-|-|
-|`stash@{0}`|stash `789d63a479ed182bd61ab86e6e549cd3c9190d1e`; base `d770a8203899e57b1bcc16f7104f6ddb79f07a4d`; index `183152f407e85dd82ae7387e4f1c9efc01fbeead`|56 tracked files; 1,637 insertions and 9,795 deletions; paired with untracked admin, coordinator, plugin-handler, and VJ relay-test files|`recovery/stash-0-refactor`|Unmapped|
+|`stash@{0}`|stash `789d63a479ed182bd61ab86e6e549cd3c9190d1e`; base `d770a8203899e57b1bcc16f7104f6ddb79f07a4d`; index `183152f407e85dd82ae7387e4f1c9efc01fbeead`|56 tracked files; 1,637 insertions and 9,795 deletions; paired with untracked admin, coordinator, plugin-handler, and VJ relay-test files|`recovery/stash-0-refactor` at `0b100510046dc261ef9d42183f97b7f0ca234834`|Preserved and pushed; stash retained|
 |`stash@{1}`|stash `728505647db03c11d23c7d09ae43615829dbf18c`; base `139c177735da53b3dbe27472ef63e3fd4f169ece`; index `ee53cc369bf0c2444ca2936aaa9a261286c762f4`|9 dependency/security files; 229 insertions and 241 deletions|`recovery/stash-1-security`|Unmapped|
 
 Both stashes must remain present after preservation.
@@ -142,7 +142,7 @@ minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
 |Source|Destination|Verification|Result|
 |-|-|-|-|
 |Baseline inventory|This ledger on `release/paper-26.2`|Review and atomic commit|Pending|
-|`stash@{0}` plus paired product paths|`recovery/stash-0-refactor`|Commit, push, stash retained|Pending|
+|`stash@{0}` plus paired product paths|`recovery/stash-0-refactor`|Remote head equals `0b100510046dc261ef9d42183f97b7f0ca234834`; all 45 copied files match their primary-worktree SHA-256; stash object remains present|Preserved|
 |`stash@{1}`|`recovery/stash-1-security`|Commit, push, stash retained|Pending|
 |Low-latency untracked tests|`feature/low-latency-renderer`|Focused/full relevant tests, commit, push|Pending|
 |Split-DJ dirty lockfile|`refactor/split-dj-client-app`|Lock integrity, commit, push|Pending|
@@ -153,3 +153,7 @@ minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
 ## Cleanup boundary
 
 No stash drop, worktree removal, branch deletion, untracked-file deletion, pull-request closure, force push, history rewrite, or tag mutation is authorized by this recovery pass. A later cleanup proposal must list exact targets and prove each target has an equivalent remote commit before asking for approval.
+
+## Recovery notes
+
+- The `stash@{0}` preservation commit intentionally retained the historical snapshot byte-for-byte. Repository hooks that would alter that snapshot were skipped: trailing whitespace, Ruff, and Ruff format. Bandit was also skipped because it flags 71 low-severity hardcoded test credentials in the recovered coordinator tests. Site ESLint and TypeScript hooks were skipped because this isolated historical-base worktree has no installed site dependencies; TypeScript therefore reported missing React, Next, Three.js, and Vitest modules. Non-mutating YAML, JSON, large-file, merge-conflict, private-key, and end-of-file hooks passed.
