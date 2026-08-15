@@ -68,6 +68,21 @@ Set-NamedRuleset `
     -PolicyPath (Join-Path $rulesetDirectory 'mod-tags.json') `
     -PreviousNames @('Paper and Fabric release tag immutability')
 
+$pluginReleaseEnvironment = @{
+    wait_timer = 0
+    prevent_self_review = $false
+    reviewers = @(@{ type = 'User'; id = 37377365 })
+    deployment_branch_policy = @{
+        protected_branches = $true
+        custom_branch_policies = $false
+    }
+} | ConvertTo-Json -Depth 6
+$pluginReleaseEnvironment | & gh api --silent --method PUT `
+    "repos/$repository/environments/plugin-release" --input -
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to configure the plugin-release environment.'
+}
+
 & gh api --silent --method PUT "repos/$repository/actions/permissions/workflow" `
     -f default_workflow_permissions=read `
     -F can_approve_pull_request_reviews=false

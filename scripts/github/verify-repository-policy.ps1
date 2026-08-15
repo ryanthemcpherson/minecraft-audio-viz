@@ -69,8 +69,8 @@ function Assert-TagCreationPolicy {
 
     $bypassActors = @($Policy.bypass_actors)
     Assert-Equal $bypassActors.Count 1 "$expectedName bypass count"
-    Assert-Equal $bypassActors[0].actor_id 5 "$expectedName bypass actor ID"
-    Assert-Equal $bypassActors[0].actor_type 'RepositoryRole' "$expectedName bypass actor type"
+    Assert-Equal $bypassActors[0].actor_id 15368 "$expectedName bypass actor ID"
+    Assert-Equal $bypassActors[0].actor_type 'Integration' "$expectedName bypass actor type"
     Assert-Equal $bypassActors[0].bypass_mode 'always' "$expectedName bypass mode"
 }
 
@@ -113,6 +113,22 @@ function Get-LiveRuleset {
     return $live
 }
 
+function Assert-PluginReleaseEnvironment {
+    param([Parameter(Mandatory)] $Environment)
+
+    Assert-Equal $Environment.name 'plugin-release' 'Release environment name'
+    Assert-Equal $Environment.deployment_branch_policy.protected_branches $true 'Release protected-branch policy'
+    Assert-Equal $Environment.deployment_branch_policy.custom_branch_policies $false 'Release custom-branch policy'
+
+    $reviewRules = @($Environment.protection_rules | Where-Object { $_.type -eq 'required_reviewers' })
+    Assert-Equal $reviewRules.Count 1 'Release required-reviewer rule count'
+    Assert-Equal $reviewRules[0].prevent_self_review $false 'Release self-review policy'
+    $reviewers = @($reviewRules[0].reviewers)
+    Assert-Equal $reviewers.Count 1 'Release reviewer count'
+    Assert-Equal $reviewers[0].type 'User' 'Release reviewer type'
+    Assert-Equal $reviewers[0].reviewer.id 37377365 'Release reviewer ID'
+}
+
 $mainPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'main.json') | ConvertFrom-Json
 $pluginCreationPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'plugin-tag-creation.json') | ConvertFrom-Json
 $pluginPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'plugin-tags.json') | ConvertFrom-Json
@@ -123,6 +139,37 @@ Assert-TagCreationPolicy $pluginCreationPolicy
 Assert-ImmutableTagPolicy $pluginPolicy 'Paper release tag immutability' 'refs/tags/plugin-v*'
 Assert-TagPolicyBase $modPolicy 'Fabric release tag quarantine' 'refs/tags/mod-v*' @('creation', 'update', 'deletion', 'non_fast_forward')
 Assert-Equal @($modPolicy.bypass_actors).Count 0 'Fabric release tag quarantine bypass count'
+
+$applyPolicyContent = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'apply-repository-policy.ps1')
+if ($applyPolicyContent -notmatch 'environments/plugin-release') {
+    throw 'Apply policy does not configure the plugin-release environment.'
+}
+if ($applyPolicyContent -notmatch "type\s*=\s*'User';\s*id\s*=\s*37377365") {
+    throw 'Apply policy does not require the approved plugin-release reviewer.'
+}
+if ($applyPolicyContent -notmatch 'protected_branches\s*=\s*\$true') {
+    throw 'Apply policy does not limit plugin-release to protected branches.'
+}
+if ($applyPolicyContent -notmatch 'custom_branch_policies\s*=\s*\$false') {
+    throw 'Apply policy unexpectedly enables custom release branches.'
+}
+
+$releaseWorkflowContent = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot '.github\workflows\release-plugin.yml')
+if ($releaseWorkflowContent -notmatch '(?m)^  workflow_dispatch:\s*$') {
+    throw 'Plugin release workflow must be manually dispatched.'
+}
+if ($releaseWorkflowContent -match '(?m)^  push:\s*$') {
+    throw 'Plugin release workflow must not use a push trigger.'
+}
+if ($releaseWorkflowContent -match 'setup-java|mvnw|maven') {
+    throw 'Plugin release workflow must promote candidate bytes without rebuilding.'
+}
+if ($releaseWorkflowContent -notmatch '(?m)^    environment: plugin-release\s*$') {
+    throw 'Plugin release job must use the protected plugin-release environment.'
+}
+if ($releaseWorkflowContent -notmatch 'refs/tags/plugin-v1\.1\.0') {
+    throw 'Plugin release workflow must derive the immutable 1.1.0 tag internally.'
+}
 
 if ($StaticOnly) {
     Write-Output 'Static repository policy verified.'
@@ -143,6 +190,12 @@ Assert-ImmutableTagPolicy (Get-LiveRuleset 'Paper release tag immutability') 'Pa
 $liveModPolicy = Get-LiveRuleset 'Fabric release tag quarantine'
 Assert-TagPolicyBase $liveModPolicy 'Fabric release tag quarantine' 'refs/tags/mod-v*' @('creation', 'update', 'deletion', 'non_fast_forward')
 Assert-Equal @($liveModPolicy.bypass_actors).Count 0 'Fabric release tag quarantine bypass count'
+
+$pluginReleaseEnvironment = gh api "repos/$repository/environments/plugin-release" | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to read the plugin-release environment.'
+}
+Assert-PluginReleaseEnvironment $pluginReleaseEnvironment
 
 $phaseZeroPolicy = Get-LiveRuleset 'Phase 0 release tag provenance'
 Assert-Equal $phaseZeroPolicy.enforcement 'active' 'Phase 0 release tag enforcement'
