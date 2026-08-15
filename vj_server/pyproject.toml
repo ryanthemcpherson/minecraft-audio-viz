@@ -27,7 +27,7 @@ audioviz-vj = "vj_server.cli:vj_server"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0",
+    "pytest>=9.0.3",
     "pytest-asyncio>=1.0",
     "pytest-timeout>=2.0",
     "pytest-cov>=6.0",
