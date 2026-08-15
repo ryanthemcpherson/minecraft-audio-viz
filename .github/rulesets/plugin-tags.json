@@ -1,14 +1,8 @@
 {
-  "name": "Paper release tag provenance",
+  "name": "Paper release tag immutability",
   "target": "tag",
   "enforcement": "active",
-  "bypass_actors": [
-    {
-      "actor_id": 15368,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ],
+  "bypass_actors": [],
   "conditions": {
     "ref_name": {
       "include": ["refs/tags/plugin-v*"],
@@ -16,7 +10,6 @@
     }
   },
   "rules": [
-    {"type": "creation"},
     {"type": "update"},
     {"type": "deletion"},
     {"type": "non_fast_forward"}

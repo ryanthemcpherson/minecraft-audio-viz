@@ -32,12 +32,12 @@ function Assert-SequenceEqual {
     Assert-Equal -Actual $actualValue -Expected $expectedValue -Message $Message
 }
 
-function Assert-ImmutableTagPolicy {
+function Assert-TagPolicyBase {
     param(
         [Parameter(Mandatory)] $Policy,
         [Parameter(Mandatory)] [string] $ExpectedName,
         [Parameter(Mandatory)] [string] $ExpectedPattern,
-        [Parameter(Mandatory)] [bool] $AllowActionsBypass
+        [Parameter(Mandatory)] [object[]] $ExpectedRules
     )
 
     Assert-Equal $Policy.name $ExpectedName 'Unexpected tag ruleset name'
@@ -45,18 +45,33 @@ function Assert-ImmutableTagPolicy {
     Assert-Equal $Policy.enforcement 'active' "$ExpectedName enforcement"
     Assert-SequenceEqual @($Policy.conditions.ref_name.include) @($ExpectedPattern) "$ExpectedName include patterns"
     Assert-Equal @($Policy.conditions.ref_name.exclude).Count 0 "$ExpectedName exclusions"
-    Assert-SequenceEqual @($Policy.rules.type) @('creation', 'update', 'deletion', 'non_fast_forward') "$ExpectedName rules"
+    Assert-SequenceEqual @($Policy.rules.type) $ExpectedRules "$ExpectedName rules"
+}
+
+function Assert-ImmutableTagPolicy {
+    param(
+        [Parameter(Mandatory)] $Policy,
+        [Parameter(Mandatory)] [string] $ExpectedName,
+        [Parameter(Mandatory)] [string] $ExpectedPattern
+    )
+
+    Assert-TagPolicyBase $Policy $ExpectedName $ExpectedPattern @('update', 'deletion', 'non_fast_forward')
 
     $bypassActors = @($Policy.bypass_actors)
-    if ($AllowActionsBypass) {
-        Assert-Equal $bypassActors.Count 1 "$ExpectedName bypass count"
-        Assert-Equal $bypassActors[0].actor_id 15368 "$ExpectedName bypass actor ID"
-        Assert-Equal $bypassActors[0].actor_type 'Integration' "$ExpectedName bypass actor type"
-        Assert-Equal $bypassActors[0].bypass_mode 'always' "$ExpectedName bypass mode"
-    }
-    else {
-        Assert-Equal $bypassActors.Count 0 "$ExpectedName bypass count"
-    }
+    Assert-Equal $bypassActors.Count 0 "$ExpectedName bypass count"
+}
+
+function Assert-TagCreationPolicy {
+    param([Parameter(Mandatory)] $Policy)
+
+    $expectedName = 'Paper release tag creation'
+    Assert-TagPolicyBase $Policy $expectedName 'refs/tags/plugin-v*' @('creation')
+
+    $bypassActors = @($Policy.bypass_actors)
+    Assert-Equal $bypassActors.Count 1 "$expectedName bypass count"
+    Assert-Equal $bypassActors[0].actor_id 5 "$expectedName bypass actor ID"
+    Assert-Equal $bypassActors[0].actor_type 'RepositoryRole' "$expectedName bypass actor type"
+    Assert-Equal $bypassActors[0].bypass_mode 'always' "$expectedName bypass mode"
 }
 
 function Assert-MainPolicy {
@@ -99,12 +114,15 @@ function Get-LiveRuleset {
 }
 
 $mainPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'main.json') | ConvertFrom-Json
+$pluginCreationPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'plugin-tag-creation.json') | ConvertFrom-Json
 $pluginPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'plugin-tags.json') | ConvertFrom-Json
 $modPolicy = Get-Content -Raw -LiteralPath (Join-Path $rulesetDirectory 'mod-tags.json') | ConvertFrom-Json
 
 Assert-MainPolicy $mainPolicy
-Assert-ImmutableTagPolicy $pluginPolicy 'Paper release tag provenance' 'refs/tags/plugin-v*' $true
-Assert-ImmutableTagPolicy $modPolicy 'Fabric release tag quarantine' 'refs/tags/mod-v*' $false
+Assert-TagCreationPolicy $pluginCreationPolicy
+Assert-ImmutableTagPolicy $pluginPolicy 'Paper release tag immutability' 'refs/tags/plugin-v*'
+Assert-TagPolicyBase $modPolicy 'Fabric release tag quarantine' 'refs/tags/mod-v*' @('creation', 'update', 'deletion', 'non_fast_forward')
+Assert-Equal @($modPolicy.bypass_actors).Count 0 'Fabric release tag quarantine bypass count'
 
 if ($StaticOnly) {
     Write-Output 'Static repository policy verified.'
@@ -120,8 +138,11 @@ $actionsApp = gh api apps/github-actions | ConvertFrom-Json
 Assert-Equal $actionsApp.id 15368 'GitHub Actions integration ID'
 
 Assert-MainPolicy (Get-LiveRuleset 'Protect main')
-Assert-ImmutableTagPolicy (Get-LiveRuleset 'Paper release tag provenance') 'Paper release tag provenance' 'refs/tags/plugin-v*' $true
-Assert-ImmutableTagPolicy (Get-LiveRuleset 'Fabric release tag quarantine') 'Fabric release tag quarantine' 'refs/tags/mod-v*' $false
+Assert-TagCreationPolicy (Get-LiveRuleset 'Paper release tag creation')
+Assert-ImmutableTagPolicy (Get-LiveRuleset 'Paper release tag immutability') 'Paper release tag immutability' 'refs/tags/plugin-v*'
+$liveModPolicy = Get-LiveRuleset 'Fabric release tag quarantine'
+Assert-TagPolicyBase $liveModPolicy 'Fabric release tag quarantine' 'refs/tags/mod-v*' @('creation', 'update', 'deletion', 'non_fast_forward')
+Assert-Equal @($liveModPolicy.bypass_actors).Count 0 'Fabric release tag quarantine bypass count'
 
 $phaseZeroPolicy = Get-LiveRuleset 'Phase 0 release tag provenance'
 Assert-Equal $phaseZeroPolicy.enforcement 'active' 'Phase 0 release tag enforcement'

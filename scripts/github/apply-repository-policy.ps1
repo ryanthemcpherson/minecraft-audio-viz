@@ -62,6 +62,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'main.json')
+Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'plugin-tag-creation.json')
 Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'plugin-tags.json')
 Set-NamedRuleset `
     -PolicyPath (Join-Path $rulesetDirectory 'mod-tags.json') `
