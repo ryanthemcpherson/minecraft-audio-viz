@@ -305,7 +305,7 @@ class RelayMixin:
                             try:
                                 await dj.websocket.close(4010, "Kicked by VJ")
                             except Exception:
-                                pass  # Ignore errors when closing already-closed connections
+                                logger.debug(f"Error closing websocket for kicked DJ {dj.dj_name} (already closed)")
                             logger.info(f"DJ kicked: {dj.dj_name}")
 
                     elif msg_type == "generate_connect_code":
@@ -616,7 +616,7 @@ class RelayMixin:
                                     )
                                 )
                             except Exception:
-                                pass
+                                logger.debug(f"Failed to send sync_test_tone to DJ {dj.dj_id}")
 
                     elif msg_type == "get_zones":
                         # Forward to Minecraft and return zones
@@ -680,7 +680,7 @@ class RelayMixin:
                                         try:
                                             await self.viz_client.set_visible(self.zone, True)
                                         except Exception:
-                                            pass
+                                            logger.warning(f"Failed to re-show entities in zone '{self.zone}' after {effect} OFF")
                                 elif effect == "freeze":
                                     self._freeze = False
                                     if effect in self._active_effects:
@@ -695,7 +695,7 @@ class RelayMixin:
                                         try:
                                             await self.viz_client.set_visible(self.zone, False)
                                         except Exception:
-                                            pass
+                                            logger.warning(f"Failed to hide entities in zone '{self.zone}' for blackout ON")
                                 elif effect == "freeze":
                                     self._freeze = True
                                 self._active_effects[effect] = {
@@ -732,14 +732,14 @@ class RelayMixin:
                                 try:
                                     await self.viz_client.set_visible(self.zone, False)
                                 except Exception:
-                                    pass
+                                    logger.warning(f"Failed to hide entities in zone '{self.zone}' for blackout toggle ON")
                         else:
                             self._active_effects.pop("blackout", None)
                             if self.viz_client and self.viz_client.connected:
                                 try:
                                     await self.viz_client.set_visible(self.zone, True)
                                 except Exception:
-                                    pass
+                                    logger.warning(f"Failed to re-show entities in zone '{self.zone}' for blackout toggle OFF")
                         logger.info(f"Blackout: {self._blackout}")
 
                     elif msg_type in ("freeze", "set_freeze"):
@@ -944,7 +944,7 @@ class RelayMixin:
                                 )
                                 continue
                         except ImportError:
-                            pass
+                            logger.debug("better-profanity not installed — scene name content filter disabled")
 
                         try:
                             scene_data = self._capture_current_state()
@@ -1085,7 +1085,7 @@ class RelayMixin:
                             try:
                                 await self.viz_client.ws.send(self.viz_client._encode(data))
                             except Exception:
-                                pass
+                                logger.warning("Failed to forward ambient_lights state to Minecraft")
                         await self._broadcast_to_browsers(
                             _json_str(
                                 {
@@ -1206,7 +1206,7 @@ class RelayMixin:
                     # Don't close connection on error, just log and continue
 
         except websockets.exceptions.ConnectionClosed:
-            pass
+            logger.debug("Browser client connection closed")
         finally:
             self._broadcast_clients.discard(websocket)
             self._voice_subscribers.discard(websocket)
@@ -1234,6 +1234,7 @@ class RelayMixin:
             try:
                 await client.send(browser_msg)
             except Exception:
+                logger.debug("Failed to send DJ roster to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1264,7 +1265,7 @@ class RelayMixin:
                     )
                 )
             except Exception:
-                pass
+                logger.debug(f"Failed to send DJ roster to DJ {dj_id}")
 
     async def _broadcast_to_browsers(self, message: str):
         """Broadcast a pre-serialized JSON message to all browser clients."""
@@ -1273,6 +1274,7 @@ class RelayMixin:
             try:
                 await client.send(message)
             except Exception:
+                logger.debug("Failed to send message to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1310,6 +1312,7 @@ class RelayMixin:
             try:
                 await client.send(message)
             except Exception:
+                logger.debug("Failed to send pattern change to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1370,6 +1373,7 @@ class RelayMixin:
             try:
                 await client.send(message)
             except Exception:
+                logger.debug("Failed to send config update to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1399,6 +1403,7 @@ class RelayMixin:
             try:
                 await client.send(browser_msg)
             except Exception:
+                logger.debug("Failed to send preset change to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1412,6 +1417,7 @@ class RelayMixin:
             try:
                 await client.send(message)
             except Exception:
+                logger.debug("Failed to send effect trigger to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1420,7 +1426,7 @@ class RelayMixin:
             try:
                 await dj.websocket.send(message)
             except Exception:
-                pass
+                logger.debug(f"Failed to send effect trigger '{effect}' to DJ {dj.dj_id}")
 
     async def _broadcast_to_djs(self, msg: dict):
         """Broadcast a message dict to all connected DJs."""
@@ -1532,7 +1538,7 @@ class RelayMixin:
             try:
                 await asyncio.gather(*send_tasks)
             except Exception:
-                pass  # Individual failures already captured in dead_clients
+                logger.debug("Error during broadcast gather (individual failures tracked in dead_clients)")
             finally:
                 if dead_clients:
                     self._broadcast_clients -= dead_clients
@@ -1750,7 +1756,7 @@ class RelayMixin:
                                     try:
                                         await client.close(4100, "Heartbeat timeout")
                                     except Exception:
-                                        pass
+                                        logger.debug(f"Error closing timed-out browser client {client.remote_address}")
                                     continue
                             else:
                                 # Pong received, reset missed count
@@ -1939,7 +1945,7 @@ class RelayMixin:
         try:
             await self.viz_client.send_voice_frame(pcm_data, seq)
         except Exception:
-            pass  # Fire and forget
+            logger.debug("Failed to relay voice frame to Minecraft (fire-and-forget)")
 
         # Broadcast to voice subscribers (Discord bot, etc.)
         if self._voice_subscribers:
@@ -1956,6 +1962,7 @@ class RelayMixin:
                 try:
                     await client.send(voice_msg)
                 except Exception:
+                    logger.debug("Failed to send voice audio to subscriber, marking as dead")
                     dead_clients.add(client)
             self._voice_subscribers -= dead_clients
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import AuthModal from './components/AuthModal';
 import ConnectedView from './components/ConnectedView';
 import DisconnectedView from './components/DisconnectedView';
@@ -15,6 +15,17 @@ function App() {
   const audioSources = useAudioSources();
 
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
+
+  // Refs to avoid stale closures in the keyboard handler
+  const connectionRef = useRef(connection);
+  const audioSourcesRef = useRef(audioSources);
+  const showAuthModalRef = useRef(showAuthModal);
+  const showWelcomeOverlayRef = useRef(showWelcomeOverlay);
+
+  useEffect(() => { connectionRef.current = connection; }, [connection]);
+  useEffect(() => { audioSourcesRef.current = audioSources; }, [audioSources]);
+  useEffect(() => { showAuthModalRef.current = showAuthModal; }, [showAuthModal]);
+  useEffect(() => { showWelcomeOverlayRef.current = showWelcomeOverlay; }, [showWelcomeOverlay]);
 
   // Load audio sources and check onboarding on mount
   useEffect(() => {
@@ -39,7 +50,12 @@ function App() {
     }
   }, [auth.isSignedIn, showAuthModal]);
 
-  // Keyboard shortcuts handler
+  const handleDismissWelcome = useCallback(() => {
+    localStorage.setItem('mcav.onboardingComplete', 'true');
+    setShowWelcomeOverlay(false);
+  }, []);
+
+  // Keyboard shortcuts handler - uses refs to avoid stale closures
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Don't trigger shortcuts when typing in input fields
@@ -51,52 +67,50 @@ function App() {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifierKey = isMac ? event.metaKey : event.ctrlKey;
 
+      const conn = connectionRef.current;
+      const sources = audioSourcesRef.current;
+
       // Ctrl/Cmd + D - Disconnect
       if (modifierKey && event.key === 'd') {
         event.preventDefault();
-        if (connection.status.connected) {
-          void connection.handleDisconnect();
+        if (conn.status.isConnected) {
+          void conn.handleDisconnect();
         }
       }
 
       // Ctrl/Cmd + R - Refresh audio sources
       if (modifierKey && event.key === 'r') {
         event.preventDefault();
-        void audioSources.loadAudioSources();
+        void sources.loadAudioSources();
       }
 
       // Ctrl/Cmd + T - Toggle test audio
       if (modifierKey && event.key === 't') {
         event.preventDefault();
-        if (audioSources.selectedSource && !connection.status.connected) {
-          if (audioSources.isTestingAudio) {
-            void audioSources.handleStopTest();
+        if (sources.selectedSource && !conn.status.isConnected) {
+          if (sources.isTestingAudio) {
+            void sources.handleStopTest();
           } else {
-            void audioSources.handleStartTest();
+            void sources.handleStartTest();
           }
         }
       }
 
       // Escape - Close auth modal, welcome overlay, or stop test audio
       if (event.key === 'Escape') {
-        if (showAuthModal) {
+        if (showAuthModalRef.current) {
           setShowAuthModal(false);
-        } else if (showWelcomeOverlay) {
+        } else if (showWelcomeOverlayRef.current) {
           handleDismissWelcome();
-        } else if (audioSources.isTestingAudio) {
-          void audioSources.handleStopTest();
+        } else if (sources.isTestingAudio) {
+          void sources.handleStopTest();
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [connection.status.connected, showWelcomeOverlay, showAuthModal, audioSources.isTestingAudio, audioSources.selectedSource]);
-
-  const handleDismissWelcome = () => {
-    localStorage.setItem('mcav.onboardingComplete', 'true');
-    setShowWelcomeOverlay(false);
-  };
+  }, [handleDismissWelcome]);
 
   const handleConnect = () => {
     void connection.handleConnect(
@@ -180,7 +194,7 @@ function App() {
         </div>
       )}
 
-      {!connection.status.connected ? (
+      {!connection.status.isConnected ? (
         <DisconnectedView
           auth={auth}
           connection={connection}

@@ -266,7 +266,7 @@ export default {
           "Strict-Transport-Security": "max-age=31536000",
         },
       });
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to resolve tenant:", err);
       return new Response("Service unavailable", { status: 502 });
     }

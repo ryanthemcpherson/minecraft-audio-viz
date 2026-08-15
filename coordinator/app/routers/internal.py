@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_session
 from app.models.db import DJSession, User
-from app.services.server_service import authenticate_server
+from app.dependencies.server import authenticate_server
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 

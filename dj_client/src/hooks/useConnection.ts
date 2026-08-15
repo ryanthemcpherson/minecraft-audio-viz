@@ -6,8 +6,10 @@ import { PRESETS } from '../components/PresetBar';
 import * as api from '../lib/api';
 import type {
   ConnectionStatus,
+  WireConnectionStatus,
   AudioLevels,
   VoiceStatus,
+  WireVoiceStatus,
   CaptureMode,
   RosterUpdate,
   AudioData,
@@ -16,6 +18,8 @@ import {
   DEFAULT_CONNECTION_STATUS,
   DEFAULT_VOICE_STATUS,
   DEFAULT_AUDIO_DATA,
+  mapWireConnectionStatus,
+  mapWireVoiceStatus,
 } from '../types';
 
 export interface UseConnectionReturn {
@@ -144,8 +148,8 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
 
   // Always listen for dj-status so reconnection events reach the frontend.
   useEffect(() => {
-    const unlisten = listen<ConnectionStatus>('dj-status', (event) => {
-      setStatus(event.payload);
+    const unlisten = listen<WireConnectionStatus>('dj-status', (event) => {
+      setStatus(mapWireConnectionStatus(event.payload));
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
@@ -154,7 +158,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
 
   // Listen for audio levels, voice, and preset events only while connected
   useEffect(() => {
-    if (!status.connected) return;
+    if (!status.isConnected) return;
 
     const unlisteners: Promise<UnlistenFn>[] = [];
 
@@ -171,8 +175,8 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     );
 
     unlisteners.push(
-      listen<VoiceStatus>('voice-status', (event) => {
-        setVoiceStatus(event.payload);
+      listen<WireVoiceStatus>('voice-status', (event) => {
+        setVoiceStatus(mapWireVoiceStatus(event.payload));
       }),
     );
 
@@ -197,7 +201,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     return () => {
       unlisteners.forEach((p) => p.then((unlisten) => unlisten()).catch(() => {}));
     };
-  }, [status.connected]);
+  }, [status.isConnected]);
 
   const handleConnect = async (
     selectedSource: string | null,
@@ -254,8 +258,8 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
         await invoke('start_capture', { sourceId: selectedSource });
       }
 
-      setStatus((prev) => ({ ...prev, connected: true }));
-    } catch (e) {
+      setStatus((prev) => ({ ...prev, isConnected: true }));
+    } catch (e: unknown) {
       const errStr = String(e);
       let errorMessage = errStr;
 
@@ -300,7 +304,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
       setRoster(null);
       setVoiceEnabled(false);
       setVoiceStatus(DEFAULT_VOICE_STATUS);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Disconnect error:', e);
     }
   };
@@ -309,7 +313,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     setActivePreset(name);
     try {
       await invoke('set_preset', { name });
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Preset change error:', e);
     }
   };
@@ -319,7 +323,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
       const newEnabled = !voiceEnabled;
       await invoke('set_voice_streaming', { enabled: newEnabled });
       setVoiceEnabled(newEnabled);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Voice toggle error:', e);
     }
   };

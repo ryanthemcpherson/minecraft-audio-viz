@@ -34,7 +34,6 @@ export class WebSocketService extends EventTarget {
      * Manually reconnect after failed state
      */
     manualReconnect() {
-        console.log('[WS] Manual reconnect triggered');
         this.isFailed = false;
         this.reconnectAttempts = 0;
         this.shouldReconnect = true;
@@ -58,7 +57,6 @@ export class WebSocketService extends EventTarget {
         this.shouldReconnect = true;
 
         const url = `ws://${this.host}:${this.port}`;
-        console.log(`[WS] Connecting to ${url}...`);
 
         this._emit('connecting', {
             attempt: this.reconnectAttempts,
@@ -132,7 +130,6 @@ export class WebSocketService extends EventTarget {
     // === Private Methods ===
 
     _onOpen() {
-        console.log('[WS] Connected');
         this.isConnecting = false;
         this.reconnectAttempts = 0;
 
@@ -165,7 +162,6 @@ export class WebSocketService extends EventTarget {
     }
 
     _onClose(event) {
-        console.log(`[WS] Disconnected (code: ${event.code})`);
         this.isConnecting = false;
         this._stopPingInterval();
 
@@ -188,7 +184,6 @@ export class WebSocketService extends EventTarget {
             // Handle VJ auth response
             if (this._awaitingAuth) {
                 if (data.type === 'auth_success') {
-                    console.log('[WS] VJ auth succeeded');
                     this._awaitingAuth = false;
                     this._completeConnection();
                     return;
@@ -250,8 +245,6 @@ export class WebSocketService extends EventTarget {
             this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1),
             60000 // Max 60 seconds
         );
-
-        console.log(`[WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempts})`);
 
         setTimeout(() => {
             if (this.shouldReconnect) {

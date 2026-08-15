@@ -1,11 +1,5 @@
 import { useRef, useEffect } from 'react';
-
-interface AudioData {
-  bands: number[];
-  isBeat: boolean;
-  bpm: number;
-  beatIntensity: number;
-}
+import type { AudioData } from '../types';
 
 interface FrequencyStripProps {
   audioRef: React.RefObject<AudioData>;

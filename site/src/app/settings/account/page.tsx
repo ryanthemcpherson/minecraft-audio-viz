@@ -172,7 +172,7 @@ export default function AccountSettingsPage() {
     try {
       const url = await getDiscordAuthUrl();
       window.location.href = url;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to get Discord auth URL:", err);
       setDiscordRedirecting(false);
     }
@@ -202,7 +202,7 @@ export default function AccountSettingsPage() {
     try {
       await revokeSession(accessToken, sessionId);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-    } catch (err) {
+    } catch (err: unknown) {
       setSessionsError(err instanceof Error ? err.message : "Failed to revoke session");
     }
   }
@@ -246,7 +246,7 @@ export default function AccountSettingsPage() {
                   autoComplete="name"
                   value={nameValue}
                   onChange={(e) => setNameValue(e.target.value)}
-                  className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                  className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") saveName();
@@ -385,7 +385,7 @@ export default function AccountSettingsPage() {
                 required
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               />
             </div>
 
@@ -405,7 +405,7 @@ export default function AccountSettingsPage() {
                 minLength={8}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               />
             </div>
 
@@ -425,7 +425,7 @@ export default function AccountSettingsPage() {
                 minLength={8}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               />
             </div>
 
@@ -527,7 +527,7 @@ export default function AccountSettingsPage() {
                 autoComplete="current-password"
                 value={deletePassword}
                 onChange={(e) => setDeletePassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50 focus-visible:ring-2 focus-visible:ring-red-500"
               />
             </div>
           )}
@@ -541,7 +541,7 @@ export default function AccountSettingsPage() {
               type="text"
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50 focus-visible:ring-2 focus-visible:ring-red-500"
               placeholder="DELETE"
             />
           </div>

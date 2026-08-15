@@ -153,7 +153,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     if (stored) {
       try {
         await logoutApi(stored);
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Failed to revoke refresh token on logout:", err);
       }
     }

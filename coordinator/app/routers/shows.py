@@ -4,22 +4,29 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models.db import DJSession, Show, VJServer
+from app.models.db import VJServer
 from app.models.schemas import (
     CreateShowRequest,
     CreateShowResponse,
     EndShowResponse,
     ShowDetailResponse,
 )
-from app.services.code_generator import generate_unique_code
-from app.services.server_service import authenticate_server
+from app.services.exceptions import (
+    OwnershipError,
+    ShowAlreadyEndedError,
+    ShowNotFoundError,
+)
+from app.services.show_service import (
+    create_show as svc_create_show,
+    end_show as svc_end_show,
+    get_show as svc_get_show,
+)
+from app.dependencies.server import authenticate_server
 
 logger = logging.getLogger(__name__)
 
@@ -46,30 +53,23 @@ async def create_show(
 
     Generates a unique WORD-XXXX connect code automatically.
     """
-    if server.id != body.server_id:
+    try:
+        result = await svc_create_show(
+            server_id=body.server_id,
+            requesting_server_id=server.id,
+            name=body.name,
+            max_djs=body.max_djs,
+            session=session,
+        )
+    except OwnershipError:
         raise HTTPException(status_code=403, detail="API key does not own this server_id")
 
-    connect_code = await generate_unique_code(session)
-
-    show = Show(
-        id=uuid.uuid4(),
-        server_id=body.server_id,
-        name=body.name,
-        connect_code=connect_code,
-        max_djs=body.max_djs,
-    )
-    session.add(show)
-    await session.commit()
-    await session.refresh(show)
-
-    logger.info("Show created: id=%s name=%s code=%s", show.id, show.name, connect_code)
-
     return CreateShowResponse(
-        show_id=show.id,
-        connect_code=show.connect_code,  # type: ignore[arg-type]
-        name=show.name,
-        server_id=show.server_id,
-        created_at=show.created_at,
+        show_id=result.show_id,
+        connect_code=result.connect_code,
+        name=result.name,
+        server_id=result.server_id,
+        created_at=result.created_at,
     )
 
 
@@ -91,38 +91,24 @@ async def end_show(
     """End a show, setting its status to ``ended`` and clearing the connect
     code so it is no longer resolvable.
     """
-    stmt = select(Show).where(Show.id == show_id)
-    result = await session.execute(stmt)
-    show = result.scalar_one_or_none()
-
-    if show is None:
+    try:
+        result = await svc_end_show(
+            show_id=show_id,
+            requesting_server_id=server.id,
+            session=session,
+        )
+    except ShowNotFoundError:
         raise HTTPException(status_code=404, detail="Show not found")
-
-    if show.server_id != server.id:
+    except OwnershipError:
         raise HTTPException(status_code=403, detail="API key does not own this show")
-
-    if show.status == "ended":
+    except ShowAlreadyEndedError:
         raise HTTPException(status_code=400, detail="Show already ended")
 
-    now = datetime.now(timezone.utc)
-    stmt_update = (
-        update(Show)
-        .where(Show.id == show_id)
-        .values(status="ended", ended_at=now, connect_code=None, current_djs=0)
+    return EndShowResponse(
+        show_id=result.show_id,
+        status=result.status,
+        ended_at=result.ended_at,
     )
-    await session.execute(stmt_update)
-
-    # Disconnect all active DJ sessions in this show
-    await session.execute(
-        update(DJSession)
-        .where(DJSession.show_id == show_id, DJSession.disconnected_at.is_(None))
-        .values(disconnected_at=now)
-    )
-    await session.commit()
-
-    logger.info("Show ended: id=%s", show_id)
-
-    return EndShowResponse(show_id=show_id, status="ended", ended_at=now)
 
 
 # ---------------------------------------------------------------------------
@@ -141,24 +127,25 @@ async def get_show(
     session: AsyncSession = Depends(get_session),
 ) -> ShowDetailResponse:
     """Return full details for a show owned by the authenticated server."""
-    stmt = select(Show).where(Show.id == show_id)
-    result = await session.execute(stmt)
-    show = result.scalar_one_or_none()
-
-    if show is None:
+    try:
+        result = await svc_get_show(
+            show_id=show_id,
+            requesting_server_id=server.id,
+            session=session,
+        )
+    except ShowNotFoundError:
         raise HTTPException(status_code=404, detail="Show not found")
-
-    if show.server_id != server.id:
+    except OwnershipError:
         raise HTTPException(status_code=403, detail="API key does not own this show")
 
     return ShowDetailResponse(
-        show_id=show.id,
-        name=show.name,
-        server_id=show.server_id,
-        status=show.status,
-        connect_code=show.connect_code,
-        max_djs=show.max_djs,
-        current_djs=show.current_djs,
-        created_at=show.created_at,
-        ended_at=show.ended_at,
+        show_id=result.show_id,
+        name=result.name,
+        server_id=result.server_id,
+        status=result.status,
+        connect_code=result.connect_code,
+        max_djs=result.max_djs,
+        current_djs=result.current_djs,
+        created_at=result.created_at,
+        ended_at=result.ended_at,
     )

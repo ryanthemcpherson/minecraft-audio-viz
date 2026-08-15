@@ -40,7 +40,7 @@ export function useAutoUpdate(): UseAutoUpdateReturn {
       } else {
         setUpdateMessage(null);
       }
-    } catch (e) {
+    } catch (e: unknown) {
       const errStr = String(e);
       const isAcl = errStr.includes('not allowed by ACL');
       console.error(`[updater] Update check failed: ${errStr}`);
@@ -108,7 +108,7 @@ export function useAutoUpdate(): UseAutoUpdateReturn {
       setAvailableUpdate(null);
       setUpdateMessage('Update installed. Please restart the DJ app.');
       setDismissUpdateBanner(false);
-    } catch (e) {
+    } catch (e: unknown) {
       setUpdateError(`Update install failed: ${String(e)}`);
     } finally {
       setIsInstallingUpdate(false);

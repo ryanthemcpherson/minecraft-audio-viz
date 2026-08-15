@@ -134,7 +134,7 @@ async function apiFetch<T>(
     let detail: string;
     try {
       detail = JSON.parse(body).detail ?? body;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to parse API error response:", err);
       detail = body;
     }
@@ -153,7 +153,7 @@ async function authedFetch<T>(
   if (isTokenExpiringSoon()) {
     try {
       await refreshTokens();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to pre-emptively refresh token:", err);
     }
   }
@@ -171,12 +171,12 @@ async function authedFetch<T>(
 
   try {
     return await apiFetch<T>(path, opts);
-  } catch (e) {
+  } catch (e: unknown) {
     // Retry once on 401 with a refreshed token
     if (e instanceof ApiError && e.status === 401) {
       try {
         await refreshTokens();
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Failed to refresh token after 401:", err);
         await clearTokens();
         throw e;
@@ -284,7 +284,7 @@ export async function resolveConnectCode(
         headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       },
     );
-  } catch (e) {
+  } catch (e: unknown) {
     // If the error is "Not signed in", fall back to unauthenticated fetch.
     // Any other error (ApiError with 4xx/5xx) should propagate as-is.
     if (e instanceof Error && e.message === 'Not signed in') {
@@ -316,7 +316,7 @@ export async function logout(): Promise<void> {
         method: 'POST',
         body: JSON.stringify({ refresh_token: refreshToken }),
       });
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to revoke refresh token on logout:", err);
     }
   }

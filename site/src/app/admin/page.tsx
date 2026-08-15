@@ -150,7 +150,7 @@ export default function AdminPage() {
             setShows(await fetchAdminShows(accessToken, { limit: 100 }));
             break;
         }
-      } catch (err) {
+      } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to load data";
         if (msg.includes("Admin access required")) {
           router.push("/dashboard");
@@ -197,7 +197,7 @@ export default function AdminPage() {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? updated : u))
       );
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to update user");
     }
   };
@@ -211,7 +211,7 @@ export default function AdminPage() {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? updated : u))
       );
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to update user");
     }
   };
@@ -329,7 +329,7 @@ export default function AdminPage() {
                 placeholder="Search users by name, email, or Discord..."
                 value={userSearch}
                 onChange={(e) => handleUserSearch(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-text-secondary focus:border-disc-cyan/50 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-text-secondary focus:border-disc-cyan/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
               />
             </div>
 

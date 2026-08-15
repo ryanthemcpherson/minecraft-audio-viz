@@ -4,8 +4,40 @@ export interface AudioSource {
   source_type: 'system_audio' | 'application' | 'input_device';
 }
 
-export interface ConnectionStatus {
+// ---------------------------------------------------------------------------
+// Wire types — snake_case fields match the WebSocket / Tauri event protocol.
+// These interfaces are intentionally snake_case because they represent the
+// JSON payloads serialised by the Rust backend (serde) and the VJ server.
+// Do NOT rename fields here; add camelCase application types below instead.
+// ---------------------------------------------------------------------------
+
+/** Wire format for connection status events from the Rust backend. */
+export interface WireConnectionStatus {
   connected: boolean;
+  is_active: boolean;
+  latency_ms: number;
+  route_mode: string;
+  mc_connected: boolean;
+  queue_position: number;
+  total_djs: number;
+  active_dj_name: string | null;
+  error: string | null;
+}
+
+/** Wire format for voice status events from the Rust backend. */
+export interface WireVoiceStatus {
+  available: boolean;
+  streaming: boolean;
+  channel_type: string;
+  connected_players: number;
+}
+
+// ---------------------------------------------------------------------------
+// Application types — camelCase booleans for use throughout the UI layer.
+// ---------------------------------------------------------------------------
+
+export interface ConnectionStatus {
+  isConnected: boolean;
   is_active: boolean;
   latency_ms: number;
   route_mode: string;
@@ -25,8 +57,8 @@ export interface AudioLevels {
 }
 
 export interface VoiceStatus {
-  available: boolean;
-  streaming: boolean;
+  isAvailable: boolean;
+  isStreaming: boolean;
   channel_type: string;
   connected_players: number;
 }
@@ -60,8 +92,35 @@ export interface AudioData {
   beatIntensity: number;
 }
 
+// ---------------------------------------------------------------------------
+// Mapping helpers — convert wire payloads to application types.
+// ---------------------------------------------------------------------------
+
+export function mapWireConnectionStatus(wire: WireConnectionStatus): ConnectionStatus {
+  return {
+    isConnected: wire.connected,
+    is_active: wire.is_active,
+    latency_ms: wire.latency_ms,
+    route_mode: wire.route_mode,
+    mc_connected: wire.mc_connected,
+    queue_position: wire.queue_position,
+    total_djs: wire.total_djs,
+    active_dj_name: wire.active_dj_name,
+    error: wire.error,
+  };
+}
+
+export function mapWireVoiceStatus(wire: WireVoiceStatus): VoiceStatus {
+  return {
+    isAvailable: wire.available,
+    isStreaming: wire.streaming,
+    channel_type: wire.channel_type,
+    connected_players: wire.connected_players,
+  };
+}
+
 export const DEFAULT_CONNECTION_STATUS: ConnectionStatus = {
-  connected: false,
+  isConnected: false,
   is_active: false,
   latency_ms: 0,
   route_mode: '',
@@ -73,8 +132,8 @@ export const DEFAULT_CONNECTION_STATUS: ConnectionStatus = {
 };
 
 export const DEFAULT_VOICE_STATUS: VoiceStatus = {
-  available: false,
-  streaming: false,
+  isAvailable: false,
+  isStreaming: false,
   channel_type: 'static',
   connected_players: 0,
 };

@@ -306,7 +306,7 @@ export default function OnboardingPage() {
                     required
                     value={orgName}
                     onChange={(e) => setOrgName(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                     placeholder="My Minecraft Server"
                   />
                 </div>
@@ -322,7 +322,7 @@ export default function OnboardingPage() {
                       required
                       value={orgSlug}
                       onChange={(e) => setOrgSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-                      className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                      className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                       placeholder="my-server"
                     />
                     <span className="text-sm text-text-secondary whitespace-nowrap">.mcav.live</span>
@@ -337,7 +337,7 @@ export default function OnboardingPage() {
                     id="orgDesc"
                     value={orgDescription}
                     onChange={(e) => setOrgDescription(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 resize-none"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500 resize-none"
                     rows={3}
                     placeholder="Tell people about your server"
                   />
@@ -454,7 +454,7 @@ export default function OnboardingPage() {
                     required
                     value={inviteCode}
                     onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 tracking-widest font-mono text-center text-lg"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500 tracking-widest font-mono text-center text-lg"
                     placeholder="ABCD1234"
                     maxLength={8}
                   />
@@ -562,7 +562,7 @@ export default function OnboardingPage() {
                     required
                     value={djName}
                     onChange={(e) => setDjName(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                     placeholder="DJ Nova"
                   />
                 </div>
@@ -575,7 +575,7 @@ export default function OnboardingPage() {
                     id="djBio"
                     value={djBio}
                     onChange={(e) => setDjBio(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 resize-none"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500 resize-none"
                     rows={3}
                     placeholder="Tell people about yourself"
                   />
@@ -590,7 +590,7 @@ export default function OnboardingPage() {
                     type="text"
                     value={djGenres}
                     onChange={(e) => setDjGenres(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                     placeholder="House, Techno, Drum & Bass"
                   />
                 </div>

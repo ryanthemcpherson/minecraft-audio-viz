@@ -814,7 +814,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                             try:
                                 asyncio.ensure_future(self.viz_client.set_visible(self.zone, True))
                             except Exception:
-                                pass
+                                logger.warning(f"Failed to re-show entities in zone '{self.zone}' after expired blackout effect")
                     elif k == "freeze":
                         self._freeze = False
                     del self._active_effects[k]
@@ -1126,7 +1126,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 try:
                     self._link.enabled = False
                 except Exception:
-                    pass
+                    logger.debug("Failed to disable Ableton Link during shutdown")
 
             # Close WebSocket servers
             dj_server.close()

@@ -1,16 +1,5 @@
 import React from 'react';
-
-interface ConnectionStatus {
-  connected: boolean;
-  is_active: boolean;
-  latency_ms: number;
-  route_mode: string;
-  mc_connected: boolean;
-  queue_position: number;
-  total_djs: number;
-  active_dj_name: string | null;
-  error: string | null;
-}
+import type { ConnectionStatus } from '../types';
 
 interface StatusPanelProps {
   status: ConnectionStatus;
@@ -20,9 +9,9 @@ function StatusPanel({ status }: StatusPanelProps) {
   return (
     <div className={`status-panel ${status.is_active ? 'active' : 'standby'}`}>
       <div className="status-indicator">
-        <span className={`status-dot ${status.connected ? 'connected' : 'disconnected'}`} />
+        <span className={`status-dot ${status.isConnected ? 'connected' : 'disconnected'}`} />
         <span className="status-text">
-          {status.connected ? (status.is_active ? 'LIVE' : 'CONNECTED') : 'DISCONNECTED'}
+          {status.isConnected ? (status.is_active ? 'LIVE' : 'CONNECTED') : 'DISCONNECTED'}
         </span>
       </div>
 

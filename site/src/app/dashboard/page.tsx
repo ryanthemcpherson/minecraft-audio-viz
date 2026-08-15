@@ -89,7 +89,7 @@ function OrgCard({
     try {
       const res = await createInvite(accessToken, org.id);
       setInviteCode(res.code);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to create invite:", err);
     } finally {
       setInviteLoading(false);
@@ -99,7 +99,7 @@ function OrgCard({
   function handleCopy(code: string) {
     try {
       navigator.clipboard.writeText(code);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to copy to clipboard:", err);
     }
     setCopied(true);
@@ -273,7 +273,7 @@ function InlineCreateOrgForm({
     try {
       await createOrg(accessToken, name.trim(), slug.trim());
       onCreated();
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create organization");
     } finally {
       setSubmitting(false);
@@ -288,7 +288,7 @@ function InlineCreateOrgForm({
           placeholder="Organization name"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
-          className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
+          className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
           maxLength={100}
         />
         <input
@@ -296,7 +296,7 @@ function InlineCreateOrgForm({
           placeholder="slug"
           value={slug}
           onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-          className="w-36 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
+          className="w-36 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
           maxLength={63}
         />
         <button
@@ -338,7 +338,7 @@ function InlineJoinOrgForm({
     try {
       await joinOrg(accessToken, code.trim());
       onJoined();
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Invalid invite code");
     } finally {
       setSubmitting(false);
@@ -352,7 +352,7 @@ function InlineJoinOrgForm({
         placeholder="Invite code"
         value={code}
         onChange={(e) => setCode(e.target.value)}
-        className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-mono text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
+        className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-mono text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
         maxLength={8}
       />
       <button
@@ -386,7 +386,7 @@ export default function DashboardPage() {
     try {
       const d = await fetchUnifiedDashboard(accessToken);
       setDashboard(d);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to load dashboard:", err);
     }
   }, [accessToken]);
@@ -431,7 +431,7 @@ export default function DashboardPage() {
     try {
       await resetAccountFull(accessToken);
       router.push("/onboarding");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to reset account:", err);
       setResettingFull(false);
       setConfirmFullReset(false);
@@ -481,7 +481,7 @@ export default function DashboardPage() {
                   if (!accessToken) return;
                   try {
                     await resendVerification(accessToken);
-                  } catch (err) { console.error("Failed to resend verification email:", err); }
+                  } catch (err: unknown) { console.error("Failed to resend verification email:", err); }
                 }}
                 className="underline hover:text-amber-300"
               >

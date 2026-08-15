@@ -122,7 +122,7 @@ export default function LoginPage() {
     try {
       const url = await getDiscordAuthUrl();
       window.location.href = url;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to get Discord auth URL:", err);
       setError("Could not start Discord sign-in");
     }
@@ -132,7 +132,7 @@ export default function LoginPage() {
     try {
       const url = await getGoogleAuthUrl();
       window.location.href = url;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to get Google auth URL:", err);
       setError("Could not start Google sign-in");
     }
@@ -240,7 +240,7 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="you@example.com"
             />
           </div>
@@ -258,7 +258,7 @@ export default function LoginPage() {
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="Your password"
             />
           </div>
@@ -295,7 +295,7 @@ export default function LoginPage() {
               autoComplete="name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="Your name"
             />
           </div>
@@ -312,7 +312,7 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="you@example.com"
             />
           </div>
@@ -330,7 +330,7 @@ export default function LoginPage() {
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="Min 8 characters"
             />
           </div>

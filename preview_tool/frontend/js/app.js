@@ -227,7 +227,6 @@ function init() {
         connStatusEl.title = 'Click to reconnect';
         connStatusEl.addEventListener('click', () => {
             if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS || !ws || ws.readyState === WebSocket.CLOSED) {
-                console.log('[WS] Manual reconnect triggered');
                 if (reconnectTimeout) clearTimeout(reconnectTimeout);
                 reconnectAttempts = 0;
                 connectWebSocket();
@@ -672,7 +671,6 @@ function connectWebSocket() {
             if (statusEl) statusEl.classList.add('connected');
             if (statusEl) statusEl.classList.remove('error');
             if (statusText) statusText.textContent = 'Connected';
-            console.log('WebSocket connected');
             reconnectAttempts = 0;  // Reset on successful connection
             stageScanRequested = false;
 
@@ -696,7 +694,6 @@ function connectWebSocket() {
                     }
                     return;
                 } else if (data.type === 'auth_success') {
-                    console.log('[WS] VJ auth succeeded');
                     return;
                 }
                 if (data.type === 'audio' || data.type === 'state') {
@@ -727,9 +724,9 @@ function connectWebSocket() {
                         );
                     }
                 } else if (data.type === 'dj_joined') {
-                    console.log('[Preview] DJ joined:', data.dj && data.dj.dj_name);
+                    // DJ joined (no-op for preview)
                 } else if (data.type === 'dj_left') {
-                    console.log('[Preview] DJ left:', data.dj_name);
+                    // DJ left (no-op for preview)
                 } else if (data.type === 'vj_state') {
                     // Initial state broadcast — extract zone info if present
                     if (data.zones && !zoneData) {
@@ -739,8 +736,6 @@ function connectWebSocket() {
                     if (data.zone_entities) {
                         zoneEntitiesData = data.zone_entities;
                     }
-                } else {
-                    console.debug('[WS] Unhandled message type:', data.type);
                 }
             } catch (e) {
                 console.error('Parse error:', e);
@@ -795,7 +790,6 @@ function scheduleReconnect() {
         MAX_RECONNECT_DELAY
     );
 
-    console.log(`[WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
     reconnectTimeout = setTimeout(connectWebSocket, delay);
 }
 
@@ -1418,7 +1412,6 @@ function handleZonesResponse(zones) {
     if (!zones || zones.length === 0) return;
     zoneData = zones;
     computeStageCenter(zones);
-    console.log(`[Stage] Received ${zones.length} zones, center:`, stageCenter);
 
     // Dispose and recreate zone groups with new positions
     disposeZoneGroups();
@@ -1512,7 +1505,6 @@ function handleBitmapInitialized(data) {
     } else {
         applyBitmapZoneVisibility();
     }
-    console.log(`[Bitmap] Initialized ${data.width}x${data.height} for zone '${data.zone}'`);
 }
 
 function handleStagesResponse(stages) {
@@ -1522,7 +1514,6 @@ function handleStagesResponse(stages) {
     const stage = stages.find(s => s.active) || stages[0];
     if (stage && stage.name && !stageScanRequested) {
         stageScanRequested = true;
-        console.log(`[Stage] Requesting block scan for stage: ${stage.name}`);
         requestStageBlocks(stage.name);
     }
 }
@@ -1532,7 +1523,6 @@ function handleStageBlocksResponse(data) {
         console.warn('[Stage] Block scan error:', data.error);
         return;
     }
-    console.log(`[Stage] Received ${data.blocks ? data.blocks.length : 0} scanned blocks`);
     renderStageBlocks(data);
 
     // Hide procedural environment once real blocks are loaded
@@ -1550,7 +1540,6 @@ function rescanStage() {
     zoneEntitiesData = null;
     ws.send(JSON.stringify({ type: 'get_zones' }));
     ws.send(JSON.stringify({ type: 'get_stages' }));
-    console.log('[Stage] Rescan requested');
 }
 
 function requestStageBlocks(stageName) {

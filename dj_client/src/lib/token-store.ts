@@ -44,7 +44,7 @@ export async function initTokenStore(): Promise<void> {
     cachedAccessToken = (await store.get<string>('accessToken')) ?? null;
     cachedRefreshToken = (await store.get<string>('refreshToken')) ?? null;
     cachedExpiresAt = (await store.get<number>('expiresAt')) ?? null;
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Failed to load token store:", err);
   }
 
@@ -106,7 +106,7 @@ async function persistTokens(): Promise<void> {
     if (cachedExpiresAt) {
       await store.set('expiresAt', cachedExpiresAt);
     }
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Failed to persist tokens to store:", err);
   }
 }
@@ -131,7 +131,7 @@ export async function clearTokens(): Promise<void> {
       await store.delete('accessToken');
       await store.delete('refreshToken');
       await store.delete('expiresAt');
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to clear tokens from store:", err);
     }
   }

@@ -44,7 +44,7 @@ export function useAudioSources(): UseAudioSourcesReturn {
           : false;
         return savedSourceExists ? savedSourceId : sources[0].id;
       });
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Failed to load audio sources:', e);
     }
   };
@@ -57,7 +57,7 @@ export function useAudioSources(): UseAudioSourcesReturn {
     if (sourceId && isConnected) {
       try {
         await invoke('change_audio_source', { sourceId });
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('Failed to change audio source:', e);
       }
     }
@@ -76,7 +76,7 @@ export function useAudioSources(): UseAudioSourcesReturn {
       await invoke('stop_capture');
       setIsTestingAudio(false);
       setTestBands([0, 0, 0, 0, 0]);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to stop test audio:', err);
     }
   };
@@ -93,7 +93,7 @@ export function useAudioSources(): UseAudioSourcesReturn {
         try {
           const levels = await invoke<AudioLevels>('get_audio_levels');
           setTestBands(levels.bands);
-        } catch (err) {
+        } catch (err: unknown) {
           console.error('Failed to get audio levels:', err);
         }
       }, 50);
@@ -105,7 +105,7 @@ export function useAudioSources(): UseAudioSourcesReturn {
         testTimeoutRef.current = null;
         void handleStopTest();
       }, 10000);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to start test audio:', err);
       setIsTestingAudio(false);
     }

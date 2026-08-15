@@ -1,14 +1,8 @@
 import { useRef, useEffect } from 'react';
+import type { AudioData } from '../types';
 
 const BAND_NAMES = ['Bass', 'Low', 'Mid', 'High', 'Air'];
 const BAND_COLORS = ['#ff9f43', '#ffd166', '#2fe098', '#43c5ff', '#c77dff'];
-
-interface AudioData {
-  bands: number[];
-  isBeat: boolean;
-  bpm: number;
-  beatIntensity: number;
-}
 
 interface FrequencyMeterProps {
   audioRef: React.RefObject<AudioData>;

@@ -1,6 +1,11 @@
 """Server authentication and utility functions.
 
 Extracted from ``app.routers.servers`` to decouple DB queries from routing.
+
+This module is framework-agnostic: it raises domain exceptions
+(``AuthenticationError``) rather than ``HTTPException``.  The router
+layer is responsible for catching these and returning the appropriate
+HTTP response.
 """
 
 from __future__ import annotations
@@ -10,12 +15,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session
 from app.models.db import VJServer
+from app.services.exceptions import AuthenticationError
 from app.services.password import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
@@ -27,12 +31,25 @@ def compute_key_prefix(raw_key: str) -> str:
 
 
 async def authenticate_server(
-    authorization: str = Header(..., description="Bearer <api_key>"),
-    session: AsyncSession = Depends(get_session),
+    authorization: str,
+    session: AsyncSession,
 ) -> VJServer:
-    """Dependency that verifies the Bearer API key and returns the server row."""
+    """Verify a Bearer API key and return the matching server row.
+
+    Parameters
+    ----------
+    authorization:
+        The raw ``Authorization`` header value (e.g. ``"Bearer <key>"``).
+    session:
+        An active SQLAlchemy async session.
+
+    Raises
+    ------
+    AuthenticationError
+        If the header format is wrong or no server matches the key.
+    """
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+        raise AuthenticationError("Invalid Authorization header format")
 
     api_key = authorization[len("Bearer ") :]
     prefix = compute_key_prefix(api_key)
@@ -59,7 +76,7 @@ async def authenticate_server(
         if verify_password(api_key, server.api_key_hash):
             return server
 
-    raise HTTPException(status_code=401, detail="Invalid API key")
+    raise AuthenticationError("Invalid API key")
 
 
 async def register_server(

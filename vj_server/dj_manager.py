@@ -189,7 +189,7 @@ class DJManagerMixin:
                 await websocket.send(_json_str({"type": "clock_sync_request", "server_time": now}))
                 dj._last_clock_resync = now
             except Exception:
-                pass
+                logger.debug(f"Failed to send clock resync request to DJ {dj.dj_id}")
 
     def _check_auth_rate_limit(self, ip: str) -> bool:
         """Check if an IP has exceeded the auth rate limit. Returns True if rate limited."""
@@ -1017,7 +1017,7 @@ class DJManagerMixin:
             )
             await ws.close(4006, "Connection denied by VJ")
         except Exception:
-            pass
+            logger.debug(f"Error sending auth_denied/closing websocket for DJ {dj_id}")
 
         await self._broadcast_to_browsers(
             _json_str(
@@ -1355,5 +1355,6 @@ class DJManagerMixin:
             try:
                 await client.send(message)
             except Exception:
+                logger.debug("Failed to send connect codes to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients

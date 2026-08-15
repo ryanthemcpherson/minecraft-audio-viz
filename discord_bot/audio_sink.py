@@ -2,11 +2,15 @@
 Custom audio sink for capturing Discord voice channel audio.
 """
 
+import logging
+
 import discord
 from discord.sinks import Sink, Filters
 import asyncio
 from typing import Optional, Callable
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class VisualizerSink(Sink):
@@ -53,7 +57,7 @@ class VisualizerSink(Sink):
             try:
                 callback(data, user)
             except Exception as e:
-                print(f"Audio sink callback error: {e}")
+                logger.error("Audio sink callback error: %s", e)
 
     def cleanup(self):
         """Called when recording stops."""
@@ -155,9 +159,9 @@ class MixedAudioSink(Sink):
                 try:
                     callback(data)
                 except Exception as e:
-                    print(f"Audio sink callback error: {e}")
+                    logger.error("Audio sink callback error: %s", e)
         except Exception as e:
-            print(f"Audio mixing error: {e}")
+            logger.error("Audio mixing error: %s", e)
 
     def _flush_mixed_audio(self):
         """Flush the mixed audio buffer to all callbacks."""
@@ -186,14 +190,14 @@ class MixedAudioSink(Sink):
                 try:
                     callback(mixed_bytes)
                 except Exception as e:
-                    print(f"Audio sink callback error: {e}")
+                    logger.error("Audio sink callback error: %s", e)
 
             # Reset accumulator for next frame
             self._mix_accumulator.fill(0)
             self._frame_count = 0
 
         except Exception as e:
-            print(f"Audio flush error: {e}")
+            logger.error("Audio flush error: %s", e)
 
     def cleanup(self):
         """Called when recording stops."""

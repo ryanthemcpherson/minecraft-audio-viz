@@ -24,7 +24,7 @@ export default function ConnectedView({
   onSignIn,
 }: ConnectedViewProps) {
   const handleSourceChange = (sourceId: string | null) => {
-    void audioSources.handleSourceChange(sourceId, connection.status.connected);
+    void audioSources.handleSourceChange(sourceId, connection.status.isConnected);
   };
 
   return (
@@ -32,7 +32,7 @@ export default function ConnectedView({
       <TopBar
         djName={connection.djName}
         showName={connection.showName}
-        isBeat={connection.isBeatForUI && connection.status.connected}
+        isBeat={connection.isBeatForUI && connection.status.isConnected}
         isConnected={true}
         user={auth.user}
         isSignedIn={auth.isSignedIn}
@@ -44,7 +44,7 @@ export default function ConnectedView({
         {/* Compact layout (<720px) */}
         <div className="compact-only">
           <StatusStrip
-            connected={connection.status.connected}
+            isConnected={connection.status.isConnected}
             isActive={connection.status.is_active}
             showName={connection.showName}
             queuePosition={connection.status.queue_position}

@@ -1,5 +1,6 @@
 import BeatIndicator from './BeatIndicator';
 import ProfileChip from './ProfileChip';
+import type { UserProfileResponse } from '../lib/api';
 
 interface TopBarProps {
   djName: string;
@@ -7,7 +8,7 @@ interface TopBarProps {
   showName: string | null;
   isBeat: boolean;
   isConnected: boolean;
-  user: any | null;
+  user: UserProfileResponse | null;
   isSignedIn: boolean;
   onSignOut: () => void;
   onSignIn: () => void;

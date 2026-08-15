@@ -212,7 +212,7 @@ async function tryRefreshAccessToken(): Promise<string | null> {
       const res = await refreshToken(stored);
       storeRefreshToken(res.refresh_token);
       return res.access_token;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to refresh access token:", err);
       clearStoredRefreshToken();
       return null;
@@ -350,7 +350,7 @@ export function getOAuthProvider(state: string): "discord" | "google" {
     while (b64.length % 4) b64 += "=";
     const payload = JSON.parse(atob(b64));
     if (payload.provider === "google") return "google";
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Failed to decode OAuth provider from state JWT:", err);
   }
   return "discord";
@@ -582,25 +582,10 @@ export async function getDJProfileBySlug(slug: string): Promise<DJProfile> {
   return api<DJProfile>(`/api/v1/dj/by-slug/${slug}`);
 }
 
-export async function fetchDashboardSummary(
-  accessToken: string
-): Promise<DashboardSummary> {
-  return api<DashboardSummary>("/api/v1/dashboard/summary", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-}
-
 export async function fetchUnifiedDashboard(
   accessToken: string
 ): Promise<UnifiedDashboard> {
   return api<UnifiedDashboard>("/api/v1/dashboard/unified", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-}
-
-export async function resetOnboarding(accessToken: string): Promise<User> {
-  return api<User>("/api/v1/onboarding/reset", {
-    method: "POST",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 }

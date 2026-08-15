@@ -1,12 +1,5 @@
 import React from 'react';
-
-interface RosterDJ {
-  dj_id: string;
-  dj_name: string;
-  is_active: boolean;
-  avatar_url: string | null;
-  queue_position: number;
-}
+import type { RosterDJ } from '../types';
 
 interface QueuePanelProps {
   roster: {

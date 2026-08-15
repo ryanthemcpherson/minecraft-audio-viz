@@ -172,7 +172,7 @@ export default function ProfileEditPage() {
           } else {
             setSlugAvailable(res.available);
           }
-        } catch (err) {
+        } catch (err: unknown) {
           console.error("Failed to check slug availability:", err);
           setSlugAvailable(null);
         } finally {
@@ -386,7 +386,7 @@ export default function ProfileEditPage() {
               required
               value={djName}
               onChange={(e) => setDjName(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="DJ Nova"
             />
           </div>
@@ -403,7 +403,7 @@ export default function ProfileEditPage() {
                 type="text"
                 value={slug}
                 onChange={(e) => handleSlugChange(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                 placeholder="dj-nova"
                 maxLength={30}
               />
@@ -430,7 +430,7 @@ export default function ProfileEditPage() {
               id="bio"
               value={bio}
               onChange={(e) => setBio(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 resize-none"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500 resize-none"
               rows={3}
               placeholder="Tell people about yourself"
               maxLength={500}
@@ -447,7 +447,7 @@ export default function ProfileEditPage() {
               type="text"
               value={genres}
               onChange={(e) => setGenres(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
               placeholder="House, Techno, Drum & Bass"
               maxLength={500}
             />
@@ -470,7 +470,7 @@ export default function ProfileEditPage() {
                 type="url"
                 value={soundcloudUrl}
                 onChange={(e) => setSoundcloudUrl(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#ff5500]/50"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#ff5500]/50 focus-visible:ring-2 focus-visible:ring-[#ff5500]"
                 placeholder="https://soundcloud.com/your-name"
               />
             </div>
@@ -486,7 +486,7 @@ export default function ProfileEditPage() {
                 type="url"
                 value={spotifyUrl}
                 onChange={(e) => setSpotifyUrl(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#1DB954]/50"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-[#1DB954]/50 focus-visible:ring-2 focus-visible:ring-[#1DB954]"
                 placeholder="https://open.spotify.com/artist/..."
               />
             </div>
@@ -502,7 +502,7 @@ export default function ProfileEditPage() {
                 type="url"
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50 focus-visible:ring-2 focus-visible:ring-cyan-500"
                 placeholder="https://yoursite.com"
               />
             </div>

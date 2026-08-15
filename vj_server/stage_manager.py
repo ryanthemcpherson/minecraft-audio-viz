@@ -632,7 +632,7 @@ class StageManagerMixin:
             explicit_count = config.get("entity_count", zone_entry.get("entity_count"))
             try:
                 explicit_count = int(explicit_count)
-            except Exception:
+            except (TypeError, ValueError):
                 explicit_count = None
             if explicit_count is not None and explicit_count < 1:
                 explicit_count = None
@@ -709,7 +709,7 @@ class StageManagerMixin:
                 try:
                     self._pattern_file_mtimes[lua_file.name] = lua_file.stat().st_mtime
                 except Exception:
-                    pass
+                    logger.debug(f"Failed to stat pattern file {lua_file.name} during mtime cache init")
 
         while self._running:
             try:
@@ -848,6 +848,7 @@ class StageManagerMixin:
             try:
                 await client.send(message)
             except Exception:
+                logger.debug("Failed to send patterns list to browser client, marking as dead")
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
 
@@ -1034,7 +1035,7 @@ class StageManagerMixin:
             explicit_count = zone_info.get("entity_count")
             try:
                 explicit_count = int(explicit_count) if explicit_count is not None else None
-            except Exception:
+            except (TypeError, ValueError):
                 explicit_count = None
             if explicit_count is not None and explicit_count < 1:
                 explicit_count = None

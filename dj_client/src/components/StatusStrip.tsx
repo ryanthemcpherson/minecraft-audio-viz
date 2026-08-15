@@ -1,5 +1,5 @@
 interface StatusStripProps {
-  connected: boolean;
+  isConnected: boolean;
   isActive: boolean;
   showName: string | null;
   queuePosition: number;
@@ -11,15 +11,15 @@ interface StatusStripProps {
 }
 
 export default function StatusStrip({
-  connected, isActive, showName, queuePosition, totalDjs,
+  isConnected, isActive, showName, queuePosition, totalDjs,
   activeDjName, latencyMs, mcConnected, bpm,
 }: StatusStripProps) {
-  if (!connected) return null;
+  if (!isConnected) return null;
 
   return (
     <div className={`status-strip ${isActive ? 'status-strip--live' : ''}`}>
       <div className="status-strip-row">
-        <span className={`status-strip-dot ${connected ? 'connected' : 'disconnected'}`} />
+        <span className={`status-strip-dot ${isConnected ? 'connected' : 'disconnected'}`} />
         {isActive ? (
           <span className="status-strip-badge">LIVE</span>
         ) : (

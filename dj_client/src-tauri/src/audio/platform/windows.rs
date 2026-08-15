@@ -48,7 +48,6 @@ use windows::core::{HRESULT, Interface};
 const MIN_PROCESS_LOOPBACK_BUILD: u32 = 20348;
 
 /// REFTIMES per second for WASAPI timing
-#[allow(dead_code)]
 const REFTIMES_PER_SEC: i64 = 10_000_000;
 
 /// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT {00000003-0000-0010-8000-00aa00389b71}
@@ -254,13 +253,12 @@ pub fn start_process_loopback(
             // it returns E_ILLEGAL_METHOD_CALL (0x8000000E).
             unsafe {
                 let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-                // Use eprintln! for guaranteed visibility (env_logger defaults to error-only)
                 if hr.0 == 0 {
-                    eprintln!("[process-loopback] COM MTA initialized (S_OK)");
+                    log::debug!("[process-loopback] COM MTA initialized (S_OK)");
                 } else if hr.0 == 1 {
-                    eprintln!("[process-loopback] COM already MTA (S_FALSE)");
+                    log::debug!("[process-loopback] COM already MTA (S_FALSE)");
                 } else {
-                    eprintln!(
+                    log::error!(
                         "[process-loopback] COM MTA init FAILED: HRESULT 0x{:08X}",
                         hr.0 as u32
                     );
@@ -362,7 +360,7 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         },
     });
 
-    eprintln!(
+    log::debug!(
         "[process-loopback] Activating PID={}, PROPVARIANT size={}, params_size={}, align={}",
         pid,
         std::mem::size_of::<PROPVARIANT>(),
@@ -381,14 +379,14 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         &handler,
     )
     .map_err(|e| {
-        eprintln!(
+        log::error!(
             "[process-loopback] ActivateAudioInterfaceAsync FAILED: {} (PID {})",
             e, pid
         );
         format!("ActivateAudioInterfaceAsync failed: {} (PID {})", e, pid)
     })?;
 
-    eprintln!(
+    log::debug!(
         "[process-loopback] ActivateAudioInterfaceAsync call succeeded, waiting for completion..."
     );
 
@@ -413,7 +411,7 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         ));
     }
 
-    eprintln!("[process-loopback] Audio interface activated successfully");
+    log::debug!("[process-loopback] Audio interface activated successfully");
 
     let unknown = activated_interface.ok_or("No audio interface returned")?;
     let audio_client: IAudioClient = unknown
@@ -428,7 +426,7 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
             let sr = mix_format.nSamplesPerSec;
             let ch = mix_format.nChannels;
             let bits = mix_format.wBitsPerSample;
-            eprintln!(
+            log::debug!(
                 "[process-loopback] Mix format: {}Hz, {} ch, {} bits",
                 sr, ch, bits
             );
@@ -438,7 +436,7 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
             (sr, ch)
         }
         Err(e) => {
-            eprintln!(
+            log::warn!(
                 "[process-loopback] GetMixFormat returned {}, using 48kHz stereo fallback",
                 e
             );
@@ -493,7 +491,7 @@ unsafe fn activate_process_loopback(pid: u32) -> Result<(IAudioClient, u32, u16)
         .Start()
         .map_err(|e| format!("IAudioClient::Start failed: {}", e))?;
 
-    eprintln!(
+    log::info!(
         "[process-loopback] Capture started for PID {} ({}Hz, {} ch)",
         pid, sample_rate, channels
     );

@@ -24,7 +24,7 @@ function isDesktopOAuthState(state: string): boolean {
     while (b64.length % 4) b64 += "=";
     const payload = JSON.parse(atob(b64));
     return !!payload.desktop;
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Failed to decode desktop OAuth state:", err);
     return false;
   }

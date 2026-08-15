@@ -69,16 +69,6 @@ class AudioStateTest {
     }
 
     @Test
-    @DisplayName("getSubBass() delegates to getBass() (deprecated)")
-    @SuppressWarnings("deprecation")
-    void subBassDelegatesToBass() {
-        double[] bands = {0.77, 0.2, 0.3, 0.4, 0.5};
-        AudioState state = new AudioState(bands, 0.5, false, 0.0, 0);
-
-        assertEquals(state.getBass(), state.getSubBass());
-    }
-
-    @Test
     @DisplayName("getBand() returns 0 for out-of-bounds indices")
     void getBandOutOfBoundsReturnsZero() {
         AudioState state = AudioState.silent();

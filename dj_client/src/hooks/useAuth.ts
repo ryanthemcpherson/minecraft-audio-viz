@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
 import * as api from '../lib/api';
 import type { UserProfileResponse } from '../lib/api';
@@ -25,6 +25,16 @@ export function useAuth(): UseAuthReturn {
   const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
 
   const isSignedIn = user !== null;
+
+  // AbortController ref for cancelling OAuth polling on unmount
+  const oauthAbortRef = useRef<AbortController | null>(null);
+
+  // Cancel any in-flight OAuth polling on unmount
+  useEffect(() => {
+    return () => {
+      oauthAbortRef.current?.abort();
+    };
+  }, []);
 
   // Initialize token store, then restore session
   useEffect(() => {
@@ -55,7 +65,7 @@ export function useAuth(): UseAuthReturn {
       if (api.isTokenExpiringSoon()) {
         try {
           await api.refreshTokens();
-        } catch (err) {
+        } catch (err: unknown) {
           console.error("Failed to refresh token:", err);
         }
       }
@@ -70,7 +80,7 @@ export function useAuth(): UseAuthReturn {
       await api.login(email, password);
       const profile = await api.getProfile();
       setUser(profile);
-    } catch (e) {
+    } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
       throw e;
     } finally {
@@ -86,7 +96,7 @@ export function useAuth(): UseAuthReturn {
         await api.register(email, password, displayName);
         const profile = await api.getProfile();
         setUser(profile);
-      } catch (e) {
+      } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;
       } finally {
@@ -99,6 +109,12 @@ export function useAuth(): UseAuthReturn {
   const signInWithDiscord = useCallback(async () => {
     setError(null);
     setIsLoading(true);
+
+    // Abort any previous OAuth polling
+    oauthAbortRef.current?.abort();
+    const controller = new AbortController();
+    oauthAbortRef.current = controller;
+
     try {
       const { authorize_url, poll_token } = await api.getDiscordAuthorizeUrl(true);
       await open(authorize_url);
@@ -109,7 +125,15 @@ export function useAuth(): UseAuthReturn {
       }
       const maxAttempts = 150; // 5 minutes at 2s intervals
       for (let i = 0; i < maxAttempts; i++) {
-        await new Promise(r => setTimeout(r, 2000));
+        if (controller.signal.aborted) return;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 2000);
+          controller.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        });
+        if (controller.signal.aborted) return;
         const result = await api.pollDesktopAuth(poll_token);
         if (result.status === 'complete' && result.exchange_code) {
           await api.exchangeDesktopCode(result.exchange_code);
@@ -120,7 +144,8 @@ export function useAuth(): UseAuthReturn {
         if (result.status === 'expired') break;
       }
       setError('Sign-in timed out. Please try again.');
-    } catch (e) {
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
@@ -130,6 +155,12 @@ export function useAuth(): UseAuthReturn {
   const signInWithGoogle = useCallback(async () => {
     setError(null);
     setIsLoading(true);
+
+    // Abort any previous OAuth polling
+    oauthAbortRef.current?.abort();
+    const controller = new AbortController();
+    oauthAbortRef.current = controller;
+
     try {
       const { authorize_url, poll_token } = await api.getGoogleAuthorizeUrl(true);
       await open(authorize_url);
@@ -140,7 +171,15 @@ export function useAuth(): UseAuthReturn {
       }
       const maxAttempts = 150; // 5 minutes at 2s intervals
       for (let i = 0; i < maxAttempts; i++) {
-        await new Promise(r => setTimeout(r, 2000));
+        if (controller.signal.aborted) return;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 2000);
+          controller.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        });
+        if (controller.signal.aborted) return;
         const result = await api.pollDesktopAuth(poll_token);
         if (result.status === 'complete' && result.exchange_code) {
           await api.exchangeDesktopCode(result.exchange_code);
@@ -151,7 +190,8 @@ export function useAuth(): UseAuthReturn {
         if (result.status === 'expired') break;
       }
       setError('Sign-in timed out. Please try again.');
-    } catch (e) {
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
@@ -163,7 +203,7 @@ export function useAuth(): UseAuthReturn {
     try {
       const { message } = await api.resendVerification();
       setVerificationMessage(message);
-    } catch (e) {
+    } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);

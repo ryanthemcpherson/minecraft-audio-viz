@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../lib/api';
 import type { UseAuthReturn } from '../hooks/useAuth';
 
@@ -7,6 +7,15 @@ type Tab = 'signin' | 'register' | 'forgot';
 interface AuthModalProps {
   auth: UseAuthReturn;
   onClose: () => void;
+}
+
+/**
+ * Returns all focusable elements within a container.
+ */
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selector =
+    'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(container.querySelectorAll<HTMLElement>(selector));
 }
 
 export default function AuthModal({ auth, onClose }: AuthModalProps) {
@@ -19,6 +28,83 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
   const [forgotMessage, setForgotMessage] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
 
+  const modalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Capture the element that had focus when modal opened, so we can restore it on close
+  useEffect(() => {
+    triggerRef.current = document.activeElement as HTMLElement | null;
+  }, []);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  // Focus trap: keep Tab cycling within the modal
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      const focusable = getFocusableElements(modal);
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    modal.addEventListener('keydown', handleTab);
+    return () => modal.removeEventListener('keydown', handleTab);
+  }, [tab]); // re-attach when tab changes since focusable elements change
+
+  // Auto-focus the first input when tab changes
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+    // Delay slightly to allow DOM to update
+    requestAnimationFrame(() => {
+      const focusable = getFocusableElements(modal);
+      if (focusable.length > 0) {
+        focusable[0].focus();
+      }
+    });
+  }, [tab]);
+
+  // Return focus to trigger element on unmount
+  useEffect(() => {
+    return () => {
+      if (triggerRef.current && typeof triggerRef.current.focus === 'function') {
+        triggerRef.current.focus();
+      }
+    };
+  }, []);
+
+  const handleClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -28,7 +114,7 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
         await auth.register(email, password, displayName);
       }
       // Modal will auto-close via parent watching isSignedIn
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to submit auth form:", err);
     }
   };
@@ -41,7 +127,7 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
     try {
       const { message } = await api.forgotPassword(forgotEmail);
       setForgotMessage(message);
-    } catch (err) {
+    } catch (err: unknown) {
       setForgotError(err instanceof Error ? err.message : String(err));
     } finally {
       setForgotLoading(false);
@@ -51,9 +137,15 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
   if (tab === 'forgot') {
     return (
       <div className="welcome-overlay" onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}>
-        <div className="auth-modal">
+        <div
+          className="auth-modal"
+          ref={modalRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="auth-modal-title"
+        >
           <button
             className="auth-back"
             onClick={() => { setTab('signin'); setForgotMessage(null); setForgotError(null); }}
@@ -62,7 +154,7 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
             &larr; Back to sign in
           </button>
 
-          <h2 className="auth-heading">Reset Password</h2>
+          <h2 id="auth-modal-title" className="auth-heading">Reset Password</h2>
           <p className="auth-subtext">
             Enter your email and we'll send you a link to reset your password.
           </p>
@@ -96,7 +188,7 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
 
           <button
             className="btn btn-link auth-close"
-            onClick={onClose}
+            onClick={handleClose}
             type="button"
           >
             Cancel
@@ -108,9 +200,15 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
 
   return (
     <div className="welcome-overlay" onClick={(e) => {
-      if (e.target === e.currentTarget) onClose();
+      if (e.target === e.currentTarget) handleClose();
     }}>
-      <div className="auth-modal">
+      <div
+        className="auth-modal"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+      >
         <div className="auth-tabs">
           <button
             className={`auth-tab ${tab === 'signin' ? 'active' : ''}`}
@@ -128,6 +226,23 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
           </button>
         </div>
 
+        <h2
+          id="auth-modal-title"
+          style={{
+            position: 'absolute',
+            width: '1px',
+            height: '1px',
+            padding: 0,
+            margin: '-1px',
+            overflow: 'hidden',
+            clip: 'rect(0, 0, 0, 0)',
+            whiteSpace: 'nowrap',
+            borderWidth: 0,
+          }}
+        >
+          {tab === 'signin' ? 'Sign In' : 'Create Account'}
+        </h2>
+
         <form className="auth-form" onSubmit={handleSubmit}>
           {tab === 'register' && (
             <label className="input-label">
@@ -140,7 +255,6 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
                 placeholder="Your name"
                 maxLength={100}
                 required
-                autoFocus
               />
             </label>
           )}
@@ -154,7 +268,6 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
-              autoFocus={tab === 'signin'}
             />
           </label>
 
@@ -230,7 +343,7 @@ export default function AuthModal({ auth, onClose }: AuthModalProps) {
 
         <button
           className="btn btn-link auth-close"
-          onClick={onClose}
+          onClick={handleClose}
           type="button"
         >
           Cancel

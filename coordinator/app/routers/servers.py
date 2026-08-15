@@ -20,20 +20,14 @@ from app.models.schemas import (
     RegisterServerRequest,
     RegisterServerResponse,
 )
+from app.dependencies.server import authenticate_server
 from app.services.server_service import (
-    authenticate_server,
     compute_key_prefix,
-    update_heartbeat,
-)
-from app.services.server_service import (
     register_server as svc_register_server,
+    update_heartbeat,
 )
 
 logger = logging.getLogger(__name__)
-
-# Backwards-compatible aliases so existing imports from other routers still work.
-_authenticate_server = authenticate_server
-_compute_key_prefix = compute_key_prefix
 
 router = APIRouter(tags=["servers"])
 

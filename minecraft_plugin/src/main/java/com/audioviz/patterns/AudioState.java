@@ -89,15 +89,6 @@ public class AudioState {
     }
 
     /**
-     * Get sub-bass level - now returns bass (sub-bass removed for low latency).
-     * @deprecated Use getBass() instead
-     */
-    @Deprecated
-    public double getSubBass() {
-        return getBand(0);
-    }
-
-    /**
      * Get high-mid frequency level (band 3, 2-6kHz).
      */
     public double getHighMid() {
