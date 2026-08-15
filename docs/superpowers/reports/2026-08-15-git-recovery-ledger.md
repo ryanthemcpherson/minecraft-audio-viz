@@ -98,7 +98,7 @@ The 27 paths under `.codex/`, `.superpowers/`, and root `AGENTS.md` are local op
 |Branch|State at inventory|Preservation target|Status|
 |-|-|-|-|
 |`main`|Primary worktree; 74 untracked paths; at `6d3da5e`|No mutation; product paths copied to recovery branches; exact commit reachable from `origin/feature/low-latency-renderer`|Commit preserved remotely; primary files retained|
-|`release/paper-26.2`|Clean at `396a5ce`|Release execution branch|Preserved locally|
+|`release/paper-26.2`|Created at `396a5ce` and advanced only through approved design, plan, and recovery-ledger commits|Published as `origin/release/paper-26.2`; remote is verified after each push|Preserved and pushed|
 |`chore/dj-client-major-deps`|Clean at `a012b52`; upstream configuration points at `origin/main`|Existing `origin/chore/dj-client-major-deps` equals exact local head|Preserved remotely|
 |`feat/site-real-tests`|Clean at `825a17d`|`origin/feat/site-real-tests` at `825a17d81ce9dadb047c96e2030d61016002d384`|Preserved and pushed|
 |`fix/remove-drei-ghost-dep`|Clean at `dbccbda`|`origin/fix/remove-drei-ghost-dep` at `dbccbda00278984a0ac9909b80294ef3061fd429`|Preserved and pushed|
@@ -142,7 +142,7 @@ minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
 
 |Source|Destination|Verification|Result|
 |-|-|-|-|
-|Baseline inventory|This ledger on `release/paper-26.2`|Review and atomic commit|Pending|
+|Baseline inventory|This ledger on `release/paper-26.2`|Initial inventory committed as `8617ff6`; subsequent mappings committed atomically|Preserved|
 |`stash@{0}` plus paired product paths|`recovery/stash-0-refactor`|Remote head equals `0b100510046dc261ef9d42183f97b7f0ca234834`; all 45 copied files match their primary-worktree SHA-256; stash object remains present|Preserved|
 |`stash@{1}`|`recovery/stash-1-security`|Remote head equals `f76c1dbc1697291b8cefc7381f44dc21d4433a77`; committed tree exactly equals stash tree; stash object remains present|Preserved|
 |Low-latency untracked tests|`feature/low-latency-renderer`|Concurrent commit `a90d3b6` contains both tests; Java 25 focused suite passed 12 tests and full suite passed 978 tests at that commit; subsequent clean compatibility commit was fast-forward preserved and remote head equals `2c078d7b1118d2b1f26318940f820aff9655fd04`|Preserved|
@@ -163,3 +163,15 @@ No stash drop, worktree removal, branch deletion, untracked-file deletion, pull-
 - A later audit detected one more concurrent fast-forward on the renderer branch, `2c078d7 fix: preserve JSON render compatibility`. It was clean and was pushed additively. The recorded 12-test focused and 978-test full-suite results apply to its parent `a90d3b6`, not to the later compatibility commit.
 - The coordinator test environment created an untracked `coordinator/uv.lock`. It was not part of the original dirty-worktree recovery scope, was not committed, and has not been deleted. The Ruff formatter attempted to rewrite one recovered file; that hook change was discarded and the exact original dirty snapshot was committed after Ruff lint and Bandit passed.
 - Clean branch preservation was additive. Four missing same-name remote refs were created, while the extra local `chore/security-hardening` commit was pushed to `recovery/security-hardening-local` so the dirty PR 143 head remained unchanged.
+
+## G0 preservation gate result
+
+G0 passed on 2026-08-15:
+
+- Both original stash objects remain present.
+- Every local branch head is reachable from at least one `origin/*` remote ref.
+- The primary worktree still contains all 47 product recovery files and all 27 excluded local-tool paths; none were removed.
+- Recovery worktrees are clean after their commits.
+- The only new untracked path outside the primary worktree is `coordinator/uv.lock`, generated while preparing the WSL test environment. It remains intentionally untouched and is documented above.
+- The release branch is published as `origin/release/paper-26.2`.
+- No cleanup operation has been performed.
