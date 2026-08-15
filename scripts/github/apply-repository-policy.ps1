@@ -61,13 +61,6 @@ if ($LASTEXITCODE -ne 0) {
     throw 'GitHub CLI authentication is required.'
 }
 
-Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'main.json')
-Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'plugin-tag-creation.json')
-Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'plugin-tags.json')
-Set-NamedRuleset `
-    -PolicyPath (Join-Path $rulesetDirectory 'mod-tags.json') `
-    -PreviousNames @('Paper and Fabric release tag immutability')
-
 $pluginReleaseEnvironment = @{
     wait_timer = 0
     prevent_self_review = $false
@@ -82,6 +75,31 @@ $pluginReleaseEnvironment | & gh api --silent --method PUT `
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to configure the plugin-release environment.'
 }
+
+$allDeployKeys = @(Invoke-GhJson -Endpoint "repos/$repository/keys")
+$releaseDeployKeys = @($allDeployKeys | Where-Object {
+    $_.title -eq 'MCAV plugin release environment'
+})
+if ($releaseDeployKeys.Count -ne 1 -or $releaseDeployKeys[0].read_only -ne $false) {
+    throw 'A single write-enabled MCAV plugin release environment deploy key is required.'
+}
+if (@($allDeployKeys | Where-Object { $_.read_only -eq $false }).Count -ne 1) {
+    throw 'The plugin release credential must be the repository''s only write deploy key.'
+}
+$releaseEnvironmentSecrets = @(& gh secret list --repo $repository --env plugin-release --json name | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to list plugin-release environment secrets.'
+}
+if (@($releaseEnvironmentSecrets | Where-Object { $_.name -eq 'MCAV_PLUGIN_RELEASE_DEPLOY_KEY' }).Count -ne 1) {
+    throw 'The plugin-release environment requires MCAV_PLUGIN_RELEASE_DEPLOY_KEY.'
+}
+
+Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'main.json')
+Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'plugin-tag-creation.json')
+Set-NamedRuleset -PolicyPath (Join-Path $rulesetDirectory 'plugin-tags.json')
+Set-NamedRuleset `
+    -PolicyPath (Join-Path $rulesetDirectory 'mod-tags.json') `
+    -PreviousNames @('Paper and Fabric release tag immutability')
 
 & gh api --silent --method PUT "repos/$repository/actions/permissions/workflow" `
     -f default_workflow_permissions=read `

@@ -4,8 +4,8 @@
   "enforcement": "active",
   "bypass_actors": [
     {
-      "actor_id": 15368,
-      "actor_type": "Integration",
+      "actor_id": null,
+      "actor_type": "DeployKey",
       "bypass_mode": "always"
     }
   ],

@@ -69,8 +69,10 @@ function Assert-TagCreationPolicy {
 
     $bypassActors = @($Policy.bypass_actors)
     Assert-Equal $bypassActors.Count 1 "$expectedName bypass count"
-    Assert-Equal $bypassActors[0].actor_id 15368 "$expectedName bypass actor ID"
-    Assert-Equal $bypassActors[0].actor_type 'Integration' "$expectedName bypass actor type"
+    if ($null -ne $bypassActors[0].actor_id) {
+        throw "$expectedName bypass actor ID must be null for a deploy key."
+    }
+    Assert-Equal $bypassActors[0].actor_type 'DeployKey' "$expectedName bypass actor type"
     Assert-Equal $bypassActors[0].bypass_mode 'always' "$expectedName bypass mode"
 }
 
@@ -170,6 +172,9 @@ if ($releaseWorkflowContent -notmatch '(?m)^    environment: plugin-release\s*$'
 if ($releaseWorkflowContent -notmatch 'refs/tags/plugin-v1\.1\.0') {
     throw 'Plugin release workflow must derive the immutable 1.1.0 tag internally.'
 }
+if ($releaseWorkflowContent -notmatch 'MCAV_PLUGIN_RELEASE_DEPLOY_KEY') {
+    throw 'Plugin release workflow must use the environment-scoped deploy key.'
+}
 
 if ($StaticOnly) {
     Write-Output 'Static repository policy verified.'
@@ -196,6 +201,25 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Failed to read the plugin-release environment.'
 }
 Assert-PluginReleaseEnvironment $pluginReleaseEnvironment
+
+$allDeployKeys = @(gh api "repos/$repository/keys" | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to list repository deploy keys.'
+}
+$releaseDeployKeys = @($allDeployKeys | Where-Object {
+    $_.title -eq 'MCAV plugin release environment'
+})
+Assert-Equal $releaseDeployKeys.Count 1 'Release deploy key count'
+Assert-Equal $releaseDeployKeys[0].read_only $false 'Release deploy key write access'
+Assert-Equal @($allDeployKeys | Where-Object { $_.read_only -eq $false }).Count 1 'Repository write deploy-key count'
+
+$releaseEnvironmentSecrets = @(& gh secret list --repo $repository --env plugin-release --json name | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to list plugin-release environment secrets.'
+}
+Assert-Equal @($releaseEnvironmentSecrets | Where-Object {
+    $_.name -eq 'MCAV_PLUGIN_RELEASE_DEPLOY_KEY'
+}).Count 1 'Release deploy-key secret count'
 
 $phaseZeroPolicy = Get-LiveRuleset 'Phase 0 release tag provenance'
 Assert-Equal $phaseZeroPolicy.enforcement 'active' 'Phase 0 release tag enforcement'
