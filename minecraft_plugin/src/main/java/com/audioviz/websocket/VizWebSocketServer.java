@@ -65,6 +65,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private final AtomicLong totalMessagesSent = new AtomicLong(0);
     private final AtomicLong totalMessagesReceived = new AtomicLong(0);
     private final AtomicLong totalSendFailures = new AtomicLong(0);
+    private final AtomicLong lastParserOverloadWarningNanos = new AtomicLong(0);
 
     // Heartbeat constants
     private static final long HEARTBEAT_INTERVAL_TICKS = 300L; // 15 seconds
@@ -73,6 +74,7 @@ public class VizWebSocketServer extends WebSocketServer {
     private static final long AUTH_TIMEOUT_TICKS = 100L; // 5 seconds
     private static final int MAX_MESSAGE_SIZE = 262_144;
     private static final int MAX_AUTH_TOKEN_LENGTH = 1_024;
+    private static final long OVERLOAD_WARNING_INTERVAL_NANOS = 30_000_000_000L;
 
     public VizWebSocketServer(AudioVizPlugin plugin, int port) {
         this(
@@ -526,15 +528,34 @@ public class VizWebSocketServer extends WebSocketServer {
         ClientInfo info,
         RuntimeException exception
     ) {
-        plugin.getLogger().log(
-            Level.WARNING,
-            "Error processing WebSocket message",
-            exception
-        );
         JsonObject error = new JsonObject();
         error.addProperty("type", "error");
-        error.addProperty("message", exception.getMessage());
+        if (exception instanceof RejectedExecutionException) {
+            warnParserOverload();
+            error.addProperty("code", "server_busy");
+            error.addProperty("message", "Server is busy; retry control messages");
+        } else {
+            plugin.getLogger().log(
+                Level.WARNING,
+                "Error processing WebSocket message",
+                exception
+            );
+            error.addProperty("code", "invalid_message");
+            error.addProperty("message", "Message could not be processed");
+        }
         sendToActiveClient(conn, info, gson.toJson(error));
+    }
+
+    private void warnParserOverload() {
+        long now = System.nanoTime();
+        long previous = lastParserOverloadWarningNanos.get();
+        boolean warningDue = previous == 0
+            || now - previous >= OVERLOAD_WARNING_INTERVAL_NANOS;
+        if (warningDue && lastParserOverloadWarningNanos.compareAndSet(previous, now)) {
+            plugin.getLogger().warning(
+                "WebSocket parser queue is full; control messages are being rejected"
+            );
+        }
     }
 
     private void handleForActiveClient(
@@ -900,6 +921,7 @@ public class VizWebSocketServer extends WebSocketServer {
      */
     public JsonObject getMetrics() {
         JsonObject metrics = new JsonObject();
+        MessageQueue.QueueMetrics queueMetrics = messageQueue.getMetrics();
         metrics.addProperty("type", "ws_metrics");
         metrics.addProperty("totalConnections", totalConnections.get());
         metrics.addProperty("totalDisconnections", totalDisconnections.get());
@@ -907,6 +929,28 @@ public class VizWebSocketServer extends WebSocketServer {
         metrics.addProperty("totalMessagesSent", totalMessagesSent.get());
         metrics.addProperty("totalMessagesReceived", totalMessagesReceived.get());
         metrics.addProperty("totalSendFailures", totalSendFailures.get());
+        metrics.addProperty("queueProcessed", queueMetrics.processed());
+        metrics.addProperty("queueBatches", queueMetrics.batches());
+        metrics.addProperty("queueDropped", queueMetrics.dropped());
+        metrics.addProperty("parsedQueueDepth", queueMetrics.parsedQueueDepth());
+        metrics.addProperty("rawQueueDepth", queueMetrics.rawQueueDepth());
+
+        var latencyTracker = plugin.getLatencyTracker();
+        var updateStats = latencyTracker == null
+            ? null
+            : latencyTracker.getMainThreadUpdateStats();
+        metrics.addProperty(
+            "mainThreadUpdateAvgMs",
+            updateStats == null ? 0.0 : updateStats.getAvg()
+        );
+        metrics.addProperty(
+            "mainThreadUpdateP95Ms",
+            updateStats == null ? 0.0 : updateStats.getP95()
+        );
+        metrics.addProperty(
+            "mainThreadUpdateMaxMs",
+            updateStats == null ? 0.0 : updateStats.getMax()
+        );
         metrics.addProperty("timestamp", System.currentTimeMillis());
         return metrics;
     }

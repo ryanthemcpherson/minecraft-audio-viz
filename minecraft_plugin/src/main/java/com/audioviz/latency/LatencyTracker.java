@@ -10,6 +10,7 @@ public class LatencyTracker {
 
     private final RollingWindow networkLatency = new RollingWindow(100);
     private final RollingWindow processingLatency = new RollingWindow(100);
+    private final RollingWindow mainThreadUpdateDuration = new RollingWindow(100);
 
     private boolean clockOffsetInitialized = false;
     private long clockOffsetMs = 0;
@@ -39,8 +40,14 @@ public class LatencyTracker {
         processingLatency.record(Math.max(0, ms));
     }
 
+    /** Record the wall-clock duration of one main-thread queue update. */
+    public void recordMainThreadUpdateDuration(double milliseconds) {
+        mainThreadUpdateDuration.record(Math.max(0, milliseconds));
+    }
+
     public RollingWindow getNetworkStats() { return networkLatency; }
     public RollingWindow getProcessingStats() { return processingLatency; }
+    public RollingWindow getMainThreadUpdateStats() { return mainThreadUpdateDuration; }
 
     /**
      * Get total average latency (network + processing).
