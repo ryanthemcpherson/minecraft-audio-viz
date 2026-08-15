@@ -1,9 +1,39 @@
 package com.audioviz.metrics;
 
+import com.audioviz.AudioVizPlugin;
+import com.audioviz.entities.EntityPoolManager;
+import com.audioviz.zones.VisualizationZone;
+import com.audioviz.zones.ZoneManager;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.junit.jupiter.api.*;
+
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class MetricsDisplayTest {
+
+    @Test
+    @DisplayName("entity count uses the canonical per-zone limit")
+    void entityCountUsesCanonicalPerZoneLimit() {
+        AudioVizPlugin plugin = mock(AudioVizPlugin.class);
+        EntityPoolManager entityPoolManager = mock(EntityPoolManager.class);
+        ZoneManager zoneManager = mock(ZoneManager.class);
+        VisualizationZone zone = mock(VisualizationZone.class);
+        FileConfiguration config = mock(FileConfiguration.class);
+
+        when(plugin.getEntityPoolManager()).thenReturn(entityPoolManager);
+        when(plugin.getZoneManager()).thenReturn(zoneManager);
+        when(plugin.getConfig()).thenReturn(config);
+        when(zoneManager.getAllZones()).thenReturn(List.of(zone));
+        when(zone.getName()).thenReturn("main");
+        when(entityPoolManager.getEntityCount("main")).thenReturn(12);
+        when(config.getInt("performance.max_entities_per_zone", 256)).thenReturn(256);
+
+        assertEquals("12/256", new MetricsDisplay(plugin).collectEntityCount());
+        verify(config).getInt("performance.max_entities_per_zone", 256);
+    }
 
     @Nested
     @DisplayName("Metric Formatting")
