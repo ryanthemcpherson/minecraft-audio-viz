@@ -131,12 +131,9 @@ minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
 - Authored PR 143: `chore/security-hardening`, dirty
 - Secret scanning and push protection are enabled
 - Workflow default permissions do not allow GitHub Actions to approve pull-request reviews
-- Existing rulesets:
-  - `18833547` — Paper/Fabric tag immutability
-  - `18824190` — Phase0 release tag provenance
-  - `12627523` — protect `main`
-- Current tag creation restrictions prevent creating `plugin-v1.1.0`; governance repair must be applied and verified before release promotion
-- Existing GitHub Actions are not yet fully SHA-pinned
+- Baseline rulesets were `12627523` (main), `18833547` (Paper/Fabric tags), and `18824190` (Phase 0 tags). The verified G1 state is recorded below.
+- Baseline tag creation restrictions prevented creating `plugin-v1.1.0`; G1 replaced the overlap with separate creation and immutability policies.
+- Baseline GitHub Actions used moving tags; the release branch now SHA-pins every external action.
 
 ## Recovery mapping log
 
@@ -175,3 +172,54 @@ G0 passed on 2026-08-15:
 - The only new untracked path outside the primary worktree is `coordinator/uv.lock`, generated while preparing the WSL test environment. It remains intentionally untouched and is documented above.
 - The release branch is published as `origin/release/paper-26.2`.
 - No cleanup operation has been performed.
+
+## G1 governance gate result
+
+G1 passed on 2026-08-15:
+
+- Repository-local Git defaults are `fetch.prune=true`, `pull.rebase=true`, `rebase.autoStash=true`, `rerere.enabled=true`, and `rerere.autoupdate=true`.
+- `docs/GIT_WORKFLOW.md` defines branch, worktree, commit, dependency, release, recovery, and cleanup policy.
+- Root, DJ client, site, and worker npm audits each report zero vulnerabilities. Their builds or typechecks passed, including 48 Rust tests and 103 site tests.
+- Dependabot has nine weekly entries, each capped at three open version-update pull requests and grouped by component/ecosystem. The pre-change 47-PR inventory is retained in `2026-08-15-dependabot-triage.json`; no PR was closed by this task.
+- All external GitHub Actions references are pinned to 40-character commit SHAs, all checkouts disable credential persistence, workflow defaults grant at most read permissions, and `security.yml` runs for every pull request targeting `main`.
+- Workflow default permissions are `read`; workflows cannot approve pull-request reviews.
+- Dependabot vulnerability alerts and automated security fixes are enabled.
+- Live rulesets:
+  - `12627523` — `Protect main`: active, no bypass actors, strict/up-to-date `CI Passed` and `Security Summary`, required conversation resolution, squash/rebase only, zero approvals for the solo-maintainer state.
+  - `20892408` — `Paper release tag creation`: active, creation-only, repository-admin bypass for deliberate human promotion.
+  - `20892410` — `Paper release tag immutability`: active, no bypass actors, blocks update/deletion/non-fast-forward for `plugin-v*`.
+  - `18833547` — renamed to `Fabric release tag quarantine`: active, no bypass actors, blocks creation/update/deletion/non-fast-forward for `mod-v*`.
+  - `18824190` — `Phase 0 release tag provenance`: remains active with no bypass for generic `v*` and `dj-v*` quarantine.
+- GitHub rejected the system GitHub Actions app as a bypass actor because this is a personal repository. The split creation/immutability design preserves immutable tags without storing a PAT or provisioning a custom GitHub App. Promotion is therefore an authenticated human action after candidate approval.
+- `verify-dependabot-policy.ps1`, `verify-workflow-pins.ps1`, and the live `verify-repository-policy.ps1` all pass.
+- A fetch pruned only local remote-tracking references for branches already deleted on GitHub; this task did not delete any remote branch.
+
+## Deferred cleanup targets — not authorized
+
+The following exact targets may be reviewed later. Their presence here is not approval to remove or close them.
+
+- Stash objects:
+  - `789d63a479ed182bd61ab86e6e549cd3c9190d1e`
+  - `728505647db03c11d23c7d09ae43615829dbf18c`
+- Recovery worktrees:
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\recovery-stash-0-refactor`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\recovery-stash-1-security`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\recovery-root-untracked-2026-08-15`
+- Historical agent worktrees:
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a2856de9`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a3dd5a96`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a55f4eb5`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a866290d`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-abf250f9`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-ad61c2ee`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-aff689d8`
+- Recovery remote branches:
+  - `recovery/stash-0-refactor`
+  - `recovery/stash-1-security`
+  - `recovery/root-untracked-2026-08-15`
+  - `recovery/security-hardening-local`
+- Temporary local branch `worktree-agent-a1a6ba06`.
+- The 47 original product files and 27 local-tool paths still untracked in the primary worktree.
+- Generated, untracked `coordinator/uv.lock` in `agent-ad61c2ee`.
+- Authored PRs 142 and 143, plus the Dependabot PRs enumerated in `2026-08-15-dependabot-triage.json`.
+- Feature branches and worktrees remain active and are not cleanup candidates until their work is reviewed or integrated.
