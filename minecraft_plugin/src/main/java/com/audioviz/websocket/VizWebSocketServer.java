@@ -166,7 +166,7 @@ public class VizWebSocketServer extends WebSocketServer {
             if (!acceptingMessages) {
                 info = null;
             } else {
-                info = new ClientInfo(conn.getRemoteSocketAddress().toString());
+                info = new ClientInfo(conn, conn.getRemoteSocketAddress().toString());
                 // Acquire the opening generation lease before publishing the
                 // client. Shutdown drains the intake gate before snapshotting,
                 // so every accepted onOpen is represented by an in-flight lease.
@@ -467,11 +467,9 @@ public class VizWebSocketServer extends WebSocketServer {
                 return false;
             }
             try {
-                MessageQueue.MessageGuard guard = operation ->
-                    runForActiveClient(conn, info, operation);
                 messageQueue.parseAndDispatch(
                     message,
-                    guard,
+                    info.messageGuard,
                     (parsed, parsedGuard) -> dispatchParsedMessage(
                         conn,
                         info,
@@ -946,16 +944,19 @@ public class VizWebSocketServer extends WebSocketServer {
     /**
      * Client connection info.
      */
-    private static class ClientInfo {
+    private final class ClientInfo {
         final String address;
         final long connectedAt;
+        final MessageQueue.MessageGuard messageGuard;
         private volatile ClientState state;
         private int inFlightOperations;
         private boolean closeWasActive;
 
-        ClientInfo(String address) {
+        ClientInfo(WebSocket connection, String address) {
             this.address = address;
             this.connectedAt = System.currentTimeMillis();
+            this.messageGuard = operation ->
+                runForActiveClient(connection, this, operation);
             this.state = ClientState.PENDING;
             this.inFlightOperations = 0;
             this.closeWasActive = false;

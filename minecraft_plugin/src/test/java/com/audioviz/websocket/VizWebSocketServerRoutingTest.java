@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 
 import java.net.InetSocketAddress;
 import java.util.List;
@@ -28,6 +29,8 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -37,6 +40,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -186,6 +190,32 @@ class VizWebSocketServerRoutingTest {
         } finally {
             queue.stop();
         }
+    }
+
+    @Test
+    void guardIdentityIsStableWithinGenerationAndDistinctAfterReconnect() {
+        MessageQueue queue = mock(MessageQueue.class);
+        VizWebSocketServer server = newServer(queue);
+        ArgumentCaptor<MessageQueue.MessageGuard> guardCaptor =
+            ArgumentCaptor.forClass(MessageQueue.MessageGuard.class);
+
+        openActiveClient(server);
+        server.onMessage(connection, "{\"type\":\"audio\",\"frame\":1}");
+        server.onMessage(connection, "{\"type\":\"audio\",\"frame\":2}");
+
+        server.onClose(connection, 1000, "reconnect", true);
+        openActiveClient(server);
+        server.onMessage(connection, "{\"type\":\"audio\",\"frame\":3}");
+
+        verify(queue, times(3)).parseAndDispatch(
+            anyString(),
+            guardCaptor.capture(),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
+        );
+        List<MessageQueue.MessageGuard> capturedGuards = guardCaptor.getAllValues();
+        assertSame(capturedGuards.get(0), capturedGuards.get(1));
+        assertNotSame(capturedGuards.get(0), capturedGuards.get(2));
     }
 
     @Test
