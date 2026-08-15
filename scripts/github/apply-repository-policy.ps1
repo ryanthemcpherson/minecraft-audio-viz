@@ -75,6 +75,11 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Failed to set default workflow permissions.'
 }
 
+& gh api --silent --method PUT "repos/$repository/vulnerability-alerts"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to enable Dependabot vulnerability alerts.'
+}
+
 & gh api --silent --method PUT "repos/$repository/automated-security-fixes"
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to enable Dependabot security updates.'

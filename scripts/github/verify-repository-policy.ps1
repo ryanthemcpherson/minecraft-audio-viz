@@ -153,6 +153,11 @@ $workflowSettings = gh api "repos/$repository/actions/permissions/workflow" | Co
 Assert-Equal $workflowSettings.default_workflow_permissions 'read' 'Default workflow permissions'
 Assert-Equal $workflowSettings.can_approve_pull_request_reviews $false 'Workflow PR approval permission'
 
+& gh api --silent "repos/$repository/vulnerability-alerts"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Dependabot vulnerability alerts are disabled.'
+}
+
 $securityUpdates = gh api "repos/$repository/automated-security-fixes" | ConvertFrom-Json
 Assert-Equal $securityUpdates.enabled $true 'Dependabot security updates'
 
