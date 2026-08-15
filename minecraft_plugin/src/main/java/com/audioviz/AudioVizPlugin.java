@@ -17,6 +17,7 @@ import com.audioviz.effects.BeatEventManager;
 import com.audioviz.entities.EntityPoolManager;
 import com.audioviz.lighting.AmbientLightManager;
 import com.audioviz.entities.EntityUpdateStats;
+import com.audioviz.listeners.AudioVizEventListener;
 import com.audioviz.gui.ChatInputManager;
 import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
@@ -32,21 +33,14 @@ import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
 import com.audioviz.zones.ZoneSelectionManager;
-import com.audioviz.bitmap.BitmapPattern;
-import com.audioviz.bitmap.text.ChatWallPattern;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
-import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.security.SecureRandom;
 import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 
-public class AudioVizPlugin extends JavaPlugin implements Listener {
+public class AudioVizPlugin extends JavaPlugin {
 
     private static AudioVizPlugin instance;
     private ZoneManager zoneManager;
@@ -142,7 +136,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.recordingManager = new RecordingManager(this);
 
         // Register event listeners
-        getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(new AudioVizEventListener(this), this);
         getServer().getPluginManager().registerEvents(menuManager, this);
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
@@ -460,34 +454,6 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         }
 
         getLogger().info("AudioViz plugin disabled!");
-    }
-
-    /**
-     * Clean up entity pools in zones belonging to an unloaded world
-     * to prevent stale entity references.
-     */
-    @EventHandler
-    public void onWorldUnload(WorldUnloadEvent event) {
-        String worldName = event.getWorld().getName();
-        for (var zone : zoneManager.getAllZones()) {
-            if (zone.getWorld().getName().equals(worldName)) {
-                getLogger().info("World '" + worldName + "' unloading, cleaning up zone '" + zone.getName() + "'");
-                entityPoolManager.cleanupZoneSync(zone.getName());
-            }
-        }
-    }
-
-    /**
-     * Route player chat messages to the ChatWallPattern for LED wall display.
-     * Runs at MONITOR priority so cancellation by other plugins is respected.
-     */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPlayerChat(AsyncPlayerChatEvent event) {
-        if (bitmapPatternManager == null) return;
-        BitmapPattern pattern = bitmapPatternManager.getPattern("bmp_chat_wall");
-        if (pattern instanceof ChatWallPattern chatWall) {
-            chatWall.addMessage(event.getPlayer().getName(), event.getMessage());
-        }
     }
 
     public static AudioVizPlugin getInstance() {
