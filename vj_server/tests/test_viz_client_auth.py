@@ -658,6 +658,54 @@ async def test_reconnect_reuses_auth_token(
     await client.disconnect()
 
 
+@pytest.mark.asyncio
+async def test_reconnect_reauthenticates_before_setup_and_render_traffic(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "stable-reconnect-secret"
+    first_websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": True, "server_type": "paper"},
+        {"type": "auth_ok"},
+    )
+    second_websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": True, "server_type": "paper"},
+        {"type": "auth_ok"},
+        {"type": "zones", "zones": [{"name": "main"}]},
+    )
+    install_websocket_factory(monkeypatch, first_websocket, second_websocket)
+
+    async def no_delay(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(viz_client_module.asyncio, "sleep", no_delay)
+    caplog.set_level(logging.DEBUG)
+    client = VizClient(
+        auth_token=secret,
+        connect_timeout=0.05,
+        enable_heartbeat=False,
+    )
+
+    assert await client.connect() is True
+    assert await client.reconnect() is True
+    assert await client.get_zones() == [{"name": "main"}]
+    await client.batch_update_fast("main", [{"id": "block_0", "visible": True}])
+
+    assert first_websocket.sent_messages == [{"type": "auth", "token": secret}]
+    assert second_websocket.sent_messages == [
+        {"type": "auth", "token": secret},
+        {"type": "get_zones"},
+        {
+            "type": "batch_update",
+            "zone": "main",
+            "entities": [{"id": "block_0", "visible": True}],
+        },
+    ]
+    assert secret not in caplog.text
+
+    await client.disconnect()
+
+
 def peer_close(secret: str) -> ConnectionClosedError:
     return ConnectionClosedError(Close(4001, f"peer echoed {secret}"), None, None)
 
