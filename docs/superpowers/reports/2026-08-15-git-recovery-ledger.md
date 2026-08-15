@@ -106,7 +106,7 @@ The 27 paths under `.codex/`, `.superpowers/`, and root `AGENTS.md` are local op
 |`fix/a11y-focus-motion-labels`|Clean at `3743ae3`|Push exact head after reachability audit|Unmapped|
 |`fix/error-handling-and-abort-controllers`|Dirty across four coordinator files: 23 insertions and 11 deletions|Verify, commit, and push exact branch|Unmapped|
 |`refactor/coordinator-service-layer`|Clean at `a2aa80d`|Push exact head after reachability audit|Unmapped|
-|`feature/low-latency-renderer`|At `ed25bc3`; two untracked render tests|Verify, commit tests, and push branch|Unmapped|
+|`feature/low-latency-renderer`|Initially at `ed25bc3` with two untracked render tests; concurrent work committed the tests and their implementation as `a90d3b6`|Exact branch pushed at `a90d3b64387a7fad567dabce1ff95aab29c12951`|Preserved and pushed|
 |`chore/security-hardening`|Local at `0821754`, one commit ahead of `origin/chore/security-hardening` at `e00c9a2`; PR 143 is dirty|Preserve local head as `recovery/security-hardening-local` without changing PR 143|Unmapped|
 
 The low-latency branch includes these commits beyond `main`:
@@ -144,7 +144,7 @@ minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
 |Baseline inventory|This ledger on `release/paper-26.2`|Review and atomic commit|Pending|
 |`stash@{0}` plus paired product paths|`recovery/stash-0-refactor`|Remote head equals `0b100510046dc261ef9d42183f97b7f0ca234834`; all 45 copied files match their primary-worktree SHA-256; stash object remains present|Preserved|
 |`stash@{1}`|`recovery/stash-1-security`|Remote head equals `f76c1dbc1697291b8cefc7381f44dc21d4433a77`; committed tree exactly equals stash tree; stash object remains present|Preserved|
-|Low-latency untracked tests|`feature/low-latency-renderer`|Focused/full relevant tests, commit, push|Pending|
+|Low-latency untracked tests|`feature/low-latency-renderer`|Concurrent commit `a90d3b6` contains both tests; Java 25 focused suite passed 12 tests and full suite passed 978 tests; remote head equals `a90d3b64387a7fad567dabce1ff95aab29c12951`|Preserved|
 |Split-DJ dirty lockfile|`refactor/split-dj-client-app`|Lock integrity, commit, push|Pending|
 |Coordinator error-handling changes|`fix/error-handling-and-abort-controllers`|Relevant coordinator tests, commit, push|Pending|
 |Clean/local-only branch heads|Exact branch or named recovery ref|Remote contains exact commit|Pending|
@@ -158,3 +158,4 @@ No stash drop, worktree removal, branch deletion, untracked-file deletion, pull-
 
 - The `stash@{0}` preservation commit intentionally retained the historical snapshot byte-for-byte. Repository hooks that would alter that snapshot were skipped: trailing whitespace, Ruff, and Ruff format. Bandit was also skipped because it flags 71 low-severity hardcoded test credentials in the recovered coordinator tests. Site ESLint and TypeScript hooks were skipped because this isolated historical-base worktree has no installed site dependencies; TypeScript therefore reported missing React, Next, Three.js, and Vitest modules. Non-mutating YAML, JSON, large-file, merge-conflict, private-key, and end-of-file hooks passed.
 - The `stash@{1}` preservation commit also retained the exact stash tree. The end-of-file hook attempted to rewrite four generated Tauri schema files, so those hook changes were discarded from the recovery worktree and the mutating hook was skipped. JSON, large-file, merge-conflict, and private-key checks passed.
+- While recovery was in progress, concurrent work advanced `feature/low-latency-renderer` from `ed25bc3` to `a90d3b6` and committed the two formerly untracked tests alongside four render implementation classes. Recovery adopted the new clean head, verified it on Java 25, and pushed that exact commit without rewriting it.
