@@ -27,6 +27,7 @@ import com.audioviz.stages.StageZonePlacementManager;
 import com.audioviz.voice.VoicechatIntegration;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.websocket.WebSocketSecurityPolicy;
+import com.audioviz.websocket.WebSocketSecretManager;
 import com.audioviz.zones.ZoneBoundaryRenderer;
 import com.audioviz.zones.ZoneEditor;
 import com.audioviz.zones.ZoneManager;
@@ -41,6 +42,7 @@ import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.security.SecureRandom;
 import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 
@@ -81,6 +83,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
         // Save default config
         saveDefaultConfig();
+        WebSocketSecretManager.SecretResolution webSocketSecret = prepareWebSocketSecret();
 
         // Initialize core managers
         this.zoneManager = new ZoneManager(this);
@@ -205,11 +208,46 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // Start WebSocket server with retry (port may linger briefly after restart)
+        startWebSocketListener(webSocketSecret);
+
+        getLogger().info("AudioViz plugin enabled!");
+    }
+
+    WebSocketSecretManager.SecretResolution prepareWebSocketSecret() {
+        WebSocketSecretManager.SecretResolution resolution =
+            new WebSocketSecretManager(new SecureRandom()).resolve(
+                getConfig().getString("ws-secret", "")
+            );
+        if (!resolution.generated()) {
+            return resolution;
+        }
+
+        getConfig().set("ws-secret", resolution.secret());
+        try {
+            saveConfig();
+        } catch (RuntimeException persistenceFailure) {
+            getLogger().severe(
+                "Unable to persist the WebSocket pairing secret; " +
+                "the WebSocket listener will remain offline."
+            );
+            return null;
+        }
+
+        getLogger().info(
+            "Generated a WebSocket pairing secret in plugins/AudioViz/config.yml. " +
+            "Set MINECRAFT_WS_SECRET to that value before starting the VJ server."
+        );
+        return resolution;
+    }
+
+    void startWebSocketListener(WebSocketSecretManager.SecretResolution secretResolution) {
+        if (secretResolution == null) {
+            return;
+        }
+
         int wsPort = getConfig().getInt("websocket.port", 8765);
         String wsAddress = getConfig().getString("websocket.address", "127.0.0.1");
-        String wsSecret = getConfig().getString("ws-secret", "");
-        if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, wsSecret)) {
+        if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, secretResolution.secret())) {
             startWebSocketWithRetry(wsAddress.strip(), wsPort, 5, 2000);
         } else {
             getLogger().severe(
@@ -218,8 +256,6 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
                 "encrypted tunnel whose Minecraft-side endpoint is loopback."
             );
         }
-
-        getLogger().info("AudioViz plugin enabled!");
     }
 
     /**
@@ -227,7 +263,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
      * previous process (e.g. zombie Java after restart). Each attempt waits
      * {@code delayMs} before retrying, up to {@code maxRetries} times.
      */
-    private void startWebSocketWithRetry(
+    void startWebSocketWithRetry(
         String bindAddress,
         int port,
         int maxRetries,

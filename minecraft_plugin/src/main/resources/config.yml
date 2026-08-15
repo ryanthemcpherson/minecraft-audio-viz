@@ -8,8 +8,9 @@ websocket:
   # Port for the WebSocket server
   port: 8765
 
-# Shared secret for WebSocket authentication. This authenticates a local or tunneled client;
-# it never permits a plaintext non-loopback listener.
+# Shared secret for WebSocket authentication. Empty values are generated and persisted here
+# on first start. Copy that value into MINECRAFT_WS_SECRET before starting the VJ server.
+# This authenticates a local or tunneled client; it never permits a plaintext non-loopback listener.
 ws-secret: ""
 
 # Default visualization settings
