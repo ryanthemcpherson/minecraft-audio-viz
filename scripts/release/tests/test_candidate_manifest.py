@@ -41,6 +41,9 @@ def candidate_inputs(tmp_path: Path) -> dict[str, Path]:
 
     (repository / ".gitignore").write_text("out/\n", encoding="utf-8")
     (repository / "tracked.txt").write_text("release input\n", encoding="utf-8")
+    plugin_directory = repository / "minecraft_plugin"
+    plugin_directory.mkdir()
+    (plugin_directory / "source.txt").write_text("plugin source\n", encoding="utf-8")
     paper_manifest = repository / "paper-manifest.json"
     paper_manifest.write_text(
         json.dumps(
@@ -58,7 +61,15 @@ def candidate_inputs(tmp_path: Path) -> dict[str, Path]:
     )
     soak_evidence = repository / "soak.md"
     soak_evidence.write_text("# Eight-hour soak\n\nPASS\n", encoding="utf-8")
-    _git(repository, "add", ".gitignore", "tracked.txt", "paper-manifest.json", "soak.md")
+    _git(
+        repository,
+        "add",
+        ".gitignore",
+        "tracked.txt",
+        "minecraft_plugin/source.txt",
+        "paper-manifest.json",
+        "soak.md",
+    )
     _git(repository, "commit", "-m", "test fixture")
 
     output_directory = repository / "out"
@@ -80,6 +91,7 @@ def candidate_inputs(tmp_path: Path) -> dict[str, Path]:
 def test_manifest_captures_exact_release_identity(candidate_inputs: dict[str, Path]) -> None:
     manifest = build_candidate_manifest(version=RELEASE_VERSION, **candidate_inputs)
     repository = candidate_inputs["repository"]
+    plugin_source_commit = _git(repository, "log", "-1", "--format=%H", "--", "minecraft_plugin")
 
     assert manifest == {
         "artifact": {
@@ -87,8 +99,11 @@ def test_manifest_captures_exact_release_identity(candidate_inputs: dict[str, Pa
             "sha256": _sha256(candidate_inputs["artifact"]),
         },
         "build_timestamp": {
-            "source": "git_commit_timestamp",
-            "source_date_epoch": int(_git(repository, "show", "-s", "--format=%ct", "HEAD")),
+            "source": "plugin_source_commit_timestamp",
+            "source_commit_sha": plugin_source_commit,
+            "source_date_epoch": int(
+                _git(repository, "show", "-s", "--format=%ct", plugin_source_commit)
+            ),
         },
         "commit_sha": _git(repository, "rev-parse", "HEAD"),
         "java_release": 25,
@@ -110,6 +125,21 @@ def test_manifest_captures_exact_release_identity(candidate_inputs: dict[str, Pa
         },
         "version": "1.1.0",
     }
+
+
+def test_docs_only_commit_preserves_plugin_build_timestamp(
+    candidate_inputs: dict[str, Path],
+) -> None:
+    repository = candidate_inputs["repository"]
+    before = build_candidate_manifest(version=RELEASE_VERSION, **candidate_inputs)
+    (repository / "readiness.md").write_text("release evidence\n", encoding="utf-8")
+    _git(repository, "add", "readiness.md")
+    _git(repository, "commit", "-m", "docs only")
+
+    after = build_candidate_manifest(version=RELEASE_VERSION, **candidate_inputs)
+
+    assert after["commit_sha"] != before["commit_sha"]
+    assert after["build_timestamp"] == before["build_timestamp"]
 
 
 def test_manifest_rejects_dirty_tracked_worktree(candidate_inputs: dict[str, Path]) -> None:

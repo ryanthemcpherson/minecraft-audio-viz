@@ -18,3 +18,10 @@ def test_staged_candidate_is_installed_before_probe_build() -> None:
     assert staging_step < install_step < probe_step
     assert '-Dfile="$RUNNER_TEMP/paper-plugin-candidate-1.1.0/mcav-paper-1.1.0.jar"' in workflow
     assert "-DpomFile=minecraft_plugin/pom.xml" in workflow
+
+
+def test_reproducible_timestamp_tracks_plugin_source_commit() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "git log -1 --format=%ct -- minecraft_plugin" in workflow
+    assert "git show -s --format=%ct HEAD" not in workflow

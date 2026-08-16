@@ -98,7 +98,10 @@ jobs:
           python -m pip install -e "vj_server/[full]"
 
       - name: Set reproducible build timestamp
-        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+        run: |
+          source_date_epoch="$(git log -1 --format=%ct -- minecraft_plugin)"
+          [[ "$source_date_epoch" =~ ^[0-9]+$ ]]
+          echo "SOURCE_DATE_EPOCH=$source_date_epoch" >> "$GITHUB_ENV"
 
       - name: Build twice and compare bytes
         run: |

@@ -17,6 +17,7 @@ RELEASE_VERSION = "1.1.0"
 JAVA_RELEASE = 25
 PAPER_API_COORDINATE = "io.papermc.paper:paper-api:26.2.build.112-stable"
 DEFAULT_PAPER_MANIFEST = Path("scripts/release/paper_26_2_manifest.json")
+PLUGIN_SOURCE_PATH = "minecraft_plugin"
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
@@ -119,11 +120,17 @@ def validate_candidate_manifest(manifest: Mapping[str, Any]) -> None:
     build_timestamp = _require_mapping(manifest["build_timestamp"], "build_timestamp")
     _require_exact_keys(
         build_timestamp,
-        {"source", "source_date_epoch"},
+        {"source", "source_commit_sha", "source_date_epoch"},
         "build_timestamp",
     )
-    if build_timestamp["source"] != "git_commit_timestamp":
-        raise ValueError("build timestamp source must be git_commit_timestamp")
+    if build_timestamp["source"] != "plugin_source_commit_timestamp":
+        raise ValueError("build timestamp source must be plugin_source_commit_timestamp")
+    source_commit_sha = build_timestamp["source_commit_sha"]
+    if (
+        not isinstance(source_commit_sha, str)
+        or GIT_SHA_PATTERN.fullmatch(source_commit_sha) is None
+    ):
+        raise ValueError("source_commit_sha must be a lowercase 40-character Git SHA")
     source_date_epoch = build_timestamp["source_date_epoch"]
     if (
         not isinstance(source_date_epoch, int)
@@ -189,11 +196,22 @@ def build_candidate_manifest(
         raise ValueError("Paper manifest does not match Paper 26.2 build 112")
     _require_sha256(paper_payload.get("sha256"), "Paper manifest sha256")
 
+    plugin_source_commit = _git(
+        repository,
+        "log",
+        "-1",
+        "--format=%H",
+        "--",
+        PLUGIN_SOURCE_PATH,
+    )
     manifest: dict[str, Any] = {
         "artifact": {"file": artifact.name, "sha256": _sha256(artifact)},
         "build_timestamp": {
-            "source": "git_commit_timestamp",
-            "source_date_epoch": int(_git(repository, "show", "-s", "--format=%ct", "HEAD")),
+            "source": "plugin_source_commit_timestamp",
+            "source_commit_sha": plugin_source_commit,
+            "source_date_epoch": int(
+                _git(repository, "show", "-s", "--format=%ct", plugin_source_commit)
+            ),
         },
         "commit_sha": _git(repository, "rev-parse", "HEAD"),
         "java_release": JAVA_RELEASE,
