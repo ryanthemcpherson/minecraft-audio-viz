@@ -11,9 +11,13 @@ class _FakeVizClient:
     def __init__(self, response: dict):
         self.connected = True
         self._response = response
+        self.sent_messages: list[dict] = []
 
-    async def send(self, _message: dict) -> dict:
-        return self._response
+    async def send(self, message: dict) -> dict:
+        self.sent_messages.append(message)
+        if message.get("type") == "get_stages":
+            return self._response
+        return {"type": "ok"}
 
 
 @pytest.mark.asyncio
@@ -51,6 +55,64 @@ async def test_rehydrate_applies_block_zone_pattern_and_entity_count() -> None:
     assert zs.pattern_name == "wave"
     assert zs.entity_count == 64
     assert zs.block_type == "DIAMOND_BLOCK"
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_restores_complete_stage_show_state() -> None:
+    palette = [
+        "REDSTONE_BLOCK",
+        "ORANGE_CONCRETE",
+        "YELLOW_CONCRETE",
+        "LIME_CONCRETE",
+        "LIGHT_BLUE_CONCRETE",
+    ]
+    server = VJServer(require_auth=False, show_spectrograph=False)
+    client = _FakeVizClient(
+        {
+            "type": "stages",
+            "stages": [
+                {
+                    "name": "Release Show",
+                    "active": True,
+                    "zones": {
+                        "CENTER": {
+                            "zone_name": "main",
+                            "config": {
+                                "pattern": "wave",
+                                "preset": "edm",
+                                "palette": palette,
+                                "entity_count": 96,
+                                "render_mode": "block",
+                                "renderer_backend": "particles",
+                                "visible": False,
+                            },
+                        }
+                    },
+                }
+            ],
+        }
+    )
+    server.viz_client = client
+
+    applied = await server._rehydrate_zone_states_from_active_stage()
+
+    assert applied is True
+    zs = server._get_zone_state("main")
+    assert zs.pattern_name == "wave"
+    assert zs.entity_count == 96
+    assert server._current_preset_name == "edm"
+    assert server._band_materials == palette
+    assert server._band_materials_source == "stage"
+    assert client.sent_messages == [
+        {"type": "get_stages"},
+        {
+            "type": "set_renderer_backend",
+            "zone": "main",
+            "backend": "particles",
+            "fallback_backend": "display_entities",
+        },
+        {"type": "set_visible", "zone": "main", "visible": False},
+    ]
 
 
 @pytest.mark.asyncio

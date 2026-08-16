@@ -52,6 +52,7 @@ configs/dj_auth.json
 minecraft_mod/build/
 minecraft_mod/eu/
 minecraft_plugin/target/
+scripts/release/probe/target/
 *.jar
 
 # Node modules (if any frontend build tools)
@@ -167,3 +168,5 @@ Desktop.ini
 # Community bot
 community_bot/.venv/
 .worktrees/
+# Maven Shade generated metadata (disabled in minecraft_plugin/pom.xml)
+minecraft_plugin/dependency-reduced-pom.xml

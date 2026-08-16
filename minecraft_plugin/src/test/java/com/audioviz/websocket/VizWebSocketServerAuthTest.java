@@ -4,6 +4,7 @@ import com.audioviz.AudioVizPlugin;
 import com.audioviz.connection.ConnectionStateListener;
 import com.audioviz.entities.EntityPoolManager;
 import com.audioviz.entities.EntityUpdate;
+import com.audioviz.latency.LatencyTracker;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
@@ -114,6 +115,9 @@ class VizWebSocketServerAuthTest {
         lenient().when(plugin.getDescription()).thenReturn(description);
         lenient().when(description.getVersion()).thenReturn("test");
         lenient().when(plugin.getConnectionStateListener()).thenReturn(connectionStateListener);
+        lenient().when(messageQueue.getMetrics()).thenReturn(
+            new MessageQueue.QueueMetrics(0, 0, 0, 0, 0)
+        );
         lenient().when(connection.getRemoteSocketAddress())
             .thenReturn(new InetSocketAddress("127.0.0.1", 54321));
         lenient().when(connection.isOpen()).thenReturn(true);
@@ -159,6 +163,86 @@ class VizWebSocketServerAuthTest {
 
         server.onClose(connection, 1000, "closed", true);
         verify(connectionStateListener).onDjDisconnect("remote close (code 1000)");
+    }
+
+    @Test
+    void parserSaturationReturnsStableServerBusyResponse() {
+        doAnswer(invocation -> {
+            MessageQueue.ParseFailureHandler failureHandler = invocation.getArgument(3);
+            failureHandler.onFailure(new RejectedExecutionException("internal detail"));
+            return null;
+        }).when(messageQueue).parseAndDispatch(
+            anyString(),
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
+        );
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+
+        server.onMessage(connection, "{\"type\":\"get_status\"}");
+
+        verify(connection).send(
+            "{\"type\":\"error\",\"code\":\"server_busy\","
+                + "\"message\":\"Server is busy; retry control messages\"}"
+        );
+        verify(connection, never()).send(argThat(
+            (String message) -> message.contains("internal detail")
+        ));
+    }
+
+    @Test
+    void handlerFailureReturnsSanitizedInvalidMessageResponse() {
+        doAnswer(invocation -> {
+            MessageQueue.ParseFailureHandler failureHandler = invocation.getArgument(3);
+            failureHandler.onFailure(new IllegalArgumentException("sensitive internal detail"));
+            return null;
+        }).when(messageQueue).parseAndDispatch(
+            anyString(),
+            any(MessageQueue.MessageGuard.class),
+            any(MessageQueue.ParsedMessageAdmission.class),
+            any(MessageQueue.ParseFailureHandler.class)
+        );
+        VizWebSocketServer server = newServer("");
+        server.onOpen(connection, handshake);
+        clearInvocations(connection);
+
+        server.onMessage(connection, "{\"type\":\"get_status\"}");
+
+        verify(connection).send(
+            "{\"type\":\"error\",\"code\":\"invalid_message\","
+                + "\"message\":\"Message could not be processed\"}"
+        );
+        verify(connection, never()).send(
+            argThat((String message) -> message.contains("sensitive internal detail"))
+        );
+    }
+
+    @Test
+    void websocketMetricsIncludeQueueAndMainThreadTiming() {
+        when(messageQueue.getMetrics()).thenReturn(
+            new MessageQueue.QueueMetrics(11, 12, 13, 14, 15)
+        );
+        LatencyTracker latencyTracker = org.mockito.Mockito.mock(LatencyTracker.class);
+        LatencyTracker.RollingWindow updateStats =
+            org.mockito.Mockito.mock(LatencyTracker.RollingWindow.class);
+        when(plugin.getLatencyTracker()).thenReturn(latencyTracker);
+        when(latencyTracker.getMainThreadUpdateStats()).thenReturn(updateStats);
+        when(updateStats.getAvg()).thenReturn(1.25);
+        when(updateStats.getP95()).thenReturn(2.5);
+        when(updateStats.getMax()).thenReturn(4.0);
+
+        JsonObject metrics = newServer("").getMetrics();
+
+        assertEquals(11, metrics.get("queueProcessed").getAsLong());
+        assertEquals(12, metrics.get("queueBatches").getAsLong());
+        assertEquals(13, metrics.get("queueDropped").getAsLong());
+        assertEquals(14, metrics.get("parsedQueueDepth").getAsInt());
+        assertEquals(15, metrics.get("rawQueueDepth").getAsInt());
+        assertEquals(1.25, metrics.get("mainThreadUpdateAvgMs").getAsDouble());
+        assertEquals(2.5, metrics.get("mainThreadUpdateP95Ms").getAsDouble());
+        assertEquals(4.0, metrics.get("mainThreadUpdateMaxMs").getAsDouble());
     }
 
     @Test

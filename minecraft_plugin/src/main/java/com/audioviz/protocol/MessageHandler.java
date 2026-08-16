@@ -233,7 +233,7 @@ public class MessageHandler {
         }
         int count = message.has("count") ? message.get("count").getAsInt() :
             plugin.getConfig().getInt("defaults.entity_count", 16);
-        int maxEntities = plugin.getConfig().getInt("max-entities-per-zone", 1000);
+        int maxEntities = plugin.getConfig().getInt("performance.max_entities_per_zone", 256);
         count = Math.max(0, Math.min(count, maxEntities));
         String materialName = message.has("material") ? message.get("material").getAsString() : "GLOWSTONE";
 

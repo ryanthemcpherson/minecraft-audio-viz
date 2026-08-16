@@ -624,6 +624,20 @@ class StageManagerMixin:
             if block_type:
                 zs.block_type = str(block_type)
 
+            if zone_name == self.zone:
+                preset_name = config.get("preset")
+                if isinstance(preset_name, str) and preset_name in AUDIO_PRESETS:
+                    self._apply_named_preset(preset_name)
+
+                palette = config.get("palette")
+                if (
+                    isinstance(palette, list)
+                    and len(palette) == 5
+                    and all(material is None or isinstance(material, str) for material in palette)
+                ):
+                    self._band_materials = list(palette)
+                    self._band_materials_source = "stage"
+
             if render_mode == "bitmap":
                 if not str(pattern_name).startswith("bmp_"):
                     pattern_name = "bmp_spectrum"
@@ -660,6 +674,37 @@ class StageManagerMixin:
             if zone_name == self.zone:
                 self.entity_count = zs.entity_count
                 self._pattern_config.entity_count = zs.entity_count
+
+            renderer_backend = config.get("renderer_backend")
+            if renderer_backend in {"display_entities", "particles", "hologram"}:
+                try:
+                    await self.viz_client.send(
+                        {
+                            "type": "set_renderer_backend",
+                            "zone": zone_name,
+                            "backend": renderer_backend,
+                            "fallback_backend": "display_entities",
+                        }
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "Failed to restore renderer backend for zone '%s' (error_type=%s)",
+                        zone_name,
+                        type(error).__name__,
+                    )
+
+            visible = config.get("visible")
+            if isinstance(visible, bool):
+                try:
+                    await self.viz_client.send(
+                        {"type": "set_visible", "zone": zone_name, "visible": visible}
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "Failed to restore visibility for zone '%s' (error_type=%s)",
+                        zone_name,
+                        type(error).__name__,
+                    )
             applied += 1
 
         logger.info(

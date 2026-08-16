@@ -428,6 +428,11 @@ class VizClient:
                     # Handle pong messages for heartbeat
                     if msg_type == "pong":
                         self._last_pong = time.time()
+                        resp_seq = data.get("_seq")
+                        if resp_seq is not None and resp_seq in self._pending_futures:
+                            future = self._pending_futures.pop(resp_seq)
+                            if not future.done():
+                                future.set_result(data)
                         continue
 
                     # Discard fire-and-forget acknowledgments that flood the channel

@@ -1,0 +1,225 @@
+# Git Recovery Ledger — 2026-08-15
+
+## Purpose and safety rules
+
+This ledger records the authoritative pre-release Git state before any recovery or governance mutation for the Paper 26.2 release. Recovery is additive and non-destructive: copy or apply work into named branches, commit it, push it, and retain the original stash, worktree, branch, and untracked source until a separate deletion list is reviewed and approved.
+
+The release worktree is `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\phase0-containment` on `release/paper-26.2`. Its baseline commit for this ledger is `396a5cef190812bdcf6f203233f4ee6f062354d7`.
+
+## Repository baseline
+
+- Primary repository: `C:\Users\Ryan\Desktop\minecraft-audio-viz`
+- Primary branch: `main` at `6d3da5e`, three commits ahead of `origin/main` at `1a1c94d`
+- Release branch: `release/paper-26.2` at `396a5ce`, five commits ahead of `origin/main`
+- Object integrity: `git fsck --full --no-reflogs` exited successfully; dangling objects were reported, but no connectivity or corruption errors were found
+- Primary worktree: 74 untracked paths total
+- Product recovery scope: 47 untracked paths
+- Excluded local-tool scope: 27 untracked paths under `.codex/`, `.superpowers/`, plus root `AGENTS.md`
+- Destructive cleanup authorized: none
+
+## Stashes
+
+|Source|Object and base|Contents|Recovery target|Status|
+|-|-|-|-|-|
+|`stash@{0}`|stash `789d63a479ed182bd61ab86e6e549cd3c9190d1e`; base `d770a8203899e57b1bcc16f7104f6ddb79f07a4d`; index `183152f407e85dd82ae7387e4f1c9efc01fbeead`|56 tracked files; 1,637 insertions and 9,795 deletions; paired with untracked admin, coordinator, plugin-handler, and VJ relay-test files|`recovery/stash-0-refactor` at `0b100510046dc261ef9d42183f97b7f0ca234834`|Preserved and pushed; stash retained|
+|`stash@{1}`|stash `728505647db03c11d23c7d09ae43615829dbf18c`; base `139c177735da53b3dbe27472ef63e3fd4f169ece`; index `ee53cc369bf0c2444ca2936aaa9a261286c762f4`|9 dependency/security files; 229 insertions and 241 deletions|`recovery/stash-1-security` at `f76c1dbc1697291b8cefc7381f44dc21d4433a77`|Preserved and pushed; stash retained|
+
+Both stashes must remain present after preservation.
+
+## Product untracked paths in the primary worktree
+
+The following paths are evidence-bearing product files. They are copied only to their named recovery target; the originals remain untouched.
+
+### Paired with `stash@{0}`
+
+```text
+admin_panel/js/managers/BitmapManager.js
+admin_panel/js/managers/PreviewManager.js
+admin_panel/js/modules/ActionsManager.js
+admin_panel/js/modules/AudioManager.js
+admin_panel/js/modules/BannerManager.js
+admin_panel/js/modules/ConnectCodeManager.js
+admin_panel/js/modules/DJManager.js
+admin_panel/js/modules/ElementCache.js
+admin_panel/js/modules/EventWiring.js
+admin_panel/js/modules/InitialState.js
+admin_panel/js/modules/MessageRouter.js
+admin_panel/js/modules/ParticleEffectsManager.js
+admin_panel/js/modules/PatternManager.js
+admin_panel/js/modules/SceneManager.js
+admin_panel/js/modules/UIHelpers.js
+admin_panel/js/modules/VoiceChatManager.js
+admin_panel/js/modules/ZoneManager.js
+admin_panel/js/ui/ModalDialog.js
+coordinator/app/dependencies/server.py
+coordinator/app/services/connect_service.py
+coordinator/app/services/exceptions.py
+coordinator/app/services/show_service.py
+coordinator/tests/test_audit.py
+coordinator/tests/test_auth_service.py
+coordinator/tests/test_connect_service.py
+coordinator/tests/test_discord_bot_notifier.py
+coordinator/tests/test_discord_oauth.py
+coordinator/tests/test_email_service.py
+coordinator/tests/test_google_oauth.py
+coordinator/tests/test_org_service.py
+coordinator/tests/test_r2_storage.py
+coordinator/tests/test_rate_limiter.py
+coordinator/tests/test_server_service.py
+coordinator/tests/test_show_service.py
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/BaseHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/BitmapCoreHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/BitmapEffectsHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/CoreEntityHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/DjInfoHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/ParticleHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/RenderModeHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/StageHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/TypedMessageHandler.java
+minecraft_plugin/src/main/java/com/audioviz/protocol/handlers/VoiceHandler.java
+vj_server/tests/test_relay.py
+```
+
+### Separate root-document recovery
+
+```text
+docs/plans/2026-03-01-three-features-impl.md
+docs/superpowers/plans/2026-03-31-security-hardening.md
+```
+
+Target: `recovery/root-untracked-2026-08-15`.
+
+## Excluded local-tool paths
+
+The 27 paths under `.codex/`, `.superpowers/`, and root `AGENTS.md` are local operating state or instructions. They are intentionally excluded from product recovery and remain untouched in the primary worktree.
+
+## Worktrees and local branches
+
+|Branch|State at inventory|Preservation target|Status|
+|-|-|-|-|
+|`main`|Primary worktree; 74 untracked paths; at `6d3da5e`|No mutation; product paths copied to recovery branches; exact commit reachable from `origin/feature/low-latency-renderer`|Commit preserved remotely; primary files retained|
+|`release/paper-26.2`|Created at `396a5ce` and advanced only through approved design, plan, and recovery-ledger commits|Published as `origin/release/paper-26.2`; remote is verified after each push|Preserved and pushed|
+|`chore/dj-client-major-deps`|Clean at `a012b52`; upstream configuration points at `origin/main`|Existing `origin/chore/dj-client-major-deps` equals exact local head|Preserved remotely|
+|`feat/site-real-tests`|Clean at `825a17d`|`origin/feat/site-real-tests` at `825a17d81ce9dadb047c96e2030d61016002d384`|Preserved and pushed|
+|`fix/remove-drei-ghost-dep`|Clean at `dbccbda`|`origin/fix/remove-drei-ghost-dep` at `dbccbda00278984a0ac9909b80294ef3061fd429`|Preserved and pushed|
+|`refactor/split-dj-client-app`|Dirty lockfile: 2 insertions and 2 deletions|Exact branch pushed at `76d3374668721b09ad088e43bfbe4114731c1273`|Preserved and pushed|
+|`fix/a11y-focus-motion-labels`|Clean at `3743ae3`|`origin/fix/a11y-focus-motion-labels` at `3743ae3bb991a573726a628478d4856718da07dd`|Preserved and pushed|
+|`fix/error-handling-and-abort-controllers`|Dirty across four coordinator files: 23 insertions and 11 deletions|Exact branch pushed at `671f0a2d42318341cdf7bac28c373421351ce519`|Preserved and pushed; generated `coordinator/uv.lock` remains untracked|
+|`refactor/coordinator-service-layer`|Clean at `a2aa80d`|`origin/refactor/coordinator-service-layer` at `a2aa80d5c29eafa7834ced0099221c18fa40326f`|Preserved and pushed|
+|`feature/low-latency-renderer`|Initially at `ed25bc3` with two untracked render tests; concurrent work committed the tests and implementation as `a90d3b6`, then advanced compatibility work to `2c078d7`|Exact branch pushed at `2c078d7b1118d2b1f26318940f820aff9655fd04`|Preserved and pushed|
+|`chore/security-hardening`|Local at `0821754`, one commit ahead of `origin/chore/security-hardening` at `e00c9a2`; PR 143 is dirty|`origin/recovery/security-hardening-local` at `082175498ded676bba1e63bd4ada84d2d663a0c4`; PR 143 head unchanged|Preserved and pushed|
+|`worktree-agent-a1a6ba06`|Local temporary branch at `d770a82` without an attached worktree|Exact commit is reachable from `origin/main`|Preserved remotely; no new remote branch needed|
+
+The low-latency branch includes these commits beyond `main`:
+
+- `038b416 feat: canonicalize render protocol limits`
+- `434d560 feat: add bounded render mailboxes`
+- `ed25bc3 fix: stabilize connection message guards`
+
+Its two untracked tests are:
+
+```text
+minecraft_plugin/src/test/java/com/audioviz/render/JsonRenderFrameDecoderTest.java
+minecraft_plugin/src/test/java/com/audioviz/render/RenderFrameHubTest.java
+```
+
+## Remote pull requests and governance
+
+- 47 open pull requests: 45 Dependabot, 2 authored
+- 28 blocked and 19 dirty
+- Authored PR 142: `chore/dj-client-major-deps`, dirty
+- Authored PR 143: `chore/security-hardening`, dirty
+- Secret scanning and push protection are enabled
+- Workflow default permissions do not allow GitHub Actions to approve pull-request reviews
+- Baseline rulesets were `12627523` (main), `18833547` (Paper/Fabric tags), and `18824190` (Phase 0 tags). The verified G1 state is recorded below.
+- Baseline tag creation restrictions prevented creating `plugin-v1.1.0`; G1 replaced the overlap with separate creation and immutability policies.
+- Baseline GitHub Actions used moving tags; the release branch now SHA-pins every external action.
+
+## Recovery mapping log
+
+|Source|Destination|Verification|Result|
+|-|-|-|-|
+|Baseline inventory|This ledger on `release/paper-26.2`|Initial inventory committed as `8617ff6`; subsequent mappings committed atomically|Preserved|
+|`stash@{0}` plus paired product paths|`recovery/stash-0-refactor`|Remote head equals `0b100510046dc261ef9d42183f97b7f0ca234834`; all 45 copied files match their primary-worktree SHA-256; stash object remains present|Preserved|
+|`stash@{1}`|`recovery/stash-1-security`|Remote head equals `f76c1dbc1697291b8cefc7381f44dc21d4433a77`; committed tree exactly equals stash tree; stash object remains present|Preserved|
+|Low-latency untracked tests|`feature/low-latency-renderer`|Concurrent commit `a90d3b6` contains both tests; Java 25 focused suite passed 12 tests and full suite passed 978 tests at that commit; subsequent clean compatibility commit was fast-forward preserved and remote head equals `2c078d7b1118d2b1f26318940f820aff9655fd04`|Preserved|
+|Split-DJ dirty lockfile|`refactor/split-dj-client-app`|`npm install --package-lock-only --ignore-scripts --no-audit` confirmed the lock was current; remote head equals `76d3374668721b09ad088e43bfbe4114731c1273`|Preserved|
+|Coordinator error-handling changes|`fix/error-handling-and-abort-controllers`|WSL-native Python 3.12 tests passed: 29/29 across `test_auth_api.py` and `test_auth_errors.py`; Ruff and Bandit passed; remote head equals `671f0a2d42318341cdf7bac28c373421351ce519`|Preserved|
+|Clean/local-only branch heads|Exact branch or named recovery ref|All exact commit IDs verified against remote refs; the security-hardening extra commit is isolated from PR 143|Preserved|
+|Two root untracked documents|`recovery/root-untracked-2026-08-15`|Remote head equals `e35d919167859527106eb5b83ea63a8a5b3a178b`; both copied files hash-match and both originals remain present|Preserved|
+
+## Cleanup boundary
+
+No stash drop, worktree removal, branch deletion, untracked-file deletion, pull-request closure, force push, history rewrite, or tag mutation is authorized by this recovery pass. A later cleanup proposal must list exact targets and prove each target has an equivalent remote commit before asking for approval.
+
+## Recovery notes
+
+- The `stash@{0}` preservation commit intentionally retained the historical snapshot byte-for-byte. Repository hooks that would alter that snapshot were skipped: trailing whitespace, Ruff, and Ruff format. Bandit was also skipped because it flags 71 low-severity hardcoded test credentials in the recovered coordinator tests. Site ESLint and TypeScript hooks were skipped because this isolated historical-base worktree has no installed site dependencies; TypeScript therefore reported missing React, Next, Three.js, and Vitest modules. Non-mutating YAML, JSON, large-file, merge-conflict, private-key, and end-of-file hooks passed.
+- The `stash@{1}` preservation commit also retained the exact stash tree. The end-of-file hook attempted to rewrite four generated Tauri schema files, so those hook changes were discarded from the recovery worktree and the mutating hook was skipped. JSON, large-file, merge-conflict, and private-key checks passed.
+- While recovery was in progress, concurrent work advanced `feature/low-latency-renderer` from `ed25bc3` to `a90d3b6` and committed the two formerly untracked tests alongside four render implementation classes. Recovery adopted the new clean head, verified it on Java 25, and pushed that exact commit without rewriting it.
+- A later audit detected one more concurrent fast-forward on the renderer branch, `2c078d7 fix: preserve JSON render compatibility`. It was clean and was pushed additively. The recorded 12-test focused and 978-test full-suite results apply to its parent `a90d3b6`, not to the later compatibility commit.
+- The coordinator test environment created an untracked `coordinator/uv.lock`. It was not part of the original dirty-worktree recovery scope, was not committed, and has not been deleted. The Ruff formatter attempted to rewrite one recovered file; that hook change was discarded and the exact original dirty snapshot was committed after Ruff lint and Bandit passed.
+- Clean branch preservation was additive. Four missing same-name remote refs were created, while the extra local `chore/security-hardening` commit was pushed to `recovery/security-hardening-local` so the dirty PR 143 head remained unchanged.
+
+## G0 preservation gate result
+
+G0 passed on 2026-08-15:
+
+- Both original stash objects remain present.
+- Every local branch head is reachable from at least one `origin/*` remote ref.
+- The primary worktree still contains all 47 product recovery files and all 27 excluded local-tool paths; none were removed.
+- Recovery worktrees are clean after their commits.
+- The only new untracked path outside the primary worktree is `coordinator/uv.lock`, generated while preparing the WSL test environment. It remains intentionally untouched and is documented above.
+- The release branch is published as `origin/release/paper-26.2`.
+- No cleanup operation has been performed.
+
+## G1 governance gate result
+
+G1 passed on 2026-08-15:
+
+- Repository-local Git defaults are `fetch.prune=true`, `pull.rebase=true`, `rebase.autoStash=true`, `rerere.enabled=true`, and `rerere.autoupdate=true`.
+- `docs/GIT_WORKFLOW.md` defines branch, worktree, commit, dependency, release, recovery, and cleanup policy.
+- Root, DJ client, site, and worker npm audits each report zero vulnerabilities. Their builds or typechecks passed, including 48 Rust tests and 103 site tests.
+- Dependabot has nine weekly entries, each capped at three open version-update pull requests and grouped by component/ecosystem. The pre-change 47-PR inventory is retained in `2026-08-15-dependabot-triage.json`; no PR was closed by this task.
+- All external GitHub Actions references are pinned to 40-character commit SHAs, all checkouts disable credential persistence, workflow defaults grant at most read permissions, and `security.yml` runs for every pull request targeting `main`.
+- Workflow default permissions are `read`; workflows cannot approve pull-request reviews.
+- Dependabot vulnerability alerts and automated security fixes are enabled.
+- Live rulesets:
+  - `12627523` — `Protect main`: active, no bypass actors, strict/up-to-date `CI Passed` and `Security Summary`, required conversation resolution, squash/rebase only, zero approvals for the solo-maintainer state.
+  - `20892408` — `Paper release tag creation`: active, creation-only, repository-admin bypass for deliberate human promotion.
+  - `20892410` — `Paper release tag immutability`: active, no bypass actors, blocks update/deletion/non-fast-forward for `plugin-v*`.
+  - `18833547` — renamed to `Fabric release tag quarantine`: active, no bypass actors, blocks creation/update/deletion/non-fast-forward for `mod-v*`.
+  - `18824190` — `Phase 0 release tag provenance`: remains active with no bypass for generic `v*` and `dj-v*` quarantine.
+- GitHub rejected the system GitHub Actions app as a bypass actor because this is a personal repository. The split creation/immutability design preserves immutable tags without storing a PAT or provisioning a custom GitHub App. Promotion is therefore an authenticated human action after candidate approval.
+- `verify-dependabot-policy.ps1`, `verify-workflow-pins.ps1`, and the live `verify-repository-policy.ps1` all pass.
+- A fetch pruned only local remote-tracking references for branches already deleted on GitHub; this task did not delete any remote branch.
+
+## Deferred cleanup targets — not authorized
+
+The following exact targets may be reviewed later. Their presence here is not approval to remove or close them.
+
+- Stash objects:
+  - `789d63a479ed182bd61ab86e6e549cd3c9190d1e`
+  - `728505647db03c11d23c7d09ae43615829dbf18c`
+- Recovery worktrees:
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\recovery-stash-0-refactor`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\recovery-stash-1-security`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.worktrees\recovery-root-untracked-2026-08-15`
+- Historical agent worktrees:
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a2856de9`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a3dd5a96`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a55f4eb5`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-a866290d`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-abf250f9`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-ad61c2ee`
+  - `C:\Users\Ryan\Desktop\minecraft-audio-viz\.claude\worktrees\agent-aff689d8`
+- Recovery remote branches:
+  - `recovery/stash-0-refactor`
+  - `recovery/stash-1-security`
+  - `recovery/root-untracked-2026-08-15`
+  - `recovery/security-hardening-local`
+- Temporary local branch `worktree-agent-a1a6ba06`.
+- The 47 original product files and 27 local-tool paths still untracked in the primary worktree.
+- Generated, untracked `coordinator/uv.lock` in `agent-ad61c2ee`.
+- Authored PRs 142 and 143, plus the Dependabot PRs enumerated in `2026-08-15-dependabot-triage.json`.
+- Feature branches and worktrees remain active and are not cleanup candidates until their work is reviewed or integrated.

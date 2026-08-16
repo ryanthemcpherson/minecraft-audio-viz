@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from websockets.exceptions import ConnectionClosedError
-from websockets.frames import OP_TEXT, Close, Frame
+from websockets.frames import Close, Frame, Opcode
 
 import vj_server.viz_client as viz_client_module
 from vj_server.viz_client import VizClient
@@ -199,10 +199,10 @@ async def test_transport_logger_redacts_encoded_auth_frame_with_escaped_token(
     assert await client.connect() is True
 
     auth_wire = client._encode({"type": "auth", "token": secret})
-    auth_frame = Frame(OP_TEXT, auth_wire.encode())
-    peer_echo_frame = Frame(OP_TEXT, f"peer echoed {secret}".encode())
+    auth_frame = Frame(Opcode.TEXT, auth_wire.encode())
+    peer_echo_frame = Frame(Opcode.TEXT, f"peer echoed {secret}".encode())
     embedded_auth_wire = f"peer echoed {auth_wire}"
-    embedded_auth_frame = Frame(OP_TEXT, embedded_auth_wire.encode())
+    embedded_auth_frame = Frame(Opcode.TEXT, embedded_auth_wire.encode())
     transport_logger = connect_calls[0]["logger"]
     caplog.set_level(logging.DEBUG)
 
@@ -477,6 +477,29 @@ async def test_heartbeat_receive_loop_is_sole_reader_and_starts_heartbeat_after_
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_receive_loop_routes_correlated_pong_to_ping_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket: FakeWebSocket
+
+    def respond_to_ping(message: dict[str, Any]) -> None:
+        if message.get("type") == "ping":
+            websocket.queue_response({"type": "pong", "_seq": message["_seq"]})
+
+    websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": False, "server_type": "paper"},
+        on_send=respond_to_ping,
+    )
+    install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(connect_timeout=0.05, enable_heartbeat=True)
+
+    assert await client.connect() is True
+    assert await client.ping() is True
+
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_disconnect_closes_disconnected_transport_and_clears_identity() -> None:
     websocket = FakeWebSocket()
     client = VizClient()
@@ -654,6 +677,54 @@ async def test_reconnect_reuses_auth_token(
     expected_auth = [{"type": "auth", "token": "stable-secret"}]
     assert first_websocket.sent_messages == expected_auth
     assert second_websocket.sent_messages == expected_auth
+
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_reauthenticates_before_setup_and_render_traffic(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "stable-reconnect-secret"
+    first_websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": True, "server_type": "paper"},
+        {"type": "auth_ok"},
+    )
+    second_websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": True, "server_type": "paper"},
+        {"type": "auth_ok"},
+        {"type": "zones", "zones": [{"name": "main"}]},
+    )
+    install_websocket_factory(monkeypatch, first_websocket, second_websocket)
+
+    async def no_delay(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(viz_client_module.asyncio, "sleep", no_delay)
+    caplog.set_level(logging.DEBUG)
+    client = VizClient(
+        auth_token=secret,
+        connect_timeout=0.05,
+        enable_heartbeat=False,
+    )
+
+    assert await client.connect() is True
+    assert await client.reconnect() is True
+    assert await client.get_zones() == [{"name": "main"}]
+    await client.batch_update_fast("main", [{"id": "block_0", "visible": True}])
+
+    assert first_websocket.sent_messages == [{"type": "auth", "token": secret}]
+    assert second_websocket.sent_messages == [
+        {"type": "auth", "token": secret},
+        {"type": "get_zones"},
+        {
+            "type": "batch_update",
+            "zone": "main",
+            "entities": [{"id": "block_0", "visible": True}],
+        },
+    ]
+    assert secret not in caplog.text
 
     await client.disconnect()
 

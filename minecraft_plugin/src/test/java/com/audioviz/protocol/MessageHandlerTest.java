@@ -306,6 +306,38 @@ class MessageHandlerTest {
         assertEquals("SEA_LANTERN", response.get("material").getAsString());
     }
 
+    @Test
+    @DisplayName("init_pool caps requested entities at the configured release limit")
+    void initPoolCapsRequestedCountAtConfiguredReleaseLimit() {
+        when(zoneManager.zoneExists("main")).thenReturn(true);
+        when(mockConfig.getInt("performance.max_entities_per_zone", 256)).thenReturn(256);
+
+        JsonObject msg = new JsonObject();
+        msg.addProperty("zone", "main");
+        msg.addProperty("count", 500);
+
+        JsonObject response = handler.handleMessage("init_pool", msg);
+
+        assertEquals(256, response.get("count").getAsInt());
+        verify(entityPoolManager).initializeBlockPool("main", 256, org.bukkit.Material.GLOWSTONE);
+    }
+
+    @Test
+    @DisplayName("init_pool honors a configured entity limit below the release default")
+    void initPoolHonorsLowerConfiguredLimit() {
+        when(zoneManager.zoneExists("main")).thenReturn(true);
+        when(mockConfig.getInt("performance.max_entities_per_zone", 256)).thenReturn(64);
+
+        JsonObject msg = new JsonObject();
+        msg.addProperty("zone", "main");
+        msg.addProperty("count", 500);
+
+        JsonObject response = handler.handleMessage("init_pool", msg);
+
+        assertEquals(64, response.get("count").getAsInt());
+        verify(entityPoolManager).initializeBlockPool("main", 64, org.bukkit.Material.GLOWSTONE);
+    }
+
     // --- batch_update ---
 
     @Nested

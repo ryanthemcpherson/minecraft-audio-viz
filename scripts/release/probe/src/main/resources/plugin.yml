@@ -1,0 +1,11 @@
+name: MCAVIntegrationProbe
+version: '1.0'
+main: com.audioviz.release.MCAVIntegrationProbe
+api-version: '26.2'
+description: Disposable release-only lifecycle probe for AudioViz
+depend:
+  - AudioViz
+commands:
+  mcavprobe:
+    description: Run a disposable AudioViz lifecycle probe
+    usage: /mcavprobe <verify-main-batch|unload-cycle>

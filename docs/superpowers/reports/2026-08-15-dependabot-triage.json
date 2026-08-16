@@ -1,0 +1,529 @@
+{
+  "captured_at": "2026-08-15",
+  "repository": "ryanthemcpherson/minecraft-audio-viz",
+  "open_pull_request_count": 47,
+  "note": "Inventory only. No pull requests were closed or modified.",
+  "pull_requests": [
+    {
+      "author": {
+        "id": "MDQ6VXNlcjM3Mzc3MzY1",
+        "is_bot": false,
+        "login": "ryanthemcpherson",
+        "name": "Ryan McPherson"
+      },
+      "headRefName": "chore/dj-client-major-deps",
+      "mergeStateStatus": "DIRTY",
+      "number": 142,
+      "title": "chore(deps): bump vite 8, plugin-react 6, typescript 6 in dj_client",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/142"
+    },
+    {
+      "author": {
+        "id": "MDQ6VXNlcjM3Mzc3MzY1",
+        "is_bot": false,
+        "login": "ryanthemcpherson",
+        "name": "Ryan McPherson"
+      },
+      "headRefName": "chore/security-hardening",
+      "mergeStateStatus": "DIRTY",
+      "number": 143,
+      "title": "feat(security): comprehensive supply chain and CI security hardening",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/143"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/github_actions/docker/build-push-action-7",
+      "mergeStateStatus": "DIRTY",
+      "number": 145,
+      "title": "chore(deps): bump docker/build-push-action from 6 to 7",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/145"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/dj_client/tauri-apps/plugin-updater-2.10.1",
+      "mergeStateStatus": "DIRTY",
+      "number": 146,
+      "title": "chore(deps): bump @tauri-apps/plugin-updater from 2.10.0 to 2.10.1 in /dj_client",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/146"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/site/next-16.2.2",
+      "mergeStateStatus": "DIRTY",
+      "number": 152,
+      "title": "chore(deps): bump next from 16.1.7 to 16.2.2 in /site",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/152"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/site/types/node-25.5.2",
+      "mergeStateStatus": "BLOCKED",
+      "number": 155,
+      "title": "chore(deps-dev): bump @types/node from 25.5.0 to 25.5.2 in /site",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/155"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/site/vitejs/plugin-react-6.0.1",
+      "mergeStateStatus": "DIRTY",
+      "number": 156,
+      "title": "chore(deps-dev): bump @vitejs/plugin-react from 5.1.4 to 6.0.1 in /site",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/156"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/site/jsdom-29.0.1",
+      "mergeStateStatus": "DIRTY",
+      "number": 157,
+      "title": "chore(deps-dev): bump jsdom from 29.0.0 to 29.0.1 in /site",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/157"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/cargo/dj_client/src-tauri/tauri-plugin-updater-2.10.1",
+      "mergeStateStatus": "DIRTY",
+      "number": 158,
+      "title": "chore(deps): bump tauri-plugin-updater from 2.10.0 to 2.10.1 in /dj_client/src-tauri",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/158"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/site/tailwindcss-4.2.2",
+      "mergeStateStatus": "BLOCKED",
+      "number": 159,
+      "title": "chore(deps-dev): bump tailwindcss from 4.2.1 to 4.2.2 in /site",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/159"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/github_actions/softprops/action-gh-release-3",
+      "mergeStateStatus": "DIRTY",
+      "number": 161,
+      "title": "chore(deps): bump softprops/action-gh-release from 2 to 3",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/161"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/dj_client/react-dom-19.2.5",
+      "mergeStateStatus": "BLOCKED",
+      "number": 163,
+      "title": "chore(deps): bump react-dom from 19.2.4 to 19.2.5 in /dj_client",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/163"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/dj_client/react-19.2.5",
+      "mergeStateStatus": "DIRTY",
+      "number": 169,
+      "title": "chore(deps): bump react from 19.2.4 to 19.2.5 in /dj_client",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/169"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/cargo/dj_client/src-tauri/rand-0.10.1",
+      "mergeStateStatus": "BLOCKED",
+      "number": 170,
+      "title": "chore(deps): bump rand from 0.10.0 to 0.10.1 in /dj_client/src-tauri",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/170"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/cargo/dj_client/src-tauri/tokio-1.52.1",
+      "mergeStateStatus": "BLOCKED",
+      "number": 172,
+      "title": "chore(deps): bump tokio from 1.50.0 to 1.52.1 in /dj_client/src-tauri",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/172"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/dj_client/typescript-6.0.3",
+      "mergeStateStatus": "DIRTY",
+      "number": 173,
+      "title": "chore(deps-dev): bump typescript from 5.9.3 to 6.0.3 in /dj_client",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/173"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/typescript-6.0.3",
+      "mergeStateStatus": "DIRTY",
+      "number": 177,
+      "title": "chore(deps-dev): bump typescript from 6.0.2 to 6.0.3",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/177"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/dj_client/vite-8.0.9",
+      "mergeStateStatus": "DIRTY",
+      "number": 178,
+      "title": "chore(deps-dev): bump vite from 7.3.1 to 8.0.9 in /dj_client",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/178"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/worker/typescript-6.0.3",
+      "mergeStateStatus": "DIRTY",
+      "number": 179,
+      "title": "chore(deps-dev): bump typescript from 6.0.2 to 6.0.3 in /worker",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/179"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/boto3-gte-1.42.97",
+      "mergeStateStatus": "BLOCKED",
+      "number": 180,
+      "title": "chore(deps): update boto3 requirement from >=1.34.0 to >=1.42.97",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/180"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/python-dotenv-gte-1.2.2",
+      "mergeStateStatus": "BLOCKED",
+      "number": 181,
+      "title": "chore(deps): update python-dotenv requirement from >=1.0.0 to >=1.2.2",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/181"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/python-multipart-gte-0.0.27",
+      "mergeStateStatus": "BLOCKED",
+      "number": 183,
+      "title": "chore(deps): update python-multipart requirement from >=0.0.7 to >=0.0.27",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/183"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/pyjwt-gte-2.12.1",
+      "mergeStateStatus": "BLOCKED",
+      "number": 185,
+      "title": "chore(deps): update pyjwt requirement from >=2.8.0 to >=2.12.1",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/185"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/resend-gte-2.29.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 187,
+      "title": "chore(deps): update resend requirement from >=2.0.0 to >=2.29.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/187"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/alembic-gte-1.18.4",
+      "mergeStateStatus": "BLOCKED",
+      "number": 188,
+      "title": "chore(deps): update alembic requirement from >=1.13.0 to >=1.18.4",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/188"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/com.google.code.gson-gson-2.14.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 189,
+      "title": "chore(deps): bump com.google.code.gson:gson from 2.13.2 to 2.14.0 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/189"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/uvicorn-gte-0.46.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 190,
+      "title": "chore(deps): update uvicorn requirement from >=0.30.0 to >=0.46.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/190"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/bcrypt-gte-5.0.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 191,
+      "title": "chore(deps): update bcrypt requirement from >=4.1.0 to >=5.0.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/191"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/asyncpg-gte-0.31.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 192,
+      "title": "chore(deps): update asyncpg requirement from >=0.29.0 to >=0.31.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/192"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/pip/pydantic-settings-gte-2.14.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 193,
+      "title": "chore(deps): update pydantic-settings requirement from >=2.0.0 to >=2.14.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/193"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/cargo/dj_client/src-tauri/tauri-build-2.6.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 197,
+      "title": "chore(deps): bump tauri-build from 2.5.6 to 2.6.0 in /dj_client/src-tauri",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/197"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/cargo/dj_client/src-tauri/tauri-plugin-single-instance-2.4.2",
+      "mergeStateStatus": "BLOCKED",
+      "number": 199,
+      "title": "chore(deps): bump tauri-plugin-single-instance from 2.4.0 to 2.4.2 in /dj_client/src-tauri",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/199"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/org.mockbukkit.mockbukkit-mockbukkit-v1.21-4.110.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 200,
+      "title": "chore(deps-dev): bump org.mockbukkit.mockbukkit:mockbukkit-v1.21 from 4.108.0 to 4.110.0 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/200"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/org.junit.jupiter-junit-jupiter-params-6.1.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 214,
+      "title": "chore(deps-dev): bump org.junit.jupiter:junit-jupiter-params from 5.12.1 to 6.1.0 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/214"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/org.junit.jupiter-junit-jupiter-engine-6.1.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 216,
+      "title": "chore(deps-dev): bump org.junit.jupiter:junit-jupiter-engine from 5.12.1 to 6.1.0 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/216"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/org.junit.jupiter-junit-jupiter-api-6.1.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 218,
+      "title": "chore(deps-dev): bump org.junit.jupiter:junit-jupiter-api from 5.12.1 to 6.1.0 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/218"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/net.bytebuddy-byte-buddy-1.18.10",
+      "mergeStateStatus": "BLOCKED",
+      "number": 219,
+      "title": "chore(deps-dev): bump net.bytebuddy:byte-buddy from 1.18.5 to 1.18.10 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/219"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/org.apache.maven.plugins-maven-surefire-plugin-3.5.6",
+      "mergeStateStatus": "BLOCKED",
+      "number": 221,
+      "title": "chore(deps-dev): bump org.apache.maven.plugins:maven-surefire-plugin from 3.5.4 to 3.5.6 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/221"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/net.bytebuddy-byte-buddy-agent-1.18.10",
+      "mergeStateStatus": "BLOCKED",
+      "number": 223,
+      "title": "chore(deps-dev): bump net.bytebuddy:byte-buddy-agent from 1.18.5 to 1.18.10 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/223"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/io.papermc.paper-paper-api-26.1.2.build.69-stable",
+      "mergeStateStatus": "BLOCKED",
+      "number": 226,
+      "title": "chore(deps): bump io.papermc.paper:paper-api from 1.21.11-R0.1-SNAPSHOT to 26.1.2.build.69-stable in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/226"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/maven/minecraft_plugin/org.jacoco-jacoco-maven-plugin-0.8.15",
+      "mergeStateStatus": "BLOCKED",
+      "number": 230,
+      "title": "chore(deps-dev): bump org.jacoco:jacoco-maven-plugin from 0.8.14 to 0.8.15 in /minecraft_plugin",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/230"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/github_actions/actions/checkout-7",
+      "mergeStateStatus": "DIRTY",
+      "number": 234,
+      "title": "chore(deps): bump actions/checkout from 4 to 7",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/234"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/vite-8.1.0",
+      "mergeStateStatus": "DIRTY",
+      "number": 238,
+      "title": "chore(deps-dev): bump vite from 8.0.3 to 8.1.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/238"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/types/node-26.0.1",
+      "mergeStateStatus": "DIRTY",
+      "number": 239,
+      "title": "chore(deps-dev): bump @types/node from 25.5.0 to 26.0.1",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/239"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/three-0.185.0",
+      "mergeStateStatus": "BLOCKED",
+      "number": 240,
+      "title": "chore(deps): bump three from 0.183.1 to 0.185.0",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/240"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/worker/wrangler-4.105.0",
+      "mergeStateStatus": "DIRTY",
+      "number": 241,
+      "title": "chore(deps-dev): bump wrangler from 4.79.0 to 4.105.0 in /worker",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/241"
+    },
+    {
+      "author": {
+        "is_bot": true,
+        "login": "app/dependabot"
+      },
+      "headRefName": "dependabot/npm_and_yarn/worker/cloudflare/workers-types-4.20260629.1",
+      "mergeStateStatus": "DIRTY",
+      "number": 242,
+      "title": "chore(deps-dev): bump @cloudflare/workers-types from 4.20260331.1 to 4.20260629.1 in /worker",
+      "url": "https://github.com/ryanthemcpherson/minecraft-audio-viz/pull/242"
+    }
+  ]
+}

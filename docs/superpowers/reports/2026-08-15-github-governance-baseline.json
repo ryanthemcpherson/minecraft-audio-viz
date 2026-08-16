@@ -1,0 +1,99 @@
+{
+  "captured_at": "2026-08-15",
+  "repository": "ryanthemcpherson/minecraft-audio-viz",
+  "default_branch": "main",
+  "github_actions_app": {
+    "id": 15368,
+    "slug": "github-actions",
+    "name": "GitHub Actions"
+  },
+  "workflow_permissions": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false
+  },
+  "rulesets": [
+    {
+      "id": 12627523,
+      "name": "Protect main",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["refs/heads/main"],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [
+        {
+          "actor_id": 5,
+          "actor_type": "RepositoryRole",
+          "bypass_mode": "always"
+        }
+      ],
+      "rules": [
+        {"type": "deletion"},
+        {"type": "non_fast_forward"},
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews_on_push": true,
+            "required_reviewers": [],
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": true,
+            "allowed_merge_methods": ["merge", "squash", "rebase"]
+          }
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": false,
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {"context": "CI Passed"}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 18833547,
+      "name": "Paper and Fabric release tag immutability",
+      "target": "tag",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["refs/tags/plugin-v*", "refs/tags/mod-v*"],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {"type": "creation"},
+        {"type": "update"},
+        {"type": "deletion"},
+        {"type": "non_fast_forward"}
+      ]
+    },
+    {
+      "id": 18824190,
+      "name": "Phase 0 release tag provenance",
+      "target": "tag",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["refs/tags/v*", "refs/tags/dj-v*"],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {"type": "creation"},
+        {"type": "update"},
+        {"type": "deletion"},
+        {"type": "non_fast_forward"}
+      ]
+    }
+  ]
+}

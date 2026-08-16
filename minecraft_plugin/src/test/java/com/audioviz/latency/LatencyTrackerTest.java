@@ -122,6 +122,19 @@ class LatencyTrackerTest {
         }
 
         @Test
+        @DisplayName("main-thread update duration recorded")
+        void mainThreadUpdateDuration() {
+            var tracker = new LatencyTracker();
+            tracker.recordMainThreadUpdateDuration(4.0);
+            tracker.recordMainThreadUpdateDuration(10.0);
+            tracker.recordMainThreadUpdateDuration(-2.0);
+
+            assertEquals(14.0 / 3.0, tracker.getMainThreadUpdateStats().getAvg(), 0.001);
+            assertEquals(10.0, tracker.getMainThreadUpdateStats().getP95(), 0.001);
+            assertEquals(10.0, tracker.getMainThreadUpdateStats().getMax(), 0.001);
+        }
+
+        @Test
         @DisplayName("total latency sums segments")
         void totalLatency() {
             var tracker = new LatencyTracker();

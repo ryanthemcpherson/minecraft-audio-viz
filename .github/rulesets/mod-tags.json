@@ -1,0 +1,18 @@
+{
+  "name": "Fabric release tag quarantine",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/tags/mod-v*"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {"type": "creation"},
+    {"type": "update"},
+    {"type": "deletion"},
+    {"type": "non_fast_forward"}
+  ]
+}

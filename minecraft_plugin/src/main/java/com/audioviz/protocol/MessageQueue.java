@@ -57,6 +57,14 @@ public class MessageQueue {
         void onFailure(RuntimeException exception);
     }
 
+    public record QueueMetrics(
+        long processed,
+        long batches,
+        long dropped,
+        int parsedQueueDepth,
+        int rawQueueDepth
+    ) { }
+
     private static final MessageGuard ALLOW_ALL = operation -> {
         operation.run();
         return true;
@@ -202,7 +210,8 @@ public class MessageQueue {
      * Enqueue a raw JSON string for async parsing and processing.
      * Called from WebSocket thread - must be thread-safe and non-blocking.
      *
-     * If the queue is full, the oldest message is dropped to apply backpressure.
+     * If the raw parser queue is full, the frame is rejected and reported to the
+     * supplied failure handler. The parsed queue separately retains drop-oldest behavior.
      */
     public void enqueueRaw(String rawJson) {
         enqueueRaw(rawJson, ALLOW_ALL);
@@ -268,6 +277,10 @@ public class MessageQueue {
                 jsonExecutor.execute(parseTask);
             } catch (RejectedExecutionException exception) {
                 recordDroppedMessage();
+                notifyFailure(
+                    failureHandler,
+                    new RejectedExecutionException("WebSocket parser queue is full")
+                );
             }
         }
     }
@@ -345,6 +358,19 @@ public class MessageQueue {
      * Called on main thread every tick.
      */
     private void processTick() {
+        long started = System.nanoTime();
+        try {
+            processTickBody();
+        } finally {
+            var latencyTracker = plugin.getLatencyTracker();
+            if (latencyTracker != null) {
+                double elapsedMilliseconds = (System.nanoTime() - started) / 1_000_000.0;
+                latencyTracker.recordMainThreadUpdateDuration(elapsedMilliseconds);
+            }
+        }
+    }
+
+    private void processTickBody() {
         // Clear per-tick caches and reusable maps
         trigCache.clear();
         updatesByZone.values().forEach(List::clear);
@@ -694,6 +720,16 @@ public class MessageQueue {
     /**
      * Get processing statistics.
      */
+    public QueueMetrics getMetrics() {
+        return new QueueMetrics(
+            messagesProcessed.get(),
+            batchesSent.get(),
+            messagesDropped.get(),
+            messageQueue.size(),
+            jsonExecutor.getQueue().size()
+        );
+    }
+
     public String getStats() {
         long dropped = messagesDropped.get();
         String stats = "Messages: " + messagesProcessed.get() +

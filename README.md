@@ -1,4 +1,4 @@
-> **Phase 0 containment:** Prebuilt DJ-client releases, automatic updates, the VJ Docker image, and the zero-install Docker demo are temporarily unavailable. Source builds are for development verification only until signed release, rollback, clean-install, and end-to-end demo gates pass.
+> **Supported Minecraft path:** MCAV 1.1.0 targets Paper 26.2 on Java 25. Follow the [Paper 26.2 installation and rollback guide](docs/PAPER_26_2_INSTALL.md). Prebuilt DJ-client releases, automatic updates, the VJ Docker image, and the zero-install Docker demo remain quarantined.
 
 <div align="center">
   <img src="mcav.png" alt="MCAV Logo" width="64" height="64">
@@ -11,9 +11,9 @@
 
   ![Rust](https://img.shields.io/badge/rust-stable-orange.svg)
   ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
-  ![Java 21](https://img.shields.io/badge/java-21-orange.svg)
-  ![Fabric](https://img.shields.io/badge/fabric-MC%201.21.11-green.svg)
-  ![Paper](https://img.shields.io/badge/paper-MC%201.21.11-green.svg)
+  ![Java 25](https://img.shields.io/badge/java-25-orange.svg)
+  ![Paper 26.2](https://img.shields.io/badge/paper-26.2-green.svg)
+  ![Fabric historical](https://img.shields.io/badge/fabric-historical%2Fquarantined-lightgrey.svg)
   ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
   ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 </div>
@@ -51,9 +51,10 @@
 - **Windows Audio Capture** — per-app WASAPI capture (Spotify, Chrome, any audio source)
 - **Real-time FFT Analysis** — 5-band frequency processing with ultra-low latency (~20ms)
 - **55+ Visualization Patterns** — 41 Lua 3D patterns + 14 bitmap 2D patterns, from Spectrum Bars to Galaxy Spirals, Auroras, Plasma, and more
-- **Dual Render Backends** — high-res map tile displays (128x128 per tile) and entity LED walls, switchable per zone
+- **Dual Visualization Modes** — pooled 3D Display Entities and bitmap text-display pixel walls, switchable per zone
 - **6 Audio Presets** — auto, edm, chill, rock, hiphop, classical
-- **Two Minecraft Integrations** — Fabric mod and Paper plugin, both connecting to the same VJ server (see [comparison](#minecraft-integration))
+- **Paper 26.2 Renderer** — supported Java 25 plugin with pooled Display Entities, authenticated loopback transport, and disconnect cleanup
+- **Historical Fabric Renderer** — retained as quarantined source; it is not a compatibility claim or release artifact
 - **3D Browser Preview** — WebGL scene with full Minecraft rendering parity
 - **Admin Control Panel** — VJ-style control surface with live meters, effects, and zone controls
 - **DJ Client** — cross-platform Tauri desktop app (Rust) for remote DJ sessions
@@ -84,56 +85,13 @@ npm run tauri:build
 
 See [`dj_client/README.md`](dj_client/README.md) and [`demo/README.md`](demo/README.md) for the quarantine limitations.
 
-### VJ Server Source Setup (Development Verification Only)
+### Paper 26.2 release path
 
-**Requirements:** Python 3.11+ (VJ server can run on any platform)
+**Requirements:** Paper 26.2 (`26.2.build.112-stable` validated), Java 25+, Python 3.11+, `mcav-paper-1.1.0.jar`, and matching VJ server source.
 
-```bash
-# 1. Clone & install VJ server
-git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-cd minecraft-audio-viz
-pip install -e vj_server/     # Install VJ server package
+Use the [Paper 26.2 operator guide](docs/PAPER_26_2_INSTALL.md) for backup, installation, first-run secret retrieval, loopback pairing, stage creation, diagnostics, disconnect recovery, clean uninstall, and rollback. The guide treats the pairing secret as local-only data and does not expose the renderer listener to the network.
 
-# 2. Start VJ server (multi-DJ mode)
-audioviz-vj                   # Starts on port 9000
-
-# 3. Open in browser
-#    Admin Panel:  http://localhost:8080
-#    Browser WS:   ws://localhost:8766 (used by 3D preview)
-```
-
-### Minecraft Setup (Optional)
-
-To render visualizations inside Minecraft, install either the Fabric mod or the Paper plugin. Both connect to the same VJ server — pick whichever matches your server platform.
-
-**Fabric mod:**
-```bash
-cd minecraft_mod && ./gradlew build
-# Copy build/libs/audioviz-mod-*.jar to your server's mods/ folder
-# Requires: Fabric Loader, Fabric API, SGUI, Polymer
-```
-
-**Paper plugin:**
-```bash
-cd minecraft_plugin && mvn package
-# Copy target/audioviz-plugin-*.jar to your server's plugins/ folder
-# No additional dependencies required
-```
-
-Run the VJ server on the same host as Minecraft (the default renderer endpoint is loopback-only):
-```bash
-audioviz-vj
-```
-
-When the VJ and Minecraft servers are on different machines, create an encrypted tunnel first. For example, from the VJ host:
-```bash
-ssh -N -L 18765:127.0.0.1:8765 operator@your-mc-server
-audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765
-```
-
-The Minecraft renderer listener never accepts plaintext LAN or public binds, even when a shared secret is configured. See [Connectivity](docs/CONNECTIVITY.md#secure-renderer-transport) for deployment details.
-
-See [Minecraft Integration](#minecraft-integration) for a detailed comparison.
+The historical Fabric source and older Minecraft 1.21.x instructions are quarantined. They are not supported alternatives to the Paper 26.2 release path.
 
 ---
 
@@ -147,7 +105,7 @@ graph LR
     DJ2[DJ Client 2] -->|audio frames| VJ
     DJ3[DJ Client 3] -->|audio frames| VJ
 
-    VJ -->|entity updates| MC[Minecraft Server<br/><small>Fabric mod or Paper plugin</small>]
+    VJ -->|entity updates| MC[Minecraft Server<br/><small>Paper 26.2 plugin</small>]
     VJ -->|viz state| BP[Browser 3D Preview<br/><small>Three.js</small>]
     VJ -->|control state| AP[Admin Panel<br/><small>VJ control surface</small>]
 
@@ -173,9 +131,7 @@ graph TD
     D --> G[Browser Preview]
     E --> G
 
-    F -->|Fabric mod| H[Map Renderer<br/><small>128x128 maps</small>]
-    F -->|Fabric mod| I[Virtual Entities<br/><small>Polymer</small>]
-    F -->|Paper plugin| J[Display Entities<br/><small>entity pools</small>]
+    F -->|Paper 26.2 plugin| J[Display Entities<br/><small>entity pools</small>]
 
     style C fill:#1a1a2e,stroke:#00ccff,color:#f5f5f5
     style F fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
@@ -231,54 +187,22 @@ graph LR
 
 ## Minecraft Integration
 
-MCAV provides two ways to render visualizations in Minecraft. Both receive the same data from the VJ server — choose based on your server platform.
+The supported release renderer is the Paper 26.2 plugin in `minecraft_plugin/`. It runs on Java 25, receives authenticated VJ messages over a loopback-only WebSocket listener, and renders pooled Display Entities.
 
-### Choosing: Fabric Mod vs Paper Plugin
+### Paper 26.2 capabilities
 
-```mermaid
-graph TD
-    Q{Which server<br/>platform?} -->|Fabric| FM[Fabric Mod<br/><code>minecraft_mod/</code>]
-    Q -->|Paper / Spigot| PP[Paper Plugin<br/><code>minecraft_plugin/</code>]
+- **Zone management** — create, position, resize, rotate, and persist visualization zones
+- **Pattern switching** — Lua 3D patterns and bitmap patterns from the shared VJ server
+- **Beat-reactive effects** — particle bursts, ambient lighting, and stage decorators
+- **Stage system** — multi-zone stage templates, placement, activation, and persistence
+- **Inventory menus** — in-game zone, stage, pattern, and performance controls
+- **Bounded processing** — parser and tick queues expose overload and latency diagnostics
+- **Safe disconnects** — a configurable grace window permits reconnect, then removes active entities without deleting saved stage data
+- **Optional Bedrock access** — Geyser/Floodgate integration can be validated separately
 
-    FM --> FB1[Map renderer<br/><small>128x128 maps in item frames</small>]
-    FM --> FB2[Virtual entities<br/><small>Polymer, zero server overhead</small>]
-    FM --> FB3[SGUI menus]
+### Historical Fabric source
 
-    PP --> PB1[Display entities<br/><small>pre-allocated pools</small>]
-    PP --> PB2[Bitmap renderer<br/><small>text display pixel grids</small>]
-    PP --> PB3[Inventory menus]
-    PP --> PB4[Bedrock support<br/><small>via Geyser</small>]
-
-    style FM fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
-    style PP fill:#1a1a2e,stroke:#00ccff,color:#f5f5f5
-```
-
-| Feature | Fabric Mod | Paper Plugin |
-|-|-|-|
-| **Server platform** | Fabric Loader + Fabric API | Paper or Spigot |
-| **3D patterns (Lua)** | Virtual entities (Polymer) | Display entities (pooled) |
-| **2D patterns (bitmap)** | Map renderer (128x128 tiles) | Text display pixel grid |
-| **GUI system** | SGUI server-side menus | Inventory-based menus |
-| **Bedrock players** | Not supported | Supported (via Geyser) |
-| **Bundle packets** | Yes (atomic frame updates) | No |
-| **Dependencies** | Fabric API, SGUI, Polymer | None |
-| **Bandwidth (64x36 bitmap)** | ~4 KB/tick (10 packets) | ~1.15 MB/tick (23K packets) |
-| **Entity overhead** | Zero (virtual) | Real entities (pooled) |
-| **Beat effects** | Particles, ambient lighting, stage decorators | Particles, ambient lighting, stage decorators |
-
-**Summary:** The Fabric mod has better rendering performance (virtual entities, map-based bitmaps, bundle packets). The Paper plugin has simpler setup (no extra dependencies) and supports Bedrock players. Both provide the full visualization experience — the same patterns, the same VJ server, the same controls.
-
-### Shared Capabilities
-
-Both the mod and plugin provide:
-
-- **Zone management** — create, position, resize, and rotate visualization zones
-- **Pattern switching** — all 41 Lua 3D patterns + 14 bitmap patterns
-- **Beat-reactive effects** — particle bursts, ambient lighting, stage decorators
-- **Stage system** — multi-zone stages with spotlights, DJ billboards, and floor tiles
-- **Admin menus** — in-game GUI for zone/stage/pattern control
-- **WebSocket connection** — receives `batch_update` and `bitmap_frame` messages on port 8765
-- **Audio presets** — auto, edm, chill, rock, hiphop, classical
+`minecraft_mod/` is retained as quarantined historical source from the Minecraft 1.21.x line. It is not built, published, or supported by the Paper 26.2 release and should not be used as an installation alternative.
 
 ---
 
@@ -301,7 +225,7 @@ Both the mod and plugin provide:
 
 ### Lua 3D Patterns (41)
 
-3D entity-based patterns computed by the VJ server's Lua engine. Rendered in Minecraft by the Fabric mod (virtual entities) or Paper plugin (display entities), and mirrored in the browser 3D preview.
+3D entity-based patterns computed by the VJ server's Lua engine. The supported Paper 26.2 plugin renders them with pooled Display Entities, and the browser 3D preview mirrors them. The old Fabric renderer is historical and quarantined.
 
 | Pattern | Key | Description |
 |-|-|-|
@@ -349,7 +273,7 @@ Both the mod and plugin provide:
 
 ### Bitmap Patterns (14)
 
-Flat 2D pixel-grid patterns. The Fabric mod renders these via map tile displays (128x128 per tile, glow item frames). The Paper plugin renders them via text display entities as individually-addressable pixels. Both support effects processing and layer compositing.
+Flat 2D pixel-grid patterns. The supported Paper 26.2 plugin renders them as individually addressable text-display pixels with effects processing and layer compositing. The former Fabric map-tile implementation is historical and quarantined.
 
 | Pattern | Key | Description |
 |-|-|-|
@@ -375,10 +299,10 @@ Flat 2D pixel-grid patterns. The Fabric mod renders these via map tile displays 
 ### VJ Server Commands
 
 ```bash
-# Start VJ server (multi-DJ mode)
-audioviz-vj                               # start on default port 9000
+# Export the generated Paper pairing secret first; do not put it in shell history.
+audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 8765  # same-host Paper
 audioviz-vj --port 9000                   # custom DJ port
-audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765  # local tunnel
+audioviz-vj --minecraft-host 127.0.0.1 --minecraft-port 18765  # encrypted tunnel
 audioviz-vj --no-auth                     # dev mode - skip authentication
 audioviz-vj --metrics-port 9001           # health metrics endpoint
 ```
@@ -391,7 +315,7 @@ The DJ Client is a desktop GUI app. Prebuilt distribution is quarantined during 
 
 ## Minecraft Commands
 
-Both the Fabric mod and Paper plugin use the same `/audioviz` command tree:
+The Paper 26.2 plugin uses the `/audioviz` command tree below. The historical Fabric implementation is quarantined and is not covered by this command reference.
 
 | Command | Description |
 |-|-|
@@ -438,7 +362,7 @@ For production, the VJ server enforces authentication by default.
 </details>
 
 <details>
-<summary><strong>In-Game Features (both mod and plugin)</strong></summary>
+<summary><strong>Paper 26.2 in-game features</strong></summary>
 
 ### GUI menu system
 - Main menu (system status, active zones, connection info)
@@ -457,15 +381,11 @@ For production, the VJ server enforces authentication by default.
 
 ### Render backends
 
-**Fabric mod:**
-- Map display — high-resolution 128x128 pixel maps in glow item frames, dirty-rect tracking for efficient updates
-- Virtual entity LED wall — Polymer virtual block display entities as individually-addressable pixels
-- Bundle packets for tear-free frame updates
-
-**Paper plugin:**
 - Display entity pools — pre-allocated real entities with interpolation
 - Text display pixel grid — individually-addressable pixels via text display background color
 - Async bitmap rendering on dedicated thread pool
+
+The former Fabric map renderer, Polymer virtual entities, and bundle packet path are historical/quarantined and not part of this release.
 
 </details>
 
@@ -502,8 +422,8 @@ docker compose logs -f vj-server
 minecraft-audio-viz/
 ├── dj_client/             # DJ Client (Rust/Tauri, audio capture + FFT)
 ├── vj_server/             # VJ Server (Python, Lua pattern engine + routing)
-├── minecraft_mod/         # Fabric mod (Java 21, MC 1.21.11)
-├── minecraft_plugin/      # Paper/Spigot plugin (Java 21, MC 1.21.11)
+├── minecraft_mod/         # Historical/quarantined Fabric source (MC 1.21.x line)
+├── minecraft_plugin/      # Supported Paper 26.2 plugin (Java 25)
 ├── admin_panel/           # Web control panel (VJ interface)
 ├── preview_tool/          # 3D browser preview (Three.js)
 ├── site/                  # Landing page (Next.js 15, mcav.live)
@@ -537,10 +457,10 @@ minecraft-audio-viz/
 # VJ Server
 cd vj_server && pip install -e ".[dev]" && pytest
 
-# Minecraft Mod (Fabric)
+# Historical Fabric source (quarantined; not a release acceptance path)
 cd minecraft_mod && ./gradlew build
 
-# Minecraft Plugin (Paper)
+# Minecraft Plugin (Paper 26.2, Java 25)
 cd minecraft_plugin && mvn package
 
 # DJ Client (Rust/Tauri)
@@ -558,7 +478,7 @@ cd site && npm install && npm run dev
 ## Known Limitations
 
 - **Windows-only audio capture** — WASAPI is required for per-application audio capture. The VJ server source can run on Linux, but its Docker path is quarantined during Phase 0 and DJs must run locally.
-- **Java Edition only** — Both the Fabric mod and Paper plugin require Java Edition 1.21.11+.
+- **Exact supported renderer boundary** — the public plugin path is Paper 26.2 on Java 25; Spigot, Purpur, other forks, Minecraft 1.21.x, Java 21, and the historical Fabric source are outside this release's compatibility claim.
 - **Low-frequency resolution limited** — 1024-sample FFT at 48kHz cannot accurately detect frequencies below ~43Hz, so sub-bass (20-40Hz) is excluded from the 5-band system.
 
 ---
