@@ -134,6 +134,13 @@ jobs:
             --soak-evidence docs/superpowers/reports/2026-08-15-paper-26-2-reference-machine.md \
             --output "$staging/candidate-manifest.json"
 
+      - name: Install exact candidate for probe compilation
+        run: |
+          ./minecraft_plugin/mvnw -B \
+            org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+            -Dfile="$RUNNER_TEMP/paper-plugin-candidate-1.1.0/mcav-paper-1.1.0.jar" \
+            -DpomFile=minecraft_plugin/pom.xml
+
       - name: Build integration probe
         run: ./minecraft_plugin/mvnw -f scripts/release/probe/pom.xml -B package
 
