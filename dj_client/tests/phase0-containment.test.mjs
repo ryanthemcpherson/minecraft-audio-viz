@@ -540,8 +540,12 @@ test("Paper release promotes protected, exact candidate bytes", () => {
   assert.match(verification, /sha256sum -c SHA256SUMS\.txt/);
   assert.match(verification, /require_successful_push_run ci\.yml/);
   assert.match(verification, /require_successful_push_run security\.yml/);
+  assert.match(verification, /existing_tag_target="\$\(git rev-parse 'refs\/tags\/plugin-v1\.1\.0\^\{\}'\)"/);
+  assert.match(verification, /test "\$existing_tag_target" = "\$COMMIT_SHA"/);
   assert.match(releaseJob, /^\s{4}environment:\s*plugin-release\s*$/m);
   assert.match(releaseJob, /^\s{6}contents:\s*write\s*$/m);
+  assert.match(releaseJob, /if git show-ref --verify --quiet refs\/tags\/plugin-v1\.1\.0; then/);
+  assert.match(releaseJob, /Existing immutable tag already targets approved commit/);
   assert.match(releaseJob, /git push origin refs\/tags\/plugin-v1\.1\.0/);
   assert.doesNotMatch(releaseJob, /(?:mvnw|gradlew|npm\s+run\s+build)/);
 });
