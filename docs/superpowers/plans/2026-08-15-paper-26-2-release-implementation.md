@@ -74,7 +74,7 @@
   - npm audit reports show zero critical/high findings in root, `dj_client`, `site`, and `worker`.
   - Real Paper 26.2 integration report passes.
   - 256-entity performance report passes 19.8 TPS, 100 ms end-to-visible p95, and 10 ms plugin-main-thread p95.
-  - Eight-hour soak report passes.
+  - The completed automated performance/cleanup report passes and the user-approved six-hour endurance observation is recorded separately.
   - Clean-machine install/uninstall/rollback report passes.
   - Candidate JAR SHA-256, CycloneDX SBOM, and GitHub attestation verify.
 

@@ -18,7 +18,7 @@
 - Candidate and publication run from exact current `main`; publication never rebuilds.
 - Java 25 is used for Paper/plugin jobs; Fabric jobs remain on Java 21 and remain quarantined.
 - Real-server tests bind to loopback and never log the generated secret.
-- The eight-hour soak is not shortened for final release evidence.
+- On 2026-08-15 the user revised final endurance acceptance to at least six hours because the reference workload was materially affecting the workstation. The interrupted run must not be represented as an eight-hour automated pass; measured performance and cleanup evidence comes from the completed 600-second gate.
 - No public compatibility claim is made for 1.21, Spigot, Purpur, Fabric, or Bedrock.
 - Every action reference is a full 40-character SHA.
 
@@ -233,7 +233,7 @@
 
 ---
 
-### Task 3: Add repeatable performance and eight-hour soak measurement
+### Task 3: Add repeatable performance and sustained endurance measurement
 
 **Files:**
 - Create: `scripts/release/paper_performance.py`
@@ -242,7 +242,7 @@
 
 **Interfaces:**
 - Consumes: real Paper/VJ harness, `get_ws_metrics`, `query_zone_status`, `jcmd`, 256-entity frames
-- Produces: signed-off JSON/Markdown evidence for TPS, applied-frame latency, main-thread p95, bounded queues, resource baseline, and soak duration
+- Produces: signed-off JSON/Markdown evidence for TPS, applied-frame latency, main-thread p95, bounded queues, resource baseline, and the user-approved endurance observation
 
 - [ ] **Step 1: Write failing metric calculation tests**
 
@@ -274,21 +274,21 @@
 
   Record process/thread count, `jcmd <pid> GC.heap_info`, `jcmd <pid> Thread.print`, zone entity count, and queue metrics before load, each hour, and after cleanup. The report includes absolute and delta values; after teardown, active entity and queue counts must be zero and non-daemon MCAV threads must not remain.
 
-- [ ] **Step 6: Run a short harness validation**
+- [x] **Step 6: Run a short harness validation**
 
   ```powershell
   wsl bash -lc 'cd /mnt/c/Users/Ryan/Desktop/minecraft-audio-viz/.worktrees/phase0-containment && uv run --python 3.12 python scripts/release/paper_performance.py --plugin minecraft_plugin/target/mcav-paper-1.1.0.jar --duration-seconds 600 --minimum-samples 1000 --report build/reports/paper-performance-smoke.json'
   ```
 
-- [ ] **Step 7: Run the unshortened release soak on the reference machine**
+- [x] **Step 7: Run the user-approved endurance observation on the reference machine**
 
   ```powershell
   wsl bash -lc 'cd /mnt/c/Users/Ryan/Desktop/minecraft-audio-viz/.worktrees/phase0-containment && uv run --python 3.12 python scripts/release/paper_performance.py --plugin minecraft_plugin/target/mcav-paper-1.1.0.jar --duration-seconds 28800 --minimum-samples 1000 --reconnect-interval-seconds 900 --report build/reports/paper-performance-8h.json'
   ```
 
-  Expected: elapsed duration at least 28,800 seconds and every threshold passes.
+  The command was started with the original 28,800-second target. At the user's direction it was stopped after more than six hours because it was affecting workstation performance. Twenty-seven scheduled reconnects succeeded through the last confirmed 6h45m checkpoint and no runtime failure was emitted. The interrupt produced no final JSON, so the observation is recorded separately from the completed automated performance report.
 
-- [ ] **Step 8: Record the reference machine and evidence hash**
+- [x] **Step 8: Record the reference machine and evidence hash**
 
   The Markdown report records CPU, RAM, OS/WSL versions, Docker/Java versions, commit SHA, plugin JAR SHA-256, Paper SHA-256, start/end UTC, all percentiles, resource deltas, and SHA-256 of the raw JSON report. It does not include the pairing secret or full environment.
 

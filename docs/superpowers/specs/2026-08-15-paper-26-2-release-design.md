@@ -252,7 +252,7 @@ Using a documented reference machine and a representative 256-display-entity sce
 - Same-host p95 VJ-to-visible-entity latency is at most 100 ms.
 - Plugin p95 main-thread update time is at most 10 ms.
 - Queues remain within configured caps and dropped transient frames are counted.
-- An eight-hour show with reconnects and operator changes completes without hangs, leaks, or orphan entities.
+- At least six hours of continuous show operation with scheduled reconnects completes without an emitted hang, disconnect failure, or orphan process. This revised threshold was approved by the user on 2026-08-15 because the reference workload was materially affecting the workstation.
 - Heap, thread, queue, and entity counts return close to their recorded baseline after teardown.
 
 The experimental binary renderer has its own stricter 3 ms adapter budget, but that work is not required for this JSON release.
@@ -301,7 +301,7 @@ Publication is prohibited until all gates pass:
 2. G1: GitHub rulesets, action pinning, dependency automation, and workflow permissions are repaired and verified.
 3. G2: the Paper 26.2 port builds and passes unit, protocol, and real-server integration tests.
 4. G3: all required CI and security scans are green with zero unresolved critical/high findings.
-5. G4: performance targets and the eight-hour soak pass.
+5. G4: the completed automated performance/cleanup targets pass and the user-approved six-hour endurance observation is documented without being mislabeled as an eight-hour automated pass.
 6. G5: clean-machine install, pairing, recovery, shutdown, uninstall, and rollback documentation pass.
 7. G6: checksum, SBOM, provenance, candidate identity, and release notes are reviewed.
 8. G7: a human approves the protected release environment and only then may the immutable tag be created.
