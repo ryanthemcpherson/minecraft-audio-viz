@@ -213,8 +213,8 @@ const assertJavaDependencyCheckJob = (
 
   assert.match(job, /DEPENDENCY_CHECK_DATA_DIR:\s*\$\{\{ github\.workspace \}\}\/\.dependency-check-data/);
   assert.match(job, /NVD_API_KEY:\s*\$\{\{ secrets\.NVD_API_KEY \}\}/);
-  assert.match(job, /uses:\s*actions\/cache\/restore@v4/);
-  assert.match(job, /uses:\s*actions\/cache\/save@v4/);
+  assert.match(job, /uses:\s*actions\/cache\/restore@[0-9a-f]{40}\s+# v4/);
+  assert.match(job, /uses:\s*actions\/cache\/save@[0-9a-f]{40}\s+# v4/);
   assert.match(job, /owasp-dependency-check-12\.2\.2-/);
   assert.match(job, /restore-keys:/);
   assert.match(
@@ -227,7 +227,7 @@ const assertJavaDependencyCheckJob = (
     /- name: Save NVD data cache\s*\n\s+if:\s*always\(\) && steps\.dependency-check\.outputs\.reports-generated == 'true'/,
   );
   assert.match(job, /- name: Upload dependency-check reports\s*\n\s+if:\s*always\(\)/);
-  assert.match(job, /uses:\s*actions\/upload-artifact@v7/);
+  assert.match(job, /uses:\s*actions\/upload-artifact@[0-9a-f]{40}\s+# v7/);
   assert.match(job, new RegExp(`${escapeRegExp(reportDirectory)}/dependency-check-report\\.json`));
   assert.match(job, new RegExp(`${escapeRegExp(reportDirectory)}/dependency-check-report\\.sarif`));
   assert.doesNotMatch(job, /continue-on-error\s*:|\|\|\s*true/);
@@ -266,7 +266,7 @@ const assertExactReleaseProvenanceGate = (release, workflowPath) => {
   const releaseGate = yamlBlock(release, "ci-gate", 2);
 
   assert.doesNotMatch(release, /^\s{2}checks:\s*read\s*$/m);
-  assert.match(releaseGate, /uses:\s*actions\/checkout@v4/);
+  assert.match(releaseGate, /uses:\s*actions\/checkout@[0-9a-f]{40}\s+# v4/);
   assert.match(releaseGate, /fetch-depth:\s*0/);
   assert.match(
     releaseGate,
@@ -517,45 +517,58 @@ test("primary CI requires community, protocol, and DJ containment contracts", ()
 test("tag releases require main ancestry and exact workflow-run provenance", () => {
   for (const workflowPath of [
     ".github/workflows/release.yml",
-    ".github/workflows/release-plugin.yml",
     ".github/workflows/release-mod.yml",
   ]) {
     assertExactReleaseProvenanceGate(readRepositoryFile(workflowPath), workflowPath);
   }
 
   const combinedRelease = readRepositoryFile(".github/workflows/release.yml");
-  assert.match(combinedRelease, /^\s{2}actions:\s*read\s*$/m);
-  assert.match(combinedRelease, /^\s{2}contents:\s*write\s*$/m);
+  assert.match(combinedRelease, /^permissions:\s*\{\}\s*$/m);
 });
 
-test("Paper and Fabric release workflows remain quarantined from historical refs", () => {
-  for (const { workflowPath, tagPattern } of [
-    { workflowPath: ".github/workflows/release-plugin.yml", tagPattern: "plugin-v*" },
-    { workflowPath: ".github/workflows/release-mod.yml", tagPattern: "mod-v*" },
-  ]) {
-    const release = readRepositoryFile(workflowPath);
-    const triggers = yamlBlock(release, "on", 0);
-    const releaseGate = yamlBlock(release, "ci-gate", 2);
-    const build = yamlBlock(release, "build", 2);
-    const releaseJob = yamlBlock(release, "release", 2);
+test("Paper release promotes protected, exact candidate bytes", () => {
+  const release = readRepositoryFile(".github/workflows/release-plugin.yml");
+  const triggers = yamlBlock(release, "on", 0);
+  const verification = yamlBlock(release, "verify-candidate", 2);
+  const releaseJob = yamlBlock(release, "release", 2);
 
-    assert.match(triggers, new RegExp(`^\\s+tags: \\['${escapeRegExp(tagPattern)}'\\]$`, "m"));
-    assert.doesNotMatch(triggers, /workflow_dispatch/);
-    assert.match(release, /^permissions:\s*\{\}\s*$/m);
-    assert.match(releaseGate, /^\s{4}permissions:\s*$/m);
-    assert.match(releaseGate, /^\s{6}actions:\s*read\s*$/m);
-    assert.match(releaseGate, /^\s{6}contents:\s*read\s*$/m);
-    assert.match(build, /^\s+needs:\s*\[ci-gate\]\s*$/m);
-    assert.match(build, /^\s{4}permissions:\s*$/m);
-    assert.match(build, /^\s{6}contents:\s*read\s*$/m);
-    assert.match(build, /persist-credentials:\s*false/);
-    assert.match(build, /uses:\s*actions\/upload-artifact@v7/);
-    assert.match(build, /if-no-files-found:\s*error/);
-    assert.match(releaseJob, /^\s{4}permissions:\s*$/m);
-    assert.match(releaseJob, /^\s{6}actions:\s*read\s*$/m);
-    assert.match(releaseJob, /^\s{6}contents:\s*write\s*$/m);
-    assert.doesNotMatch(releaseJob, /uses:\s*actions\/checkout/);
-  }
+  assert.match(triggers, /^\s+workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(triggers, /^\s+(?:push|pull_request):\s*$/m);
+  assert.match(release, /^permissions:\s*\{\}\s*$/m);
+  assert.match(verification, /test "\$COMMIT_SHA" = "\$\(git rev-parse origin\/main\)"/);
+  assert.match(verification, /\.head_sha == \$commit_sha/);
+  assert.match(verification, /sha256sum -c SHA256SUMS\.txt/);
+  assert.match(verification, /require_successful_push_run ci\.yml/);
+  assert.match(verification, /require_successful_push_run security\.yml/);
+  assert.match(releaseJob, /^\s{4}environment:\s*plugin-release\s*$/m);
+  assert.match(releaseJob, /^\s{6}contents:\s*write\s*$/m);
+  assert.match(releaseJob, /git push origin refs\/tags\/plugin-v1\.1\.0/);
+  assert.doesNotMatch(releaseJob, /(?:mvnw|gradlew|npm\s+run\s+build)/);
+});
+
+test("Fabric release workflow remains quarantined from historical refs", () => {
+  const release = readRepositoryFile(".github/workflows/release-mod.yml");
+  const triggers = yamlBlock(release, "on", 0);
+  const releaseGate = yamlBlock(release, "ci-gate", 2);
+  const build = yamlBlock(release, "build", 2);
+  const releaseJob = yamlBlock(release, "release", 2);
+
+  assert.match(triggers, /^\s+tags: \['mod-v\*'\]$/m);
+  assert.doesNotMatch(triggers, /workflow_dispatch/);
+  assert.match(release, /^permissions:\s*\{\}\s*$/m);
+  assert.match(releaseGate, /^\s{4}permissions:\s*$/m);
+  assert.match(releaseGate, /^\s{6}actions:\s*read\s*$/m);
+  assert.match(releaseGate, /^\s{6}contents:\s*read\s*$/m);
+  assert.match(build, /^\s+needs:\s*\[ci-gate\]\s*$/m);
+  assert.match(build, /^\s{4}permissions:\s*$/m);
+  assert.match(build, /^\s{6}contents:\s*read\s*$/m);
+  assert.match(build, /persist-credentials:\s*false/);
+  assert.match(build, /uses:\s*actions\/upload-artifact@[0-9a-f]{40}\s+# v7/);
+  assert.match(build, /if-no-files-found:\s*error/);
+  assert.match(releaseJob, /^\s{4}permissions:\s*$/m);
+  assert.match(releaseJob, /^\s{6}actions:\s*read\s*$/m);
+  assert.match(releaseJob, /^\s{6}contents:\s*write\s*$/m);
+  assert.doesNotMatch(releaseJob, /uses:\s*actions\/checkout/);
 });
 
 test("Paper and Fabric release tags cannot be created or rewritten", () => {
@@ -778,14 +791,10 @@ test("Paper and Fabric dependency scans fail closed with unsuppressed OWASP repo
     /Fabric dependency-check[^\n]*needs\.fabric-java-security\.result/,
   );
 
-  for (const fabricTrigger of [
-    "minecraft_mod/build.gradle",
-    "minecraft_mod/gradle.properties",
-    "minecraft_mod/settings.gradle",
-    "minecraft_mod/gradle/wrapper/gradle-wrapper.properties",
-  ]) {
-    assert.match(yamlBlock(security, "on", 0), new RegExp(`['"]${escapeRegExp(fabricTrigger)}['"]`));
-  }
+  const securityTriggers = yamlBlock(security, "on", 0);
+  assert.match(securityTriggers, /^\s+push:\s*\n\s+branches:\s*\[main\]\s*$/m);
+  assert.match(securityTriggers, /^\s+pull_request:\s*\n\s+branches:\s*\[main\]\s*$/m);
+  assert.doesNotMatch(securityTriggers, /paths(?:-ignore)?:/);
 });
 
 test("release and security gates reject masked or unsuccessful checks", () => {
@@ -873,6 +882,7 @@ test("release and security gates reject masked or unsuccessful checks", () => {
     "python-lint",
     "java-build",
     "java-plugin-build",
+    "paper-26-2-integration",
     "site-build",
     "coordinator-test",
     "vj-server-test",
