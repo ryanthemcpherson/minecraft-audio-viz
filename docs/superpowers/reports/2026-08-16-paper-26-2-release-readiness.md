@@ -9,12 +9,12 @@ Overall status: **READY FOR PROTECTED PR; NOT YET AUTHORIZED FOR CANDIDATE CREAT
 - Artifact: `mcav-paper-1.1.0.jar`
 - Paper API: `io.papermc.paper:paper-api:26.2.build.112-stable`
 - Java release: `25`
-- Plugin source commit: `4dda304b5ab0435e84386833d14c1caea1d45384`
-- Reproducible timestamp: `1786824222`, the timestamp of the last commit that changed `minecraft_plugin`
-- Expected JAR SHA-256: `37da9221278b773241eaf020a4dfe48b3e60b5e6f4238b62c5767ea564f13601`
+- Reproducible timestamp commit: repository root `a1fb59ac58021a8b362625b460aa589818e77c85`
+- Reproducible timestamp: `1771516763`
+- Expected JAR SHA-256: `b515c859a4da82961b524e515451315d91d67f3d5e0389019c1e55f51f618de5`
 - Reproducibility result: `PASS`; two clean Java 25 builds produced identical bytes
 
-The candidate workflow records both exact current-main identity and the plugin-source commit used for archive timestamps. Documentation, workflow, or merge-only commits therefore cannot perturb the JAR bytes.
+The candidate workflow records exact current-main identity separately from the immutable repository-root commit used for archive timestamps. Documentation, workflow, rebase, squash, or merge metadata therefore cannot perturb the JAR bytes.
 
 ## G0 — recovery and durable history
 
@@ -81,8 +81,8 @@ Status: **PASS**. Reviewer: Codex.
 
 Status: **PREPARED; FINAL ARTIFACT EVIDENCE PENDING CANDIDATE RUN.** Reviewer: Codex locally; GitHub attestation service required for final status.
 
-- Two local clean builds at the plugin-source timestamp are byte-identical at the expected SHA-256 above.
-- Candidate manifest schema is closed and validates version, exact main commit, plugin-source commit/timestamp, Java release, Paper coordinate/hash, JAR hash, SBOM hash, and endurance-evidence hash.
+- Two local clean builds at the repository-root timestamp are byte-identical at the expected SHA-256 above.
+- Candidate manifest schema is closed and validates version, exact main commit, repository-root timestamp identity, Java release, Paper coordinate/hash, JAR hash, SBOM hash, and endurance-evidence hash.
 - Candidate workflow builds twice, compares bytes, creates a CycloneDX JSON SBOM, runs real Paper integration, attests the JAR/SBOM, and retains one bundle for 90 days.
 - Promotion downloads and reverifies that retained bundle and its attestations. It never rebuilds.
 - Final G6 completion requires the candidate-run manifest, checksum, SBOM, and GitHub attestations to match the expected JAR bytes.

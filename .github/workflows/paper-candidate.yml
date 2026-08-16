@@ -99,7 +99,9 @@ jobs:
 
       - name: Set reproducible build timestamp
         run: |
-          source_date_epoch="$(git log -1 --format=%ct -- minecraft_plugin)"
+          source_commit_sha="$(git rev-list --max-parents=0 HEAD)"
+          [[ "$source_commit_sha" =~ ^[0-9a-f]{40}$ ]]
+          source_date_epoch="$(git show -s --format=%ct "$source_commit_sha")"
           [[ "$source_date_epoch" =~ ^[0-9]+$ ]]
           echo "SOURCE_DATE_EPOCH=$source_date_epoch" >> "$GITHUB_ENV"
 

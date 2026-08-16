@@ -91,7 +91,7 @@ def candidate_inputs(tmp_path: Path) -> dict[str, Path]:
 def test_manifest_captures_exact_release_identity(candidate_inputs: dict[str, Path]) -> None:
     manifest = build_candidate_manifest(version=RELEASE_VERSION, **candidate_inputs)
     repository = candidate_inputs["repository"]
-    plugin_source_commit = _git(repository, "log", "-1", "--format=%H", "--", "minecraft_plugin")
+    repository_root_commit = _git(repository, "rev-list", "--max-parents=0", "HEAD")
 
     assert manifest == {
         "artifact": {
@@ -99,10 +99,10 @@ def test_manifest_captures_exact_release_identity(candidate_inputs: dict[str, Pa
             "sha256": _sha256(candidate_inputs["artifact"]),
         },
         "build_timestamp": {
-            "source": "plugin_source_commit_timestamp",
-            "source_commit_sha": plugin_source_commit,
+            "source": "repository_root_commit_timestamp",
+            "source_commit_sha": repository_root_commit,
             "source_date_epoch": int(
-                _git(repository, "show", "-s", "--format=%ct", plugin_source_commit)
+                _git(repository, "show", "-s", "--format=%ct", repository_root_commit)
             ),
         },
         "commit_sha": _git(repository, "rev-parse", "HEAD"),
@@ -127,7 +127,7 @@ def test_manifest_captures_exact_release_identity(candidate_inputs: dict[str, Pa
     }
 
 
-def test_docs_only_commit_preserves_plugin_build_timestamp(
+def test_docs_only_commit_preserves_repository_build_timestamp(
     candidate_inputs: dict[str, Path],
 ) -> None:
     repository = candidate_inputs["repository"]
