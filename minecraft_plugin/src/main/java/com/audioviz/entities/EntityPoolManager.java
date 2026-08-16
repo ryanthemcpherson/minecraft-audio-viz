@@ -55,7 +55,7 @@ public class EntityPoolManager {
         this.entityPools = new ConcurrentHashMap<>();
         this.entityTypes = new ConcurrentHashMap<>();
         this.entityMaterialCache = new ConcurrentHashMap<>(); // zone → entityId → material
-        this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 1000);
+        this.maxEntitiesPerZone = plugin.getConfig().getInt("performance.max_entities_per_zone", 256);
     }
 
     /**

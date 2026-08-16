@@ -30,6 +30,7 @@ public class ConnectionStateListener {
     private int rampTicksElapsed = 0;
 
     private BukkitTask tickTask;
+    private volatile DisconnectCleanupController disconnectCleanupController;
 
     private static final long STALE_THRESHOLD_MS = 3000;
     private static final int RAMP_DURATION_TICKS = 20;
@@ -42,6 +43,21 @@ public class ConnectionStateListener {
 
     /** Start the staleness check tick loop (call from onEnable). */
     public void start() {
+        int graceTicks = clampDisconnectGraceTicks(
+            plugin.getConfig().getInt("connection.disconnect_grace_ticks", 100)
+        );
+        disconnectCleanupController = new DisconnectCleanupController(
+            (action, delayTicks) -> {
+                BukkitTask task = Bukkit.getScheduler().runTaskLater(
+                    plugin,
+                    action,
+                    delayTicks
+                );
+                return task::cancel;
+            },
+            plugin.getEntityPoolManager()::cleanupAllSync,
+            graceTicks
+        );
         tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 10L);
     }
 
@@ -51,12 +67,21 @@ public class ConnectionStateListener {
             tickTask.cancel();
             tickTask = null;
         }
+        DisconnectCleanupController cleanupController = disconnectCleanupController;
+        disconnectCleanupController = null;
+        if (cleanupController != null) {
+            cleanupController.stop();
+        }
     }
 
     /** Called by VizWebSocketServer when a client connects (VJ server or DJ). */
     public void onDjConnect(String info) {
         djConnected = true;
         stale = false;
+        DisconnectCleanupController cleanupController = disconnectCleanupController;
+        if (cleanupController != null) {
+            cleanupController.connected();
+        }
         logger.info("WebSocket client connected: " + info);
         Bukkit.getScheduler().runTask(plugin, () -> {
             startBrightnessRamp(1.0);
@@ -66,6 +91,10 @@ public class ConnectionStateListener {
     /** Called by VizWebSocketServer when a client disconnects. */
     public void onDjDisconnect(String reason) {
         djConnected = false;
+        DisconnectCleanupController cleanupController = disconnectCleanupController;
+        if (cleanupController != null) {
+            cleanupController.disconnected();
+        }
         logger.info("WebSocket client disconnected: " + reason);
     }
 
@@ -137,6 +166,10 @@ public class ConnectionStateListener {
     public static boolean isStale(long lastFrameMs, long nowMs, long thresholdMs) {
         if (lastFrameMs == 0) return true;
         return (nowMs - lastFrameMs) > thresholdMs;
+    }
+
+    static int clampDisconnectGraceTicks(int configuredTicks) {
+        return Math.max(0, Math.min(configuredTicks, 1200));
     }
 
     /** Compute brightness during a linear ramp. */

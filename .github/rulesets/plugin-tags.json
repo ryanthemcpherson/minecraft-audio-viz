@@ -1,0 +1,17 @@
+{
+  "name": "Paper release tag immutability",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/tags/plugin-v*"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {"type": "update"},
+    {"type": "deletion"},
+    {"type": "non_fast_forward"}
+  ]
+}

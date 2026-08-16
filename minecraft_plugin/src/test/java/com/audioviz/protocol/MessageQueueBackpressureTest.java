@@ -3,6 +3,7 @@ package com.audioviz.protocol;
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.entities.EntityPoolManager;
 import com.audioviz.entities.EntityUpdate;
+import com.audioviz.latency.LatencyTracker;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -17,8 +18,10 @@ import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -44,6 +47,7 @@ class MessageQueueBackpressureTest {
         CountDownLatch releaseWorkers = new CountDownLatch(1);
         CountDownLatch releaseOverflowGuard = new CountDownLatch(1);
         AtomicBoolean overflowGuardRan = new AtomicBoolean();
+        AtomicReference<RuntimeException> overflowFailure = new AtomicReference<>();
         CompletableFuture<Void> overflowSubmission = null;
 
         MessageQueue.MessageGuard blockingWorkerGuard = operation -> {
@@ -83,12 +87,23 @@ class MessageQueueBackpressureTest {
             }
 
             overflowSubmission = CompletableFuture.runAsync(
-                () -> queue.enqueueRaw(RAW_MESSAGE, overflowGuard)
+                () -> queue.parseAndDispatch(
+                    RAW_MESSAGE,
+                    overflowGuard,
+                    (json, guard) -> queue.enqueue(json, guard),
+                    overflowFailure::set
+                )
             );
             overflowSubmission.get(1, TimeUnit.SECONDS);
 
             assertFalse(overflowGuardRan.get(), "Rejected work must never run on the caller");
+            RejectedExecutionException rejection = assertInstanceOf(
+                RejectedExecutionException.class,
+                overflowFailure.get()
+            );
+            assertEquals("WebSocket parser queue is full", rejection.getMessage());
             assertEquals(1, droppedCount(queue));
+            assertEquals(64, queue.getMetrics().rawQueueDepth());
         } finally {
             releaseOverflowGuard.countDown();
             releaseWorkers.countDown();
@@ -117,6 +132,10 @@ class MessageQueueBackpressureTest {
 
             assertTrue(queue.getStats().contains("Queue: 1000"));
             assertTrue(queue.getStats().contains("Dropped: 1"));
+            assertEquals(
+                new MessageQueue.QueueMetrics(0, 0, 1, 1000, 0),
+                queue.getMetrics()
+            );
 
             invokeProcessTick(queue);
 
@@ -125,8 +144,27 @@ class MessageQueueBackpressureTest {
                 .handleMessage(eq("control"), messages.capture());
             assertEquals(1, messages.getAllValues().getFirst().get("marker").getAsInt());
             assertEquals(1000, messages.getAllValues().getLast().get("marker").getAsInt());
+            assertEquals(
+                new MessageQueue.QueueMetrics(1000, 0, 1, 0, 0),
+                queue.getMetrics()
+            );
         } finally {
             queue.stop();
+        }
+    }
+
+    @Test
+    void processTickRecordsMainThreadUpdateDuration() {
+        QueueFixture fixture = newFixture();
+
+        try {
+            invokeProcessTick(fixture.queue());
+
+            ArgumentCaptor<Double> duration = ArgumentCaptor.forClass(Double.class);
+            verify(fixture.latencyTracker()).recordMainThreadUpdateDuration(duration.capture());
+            assertTrue(duration.getValue() >= 0.0);
+        } finally {
+            fixture.queue().stop();
         }
     }
 
@@ -202,12 +240,15 @@ class MessageQueueBackpressureTest {
         AudioVizPlugin plugin = mock(AudioVizPlugin.class);
         MessageHandler messageHandler = mock(MessageHandler.class);
         EntityPoolManager entityPoolManager = mock(EntityPoolManager.class);
+        LatencyTracker latencyTracker = mock(LatencyTracker.class);
         when(plugin.getLogger()).thenReturn(Logger.getLogger(MessageQueueBackpressureTest.class.getName()));
         when(plugin.getEntityPoolManager()).thenReturn(entityPoolManager);
+        when(plugin.getLatencyTracker()).thenReturn(latencyTracker);
         return new QueueFixture(
             new MessageQueue(plugin, messageHandler),
             messageHandler,
-            entityPoolManager
+            entityPoolManager,
+            latencyTracker
         );
     }
 
@@ -264,6 +305,7 @@ class MessageQueueBackpressureTest {
     private record QueueFixture(
         MessageQueue queue,
         MessageHandler messageHandler,
-        EntityPoolManager entityPoolManager
+        EntityPoolManager entityPoolManager,
+        LatencyTracker latencyTracker
     ) { }
 }

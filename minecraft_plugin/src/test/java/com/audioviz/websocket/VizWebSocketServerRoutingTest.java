@@ -192,6 +192,7 @@ class VizWebSocketServerRoutingTest {
     void paddedHighFrequencyFloodCannotBypassParserAdmissionBound() throws Exception {
         MessageQueue queue = new MessageQueue(plugin, messageHandler);
         VizWebSocketServer server = newServer(queue);
+        List<String> sent = new CopyOnWriteArrayList<>();
         CountDownLatch parserWorkersEntered = new CountDownLatch(2);
         CountDownLatch releaseParserWorkers = new CountDownLatch(1);
         MessageQueue.MessageGuard blockingGuard = operation -> {
@@ -210,6 +211,10 @@ class VizWebSocketServerRoutingTest {
 
         try {
             openActiveClient(server);
+            doAnswer(invocation -> {
+                sent.add(invocation.getArgument(0));
+                return null;
+            }).when(connection).send(anyString());
             queue.enqueueRaw("{\"type\":\"audio\"}", blockingGuard);
             queue.enqueueRaw("{\"type\":\"audio\"}", blockingGuard);
             assertTrue(parserWorkersEntered.await(2, TimeUnit.SECONDS));
@@ -224,6 +229,15 @@ class VizWebSocketServerRoutingTest {
 
             verifyNoInteractions(messageHandler);
             awaitCondition(() -> droppedCount(queue) == 10L, "ten rejected parser admissions");
+            awaitCondition(() -> sent.size() == 10, "ten server_busy responses");
+            assertEquals(
+                java.util.Collections.nCopies(
+                    10,
+                    "{\"type\":\"error\",\"code\":\"server_busy\","
+                        + "\"message\":\"Server is busy; retry control messages\"}"
+                ),
+                sent
+            );
             assertEquals(0, queueSize(queue));
         } finally {
             releaseParserWorkers.countDown();

@@ -143,14 +143,14 @@ public class MetricsDisplay {
         return formatDjStatus(connected, stale, bpm, confidence);
     }
 
-    private String collectEntityCount() {
+    String collectEntityCount() {
         var epm = plugin.getEntityPoolManager();
         if (epm == null) return "0/0";
         int active = 0;
         int max = 0;
         for (var zone : plugin.getZoneManager().getAllZones()) {
             active += epm.getEntityCount(zone.getName());
-            max += plugin.getConfig().getInt("entities.max-per-zone", 500);
+            max += plugin.getConfig().getInt("performance.max_entities_per_zone", 256);
         }
         return formatEntityCount(active, max);
     }

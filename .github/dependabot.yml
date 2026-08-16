@@ -6,7 +6,11 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    groups:
+      vj-python:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "python"
@@ -17,7 +21,22 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    groups:
+      paper-runtime:
+        patterns:
+          - "io.papermc.paper:*"
+          - "org.java-websocket:*"
+          - "com.google.code.gson:*"
+          - "de.maxhenkel.voicechat:*"
+      paper-test-build:
+        patterns:
+          - "org.junit.*:*"
+          - "org.mockito:*"
+          - "org.mockbukkit.mockbukkit:*"
+          - "org.jacoco:*"
+          - "org.apache.maven.plugins:*"
+          - "net.bytebuddy:*"
     labels:
       - "dependencies"
       - "java"
@@ -28,7 +47,12 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      root-production:
+        dependency-type: "production"
+      root-development:
+        dependency-type: "development"
     labels:
       - "dependencies"
       - "javascript"
@@ -39,7 +63,12 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      dj-client-production:
+        dependency-type: "production"
+      dj-client-development:
+        dependency-type: "development"
     labels:
       - "dependencies"
       - "javascript"
@@ -50,7 +79,11 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      dj-rust:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "rust"
@@ -61,7 +94,11 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    groups:
+      coordinator-python:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "python"
@@ -72,7 +109,12 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      site-production:
+        dependency-type: "production"
+      site-development:
+        dependency-type: "development"
     labels:
       - "dependencies"
       - "javascript"
@@ -83,7 +125,12 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      worker-production:
+        dependency-type: "production"
+      worker-development:
+        dependency-type: "development"
     labels:
       - "dependencies"
       - "javascript"
@@ -94,7 +141,11 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "ci"

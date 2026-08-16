@@ -78,7 +78,7 @@ public class SettingsMenu implements Menu {
             .build());
 
         // Max entities per zone
-        int maxEntities = plugin.getConfig().getInt("performance.max_entities_per_zone", 100);
+        int maxEntities = plugin.getConfig().getInt("performance.max_entities_per_zone", 256);
         inventory.setItem(SLOT_MAX_ENTITIES, ItemBuilder.slider(
             "&eMax Entities/Zone",
             Math.min(maxEntities / 10, 10),
