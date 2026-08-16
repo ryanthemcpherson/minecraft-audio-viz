@@ -1,6 +1,6 @@
 # MCAV v2 Paper Visual Lab Design
 
-**Status:** Approved design; awaiting written-spec review
+**Status:** Approved
 
 **Date:** 2026-08-15
 
