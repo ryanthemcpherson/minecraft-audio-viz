@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from websockets.exceptions import ConnectionClosedError
-from websockets.frames import OP_TEXT, Close, Frame
+from websockets.frames import Close, Frame, Opcode
 
 import vj_server.viz_client as viz_client_module
 from vj_server.viz_client import VizClient
@@ -199,10 +199,10 @@ async def test_transport_logger_redacts_encoded_auth_frame_with_escaped_token(
     assert await client.connect() is True
 
     auth_wire = client._encode({"type": "auth", "token": secret})
-    auth_frame = Frame(OP_TEXT, auth_wire.encode())
-    peer_echo_frame = Frame(OP_TEXT, f"peer echoed {secret}".encode())
+    auth_frame = Frame(Opcode.TEXT, auth_wire.encode())
+    peer_echo_frame = Frame(Opcode.TEXT, f"peer echoed {secret}".encode())
     embedded_auth_wire = f"peer echoed {auth_wire}"
-    embedded_auth_frame = Frame(OP_TEXT, embedded_auth_wire.encode())
+    embedded_auth_frame = Frame(Opcode.TEXT, embedded_auth_wire.encode())
     transport_logger = connect_calls[0]["logger"]
     caplog.set_level(logging.DEBUG)
 
