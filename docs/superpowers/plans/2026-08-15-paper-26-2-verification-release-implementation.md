@@ -515,7 +515,7 @@
 ### Task 7: Run the pre-candidate release audit and merge
 
 **Files:**
-- Create: `docs/superpowers/reports/2026-08-15-paper-26-2-release-readiness.md`
+- Create: `docs/superpowers/reports/2026-08-16-paper-26-2-release-readiness.md`
 
 **Interfaces:**
 - Consumes: completed Git/runtime/release plans, local soak report, all audits
@@ -548,7 +548,7 @@
 - [ ] **Step 5: Commit the readiness report**
 
   ```powershell
-  git add docs/superpowers/reports/2026-08-15-paper-26-2-release-readiness.md
+  git add docs/superpowers/reports/2026-08-16-paper-26-2-release-readiness.md
   git commit -m "docs(release): record Paper 26.2 readiness"
   ```
 
@@ -567,7 +567,7 @@
   git fetch --prune origin
   git rebase origin/main
   git push -u origin release/paper-26.2
-  gh pr create --base main --head release/paper-26.2 --title "feat: release Paper 26.2 plugin" --body-file docs/superpowers/reports/2026-08-15-paper-26-2-release-readiness.md
+  gh pr create --base main --head release/paper-26.2 --title "feat: release Paper 26.2 plugin" --body-file docs/superpowers/reports/2026-08-16-paper-26-2-release-readiness.md
   gh pr view --json url,state,mergeStateStatus,statusCheckRollup
   ```
 
