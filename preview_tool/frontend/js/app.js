@@ -87,6 +87,7 @@ let availablePatterns = [];
 
 // WebSocket
 let ws = null;
+let vjCredentials = null;
 let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -652,33 +653,23 @@ function connectWebSocket() {
     const statusEl = document.getElementById('connection-status');
     const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
 
-    // VJ password: check URL param, then localStorage
-    const urlParams = new URLSearchParams(window.location.search);
-    const vjPassword = urlParams.get('vj_password')
-        || localStorage.getItem('mcav_vj_password')
-        || '';
+    if (!vjCredentials) {
+        showPreviewLogin();
+        return;
+    }
 
     try {
         const wsHost = window.location.hostname || 'localhost';
-        ws = new WebSocket(`ws://${wsHost}:${CONFIG.wsPort}`);
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${wsScheme}://${wsHost}:${CONFIG.wsPort}`);
 
         ws.onopen = () => {
-            // Send VJ auth if a password is available
-            if (vjPassword) {
-                ws.send(JSON.stringify({ type: 'vj_auth', password: vjPassword }));
-                // Auth response handled in onmessage
-            }
-
-            if (statusEl) statusEl.classList.add('connected');
-            if (statusEl) statusEl.classList.remove('error');
-            if (statusText) statusText.textContent = 'Connected';
-            console.log('WebSocket connected');
-            reconnectAttempts = 0;  // Reset on successful connection
-            stageScanRequested = false;
-
-            // Request zone and stage data for scanned block rendering
-            ws.send(JSON.stringify({ type: 'get_zones' }));
-            ws.send(JSON.stringify({ type: 'get_stages' }));
+            if (statusText) statusText.textContent = 'Authenticating…';
+            ws.send(JSON.stringify({
+                type: 'vj_auth',
+                username: vjCredentials.username,
+                password: vjCredentials.password,
+            }));
         };
 
         ws.onmessage = (event) => {
@@ -688,15 +679,20 @@ function connectWebSocket() {
                     console.error('[WS] VJ auth failed:', data.error);
                     if (statusText) statusText.textContent = 'Auth Failed';
                     if (statusEl) statusEl.classList.add('error');
-                    const newPassword = prompt(`VJ Auth Failed: ${data.error || 'Invalid password'}\nEnter VJ password:`);
-                    if (newPassword) {
-                        localStorage.setItem('mcav_vj_password', newPassword);
-                        ws.close();
-                        setTimeout(connectWebSocket, 500);
-                    }
+                    vjCredentials = null;
+                    showPreviewLogin('Invalid username or password.');
+                    ws.close(4003, 'Authentication failed');
                     return;
                 } else if (data.type === 'auth_success') {
                     console.log('[WS] VJ auth succeeded');
+                    if (statusEl) statusEl.classList.add('connected');
+                    if (statusEl) statusEl.classList.remove('error');
+                    if (statusText) statusText.textContent = 'Connected';
+                    reconnectAttempts = 0;
+                    stageScanRequested = false;
+                    hidePreviewLogin();
+                    ws.send(JSON.stringify({ type: 'get_zones' }));
+                    ws.send(JSON.stringify({ type: 'get_stages' }));
                     return;
                 }
                 if (data.type === 'audio' || data.type === 'state') {
@@ -750,7 +746,7 @@ function connectWebSocket() {
         ws.onclose = () => {
             if (statusEl) statusEl.classList.remove('connected');
             if (statusText) statusText.textContent = 'Disconnected';
-            scheduleReconnect();
+            if (vjCredentials) scheduleReconnect();
         };
 
         ws.onerror = () => {
@@ -765,6 +761,7 @@ function connectWebSocket() {
 }
 
 function scheduleReconnect() {
+    if (!vjCredentials) return;
     if (reconnectTimeout) clearTimeout(reconnectTimeout);
 
     reconnectAttempts++;
@@ -797,6 +794,72 @@ function scheduleReconnect() {
 
     console.log(`[WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
     reconnectTimeout = setTimeout(connectWebSocket, delay);
+}
+
+function showPreviewLogin(message = '') {
+    const gate = document.getElementById('auth-gate');
+    const error = document.getElementById('auth-error');
+    const submit = document.getElementById('auth-submit');
+    const username = document.getElementById('auth-username');
+    const password = document.getElementById('auth-password');
+    if (!gate) return;
+
+    gate.hidden = false;
+    error.textContent = message;
+    password.value = '';
+    submit.disabled = false;
+    submit.textContent = 'Open 3D Preview';
+    (username.value ? password : username).focus();
+}
+
+function hidePreviewLogin() {
+    const gate = document.getElementById('auth-gate');
+    const error = document.getElementById('auth-error');
+    const submit = document.getElementById('auth-submit');
+    if (gate) gate.hidden = true;
+    if (error) error.textContent = '';
+    if (submit) {
+        submit.disabled = false;
+        submit.textContent = 'Open 3D Preview';
+    }
+}
+
+function setupPreviewLogin() {
+    const form = document.getElementById('auth-form');
+    const error = document.getElementById('auth-error');
+    const submit = document.getElementById('auth-submit');
+    const username = document.getElementById('auth-username');
+    const password = document.getElementById('auth-password');
+    const logout = document.getElementById('btn-logout');
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const nextUsername = username.value.trim();
+        const nextPassword = password.value;
+        if (!nextUsername || !nextPassword) {
+            error.textContent = 'Enter the username and password from FIRST_LOGIN.txt.';
+            return;
+        }
+
+        vjCredentials = { username: nextUsername, password: nextPassword };
+        error.textContent = '';
+        submit.disabled = true;
+        submit.textContent = 'Authenticating…';
+        reconnectAttempts = 0;
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
+        connectWebSocket();
+    });
+
+    logout.addEventListener('click', () => {
+        vjCredentials = null;
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        if (ws) ws.close(1000, 'Operator signed out');
+        username.value = '';
+        showPreviewLogin('Signed out.');
+    });
+
+    showPreviewLogin();
 }
 
 function updateAudioState(data) {
@@ -1696,5 +1759,8 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
-// Start when DOM is ready
-document.addEventListener('DOMContentLoaded', init);
+// Start the renderer behind a protected operator login.
+document.addEventListener('DOMContentLoaded', () => {
+    setupPreviewLogin();
+    init();
+});
