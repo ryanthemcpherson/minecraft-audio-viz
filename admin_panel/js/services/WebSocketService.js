@@ -12,6 +12,8 @@ export class WebSocketService extends EventTarget {
         this.username = options.username || '';
         this.password = options.password || '';
         this.pageProtocol = options.pageProtocol || globalThis.location?.protocol || 'http:';
+        const scheme = this.pageProtocol === 'https:' ? 'wss' : 'ws';
+        this.url = options.url || `${scheme}://${this.host}:${this.port}`;
         this.reconnectInterval = options.reconnectInterval || 1000;
         this.maxReconnectAttempts = options.maxReconnectAttempts || 50;
 
@@ -77,9 +79,7 @@ export class WebSocketService extends EventTarget {
         this.isConnecting = true;
         this.shouldReconnect = true;
 
-        const scheme = this.pageProtocol === 'https:' ? 'wss' : 'ws';
-        const url = `${scheme}://${this.host}:${this.port}`;
-        console.log(`[WS] Connecting to ${url}...`);
+        console.log(`[WS] Connecting to ${this.url}...`);
 
         this._emit('connecting', {
             attempt: this.reconnectAttempts,
@@ -88,7 +88,7 @@ export class WebSocketService extends EventTarget {
 
         try {
             const generation = ++this._socketGeneration;
-            const socket = new WebSocket(url);
+            const socket = new WebSocket(this.url);
             this.ws = socket;
 
             socket.onopen = () => this._onOpen(socket, generation);

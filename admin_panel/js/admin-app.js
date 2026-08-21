@@ -4,6 +4,7 @@
  */
 
 import { WebSocketService } from './services/WebSocketService.js';
+import { resolveBrowserWebSocketUrl } from './utils/browser-endpoint.js';
 import { createInitialState } from './modules/InitialState.js';
 import { cacheElements } from './modules/ElementCache.js';
 import { setupEventListeners } from './modules/EventWiring.js';
@@ -31,14 +32,14 @@ class AdminApp {
         this.onAuthRequired = options.onAuthRequired || (() => {});
         this.onAuthFailed = options.onAuthFailed || (() => {});
 
-        // WebSocket connection - use same host as the page was served from
-        const wsHost = window.location.hostname || 'localhost';
         const urlParams = new URLSearchParams(window.location.search);
-        const wsPort = parseInt(urlParams.get('port'), 10) || 8766;
+        const wsUrl = resolveBrowserWebSocketUrl(
+            window.location,
+            urlParams,
+            window.MCAV_RUNTIME_CONFIG,
+        );
         this.ws = new WebSocketService({
-            host: wsHost,
-            port: wsPort,
-            pageProtocol: window.location.protocol,
+            url: wsUrl,
             username: options.username || '',
             password: options.password || '',
         });

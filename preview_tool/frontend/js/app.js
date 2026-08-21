@@ -3,12 +3,11 @@
  * Professional Three.js visualization with particles and block indicators
  */
 
-import { PreviewAuthSession, websocketScheme } from './PreviewAuthSession.js';
+import { PreviewAuthSession } from './PreviewAuthSession.js';
+import { resolveBrowserWebSocketUrl } from './browser-endpoint.js';
 
-// Configuration — port can be overridden via ?port=XXXX URL parameter
 const _urlParams = new URLSearchParams(window.location.search);
 const CONFIG = {
-    wsPort: parseInt(_urlParams.get('port'), 10) || 8766,
     entityCount: 16,
     gridSize: 4,
     blockSize: 0.8,
@@ -679,9 +678,12 @@ function connectWebSocket() {
     }
 
     try {
-        const wsHost = window.location.hostname || 'localhost';
-        const wsScheme = websocketScheme(window.location.protocol);
-        const socket = new WebSocket(`${wsScheme}://${wsHost}:${CONFIG.wsPort}`);
+        const wsUrl = resolveBrowserWebSocketUrl(
+            window.location,
+            _urlParams,
+            window.MCAV_RUNTIME_CONFIG,
+        );
+        const socket = new WebSocket(wsUrl);
         ws = socket;
         const isCurrentSocket = () => (
             ws === socket && wsGeneration === connectionGeneration
