@@ -435,6 +435,107 @@ test('correlated protocol errors clear emergency pending state without changing 
     }
 });
 
+test('disconnect and fresh snapshot reconcile emergency pending without a late timeout', () => {
+    const originalDocument = globalThis.document;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const appRoot = new FakeElement('app');
+    const status = new FakeElement('emergency-control-status');
+    const blackout = new FakeElement('btn-blackout');
+    const freeze = new FakeElement('btn-freeze');
+    const sent = [];
+    const timeoutCallbacks = [];
+    globalThis.document = {
+        getElementById: (id) => id === 'app' ? appRoot : id === 'emergency-control-status' ? status : null,
+    };
+    globalThis.setTimeout = (callback) => {
+        timeoutCallbacks.push(callback);
+        return timeoutCallbacks.length;
+    };
+    globalThis.clearTimeout = () => {};
+    const app = {
+        state: { blackout: false, freeze: false },
+        elements: { btnBlackout: blackout, btnFreeze: freeze },
+        ws: { sendImmediate: (message) => (sent.push(message), true) },
+    };
+    const actions = new ActionsManager(app);
+
+    try {
+        actions.toggleBlackout();
+        const endedRequestId = sent[0].request_id;
+        actions.handleConnectionLost();
+        assert.equal(blackout.getAttribute('aria-busy'), 'false');
+        assert.match(status.textContent, /connection lost/i);
+
+        actions.toggleBlackout();
+        const freshRequestId = sent[1].request_id;
+        assert.notEqual(freshRequestId, endedRequestId);
+        assert.equal(blackout.getAttribute('aria-busy'), 'true');
+
+        actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: false,
+            request_id: endedRequestId,
+        });
+        assert.equal(app.state.blackout, true);
+        assert.equal(blackout.getAttribute('aria-busy'), 'true');
+
+        actions.applyEmergencyState({
+            type: 'vj_state',
+            blackout: false,
+            freeze: true,
+        });
+        assert.equal(app.state.blackout, false);
+        assert.equal(app.state.freeze, true);
+        assert.equal(blackout.getAttribute('aria-busy'), 'false');
+        assert.match(status.textContent, /synchronized/i);
+
+        for (const timeoutCallback of timeoutCallbacks) timeoutCallback();
+        assert.doesNotMatch(status.textContent, /not confirmed/i);
+        assert.equal(blackout.getAttribute('aria-busy'), 'false');
+    } finally {
+        globalThis.document = originalDocument;
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+    }
+});
+
+test('uncorrelated authoritative broadcasts never clear an in-flight emergency request', () => {
+    const originalDocument = globalThis.document;
+    const originalSetTimeout = globalThis.setTimeout;
+    const appRoot = new FakeElement('app');
+    const status = new FakeElement('emergency-control-status');
+    const blackout = new FakeElement('btn-blackout');
+    globalThis.document = {
+        getElementById: (id) => id === 'app' ? appRoot : id === 'emergency-control-status' ? status : null,
+    };
+    globalThis.setTimeout = () => 7;
+    const app = {
+        state: { blackout: false, freeze: false },
+        elements: { btnBlackout: blackout, btnFreeze: new FakeElement('btn-freeze') },
+        ws: { sendImmediate: () => true },
+    };
+    const actions = new ActionsManager(app);
+
+    try {
+        actions.toggleBlackout();
+        actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: false,
+        });
+
+        assert.equal(app.state.blackout, true);
+        assert.equal(blackout.getAttribute('aria-pressed'), 'true');
+        assert.equal(blackout.getAttribute('aria-busy'), 'true');
+        assert.match(status.textContent, /pending/i);
+    } finally {
+        globalThis.document = originalDocument;
+        globalThis.setTimeout = originalSetTimeout;
+    }
+});
+
 test('disabled emergency controls cannot be fired through global shortcuts', () => {
     withControlHarness(({ app }) => {
         let blackoutCalls = 0;

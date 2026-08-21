@@ -47,6 +47,7 @@ export function setupConnectionLifecycle(app) {
         app.ui.setConnectionStatus('disconnected');
         app.ui.updateServiceIndicators();
         app.connectCodes.resetGenerateButton();
+        app.actions?.handleConnectionLost?.();
         app.ui.applyControlState?.();
     });
 
