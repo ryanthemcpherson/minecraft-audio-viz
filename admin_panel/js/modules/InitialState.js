@@ -76,6 +76,7 @@ export function createInitialState() {
         bitmap: {
             initialized: false,
             initializedZones: new Set(),
+            zones: {},
             zone: 'main',
             width: 16,
             height: 12,

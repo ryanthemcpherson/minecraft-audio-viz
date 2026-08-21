@@ -31,27 +31,24 @@ export class ZoneManager {
     syncBitmapStateFromZonePatterns() {
         const zp = this.state.zonePatterns;
         if (!zp) return;
+        const bitmapZones = this.state.bitmap.zones || (this.state.bitmap.zones = {});
         for (const [zoneName, info] of Object.entries(zp)) {
             const rm = typeof info === 'object' ? info.render_mode : null;
             if (rm === 'bitmap') {
                 this.state.bitmap.initializedZones.add(zoneName);
-                if (this.app.preview?.bitmapPreview) {
-                    const zg = this.app.preview.previewZoneGroups?.[zoneName];
-                    if (zg) {
-                        const bw = this.state.bitmap.width || 16;
-                        const bh = this.state.bitmap.height || 12;
-                        const patId = typeof info === 'object' ? info.pattern : info;
-                        this.app.preview.bitmapPreview.activate(zoneName, bw, bh, patId || 'bmp_spectrum', zg);
-                        this.app.preview.bitmapPreview.setZoneVisible(zoneName, true);
-                    }
-                }
+                const patId = typeof info === 'object' ? info.pattern : info;
+                bitmapZones[zoneName] = {
+                    ...bitmapZones[zoneName],
+                    initialized: true,
+                    pattern: patId || bitmapZones[zoneName]?.pattern || 'bmp_spectrum',
+                };
             } else {
                 this.state.bitmap.initializedZones.delete(zoneName);
-                if (this.app.preview?.bitmapPreview) {
-                    this.app.preview.bitmapPreview.deactivate(zoneName);
-                }
+                delete bitmapZones[zoneName];
             }
         }
+        this.state.bitmap.initialized = this.state.bitmap.initializedZones.size > 0;
+        this.app.preview?.syncBitmapZones();
     }
 
     // === Zone Event Listeners ===
