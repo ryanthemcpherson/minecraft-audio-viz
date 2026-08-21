@@ -37,6 +37,7 @@ if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
     "$endpoint_host" "$endpoint_host" "$endpoint_host" > "$identity_dir/FIRST_LOGIN.txt"
   printf '{"public_host":"%s"}\n' "$canonical_host" > "$identity_dir/identity.json"
   ln -s 'identity-generations/test-generation' "$MCAV_ROOT/state/current-identity"
+  if [[ "${FAKE_BOOTSTRAP_FAIL_AFTER_IDENTITY:-0}" == "1" ]]; then exit 18; fi
   exit 0
 fi
 printf '%s\n' "$@" > "$VJ_CAPTURE"
@@ -228,6 +229,15 @@ test_bootstrap_failure_still_starts_paper() {
   make_fixture "$fixture"
   FAKE_BOOTSTRAP_FAIL=1 run_wrapper "$fixture" "$fixture/paper" --nogui
   [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start after bootstrap failure'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ started after bootstrap failure'
+}
+
+test_post_identity_bootstrap_failure_starts_only_paper() {
+  local fixture="$TEST_ROOT/post-identity-bootstrap-failure"
+  make_fixture "$fixture"
+  FAKE_BOOTSTRAP_FAIL_AFTER_IDENTITY=1 run_wrapper "$fixture" "$fixture/paper" --nogui
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start after identity recovery failure'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ started after identity recovery failure'
 }
 
 test_vj_bind_failure_still_starts_paper() {
@@ -255,6 +265,7 @@ test_topology_overrides_fail_closed_and_still_start_paper
 test_example_environment_uses_two_public_ports
 test_arm64_runtime_selection
 test_bootstrap_failure_still_starts_paper
+test_post_identity_bootstrap_failure_starts_only_paper
 test_vj_bind_failure_still_starts_paper
 test_missing_paper_command_is_rejected
 printf 'start-mcav.sh integration tests passed\n'
