@@ -14,6 +14,7 @@ export class PreviewManager {
         // 3D Preview state
         this._initialized = false;
         this._stripCollapsed = localStorage.getItem('mcav-preview-collapsed') === 'true';
+        this._presentationMode = 'hidden';
         this._scene = null;
         this._camera = null;
         this._renderer = null;
@@ -148,7 +149,7 @@ export class PreviewManager {
             slot.append(strip);
         }
 
-        if (visible) {
+        if (this._canAnimate()) {
             this.startAnimation();
             requestAnimationFrame(() => this._onResize());
         } else {
@@ -178,7 +179,7 @@ export class PreviewManager {
 
                 if (this._stripCollapsed) {
                     this.stopAnimation();
-                } else {
+                } else if (this._canAnimate()) {
                     this._onResize();
                     this.startAnimation();
                 }
@@ -950,8 +951,14 @@ export class PreviewManager {
 
     // === Animation Loop ===
 
+    _canAnimate() {
+        return !this._stripCollapsed
+            && (this._presentationMode === 'live' || this._presentationMode === 'compact');
+    }
+
     startAnimation() {
         if (!this._initialized || this._failed) return;
+        if (!this._canAnimate()) return;
         if (this._animationId) return;
         this._lastFrameTime = performance.now();
         this._animate();
