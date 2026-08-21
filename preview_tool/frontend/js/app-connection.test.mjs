@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const appUrl = new URL('./app.js', import.meta.url);
 const authModule = await import('./PreviewAuthSession.js');
+const browserEndpointModule = await import('./browser-endpoint.js');
 let moduleSequence = 0;
 
 class FakeClassList {
@@ -120,7 +121,8 @@ async function createConnectionHarness() {
 
     globalThis.WebSocket = FakeWebSocket;
     globalThis.window = {
-        location: { hostname: 'localhost', protocol: 'http:', search: '' },
+        location: { hostname: 'localhost', host: 'localhost:8080', protocol: 'https:', search: '' },
+        MCAV_RUNTIME_CONFIG: { browserWebSocketMode: 'same-origin', browserWebSocketPath: '/ws' },
         addEventListener() {},
     };
     globalThis.document = {
@@ -134,12 +136,18 @@ async function createConnectionHarness() {
         return scheduledTimeouts.length;
     };
     globalThis.__previewAuthModule = authModule;
+    globalThis.__browserEndpointModule = browserEndpointModule;
 
     const source = await readFile(appUrl, 'utf8');
-    const instrumentedSource = source.replace(
-        "import { PreviewAuthSession, websocketScheme } from './PreviewAuthSession.js';",
-        'const { PreviewAuthSession, websocketScheme } = globalThis.__previewAuthModule;',
-    ) + `\nexport { connectWebSocket, setupPreviewLogin };\n// ${moduleSequence++}`;
+    const instrumentedSource = source
+        .replace(
+            "import { PreviewAuthSession } from './PreviewAuthSession.js';",
+            'const { PreviewAuthSession } = globalThis.__previewAuthModule;',
+        )
+        .replace(
+            "import { resolveBrowserWebSocketUrl } from './browser-endpoint.js';",
+            'const { resolveBrowserWebSocketUrl } = globalThis.__browserEndpointModule;',
+        ) + `\nexport { connectWebSocket, setupPreviewLogin };\n// ${moduleSequence++}`;
     const moduleUrl = `data:text/javascript;base64,${Buffer.from(instrumentedSource).toString('base64')}`;
     const app = await import(moduleUrl);
 
@@ -156,6 +164,7 @@ async function createConnectionHarness() {
             globalThis.WebSocket = originalGlobals.WebSocket;
             globalThis.window = originalGlobals.window;
             delete globalThis.__previewAuthModule;
+            delete globalThis.__browserEndpointModule;
         },
     };
 }
@@ -176,6 +185,15 @@ test('superseded socket cannot authenticate the replacement connection', async (
     assert.equal(harness.statusText.textContent, 'Negotiating access…');
     assert.equal(harness.status.classList.contains('connected'), false);
     assert.deepEqual(replacementSocket.sent, []);
+});
+
+test('connects the preview through the configured same-origin endpoint', async (t) => {
+    const harness = await createConnectionHarness();
+    t.after(harness.cleanup);
+
+    harness.app.connectWebSocket();
+
+    assert.equal(harness.sockets[0].url, 'wss://localhost:8080/ws');
 });
 
 test('superseded socket close and error cannot disconnect the replacement', async (t) => {

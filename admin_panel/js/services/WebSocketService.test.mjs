@@ -49,7 +49,7 @@ test('sends an exact username and password authentication message', () => {
     }]);
 });
 
-test('uses wss when the control panel is served over HTTPS', () => {
+test('connects using the supplied browser endpoint URL', () => {
     const originalWebSocket = globalThis.WebSocket;
     let requestedUrl = '';
 
@@ -65,16 +65,14 @@ test('uses wss when the control panel is served over HTTPS', () => {
     globalThis.WebSocket = FakeWebSocket;
     try {
         const service = new WebSocketService({
-            host: 'panel.example.test',
-            port: 8766,
-            pageProtocol: 'https:',
+            url: 'wss://panel.example.test/ws',
             username: 'operator',
             password: 'secret-value',
         });
 
         service.connect();
 
-        assert.equal(requestedUrl, 'wss://panel.example.test:8766');
+        assert.equal(requestedUrl, 'wss://panel.example.test/ws');
     } finally {
         globalThis.WebSocket = originalWebSocket;
     }
