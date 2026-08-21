@@ -236,30 +236,6 @@ export class UIHelpers {
         this.applyControlState();
     }
 
-    // === Tab Switching ===
-
-    switchTab(tabName) {
-        // Update tab buttons
-        this.elements.tabs.forEach(tab => {
-            const isActive = tab.dataset.tab === tabName;
-            tab.classList.toggle('active', isActive);
-            tab.setAttribute('aria-selected', String(isActive));
-        });
-
-        // Slide tab indicator
-        this.updateTabIndicator();
-
-        // Update panels
-        this.elements.tabPanels.forEach(panel => {
-            panel.classList.toggle('active', panel.id === `${tabName}-panel`);
-        });
-    }
-
-    updateTabIndicator() {
-        // cleanup-task-7: compatibility wrapper for callers retained during extraction.
-        return this.app.workspaces?.activeWorkspace ?? null;
-    }
-
     // === Keyboard Shortcuts ===
 
     handleKeyboard(e) {
