@@ -13,6 +13,23 @@
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to content</a>
+    <section id="auth-gate" class="auth-gate" aria-labelledby="auth-title">
+        <div class="auth-card">
+            <img class="auth-logo" src="mcav-medium.png" alt="MCAV">
+            <p class="auth-eyebrow">Secure operator access</p>
+            <h1 id="auth-title">3D Stage Preview</h1>
+            <p class="auth-copy">Use the credentials generated in <code>mcav-vj/FIRST_LOGIN.txt</code>.</p>
+            <form id="auth-form" class="auth-form">
+                <label for="auth-username">Username</label>
+                <input id="auth-username" name="username" type="text" autocomplete="username" required>
+                <label for="auth-password">Password</label>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+                <p id="auth-error" class="auth-error" role="alert" aria-live="polite"></p>
+                <button id="auth-submit" class="auth-submit" type="submit">Open 3D Preview</button>
+            </form>
+            <p class="auth-footnote">Credentials stay in memory for this tab only.</p>
+        </div>
+    </section>
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
@@ -29,6 +46,7 @@
                 </div>
             </div>
             <div class="header-right">
+                <button id="btn-logout" class="header-logout" type="button">Sign out</button>
                 <div class="header-stat voice-status-header" id="voice-header-status">
                     <span class="voice-header-dot" id="voice-header-dot"></span>
                     <span class="stat-value" id="voice-header-text">Voice: N/A</span>
