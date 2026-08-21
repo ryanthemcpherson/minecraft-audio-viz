@@ -31,6 +31,8 @@ export class WorkspaceManager {
         this.buttons = [];
         this.panels = [];
         this.labels = [];
+        this.sectionIndexButtons = [];
+        this.sectionAvailabilityObserver = null;
         this.activeWorkspace = DEFAULT_WORKSPACE;
     }
 
@@ -41,6 +43,7 @@ export class WorkspaceManager {
         this.labels = [...this.root.querySelectorAll('[data-workspace-label]')];
         this.setupTabSemantics();
         this.relocateControls();
+        this.setupSectionIndex();
         for (const button of this.buttons) {
             button.addEventListener('click', () => {
                 this.activate(button.dataset.workspace, { focus: true });
@@ -57,6 +60,66 @@ export class WorkspaceManager {
             console.warn('[Workspace] Preference read failed', error);
         }
         this.activate(isWorkspaceName(saved) ? saved : DEFAULT_WORKSPACE, { persist: false });
+    }
+
+    setupSectionIndex() {
+        this.sectionIndexButtons = [
+            ...this.root.querySelectorAll('[data-section-target]'),
+        ].filter((button) => button.dataset?.sectionTarget);
+
+        for (const button of this.sectionIndexButtons) {
+            button.addEventListener('click', () => this.activateSectionIndex(button));
+        }
+        this.syncSectionIndexAvailability();
+
+        const MutationObserverClass = this.root.defaultView?.MutationObserver
+            ?? globalThis.MutationObserver;
+        if (!MutationObserverClass) return;
+
+        this.sectionAvailabilityObserver = new MutationObserverClass(() => {
+            this.syncSectionIndexAvailability();
+        });
+        const observedTargets = new Set();
+        for (const button of this.sectionIndexButtons) {
+            const target = this.root.getElementById?.(button.dataset.sectionTarget);
+            if (!target || observedTargets.has(target)) continue;
+            observedTargets.add(target);
+            this.sectionAvailabilityObserver.observe(target, {
+                attributes: true,
+                attributeFilter: ['class', 'hidden'],
+            });
+        }
+    }
+
+    syncSectionIndexAvailability() {
+        for (const button of this.sectionIndexButtons) {
+            const target = this.root.getElementById?.(button.dataset.sectionTarget);
+            const unavailable = !target
+                || target.hidden
+                || target.classList?.contains('hidden');
+            button.hidden = unavailable;
+            button.disabled = unavailable;
+        }
+    }
+
+    activateSectionIndex(button) {
+        const section = this.root.getElementById?.(button.dataset.sectionTarget);
+        if (!section || button.disabled || section.hidden
+            || section.classList?.contains('hidden')) return false;
+
+        const heading = section.querySelector?.(':scope > .section-title')
+            ?? section.querySelector?.('.section-title')
+            ?? null;
+        if (section.classList?.contains('collapsed')) heading?.click?.();
+
+        const focusTarget = this.root.getElementById?.(button.dataset.focusTarget)
+            ?? heading;
+        if (focusTarget === heading && heading?.getAttribute?.('tabindex') == null) {
+            heading.setAttribute('tabindex', '-1');
+        }
+        focusTarget?.focus?.({ preventScroll: true });
+        section.scrollIntoView?.({ block: 'start', behavior: 'auto' });
+        return true;
     }
 
     resolveStorage() {
