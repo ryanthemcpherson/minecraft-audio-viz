@@ -414,59 +414,6 @@ async def test_legacy_http_bind_failure_does_not_prevent_websocket_startup(
 
 
 @pytest.mark.asyncio
-async def test_legacy_http_cleanup_finishes_before_propagating_cancellation() -> None:
-    shutdown_started = threading.Event()
-    release_shutdown = threading.Event()
-    stop_requested = threading.Event()
-    events: list[str] = []
-
-    class DelayedHTTPServer:
-        def serve_forever(self) -> None:
-            stop_requested.wait()
-
-        def shutdown(self) -> None:
-            events.append("shutdown")
-            shutdown_started.set()
-            release_shutdown.wait()
-            stop_requested.set()
-
-        def server_close(self) -> None:
-            events.append("server_close")
-
-    http_server = DelayedHTTPServer()
-    http_thread = threading.Thread(
-        target=http_server.serve_forever,
-        daemon=True,
-        name="test-legacy-http-server",
-    )
-    http_thread.start()
-    server = vj_mod.VJServer(metrics_port=None, show_spectrograph=False)
-    cleanup_task = asyncio.create_task(server._stop_legacy_http_thread(http_server, http_thread))
-
-    try:
-        while not shutdown_started.is_set():
-            await asyncio.sleep(0)
-        cleanup_task.cancel()
-        await asyncio.sleep(0.01)
-        assert cleanup_task.done() is False
-
-        release_shutdown.set()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(cleanup_task, timeout=1.0)
-
-        assert events == ["shutdown", "server_close"]
-        assert http_thread.is_alive() is False
-        assert not any(
-            thread.name == "legacy-http-cleanup" and thread.is_alive()
-            for thread in threading.enumerate()
-        )
-    finally:
-        release_shutdown.set()
-        stop_requested.set()
-        http_thread.join(timeout=1.0)
-
-
-@pytest.mark.asyncio
 async def test_real_legacy_http_cleanup_keeps_event_loop_responsive(tmp_path: Path) -> None:
     http_server = create_http_server(0, str(tmp_path))
     serve_started = threading.Event()
@@ -508,6 +455,315 @@ async def test_real_legacy_http_cleanup_keeps_event_loop_responsive(tmp_path: Pa
 
     assert loop_ticks > 0
     assert http_thread.is_alive() is False
+
+
+@pytest.mark.asyncio
+async def test_run_repeated_cancellation_during_http_cleanup_closes_every_resource_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ControlledHTTPServer:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+            self.shutdown_started = threading.Event()
+            self.release_shutdown = threading.Event()
+            self.stop_requested = threading.Event()
+
+        def serve_forever(self) -> None:
+            self.stop_requested.wait()
+
+        def shutdown(self) -> None:
+            self.events.append("shutdown")
+            self.shutdown_started.set()
+            self.release_shutdown.wait()
+            self.stop_requested.set()
+
+        def server_close(self) -> None:
+            self.events.append("server_close")
+
+    class CountingListener:
+        def __init__(self, *, wait_error: Exception | None = None) -> None:
+            self.wait_error = wait_error
+            self.close_calls = 0
+            self.wait_closed_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_closed_calls += 1
+            if self.wait_error is not None:
+                raise self.wait_error
+
+    class CountingClient:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def send(self, message: str) -> None:
+            self.messages.append(message)
+
+    import vj_server.metrics as metrics_module
+
+    http_server = ControlledHTTPServer()
+    dj_listener = CountingListener()
+    broadcast_listener = CountingListener()
+    metrics_listener = CountingListener(wait_error=RuntimeError("metrics wait failed"))
+    websocket_listeners = [dj_listener, broadcast_listener]
+    browser_client = CountingClient()
+    dj_client = CountingClient()
+    main_loop_entered = asyncio.Event()
+    background_started = asyncio.Event()
+    background_stopped = asyncio.Event()
+
+    def fake_create_http_server(*_args):
+        return http_server
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        return websocket_listeners.pop(0)
+
+    async def fake_start_metrics_server(*_args, **_kwargs):
+        return metrics_listener
+
+    async def no_op() -> None:
+        return None
+
+    async def background_loop() -> None:
+        background_started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            background_stopped.set()
+
+    async def main_loop() -> None:
+        main_loop_entered.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(vj_mod, "create_http_server", fake_create_http_server)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    monkeypatch.setattr(metrics_module, "start_metrics_server", fake_start_metrics_server)
+    server = vj_mod.VJServer(
+        http_port=18080,
+        metrics_port=19001,
+        show_spectrograph=False,
+    )
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = background_loop
+    server._main_loop = main_loop
+    server._broadcast_clients.add(browser_client)
+    server._djs["test-dj"] = SimpleNamespace(websocket=dj_client)
+
+    run_task = asyncio.create_task(server.run())
+    try:
+        await asyncio.wait_for(main_loop_entered.wait(), timeout=1.0)
+        await asyncio.wait_for(background_started.wait(), timeout=1.0)
+        run_task.cancel()
+        while not http_server.shutdown_started.is_set():
+            await asyncio.sleep(0)
+        for _ in range(3):
+            run_task.cancel()
+            await asyncio.sleep(0)
+
+        http_server.release_shutdown.set()
+        with pytest.raises(asyncio.CancelledError) as cancel_info:
+            await asyncio.wait_for(run_task, timeout=1.0)
+
+        cleanup_failure = cancel_info.value.__cause__
+        assert isinstance(cleanup_failure, ExceptionGroup)
+        assert [str(error) for error in cleanup_failure.exceptions] == ["metrics wait failed"]
+        assert http_server.events == ["shutdown", "server_close"]
+        assert browser_client.messages == ['{"type": "server_shutdown"}']
+        assert dj_client.messages == ['{"type": "server_shutdown"}']
+        assert background_stopped.is_set()
+        for listener in (dj_listener, broadcast_listener, metrics_listener):
+            assert listener.close_calls == 1
+            assert listener.wait_closed_calls == 1
+        assert not any(
+            thread.name in {"legacy-http-server", "legacy-http-cleanup"} and thread.is_alive()
+            for thread in threading.enumerate()
+        )
+    finally:
+        http_server.release_shutdown.set()
+        http_server.stop_requested.set()
+        if not run_task.done():
+            run_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await run_task
+
+
+@pytest.mark.asyncio
+async def test_run_repeated_cancellation_in_unified_cleanup_closes_gateway_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CountingListener:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_closed_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_closed_calls += 1
+
+    class CountingGatewayRunner:
+        def __init__(self) -> None:
+            self.cleanup_calls = 0
+
+        async def cleanup(self) -> None:
+            self.cleanup_calls += 1
+
+    class DelayedClient:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+            self.send_started = asyncio.Event()
+            self.release_send = asyncio.Event()
+
+        async def send(self, message: str) -> None:
+            self.messages.append(message)
+            self.send_started.set()
+            await self.release_send.wait()
+
+    class CountingClient:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def send(self, message: str) -> None:
+            self.messages.append(message)
+
+    dj_listener = CountingListener()
+    gateway_runner = CountingGatewayRunner()
+    browser_client = DelayedClient()
+    dj_client = CountingClient()
+    main_loop_entered = asyncio.Event()
+    background_started = asyncio.Event()
+    background_stopped = asyncio.Event()
+    websocket_starts = 0
+
+    async def fake_gateway(*_args, **_kwargs):
+        return gateway_runner
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        nonlocal websocket_starts
+        websocket_starts += 1
+        return dj_listener
+
+    async def no_op() -> None:
+        return None
+
+    async def background_loop() -> None:
+        background_started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            background_stopped.set()
+
+    async def main_loop() -> None:
+        main_loop_entered.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(vj_mod, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    server = _make_unified_server(monkeypatch)
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = background_loop
+    server._main_loop = main_loop
+    server._broadcast_clients.add(browser_client)
+    server._djs["test-dj"] = SimpleNamespace(websocket=dj_client)
+
+    run_task = asyncio.create_task(server.run())
+    try:
+        await asyncio.wait_for(main_loop_entered.wait(), timeout=1.0)
+        await asyncio.wait_for(background_started.wait(), timeout=1.0)
+        run_task.cancel()
+        await asyncio.wait_for(browser_client.send_started.wait(), timeout=1.0)
+        for _ in range(3):
+            run_task.cancel()
+            await asyncio.sleep(0)
+
+        browser_client.release_send.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(run_task, timeout=1.0)
+
+        assert websocket_starts == 1
+        assert browser_client.messages == ['{"type": "server_shutdown"}']
+        assert dj_client.messages == ['{"type": "server_shutdown"}']
+        assert background_stopped.is_set()
+        assert dj_listener.close_calls == 1
+        assert dj_listener.wait_closed_calls == 1
+        assert gateway_runner.cleanup_calls == 1
+    finally:
+        browser_client.release_send.set()
+        if not run_task.done():
+            run_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await run_task
+
+
+@pytest.mark.asyncio
+async def test_run_reports_cleanup_failure_after_closing_remaining_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CountingListener:
+        def __init__(self, *, wait_error: Exception | None = None) -> None:
+            self.wait_error = wait_error
+            self.close_calls = 0
+            self.wait_closed_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_closed_calls += 1
+            if self.wait_error is not None:
+                raise self.wait_error
+
+    class CountingGatewayRunner:
+        def __init__(self) -> None:
+            self.cleanup_calls = 0
+
+        async def cleanup(self) -> None:
+            self.cleanup_calls += 1
+
+    import vj_server.metrics as metrics_module
+
+    dj_listener = CountingListener()
+    metrics_listener = CountingListener(wait_error=RuntimeError("metrics wait failed"))
+    gateway_runner = CountingGatewayRunner()
+
+    async def fake_gateway(*_args, **_kwargs):
+        return gateway_runner
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        return dj_listener
+
+    async def fake_start_metrics_server(*_args, **_kwargs):
+        return metrics_listener
+
+    async def no_op() -> None:
+        return None
+
+    monkeypatch.setattr(vj_mod, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    monkeypatch.setattr(metrics_module, "start_metrics_server", fake_start_metrics_server)
+    server = _make_unified_server(monkeypatch, metrics_port=19001)
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+
+    with pytest.raises(ExceptionGroup, match="VJ server cleanup failed") as exc_info:
+        await server.run()
+
+    assert [str(error) for error in exc_info.value.exceptions] == ["metrics wait failed"]
+    assert metrics_listener.close_calls == 1
+    assert metrics_listener.wait_closed_calls == 1
+    assert dj_listener.close_calls == 1
+    assert dj_listener.wait_closed_calls == 1
+    assert gateway_runner.cleanup_calls == 1
 
 
 # ============================================================================

@@ -1124,19 +1124,134 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         )
         cleanup_thread.start()
 
-        cancellation_requested = False
         while not completed.is_set():
-            try:
-                await asyncio.sleep(0.01)
-            except asyncio.CancelledError:
-                cancellation_requested = True
+            await asyncio.sleep(0.01)
 
         cleanup_thread.join()
         for step_name, exc in failures:
             logger.warning("Legacy HTTP %s failed: %s", step_name, exc)
+        if failures:
+            raise ExceptionGroup(
+                "Legacy HTTP cleanup failed",
+                [exc for _step_name, exc in failures],
+            )
 
-        if cancellation_requested:
-            raise asyncio.CancelledError()
+    async def _finalize_run(
+        self,
+        *,
+        gateway_runner: Any,
+        dj_server: Any,
+        broadcast_server: Any,
+        metrics_server: Any,
+        legacy_http_server: Any,
+        legacy_http_thread: Any,
+    ) -> None:
+        """Attempt every acquired-resource cleanup stage exactly once."""
+        cleanup_errors: list[Exception] = []
+
+        def attempt_sync(step_name: str, action: Any) -> None:
+            try:
+                action()
+            except Exception as exc:
+                logger.error("VJ server %s failed: %s", step_name, exc)
+                cleanup_errors.append(exc)
+
+        async def attempt_async(step_name: str, action: Any) -> None:
+            try:
+                await action()
+            except Exception as exc:
+                logger.error("VJ server %s failed: %s", step_name, exc)
+                cleanup_errors.append(exc)
+
+        if legacy_http_server is not None and legacy_http_thread is not None:
+            await attempt_async(
+                "legacy HTTP cleanup",
+                lambda: self._stop_legacy_http_thread(
+                    legacy_http_server,
+                    legacy_http_thread,
+                ),
+            )
+
+        async def notify_clients() -> None:
+            logger.info("Shutting down VJ server...")
+            shutdown_msg = json.dumps({"type": "server_shutdown"})
+            drain_tasks = []
+            for ws in list(self._broadcast_clients):
+                drain_tasks.append(asyncio.wait_for(ws.send(shutdown_msg), timeout=2.0))
+            async with self._dj_lock:
+                for dj in self._djs.values():
+                    if dj.websocket:
+                        drain_tasks.append(
+                            asyncio.wait_for(dj.websocket.send(shutdown_msg), timeout=2.0)
+                        )
+            if drain_tasks:
+                await asyncio.gather(*drain_tasks, return_exceptions=True)
+                logger.info("Notified %d clients of shutdown", len(drain_tasks))
+
+        await attempt_async("client notification", notify_clients)
+
+        async def stop_background_tasks() -> None:
+            bg_tasks = [
+                task
+                for task in [
+                    self._mc_reconnect_task,
+                    self._browser_heartbeat_task,
+                    getattr(self, "_pattern_hot_reload_task", None),
+                    self._coordinator_heartbeat_task,
+                    self._link_task,
+                    getattr(self, "_health_log_task", None),
+                ]
+                if task is not None and not task.done()
+            ]
+            for task in bg_tasks:
+                task.cancel()
+            if bg_tasks:
+                await asyncio.wait(bg_tasks, timeout=5.0)
+                logger.info("Cancelled %d background tasks", len(bg_tasks))
+
+        await attempt_async("background task cleanup", stop_background_tasks)
+
+        if self._link is not None:
+            attempt_sync("Ableton Link cleanup", lambda: setattr(self._link, "enabled", False))
+
+        listeners = (
+            ("DJ listener close", dj_server),
+            ("browser listener close", broadcast_server),
+            ("metrics listener close", metrics_server),
+        )
+        for step_name, listener in listeners:
+            if listener is not None:
+                attempt_sync(step_name, listener.close)
+
+        waiters = (
+            ("metrics listener wait", metrics_server),
+            ("DJ listener wait", dj_server),
+            ("browser listener wait", broadcast_server),
+        )
+        for step_name, listener in waiters:
+            if listener is not None:
+                await attempt_async(step_name, listener.wait_closed)
+
+        if gateway_runner is not None:
+            await attempt_async("unified gateway cleanup", gateway_runner.cleanup)
+
+        if cleanup_errors:
+            raise ExceptionGroup("VJ server cleanup failed", cleanup_errors)
+        logger.info("VJ server shutdown complete")
+
+    async def _await_run_cleanup(self, cleanup_task: asyncio.Task) -> bool:
+        """Wait for full cleanup despite repeated cancellation of the run task."""
+        cancellation_requested = False
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                cancellation_requested = True
+            except Exception:
+                break
+
+        cleanup_task.result()
+        return cancellation_requested
 
     async def run(self):
         """Start the VJ server."""
@@ -1151,6 +1266,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         metrics_server = None
         legacy_http_server = None
         legacy_http_thread = None
+        run_cancellation = None
 
         try:
             if self.unified_web:
@@ -1247,69 +1363,39 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     pass
 
             await self._main_loop()
+        except asyncio.CancelledError as exc:
+            run_cancellation = exc
         finally:
-            if legacy_http_server is not None and legacy_http_thread is not None:
-                await self._stop_legacy_http_thread(legacy_http_server, legacy_http_thread)
-
-            # Notify all connected clients of shutdown
-            logger.info("Shutting down VJ server...")
-            shutdown_msg = json.dumps({"type": "server_shutdown"})
-            drain_tasks = []
-            for ws in list(self._broadcast_clients):
-                drain_tasks.append(asyncio.wait_for(ws.send(shutdown_msg), timeout=2.0))
-            async with self._dj_lock:
-                for dj in self._djs.values():
-                    if dj.websocket:
-                        drain_tasks.append(
-                            asyncio.wait_for(dj.websocket.send(shutdown_msg), timeout=2.0)
-                        )
-            if drain_tasks:
-                await asyncio.gather(*drain_tasks, return_exceptions=True)
-                logger.info("Notified %d clients of shutdown", len(drain_tasks))
-
-            # Cancel all background tasks with timeout
-            bg_tasks = [
-                t
-                for t in [
-                    self._mc_reconnect_task,
-                    self._browser_heartbeat_task,
-                    getattr(self, "_pattern_hot_reload_task", None),
-                    self._coordinator_heartbeat_task,
-                    self._link_task,
-                    getattr(self, "_health_log_task", None),
-                ]
-                if t is not None and not t.done()
-            ]
-            for task in bg_tasks:
-                task.cancel()
-            if bg_tasks:
-                await asyncio.wait(bg_tasks, timeout=5.0)
-                logger.info("Cancelled %d background tasks", len(bg_tasks))
-
-            # Disable Ableton Link
-            if self._link is not None:
-                try:
-                    self._link.enabled = False
-                except Exception:
-                    pass
-
-            # Close all listeners acquired before normal shutdown or a startup failure.
+            cleanup_task = asyncio.create_task(
+                self._finalize_run(
+                    gateway_runner=gateway_runner,
+                    dj_server=dj_server,
+                    broadcast_server=broadcast_server,
+                    metrics_server=metrics_server,
+                    legacy_http_server=legacy_http_server,
+                    legacy_http_thread=legacy_http_thread,
+                ),
+                name="vj-server-finalizer",
+            )
+            cleanup_failure = None
+            cancellation_during_cleanup = False
             try:
-                if dj_server is not None:
-                    dj_server.close()
-                if broadcast_server is not None:
-                    broadcast_server.close()
-                if metrics_server is not None:
-                    metrics_server.close()
-                    await metrics_server.wait_closed()
-                if dj_server is not None:
-                    await dj_server.wait_closed()
-                if broadcast_server is not None:
-                    await broadcast_server.wait_closed()
-            finally:
-                if gateway_runner is not None:
-                    await gateway_runner.cleanup()
-            logger.info("VJ server shutdown complete")
+                cancellation_during_cleanup = await self._await_run_cleanup(cleanup_task)
+            except asyncio.CancelledError as exc:
+                cancellation_during_cleanup = True
+                if run_cancellation is None:
+                    run_cancellation = exc
+            except BaseException as exc:
+                cleanup_failure = exc
+
+            if cancellation_during_cleanup and run_cancellation is None:
+                run_cancellation = asyncio.CancelledError()
+            if run_cancellation is not None:
+                if cleanup_failure is not None:
+                    raise run_cancellation from cleanup_failure
+                raise run_cancellation
+            if cleanup_failure is not None:
+                raise cleanup_failure
 
     def stop(self):
         """Stop the server."""
