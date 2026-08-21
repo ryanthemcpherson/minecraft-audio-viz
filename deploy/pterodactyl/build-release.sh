@@ -60,36 +60,47 @@ install -m 755 "$SCRIPT_DIR/start-mcav.sh" "$MCAV_ROOT/start-mcav.sh"
 install -m 644 "$SCRIPT_DIR/mcav.env.example" "$MCAV_ROOT/mcav.env.example"
 printf '%s' "$VERSION" > "$MCAV_ROOT/VERSION"
 
-copy_source_file() {
-  local source_path="$1"
-  local relative_path="${source_path#"$REPO_ROOT/"}"
+copy_tracked_file() {
+  local relative_path="$1"
   local destination="$MCAV_ROOT/$relative_path"
   mkdir -p "$(dirname "$destination")"
-  install -m 644 "$source_path" "$destination"
+  install -m 644 "$REPO_ROOT/$relative_path" "$destination"
 }
 
-while IFS= read -r -d '' source_path; do
-  copy_source_file "$source_path"
-done < <(find "$REPO_ROOT/vj_server" -maxdepth 1 -type f -name '*.py' -print0)
-
-for source_tree in admin_panel preview_tool/frontend patterns configs/scenes configs/banners; do
-  if [[ ! -d "$REPO_ROOT/$source_tree" ]]; then
-    continue
+GIT_COMMAND=(git -C "$REPO_ROOT")
+if [[ -f "$REPO_ROOT/.git" ]]; then
+  WORKTREE_GIT_DIR="$(sed -n 's/^gitdir: //p' "$REPO_ROOT/.git")"
+  if [[ "$WORKTREE_GIT_DIR" =~ ^[A-Za-z]:[/\\] ]]; then
+    if ! command -v wslpath > /dev/null; then
+      printf 'Cannot resolve Windows linked-worktree Git directory without wslpath.\n' >&2
+      exit 69
+    fi
+    WORKTREE_GIT_DIR="$(wslpath -u "$WORKTREE_GIT_DIR")"
+  elif [[ "$WORKTREE_GIT_DIR" != /* ]]; then
+    WORKTREE_GIT_DIR="$(realpath -m "$REPO_ROOT/$WORKTREE_GIT_DIR")"
   fi
-  while IFS= read -r -d '' source_path; do
-    copy_source_file "$source_path"
-  done < <(
-    find "$REPO_ROOT/$source_tree" -type f \
-      ! -path '*/node_modules/*' \
-      ! -path '*/.git/*' \
-      ! -path '*/.venv/*' \
-      ! -path '*/__pycache__/*' \
-      ! -name '*.pyc' \
-      ! -name '*.pyo' \
-      -print0
-  )
-done
-copy_source_file "$REPO_ROOT/configs/dj_auth.example.json"
+  GIT_COMMAND=(git "--git-dir=$WORKTREE_GIT_DIR" "--work-tree=$REPO_ROOT")
+fi
+
+while IFS= read -r -d '' relative_path; do
+  case "$relative_path" in
+    vj_server/*.py)
+      if [[ "${relative_path#vj_server/}" == */* ]]; then
+        continue
+      fi
+      ;;
+  esac
+  copy_tracked_file "$relative_path"
+done < <(
+  "${GIT_COMMAND[@]}" ls-files -z -- \
+    'vj_server/*.py' \
+    admin_panel \
+    preview_tool/frontend \
+    patterns \
+    configs/dj_auth.example.json \
+    configs/scenes \
+    configs/banners
+)
 
 if [[ -n "$RUNTIME_SOURCE" ]]; then
   mkdir -p "$MCAV_ROOT/bin"

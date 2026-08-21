@@ -4,7 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEMP_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEMP_ROOT"' EXIT
+UNTRACKED_SCENE="$(mktemp "$REPO_ROOT/configs/scenes/.release-secret.XXXXXX")"
+cleanup() {
+  rm -f "$UNTRACKED_SCENE"
+  rm -rf "$TEMP_ROOT"
+}
+trap cleanup EXIT
 
 RUNTIME_SOURCE="$TEMP_ROOT/runtimes"
 OUTPUT_DIR="$TEMP_ROOT/output"
@@ -87,6 +92,7 @@ with zipfile.ZipFile(archive) as release_zip:
     assert required <= infos.keys(), required - infos.keys()
     assert len(infos) == len(set(infos)), "duplicate ZIP entries"
     assert all(name.startswith("mcav-vj/") for name in infos)
+    assert all(".release-secret." not in name for name in infos)
     assert release_zip.read("mcav-vj/VERSION").decode() == version
     assert release_zip.read("mcav-vj/release/AudioViz.jar") == b"fixture-plugin"
     for name in executables:
