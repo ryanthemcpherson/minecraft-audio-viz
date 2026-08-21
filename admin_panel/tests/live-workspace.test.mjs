@@ -82,3 +82,126 @@ test('presentation modes move the existing preview wrapper and pause only hidden
     else delete globalThis.requestAnimationFrame;
   }
 });
+
+test('late preview initialization cannot animate without a visible presentation slot', () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const originalRaf = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  const strip = { parentElement: null };
+  const destinations = new Map();
+  let animationStarts = 0;
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      querySelector(selector) {
+        const workspace = selector.match(/data-preview-slot="([^"]+)"/)?.[1];
+        return destinations.get(workspace) ?? null;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+    configurable: true,
+    value() { return 1; },
+  });
+
+  try {
+    const manager = Object.create(PreviewManager.prototype);
+    Object.assign(manager, {
+      elements: { previewStrip: strip },
+      _initialized: false,
+      _failed: false,
+      _stripCollapsed: false,
+      _animationId: null,
+      _animate() { animationStarts += 1; },
+      _onResize() {},
+    });
+
+    manager.setPresentationMode('visuals');
+    manager._initialized = true;
+    manager.startAnimation();
+    assert.equal(animationStarts, 0, 'async init completion must respect the hidden mode');
+
+    const zoneSlot = { append(node) { node.parentElement = this; } };
+    destinations.set('zones', zoneSlot);
+    manager.setPresentationMode('zones');
+    assert.equal(animationStarts, 1, 'a later valid compact slot resumes the preserved renderer');
+    assert.equal(strip.parentElement, zoneSlot);
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else delete globalThis.document;
+    if (originalRaf) Object.defineProperty(globalThis, 'requestAnimationFrame', originalRaf);
+    else delete globalThis.requestAnimationFrame;
+  }
+});
+
+test('collapsed preview cannot animate across presentation changes and resumes only when visible', () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const originalRaf = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  const liveSlot = { append(node) { node.parentElement = this; } };
+  let animationStarts = 0;
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      querySelector(selector) {
+        return selector === '[data-preview-slot="live"]' ? liveSlot : null;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+    configurable: true,
+    value() { return 1; },
+  });
+
+  try {
+    const manager = Object.create(PreviewManager.prototype);
+    Object.assign(manager, {
+      elements: { previewStrip: { parentElement: null } },
+      _initialized: true,
+      _failed: false,
+      _stripCollapsed: true,
+      _animationId: null,
+      _animate() { animationStarts += 1; },
+      _onResize() {},
+      stopAnimation() { this._animationId = null; },
+    });
+
+    manager.setPresentationMode('live');
+    assert.equal(animationStarts, 0, 'a collapsed Live preview stays paused');
+
+    manager._stripCollapsed = false;
+    manager.setPresentationMode('visuals');
+    manager.startAnimation();
+    assert.equal(animationStarts, 0, 'expansion while hidden cannot start the renderer');
+
+    manager.setPresentationMode('live');
+    assert.equal(animationStarts, 1, 'an expanded preview resumes in its visible Live slot');
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else delete globalThis.document;
+    if (originalRaf) Object.defineProperty(globalThis, 'requestAnimationFrame', originalRaf);
+    else delete globalThis.requestAnimationFrame;
+  }
+});
+
+test('Live CSS keeps the collapsed preview body at zero height', async () => {
+  const css = await readPanelFile('css/control-panel.css');
+
+  assert.match(
+    css,
+    /\.live-output\s+\.preview-strip\.collapsed\s+\.preview-strip-body\s*\{[^}]*height:\s*0/s,
+  );
+});
+
+test('expanded Scene collections are explicitly bounded to an internal scroller', async () => {
+  const html = await readPanelFile('index.html');
+  const css = await readPanelFile('css/control-panel.css');
+
+  assert.match(html, /class="[^"]*live-scene-bank[^"]*"[^>]*data-live-destination="launch"/);
+  assert.match(
+    css,
+    /\.launch-deck\s+>\s+\.live-scene-bank:not\(\.collapsed\)\s*\{[^}]*max-height:/s,
+  );
+  assert.match(
+    css,
+    /\.live-scene-bank:not\(\.collapsed\)\s+\.scenes-grid\s*\{[^}]*overflow-y:\s*auto/s,
+  );
+});

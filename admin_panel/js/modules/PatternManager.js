@@ -134,7 +134,7 @@ export class PatternManager {
         if (this.state.selectedZones.size > 0) {
             this.updatePatternHighlightForZones();
         } else {
-            this.highlightActivePattern(data.pattern);
+            this.highlightCurrentPattern(data.pattern);
         }
 
         // Sync bitmap section highlight for selected zones in bitmap mode
@@ -179,7 +179,7 @@ export class PatternManager {
         if (data.pattern) {
             this.state.currentPattern = data.pattern;
             this.updateCurrentPattern(data.pattern);
-            this.highlightActivePattern(data.pattern);
+            this.highlightCurrentPattern(data.pattern);
         }
 
         if (data.preset) {
@@ -197,7 +197,7 @@ export class PatternManager {
 
     updateCurrentPattern(pattern) {
         this.elements.currentPattern.textContent = pattern || '--';
-        this.highlightActivePattern(pattern);
+        this.highlightCurrentPattern(pattern);
     }
 
     updatePatternDisplay() {
@@ -283,17 +283,24 @@ export class PatternManager {
         grid.appendChild(groupGrid);
     }
 
-    highlightActivePattern(patternId) {
+    highlightCurrentPattern(patternId = this.state.currentPattern) {
         document.querySelectorAll('.pattern-btn').forEach(btn => {
             const isActive = btn.dataset.pattern === patternId;
             btn.classList.toggle('active', isActive);
             if (isActive) {
+                btn.setAttribute('aria-current', 'true');
                 btn.classList.remove('just-selected');
                 void btn.offsetWidth;
                 btn.classList.add('just-selected');
                 setTimeout(() => btn.classList.remove('just-selected'), 400);
+            } else {
+                btn.removeAttribute('aria-current');
             }
         });
+    }
+
+    highlightActivePattern(patternId) {
+        this.highlightCurrentPattern(patternId);
     }
 
     highlightActivePreset(preset) {
@@ -312,7 +319,7 @@ export class PatternManager {
     updatePatternHighlightForZones() {
         const selected = Array.from(this.state.selectedZones);
         if (selected.length === 0) {
-            this.highlightActivePattern(this.state.currentPattern);
+            this.highlightCurrentPattern(this.state.currentPattern);
             return;
         }
 
@@ -328,6 +335,11 @@ export class PatternManager {
         document.querySelectorAll('.pattern-btn').forEach(btn => {
             const patternId = btn.dataset.pattern;
             btn.classList.remove('active', 'partial');
+            if (patternId === this.state.currentPattern) {
+                btn.setAttribute('aria-current', 'true');
+            } else {
+                btn.removeAttribute('aria-current');
+            }
 
             if (patternsInUse.has(patternId)) {
                 if (allSame) {

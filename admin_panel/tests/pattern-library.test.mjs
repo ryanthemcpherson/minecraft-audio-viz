@@ -77,6 +77,7 @@ function fakeElement(tagName = 'div') {
     removeChild(child) { this.children.splice(this.children.indexOf(child), 1); },
     setAttribute(name, value) { this.attributes.set(name, String(value)); },
     getAttribute(name) { return this.attributes.get(name); },
+    removeAttribute(name) { this.attributes.delete(name); },
     addEventListener(type, listener) { listeners.set(type, listener); },
     dispatch(type, event = {}) {
       const enriched = {
@@ -199,6 +200,31 @@ test('launching a pattern sends one action and records recency', () => {
 
     assert.deepEqual(sent, [{ type: 'set_pattern', pattern: 'helix' }]);
     assert.equal(values.get('mcav-pattern-recents'), '["helix"]');
+  });
+});
+
+test('authoritative pattern highlighting replaces aria-current and can clear it', () => {
+  const values = new Map();
+  withPatternHarness({
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+  }, ({ manager, grid }) => {
+    manager.renderPatternGrid();
+    const launches = descendants(grid).filter((node) => node.dataset.pattern);
+
+    manager.highlightCurrentPattern('aurora');
+    assert.deepEqual(
+      launches.filter((node) => node.getAttribute('aria-current') === 'true')
+        .map((node) => node.dataset.pattern),
+      ['aurora'],
+    );
+
+    manager.highlightCurrentPattern(null);
+    assert.equal(
+      launches.filter((node) => node.getAttribute('aria-current') === 'true').length,
+      0,
+      'no authoritative current pattern leaves no stale aria-current marker',
+    );
   });
 });
 
