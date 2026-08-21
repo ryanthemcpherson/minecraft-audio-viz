@@ -24,11 +24,15 @@ set -euo pipefail
 if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
   printf '%s\n' "$@" > "$BOOTSTRAP_CAPTURE"
   if [[ "${FAKE_BOOTSTRAP_FAIL:-0}" == "1" ]]; then exit 17; fi
-  mkdir -p "$MCAV_ROOT/state"
-  printf 'MINECRAFT_WS_SECRET=test-secret-not-logged\n' > "$MCAV_ROOT/state/runtime.env"
-  : > "$MCAV_ROOT/state/dj_auth.json"
-  : > "$MCAV_ROOT/state/tls.crt"
-  : > "$MCAV_ROOT/state/tls.key"
+  identity_dir="$MCAV_ROOT/state/identity-generations/test-generation"
+  mkdir -p "$identity_dir"
+  printf 'MINECRAFT_WS_SECRET=test-secret-not-logged\n' > "$identity_dir/runtime.env"
+  : > "$identity_dir/dj_auth.json"
+  : > "$identity_dir/tls.crt"
+  : > "$identity_dir/tls.key"
+  : > "$identity_dir/FIRST_LOGIN.txt"
+  : > "$identity_dir/identity.json"
+  ln -s 'identity-generations/test-generation' "$MCAV_ROOT/state/current-identity"
   exit 0
 fi
 printf '%s\n' "$@" > "$VJ_CAPTURE"
@@ -91,8 +95,16 @@ test_exact_paper_arguments_and_secure_vj_flags() {
   grep -Fx -- '--tls-key' "$fixture/vj.args" >/dev/null || fail 'TLS key flag missing'
   grep -Fx -- '--http-host' "$fixture/vj.args" >/dev/null || fail 'HTTP bind flag missing'
   assert_arg_value "$fixture/bootstrap.args" '--public-host' '8.8.8.8'
+  assert_arg_value "$fixture/bootstrap.args" '--http-port' '8080'
+  assert_arg_value "$fixture/bootstrap.args" '--port' '25808'
+  grep -Fx -- '--unified-web' "$fixture/bootstrap.args" >/dev/null || \
+    fail 'bootstrap unified web flag missing'
   assert_arg_value "$fixture/vj.args" '--http-port' '8080'
   assert_arg_value "$fixture/vj.args" '--port' '25808'
+  local identity_dir="$fixture/mcav-vj/state/identity-generations/test-generation"
+  assert_arg_value "$fixture/vj.args" '--auth-file' "$identity_dir/dj_auth.json"
+  assert_arg_value "$fixture/vj.args" '--tls-cert' "$identity_dir/tls.crt"
+  assert_arg_value "$fixture/vj.args" '--tls-key' "$identity_dir/tls.key"
   assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:8080'
   grep -Fx -- '--unified-web' "$fixture/vj.args" >/dev/null || fail 'unified web flag missing'
   ! grep -Fx -- '--broadcast-port' "$fixture/vj.args" >/dev/null || \
@@ -131,6 +143,36 @@ test_public_port_collision_still_starts_paper() {
   [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start after public port collision'
   [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap ran with colliding public ports'
   [[ ! -f "$fixture/vj.args" ]] || fail 'VJ ran with colliding public ports'
+}
+
+test_topology_overrides_fail_closed_and_still_start_paper() {
+  local fixture="$TEST_ROOT/http-override"
+  make_fixture "$fixture"
+  HTTP_PORT=8081 run_wrapper "$fixture" "$fixture/paper" --nogui
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start after HTTP port override'
+  [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap accepted HTTP port override'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ accepted HTTP port override'
+
+  fixture="$TEST_ROOT/dj-override"
+  make_fixture "$fixture"
+  VJ_SERVER_PORT=9000 run_wrapper "$fixture" "$fixture/paper" --nogui
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start after DJ port override'
+  [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap accepted DJ port override'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ accepted DJ port override'
+
+  fixture="$TEST_ROOT/unified-disabled"
+  make_fixture "$fixture"
+  UNIFIED_WEB=false run_wrapper "$fixture" "$fixture/paper" --nogui
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start with unified mode disabled'
+  [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap accepted split web mode'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ accepted split web mode'
+
+  fixture="$TEST_ROOT/broadcast-override"
+  make_fixture "$fixture"
+  BROADCAST_PORT=8766 run_wrapper "$fixture" "$fixture/paper" --nogui
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start with broadcast override'
+  [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap accepted broadcast override'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ accepted broadcast override'
 }
 
 test_example_environment_uses_two_public_ports() {
@@ -185,6 +227,7 @@ test_exact_paper_arguments_and_secure_vj_flags
 test_ipv6_public_origin_is_bracketed
 test_missing_public_host_still_starts_paper
 test_public_port_collision_still_starts_paper
+test_topology_overrides_fail_closed_and_still_start_paper
 test_example_environment_uses_two_public_ports
 test_arm64_runtime_selection
 test_bootstrap_failure_still_starts_paper

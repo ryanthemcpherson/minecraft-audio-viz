@@ -11,13 +11,15 @@ import secrets
 import shlex
 import shutil
 import ssl
+import stat
 import subprocess  # nosec B404 - fixed OpenSSL argument vectors; shell execution is never used
 import tempfile
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Iterator, Mapping, Sequence
 
 from vj_server.auth import hash_password
 
@@ -48,6 +50,18 @@ class BootstrapPaths:
         return self.project_root / "backups"
 
     @property
+    def identity_generations(self) -> Path:
+        return self.state_dir / "identity-generations"
+
+    @property
+    def identity_pointer(self) -> Path:
+        return self.state_dir / "current-identity"
+
+    @property
+    def identity_lock(self) -> Path:
+        return self.state_dir / ".bootstrap.lock"
+
+    @property
     def runtime_env(self) -> Path:
         return self.state_dir / "runtime.env"
 
@@ -62,6 +76,10 @@ class BootstrapPaths:
     @property
     def tls_key(self) -> Path:
         return self.state_dir / "tls.key"
+
+    @property
+    def identity_metadata(self) -> Path:
+        return self.state_dir / "identity.json"
 
     @property
     def first_login(self) -> Path:
@@ -84,6 +102,8 @@ class BootstrapResult:
 
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 PublicIPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+PTERODACTYL_HTTP_PORT = 8080
+PTERODACTYL_DJ_PORT = 25808
 
 
 def _run_command(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -143,6 +163,54 @@ def certificate_covers_ip(
     return result.returncode == 0 and result.stdout.strip() == expected_output
 
 
+def _validate_pterodactyl_topology(
+    http_port: int,
+    dj_port: int,
+    unified_web: bool,
+) -> None:
+    if http_port != PTERODACTYL_HTTP_PORT or dj_port != PTERODACTYL_DJ_PORT or not unified_web:
+        raise BootstrapError("Pterodactyl requires HTTP 8080, DJ 25808, and unified web")
+
+
+@contextmanager
+def _deployment_lock(paths: BootstrapPaths) -> Iterator[None]:
+    """Serialize identity checks and updates across processes and threads."""
+    try:
+        import fcntl
+    except ImportError as exc:  # pragma: no cover - Pterodactyl runtime is Linux
+        raise BootstrapError("Pterodactyl bootstrap requires POSIX file locking") from exc
+
+    paths.state_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(paths.state_dir, 0o700)
+    flags = os.O_CREAT | os.O_RDWR
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_descriptor = os.open(paths.identity_lock, flags, 0o600)
+        if not stat.S_ISREG(os.fstat(file_descriptor).st_mode):
+            raise OSError("deployment lock is not a regular file")
+        os.fchmod(file_descriptor, 0o600)
+        fcntl.flock(file_descriptor, fcntl.LOCK_EX)
+    except OSError as exc:
+        if "file_descriptor" in locals():
+            os.close(file_descriptor)
+        raise BootstrapError("Could not acquire the deployment identity lock") from exc
+
+    try:
+        yield
+    finally:
+        fcntl.flock(file_descriptor, fcntl.LOCK_UN)
+        os.close(file_descriptor)
+
+
+def _fsync_directory(path: Path) -> None:
+    directory_descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -157,10 +225,10 @@ def _atomic_write(path: Path, content: bytes, mode: int = 0o600) -> None:
     temporary_path = Path(temporary_name)
     try:
         with os.fdopen(file_descriptor, "wb") as output:
+            os.fchmod(output.fileno(), mode)
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
-        os.chmod(temporary_path, mode)
         os.replace(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -168,6 +236,107 @@ def _atomic_write(path: Path, content: bytes, mode: int = 0o600) -> None:
 
 def _atomic_copy(source: Path, destination: Path, mode: int = 0o644) -> None:
     _atomic_write(destination, source.read_bytes(), mode)
+
+
+def _identity_entrypoints(paths: BootstrapPaths) -> dict[Path, str]:
+    return {
+        paths.runtime_env: "current-identity/runtime.env",
+        paths.auth_file: "current-identity/dj_auth.json",
+        paths.tls_cert: "current-identity/tls.crt",
+        paths.tls_key: "current-identity/tls.key",
+        paths.identity_metadata: "current-identity/identity.json",
+        paths.first_login: "state/current-identity/FIRST_LOGIN.txt",
+    }
+
+
+def _is_expected_symlink(path: Path, target: str) -> bool:
+    return path.is_symlink() and os.readlink(path) == target
+
+
+def _current_identity_generation(paths: BootstrapPaths) -> Path | None:
+    pointer = paths.identity_pointer
+    if not pointer.is_symlink():
+        if os.path.lexists(pointer):
+            raise BootstrapError(f"Invalid deployment identity pointer: {pointer}")
+        return None
+
+    target = Path(os.readlink(pointer))
+    if target.is_absolute():
+        raise BootstrapError(f"Invalid deployment identity pointer: {pointer}")
+    try:
+        generation = (pointer.parent / target).resolve(strict=True)
+    except OSError as exc:
+        raise BootstrapError(f"Invalid deployment identity pointer: {pointer}") from exc
+    generations_root = paths.identity_generations.resolve()
+    if generation.parent != generations_root or not generation.is_dir():
+        raise BootstrapError(f"Invalid deployment identity pointer: {pointer}")
+    return generation
+
+
+def _validate_or_prepare_entrypoints(paths: BootstrapPaths) -> None:
+    for entrypoint, target in _identity_entrypoints(paths).items():
+        if _is_expected_symlink(entrypoint, target):
+            continue
+        if os.path.lexists(entrypoint):
+            raise BootstrapError(
+                f"Refusing non-transactional or partial deployment identity: {entrypoint}"
+            )
+
+        entrypoint.parent.mkdir(parents=True, exist_ok=True)
+        temporary_link = entrypoint.parent / f".{entrypoint.name}.{secrets.token_hex(8)}"
+        try:
+            os.symlink(target, temporary_link, target_is_directory=False)
+            os.replace(temporary_link, entrypoint)
+            _fsync_directory(entrypoint.parent)
+        except OSError as exc:
+            raise BootstrapError("Failed to prepare deployment identity entrypoints") from exc
+        finally:
+            temporary_link.unlink(missing_ok=True)
+
+
+def _persist_identity_generation(
+    paths: BootstrapPaths,
+    files: Mapping[str, tuple[bytes, int]],
+) -> Path:
+    paths.identity_generations.mkdir(parents=True, exist_ok=True)
+    os.chmod(paths.identity_generations, 0o700)
+    generation_name = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S.%fZ')}-{secrets.token_hex(8)}"
+    generation = paths.identity_generations / generation_name
+    staging = Path(tempfile.mkdtemp(prefix=".generation-", dir=paths.identity_generations))
+    published = False
+    try:
+        os.chmod(staging, 0o700)
+        for filename, (content, mode) in files.items():
+            _atomic_write(staging / filename, content, mode)
+        _fsync_directory(staging)
+        os.replace(staging, generation)
+        published = True
+        _fsync_directory(paths.identity_generations)
+    except OSError as exc:
+        raise BootstrapError("Failed to persist immutable identity generation") from exc
+    finally:
+        if not published:
+            shutil.rmtree(staging, ignore_errors=True)
+    return generation
+
+
+def _commit_identity_generation(
+    paths: BootstrapPaths,
+    files: Mapping[str, tuple[bytes, int]],
+) -> Path:
+    generation = _persist_identity_generation(paths, files)
+    _validate_or_prepare_entrypoints(paths)
+    pointer_target = generation.relative_to(paths.state_dir)
+    temporary_pointer = paths.state_dir / f".current-identity.{secrets.token_hex(8)}"
+    try:
+        os.symlink(pointer_target, temporary_pointer, target_is_directory=True)
+        os.replace(temporary_pointer, paths.identity_pointer)
+        _fsync_directory(paths.state_dir)
+    except OSError as exc:
+        raise BootstrapError("Failed to commit immutable identity generation") from exc
+    finally:
+        temporary_pointer.unlink(missing_ok=True)
+    return generation
 
 
 def _plugin_name(jar_path: Path) -> str | None:
@@ -199,14 +368,91 @@ def _validate_release(paths: BootstrapPaths) -> None:
         raise BootstrapError(f"Default plugin configuration is missing: {paths.default_config}")
 
 
-def _validate_existing_identity(paths: BootstrapPaths) -> str:
+def _normalize_fingerprint(output: str) -> str:
+    fingerprint = re.sub(r"[:\s]", "", output.split("=", 1)[-1]).lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise BootstrapError("OpenSSL returned an invalid TLS SHA-256 fingerprint")
+    return fingerprint
+
+
+def _certificate_fingerprint(
+    certificate: Path,
+    command_runner: CommandRunner,
+) -> str:
     try:
-        runtime_text = paths.runtime_env.read_text(encoding="utf-8")
+        output = command_runner(
+            [
+                "openssl",
+                "x509",
+                "-fingerprint",
+                "-sha256",
+                "-noout",
+                "-in",
+                str(certificate),
+            ]
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BootstrapError("TLS certificate fingerprint inspection failed") from exc
+    return _normalize_fingerprint(output)
+
+
+def _identity_metadata(public_ip: PublicIPAddress, fingerprint: str) -> bytes:
+    metadata = {
+        "schema": 1,
+        "public_host": str(public_ip),
+        "sha256_fingerprint": fingerprint,
+        "http_port": PTERODACTYL_HTTP_PORT,
+        "dj_port": PTERODACTYL_DJ_PORT,
+        "unified_web": True,
+    }
+    return (json.dumps(metadata, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _regular_identity_file(generation: Path, filename: str) -> Path:
+    path = generation / filename
+    try:
+        file_status = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{filename} is missing") from exc
+    if not stat.S_ISREG(file_status.st_mode):
+        raise ValueError(f"{filename} is not a regular file")
+    return path
+
+
+def _login_values(content: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in content.splitlines():
+        if "=" in line:
+            field, value = line.split("=", 1)
+            values[field] = value
+    return values
+
+
+def _validate_existing_identity(
+    paths: BootstrapPaths,
+    generation: Path,
+    command_runner: CommandRunner,
+) -> tuple[str, PublicIPAddress]:
+    try:
+        runtime = _regular_identity_file(generation, "runtime.env")
+        auth_file = _regular_identity_file(generation, "dj_auth.json")
+        certificate = _regular_identity_file(generation, "tls.crt")
+        private_key = _regular_identity_file(generation, "tls.key")
+        first_login = _regular_identity_file(generation, "FIRST_LOGIN.txt")
+        metadata_file = _regular_identity_file(generation, "identity.json")
+
+        key_mode = stat.S_IMODE(private_key.stat().st_mode)
+        if key_mode != 0o600:
+            os.chmod(private_key, 0o600)
+        if stat.S_IMODE(private_key.stat().st_mode) != 0o600:
+            raise ValueError("tls.key must be owner-only (0600)")
+
+        runtime_text = runtime.read_text(encoding="utf-8")
         secret_match = re.fullmatch(r"MINECRAFT_WS_SECRET=([^\s]+)\n?", runtime_text)
         if not secret_match or len(secret_match.group(1)) < 32:
             raise ValueError("missing or short MINECRAFT_WS_SECRET")
 
-        auth_data = json.loads(paths.auth_file.read_text(encoding="utf-8"))
+        auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
         if not auth_data.get("djs") or not auth_data.get("vj_operators"):
             raise ValueError("DJ or administrator identity is missing")
         for section_name in ("djs", "vj_operators"):
@@ -214,22 +460,37 @@ def _validate_existing_identity(paths: BootstrapPaths) -> str:
                 if not str(entry.get("key_hash", "")).startswith("bcrypt:"):
                     raise ValueError(f"{section_name} contains a non-bcrypt credential")
 
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        expected_topology = {
+            "schema": 1,
+            "http_port": PTERODACTYL_HTTP_PORT,
+            "dj_port": PTERODACTYL_DJ_PORT,
+            "unified_web": True,
+        }
+        if any(metadata.get(field) != value for field, value in expected_topology.items()):
+            raise ValueError("identity metadata has an invalid Pterodactyl topology")
+        identity_public_ip = parse_public_ip(metadata.get("public_host", ""))
+        fingerprint = str(metadata.get("sha256_fingerprint", ""))
+        if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise ValueError("identity metadata has an invalid TLS fingerprint")
+
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(paths.tls_cert, paths.tls_key)
-        login_text = paths.first_login.read_text(encoding="utf-8")
-        for field in ("ADMIN_USERNAME=", "ADMIN_PASSWORD=", "DJ_USERNAME=", "DJ_PASSWORD="):
-            if field not in login_text:
-                raise ValueError(f"{field[:-1]} is missing")
-        return secret_match.group(1)
+        context.load_cert_chain(certificate, private_key)
+        if _certificate_fingerprint(certificate, command_runner) != fingerprint:
+            raise ValueError("certificate fingerprint does not match identity metadata")
+
+        login = _login_values(first_login.read_text(encoding="utf-8"))
+        for field in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "DJ_USERNAME", "DJ_PASSWORD"):
+            if not login.get(field):
+                raise ValueError(f"{field} is missing")
+        expected_endpoints = _endpoint_values(identity_public_ip, fingerprint)
+        if any(login.get(field) != value for field, value in expected_endpoints.items()):
+            raise ValueError("first-login endpoint metadata is inconsistent")
+        return secret_match.group(1), identity_public_ip
+    except BootstrapError:
+        raise
     except (OSError, ValueError, TypeError, json.JSONDecodeError, ssl.SSLError) as exc:
         raise BootstrapError(f"Invalid deployment identity at {paths.state_dir}: {exc}") from exc
-
-
-def _normalize_fingerprint(output: str) -> str:
-    fingerprint = re.sub(r"[:\s]", "", output.split("=", 1)[-1]).lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
-        raise BootstrapError("OpenSSL returned an invalid TLS SHA-256 fingerprint")
-    return fingerprint
 
 
 def _generate_tls_material(
@@ -275,18 +536,10 @@ def _generate_tls_material(
                 command_runner=command_runner,
             ):
                 raise BootstrapError("Generated TLS certificate does not cover MCAV_PUBLIC_HOST")
-            fingerprint_output = command_runner(
-                [
-                    "openssl",
-                    "x509",
-                    "-fingerprint",
-                    "-sha256",
-                    "-noout",
-                    "-in",
-                    str(staged_cert),
-                ]
-            ).stdout
-            fingerprint = _normalize_fingerprint(fingerprint_output)
+            try:
+                fingerprint = _certificate_fingerprint(staged_cert, command_runner)
+            except BootstrapError as exc:
+                raise BootstrapError(f"TLS identity generation failed: {exc}") from exc
             certificate = staged_cert.read_bytes()
             private_key = staged_key.read_bytes()
         except BootstrapError:
@@ -302,9 +555,9 @@ def _endpoint_values(public_ip: PublicIPAddress, fingerprint: str) -> dict[str, 
     )
     return {
         "TLS_SHA256_FINGERPRINT": fingerprint,
-        "ADMIN_URL": f"https://{endpoint_host}:8080/",
-        "PREVIEW_URL": f"https://{endpoint_host}:8080/preview/",
-        "DJ_ENDPOINT": f"wss://{endpoint_host}:25808",
+        "ADMIN_URL": f"https://{endpoint_host}:{PTERODACTYL_HTTP_PORT}/",
+        "PREVIEW_URL": f"https://{endpoint_host}:{PTERODACTYL_HTTP_PORT}/preview/",
+        "DJ_ENDPOINT": f"wss://{endpoint_host}:{PTERODACTYL_DJ_PORT}",
     }
 
 
@@ -394,23 +647,17 @@ def _create_identity(
         public_ip,
         fingerprint,
     )
-    identity_paths = (
-        paths.runtime_env,
-        paths.auth_file,
-        paths.tls_cert,
-        paths.tls_key,
-        paths.first_login,
+    _commit_identity_generation(
+        paths,
+        {
+            "runtime.env": (f"MINECRAFT_WS_SECRET={shared_secret}\n".encode(), 0o600),
+            "dj_auth.json": ((json.dumps(auth_data, indent=2) + "\n").encode(), 0o600),
+            "tls.crt": (certificate, 0o644),
+            "tls.key": (private_key, 0o600),
+            "FIRST_LOGIN.txt": (first_login, 0o600),
+            "identity.json": (_identity_metadata(public_ip, fingerprint), 0o600),
+        },
     )
-    try:
-        _atomic_write(paths.runtime_env, f"MINECRAFT_WS_SECRET={shared_secret}\n".encode(), 0o600)
-        _atomic_write(paths.auth_file, (json.dumps(auth_data, indent=2) + "\n").encode(), 0o600)
-        _atomic_write(paths.tls_cert, certificate, 0o644)
-        _atomic_write(paths.tls_key, private_key, 0o600)
-        _atomic_write(paths.first_login, first_login, 0o600)
-    except OSError as exc:
-        for identity_path in identity_paths:
-            identity_path.unlink(missing_ok=True)
-        raise BootstrapError("Failed to persist the new deployment identity") from exc
     return shared_secret
 
 
@@ -425,6 +672,11 @@ def _rotation_command(paths: BootstrapPaths, public_ip: PublicIPAddress) -> str:
             str(paths.plugins_dir),
             "--public-host",
             str(public_ip),
+            "--http-port",
+            str(PTERODACTYL_HTTP_PORT),
+            "--port",
+            str(PTERODACTYL_DJ_PORT),
+            "--unified-web",
             "--rotate-tls-identity",
         ]
     )
@@ -432,6 +684,7 @@ def _rotation_command(paths: BootstrapPaths, public_ip: PublicIPAddress) -> str:
 
 def _rotate_tls_identity(
     paths: BootstrapPaths,
+    generation: Path,
     public_ip: PublicIPAddress,
     command_runner: CommandRunner,
 ) -> None:
@@ -440,26 +693,24 @@ def _rotate_tls_identity(
         public_ip,
         command_runner,
     )
-    login_content = paths.first_login.read_text(encoding="utf-8")
+    login_content = (generation / "FIRST_LOGIN.txt").read_text(encoding="utf-8")
     updated_login = _update_first_login(login_content, public_ip, fingerprint)
-    original_files = {
-        paths.tls_key: (paths.tls_key.read_bytes(), 0o600),
-        paths.tls_cert: (paths.tls_cert.read_bytes(), 0o644),
-        paths.first_login: (paths.first_login.read_bytes(), 0o600),
-    }
     try:
-        _atomic_write(paths.tls_key, private_key, 0o600)
-        _atomic_write(paths.tls_cert, certificate, 0o644)
-        _atomic_write(paths.first_login, updated_login, 0o600)
+        runtime_env = (generation / "runtime.env").read_bytes()
+        auth_file = (generation / "dj_auth.json").read_bytes()
     except OSError as exc:
-        try:
-            for path, (content, mode) in original_files.items():
-                _atomic_write(path, content, mode)
-        except OSError as rollback_error:
-            raise BootstrapError("TLS identity rotation and recovery failed") from rollback_error
-        raise BootstrapError(
-            "TLS identity rotation failed; the original identity was restored"
-        ) from exc
+        raise BootstrapError("Existing deployment identity changed during rotation") from exc
+    _commit_identity_generation(
+        paths,
+        {
+            "runtime.env": (runtime_env, 0o600),
+            "dj_auth.json": (auth_file, 0o600),
+            "tls.crt": (certificate, 0o644),
+            "tls.key": (private_key, 0o600),
+            "FIRST_LOGIN.txt": (updated_login, 0o600),
+            "identity.json": (_identity_metadata(public_ip, fingerprint), 0o600),
+        },
+    )
 
 
 def _ensure_identity(
@@ -469,31 +720,32 @@ def _ensure_identity(
     rotate_tls_identity: bool,
     command_runner: CommandRunner,
 ) -> tuple[str, bool]:
-    identity_paths = (
-        paths.runtime_env,
-        paths.auth_file,
-        paths.tls_cert,
-        paths.tls_key,
-        paths.first_login,
-    )
-    existing_count = sum(path.exists() for path in identity_paths)
-    if existing_count == 0:
+    generation = _current_identity_generation(paths)
+    if generation is None:
+        unexpected_entrypoints = [
+            entrypoint
+            for entrypoint, target in _identity_entrypoints(paths).items()
+            if os.path.lexists(entrypoint) and not _is_expected_symlink(entrypoint, target)
+        ]
+        if unexpected_entrypoints:
+            present = ", ".join(str(path) for path in unexpected_entrypoints)
+            raise BootstrapError(f"Refusing partial deployment identity; present files: {present}")
         if rotate_tls_identity:
             raise BootstrapError(
                 "--rotate-tls-identity requires an existing complete deployment identity"
             )
         return _create_identity(paths, release_version, public_ip, command_runner), True
-    if existing_count != len(identity_paths):
-        present = ", ".join(str(path) for path in identity_paths if path.exists())
-        raise BootstrapError(f"Refusing partial deployment identity; present files: {present}")
 
-    shared_secret = _validate_existing_identity(paths)
+    shared_secret, identity_public_ip = _validate_existing_identity(
+        paths,
+        generation,
+        command_runner,
+    )
+    _validate_or_prepare_entrypoints(paths)
     if rotate_tls_identity:
-        _rotate_tls_identity(paths, public_ip, command_runner)
-    elif not certificate_covers_ip(
-        paths.tls_cert,
-        public_ip,
-        command_runner=command_runner,
+        _rotate_tls_identity(paths, generation, public_ip, command_runner)
+    elif identity_public_ip != public_ip or not certificate_covers_ip(
+        generation / "tls.crt", public_ip, command_runner=command_runner
     ):
         raise BootstrapError(
             "Existing TLS certificate does not cover MCAV_PUBLIC_HOST. "
@@ -612,6 +864,9 @@ def bootstrap_pterodactyl(
     *,
     public_host: str | None = None,
     rotate_tls_identity: bool = False,
+    http_port: int = PTERODACTYL_HTTP_PORT,
+    dj_port: int = PTERODACTYL_DJ_PORT,
+    unified_web: bool = True,
     command_runner: CommandRunner = _run_command,
 ) -> BootstrapResult:
     """Bootstrap persistent identity, plugin, and loopback renderer configuration."""
@@ -619,34 +874,44 @@ def bootstrap_pterodactyl(
     if public_host is None:
         raise BootstrapError("MCAV_PUBLIC_HOST must be a public IPv4 or IPv6 address")
     public_ip = parse_public_ip(public_host)
-    _validate_release(paths)
-    paths.backups_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(paths.backups_dir, 0o700)
+    _validate_pterodactyl_topology(http_port, dj_port, unified_web)
 
-    shared_secret, credentials_created = _ensure_identity(
-        paths,
-        release_version,
-        public_ip,
-        rotate_tls_identity,
-        command_runner,
-    )
-    if rotate_tls_identity:
+    with _deployment_lock(paths):
+        if rotate_tls_identity:
+            _, credentials_created = _ensure_identity(
+                paths,
+                release_version,
+                public_ip,
+                True,
+                command_runner,
+            )
+            return BootstrapResult(
+                credentials_created=credentials_created,
+                plugin_installed=False,
+                config_updated=False,
+                first_login=paths.first_login,
+                auth_file=paths.auth_file,
+                tls_cert=paths.tls_cert,
+            )
+
+        _validate_release(paths)
+        paths.backups_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(paths.backups_dir, 0o700)
+        shared_secret, credentials_created = _ensure_identity(
+            paths,
+            release_version,
+            public_ip,
+            False,
+            command_runner,
+        )
+        plugin_installed, backup_dir = _install_plugin(paths)
+        config_updated, _ = _configure_plugin(paths, shared_secret, backup_dir)
+
         return BootstrapResult(
             credentials_created=credentials_created,
-            plugin_installed=False,
-            config_updated=False,
+            plugin_installed=plugin_installed,
+            config_updated=config_updated,
             first_login=paths.first_login,
             auth_file=paths.auth_file,
             tls_cert=paths.tls_cert,
         )
-    plugin_installed, backup_dir = _install_plugin(paths)
-    config_updated, _ = _configure_plugin(paths, shared_secret, backup_dir)
-
-    return BootstrapResult(
-        credentials_created=credentials_created,
-        plugin_installed=plugin_installed,
-        config_updated=config_updated,
-        first_login=paths.first_login,
-        auth_file=paths.auth_file,
-        tls_cert=paths.tls_cert,
-    )

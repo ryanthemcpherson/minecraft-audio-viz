@@ -4,9 +4,13 @@ import json
 import os
 import re
 import shlex
+import ssl
 import subprocess
 import sys
+import threading
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Sequence
 
@@ -19,6 +23,7 @@ from vj_server.pterodactyl import BootstrapError, BootstrapPaths, bootstrap_pter
 
 PUBLIC_IPV4 = "8.8.8.8"
 SECOND_PUBLIC_IPV4 = "1.1.1.1"
+THIRD_PUBLIC_IPV4 = "9.9.9.9"
 PUBLIC_IPV6 = "2606:4700:4700::1111"
 
 
@@ -92,6 +97,33 @@ def replace_tls_with_localhost_identity(paths: BootstrapPaths) -> None:
             str(paths.tls_cert),
         ]
     )
+    generation = current_identity_generation(paths)
+    fingerprint_output = run_openssl(
+        [
+            "openssl",
+            "x509",
+            "-fingerprint",
+            "-sha256",
+            "-noout",
+            "-in",
+            str(generation / "tls.crt"),
+        ]
+    ).stdout
+    fingerprint = re.sub(r"[:\s]", "", fingerprint_output.split("=", 1)[1]).lower()
+    metadata = json.loads((generation / "identity.json").read_text(encoding="utf-8"))
+    metadata["sha256_fingerprint"] = fingerprint
+    (generation / "identity.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    public_ip = ipaddress.ip_address(metadata["public_host"])
+    (generation / "FIRST_LOGIN.txt").write_bytes(
+        pterodactyl._update_first_login(
+            (generation / "FIRST_LOGIN.txt").read_text(encoding="utf-8"),
+            public_ip,
+            fingerprint,
+        )
+    )
 
 
 def first_login_values(paths: BootstrapPaths) -> dict[str, str]:
@@ -100,6 +132,61 @@ def first_login_values(paths: BootstrapPaths) -> dict[str, str]:
         for line in paths.first_login.read_text(encoding="utf-8").splitlines()
         if "=" in line
     )
+
+
+def current_identity_generation(paths: BootstrapPaths) -> Path:
+    pointer = paths.state_dir / "current-identity"
+    assert pointer.is_symlink()
+    generation = pointer.resolve(strict=True)
+    assert generation.parent == (paths.state_dir / "identity-generations").resolve()
+    return generation
+
+
+def assert_current_identity_is_coherent(paths: BootstrapPaths) -> dict[str, str]:
+    generation = current_identity_generation(paths)
+    metadata = json.loads((generation / "identity.json").read_text(encoding="utf-8"))
+    public_ip = ipaddress.ip_address(metadata["public_host"])
+    endpoint_host = (
+        f"[{public_ip}]" if isinstance(public_ip, ipaddress.IPv6Address) else str(public_ip)
+    )
+    login = first_login_values(paths)
+    fingerprint_output = run_openssl(
+        [
+            "openssl",
+            "x509",
+            "-fingerprint",
+            "-sha256",
+            "-noout",
+            "-in",
+            str(generation / "tls.crt"),
+        ]
+    ).stdout
+    actual_fingerprint = re.sub(
+        r"[:\s]",
+        "",
+        fingerprint_output.split("=", 1)[1],
+    ).lower()
+
+    assert login["TLS_SHA256_FINGERPRINT"] == metadata["sha256_fingerprint"]
+    assert actual_fingerprint == metadata["sha256_fingerprint"]
+    assert login["ADMIN_URL"] == f"https://{endpoint_host}:8080/"
+    assert login["PREVIEW_URL"] == f"https://{endpoint_host}:8080/preview/"
+    assert login["DJ_ENDPOINT"] == f"wss://{endpoint_host}:25808"
+    assert pterodactyl.certificate_covers_ip(generation / "tls.crt", public_ip)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(generation / "tls.crt", generation / "tls.key")
+
+    for entrypoint in (
+        paths.runtime_env,
+        paths.auth_file,
+        paths.tls_cert,
+        paths.tls_key,
+        paths.identity_metadata,
+        paths.first_login,
+    ):
+        assert entrypoint.is_symlink()
+        assert entrypoint.resolve(strict=True).parent == generation
+    return metadata
 
 
 def test_parse_public_ip_normalizes_ipv4_and_ipv6() -> None:
@@ -194,6 +281,32 @@ def test_first_run_creates_secure_identity_and_plugin(bootstrap_paths: Bootstrap
         assert bootstrap_paths.tls_cert.stat().st_mode & 0o777 == 0o644
 
 
+def test_first_run_commits_one_immutable_identity_generation(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1", public_host=PUBLIC_IPV4)
+
+    metadata = assert_current_identity_is_coherent(bootstrap_paths)
+    assert metadata["public_host"] == PUBLIC_IPV4
+    generations_dir = bootstrap_paths.state_dir / "identity-generations"
+    assert len(list(generations_dir.iterdir())) == 1
+    if os.name != "nt":
+        generation = current_identity_generation(bootstrap_paths)
+        assert bootstrap_paths.state_dir.stat().st_mode & 0o777 == 0o700
+        assert generations_dir.stat().st_mode & 0o777 == 0o700
+        assert generation.stat().st_mode & 0o777 == 0o700
+        for filename in (
+            "runtime.env",
+            "dj_auth.json",
+            "tls.key",
+            "FIRST_LOGIN.txt",
+            "identity.json",
+        ):
+            assert (generation / filename).stat().st_mode & 0o777 == 0o600
+        assert (generation / "tls.crt").stat().st_mode & 0o777 == 0o644
+        assert (bootstrap_paths.state_dir / ".bootstrap.lock").stat().st_mode & 0o777 == 0o600
+
+
 def test_first_run_formats_ipv6_san_and_endpoints(bootstrap_paths: BootstrapPaths) -> None:
     bootstrap_pterodactyl(bootstrap_paths, "26.1", public_host=PUBLIC_IPV6)
 
@@ -216,6 +329,18 @@ def test_second_run_preserves_identity_byte_for_byte(bootstrap_paths: BootstrapP
     assert identity_snapshot(bootstrap_paths) == before
     assert result.credentials_created is False
     assert result.plugin_installed is False
+
+
+def test_matching_identity_repairs_world_readable_private_key(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1", public_host=PUBLIC_IPV4)
+    os.chmod(current_identity_generation(bootstrap_paths) / "tls.key", 0o644)
+
+    bootstrap_pterodactyl(bootstrap_paths, "26.1", public_host=PUBLIC_IPV4)
+
+    assert bootstrap_paths.tls_key.stat().st_mode & 0o777 == 0o600
+    assert_current_identity_is_coherent(bootstrap_paths)
 
 
 def test_existing_wrong_san_requires_exact_explicit_rotation_command(
@@ -241,6 +366,11 @@ def test_existing_wrong_san_requires_exact_explicit_rotation_command(
             str(bootstrap_paths.plugins_dir.resolve()),
             "--public-host",
             SECOND_PUBLIC_IPV4,
+            "--http-port",
+            "8080",
+            "--port",
+            "25808",
+            "--unified-web",
             "--rotate-tls-identity",
         ]
     )
@@ -314,6 +444,126 @@ def test_explicit_rotation_replaces_only_tls_and_endpoint_metadata(
         bootstrap_paths.tls_cert,
         ipaddress.ip_address(PUBLIC_IPV4),
     )
+    assert_current_identity_is_coherent(bootstrap_paths)
+
+
+@pytest.mark.parametrize(
+    "failure_point",
+    [
+        "runtime.env",
+        "dj_auth.json",
+        "tls.crt",
+        "tls.key",
+        "FIRST_LOGIN.txt",
+        "identity.json",
+        "publish-generation",
+        "switch-pointer",
+    ],
+)
+def test_rotation_failure_before_atomic_pointer_commit_keeps_old_generation_current(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    pointer = bootstrap_paths.state_dir / "current-identity"
+    old_target = os.readlink(pointer)
+    old_identity = identity_snapshot(bootstrap_paths)
+    original_replace = os.replace
+    failure_injected = False
+
+    def fail_at_boundary(
+        source: str | os.PathLike[str], destination: str | os.PathLike[str]
+    ) -> None:
+        nonlocal failure_injected
+        source_path = Path(source)
+        destination_path = Path(destination)
+        is_generation_file = (
+            failure_point == destination_path.name
+            and destination_path.parent.name.startswith(".generation-")
+        )
+        is_generation_publish = (
+            failure_point == "publish-generation"
+            and source_path.name.startswith(".generation-")
+            and destination_path.parent.name == "identity-generations"
+        )
+        is_pointer_switch = failure_point == "switch-pointer" and destination_path == pointer
+        if not failure_injected and (
+            is_generation_file or is_generation_publish or is_pointer_switch
+        ):
+            failure_injected = True
+            raise OSError(f"injected failure at {failure_point}")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(pterodactyl.os, "replace", fail_at_boundary)
+
+    with pytest.raises(BootstrapError, match="persist|commit"):
+        bootstrap_pterodactyl(
+            bootstrap_paths,
+            "26.1-test",
+            public_host=SECOND_PUBLIC_IPV4,
+            rotate_tls_identity=True,
+        )
+
+    assert failure_injected
+    assert os.readlink(pointer) == old_target
+    assert identity_snapshot(bootstrap_paths) == old_identity
+    assert_current_identity_is_coherent(bootstrap_paths)
+
+
+def test_concurrent_rotations_are_serialized_and_commit_complete_generations(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    runner_guard = threading.Lock()
+    first_request_entered = threading.Event()
+    second_request_entered = threading.Event()
+    active_requests = 0
+    maximum_active_requests = 0
+    request_count = 0
+
+    def tracking_runner(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal active_requests, maximum_active_requests, request_count
+        is_generation_request = len(arguments) > 1 and arguments[1] == "req"
+        if not is_generation_request:
+            return run_openssl(arguments)
+
+        with runner_guard:
+            request_count += 1
+            current_request = request_count
+            active_requests += 1
+            maximum_active_requests = max(maximum_active_requests, active_requests)
+        try:
+            if current_request == 1:
+                first_request_entered.set()
+                second_request_entered.wait(timeout=0.4)
+            else:
+                second_request_entered.set()
+            time.sleep(0.02)
+            return run_openssl(arguments)
+        finally:
+            with runner_guard:
+                active_requests -= 1
+
+    def rotate(public_host: str) -> None:
+        bootstrap_pterodactyl(
+            bootstrap_paths,
+            "26.1-test",
+            public_host=public_host,
+            rotate_tls_identity=True,
+            command_runner=tracking_runner,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(rotate, SECOND_PUBLIC_IPV4)
+        assert first_request_entered.wait(timeout=2)
+        second = executor.submit(rotate, THIRD_PUBLIC_IPV4)
+        first.result(timeout=10)
+        second.result(timeout=10)
+
+    assert maximum_active_requests == 1
+    metadata = assert_current_identity_is_coherent(bootstrap_paths)
+    assert metadata["public_host"] in {SECOND_PUBLIC_IPV4, THIRD_PUBLIC_IPV4}
 
 
 def test_failed_rotation_preserves_complete_existing_identity(
@@ -321,10 +571,18 @@ def test_failed_rotation_preserves_complete_existing_identity(
 ) -> None:
     bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
     before = identity_snapshot(bootstrap_paths)
+    fingerprint_requests = 0
 
     def fail_fingerprint(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal fingerprint_requests
         if "-fingerprint" in arguments:
-            raise subprocess.CalledProcessError(1, list(arguments), stderr="fingerprint failed")
+            fingerprint_requests += 1
+            if fingerprint_requests == 2:
+                raise subprocess.CalledProcessError(
+                    1,
+                    list(arguments),
+                    stderr="fingerprint failed",
+                )
         return run_openssl(arguments)
 
     with pytest.raises(BootstrapError, match="TLS identity generation failed"):
@@ -356,6 +614,43 @@ def test_explicit_rotation_refuses_a_missing_identity(
     assert not bootstrap_paths.tls_cert.exists()
     assert not bootstrap_paths.tls_key.exists()
     assert not bootstrap_paths.first_login.exists()
+
+
+def test_rotation_does_not_require_or_mutate_release_plugin_or_backups(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    bootstrap_paths.plugin_config.write_bytes(b"operator-owned plugin configuration\n")
+    plugin_before = bootstrap_paths.plugin_config.read_bytes()
+    installed_plugin = bootstrap_paths.plugins_dir / "AudioViz.jar"
+    installed_before = installed_plugin.read_bytes()
+    backups_before = sorted(
+        path.relative_to(bootstrap_paths.backups_dir)
+        for path in bootstrap_paths.backups_dir.rglob("*")
+    )
+    bootstrap_paths.release_jar.unlink()
+    bootstrap_paths.default_config.unlink()
+
+    result = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1-test",
+        public_host=SECOND_PUBLIC_IPV4,
+        rotate_tls_identity=True,
+    )
+
+    assert result.credentials_created is False
+    assert result.plugin_installed is False
+    assert result.config_updated is False
+    assert bootstrap_paths.plugin_config.read_bytes() == plugin_before
+    assert installed_plugin.read_bytes() == installed_before
+    assert (
+        sorted(
+            path.relative_to(bootstrap_paths.backups_dir)
+            for path in bootstrap_paths.backups_dir.rglob("*")
+        )
+        == backups_before
+    )
+    assert_current_identity_is_coherent(bootstrap_paths)
 
 
 def test_malformed_fingerprint_refuses_atomic_identity_creation(
@@ -453,6 +748,29 @@ def test_rejects_release_jar_with_wrong_plugin_name(bootstrap_paths: BootstrapPa
     assert not (bootstrap_paths.plugins_dir / "AudioViz.jar").exists()
 
 
+@pytest.mark.parametrize(
+    "topology_override",
+    [
+        {"http_port": 8081},
+        {"dj_port": 9000},
+        {"unified_web": False},
+    ],
+)
+def test_bootstrap_rejects_non_exact_pterodactyl_topology(
+    bootstrap_paths: BootstrapPaths,
+    topology_override: dict[str, int | bool],
+) -> None:
+    with pytest.raises(BootstrapError, match="HTTP 8080, DJ 25808, and unified web"):
+        bootstrap_pterodactyl(
+            bootstrap_paths,
+            "26.1-test",
+            public_host=PUBLIC_IPV4,
+            **topology_override,
+        )
+
+    assert not bootstrap_paths.tls_cert.exists()
+
+
 def test_cli_rotation_requires_bootstrap_and_public_host(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -486,6 +804,11 @@ def test_cli_explicitly_rotates_existing_tls_identity(
             "26.1-test",
             "--public-host",
             SECOND_PUBLIC_IPV4,
+            "--http-port",
+            "8080",
+            "--port",
+            "25808",
+            "--unified-web",
             "--rotate-tls-identity",
         ],
     )

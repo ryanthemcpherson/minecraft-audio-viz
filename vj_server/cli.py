@@ -255,6 +255,9 @@ Examples:
                 release_version,
                 public_host=args.public_host,
                 rotate_tls_identity=args.rotate_tls_identity,
+                http_port=args.http_port,
+                dj_port=args.port,
+                unified_web=args.unified_web,
             )
         except BootstrapError as exc:
             print(f"ERROR: Pterodactyl bootstrap failed: {exc}")
