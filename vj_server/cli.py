@@ -119,6 +119,22 @@ Examples:
         help="Project root containing admin, preview, patterns, and configs",
     )
     parser.add_argument(
+        "--bootstrap-pterodactyl",
+        action="store_true",
+        help="Install persistent Pterodactyl identity, plugin, and renderer configuration, then exit",
+    )
+    parser.add_argument(
+        "--plugins-dir",
+        type=Path,
+        default=None,
+        help="Paper plugins directory used by --bootstrap-pterodactyl",
+    )
+    parser.add_argument(
+        "--release-version",
+        default=None,
+        help="Release label recorded by --bootstrap-pterodactyl",
+    )
+    parser.add_argument(
         "--tls-cert",
         type=Path,
         default=(Path(value) if (value := os.environ.get("TLS_CERT")) else None),
@@ -188,6 +204,32 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if args.bootstrap_pterodactyl:
+        from vj_server.pterodactyl import BootstrapError, BootstrapPaths, bootstrap_pterodactyl
+
+        if args.project_root is None:
+            print("ERROR: --project-root is required with --bootstrap-pterodactyl")
+            return 2
+        plugins_dir = args.plugins_dir or args.project_root.parent / "plugins"
+        version_file = args.project_root / "VERSION"
+        release_version = args.release_version
+        if release_version is None:
+            release_version = (
+                version_file.read_text(encoding="utf-8").strip()
+                if version_file.is_file()
+                else "unknown"
+            )
+        try:
+            result = bootstrap_pterodactyl(
+                BootstrapPaths(args.project_root, plugins_dir),
+                release_version,
+            )
+        except BootstrapError as exc:
+            print(f"ERROR: Pterodactyl bootstrap failed: {exc}")
+            return 1
+        print(f"MCAV bootstrap complete. First login: {result.first_login}")
+        return 0
 
     # Import and run VJ server
     from vj_server.models import DJAuthConfig
