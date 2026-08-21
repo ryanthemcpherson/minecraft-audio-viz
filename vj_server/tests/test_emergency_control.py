@@ -133,6 +133,14 @@ class EmergencyRelay(RelayMixin):
         return {}
 
 
+class VoiceStatusTimeoutClient:
+    connected = True
+
+    async def send(self, message: dict):
+        assert message == {"type": "get_voice_status"}
+        return None
+
+
 @pytest.mark.asyncio
 async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlated():
     relay = EmergencyRelay()
@@ -182,6 +190,24 @@ async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlate
         "request_id": "emergency-blackout-1",
         "emergency_epoch": "test-emergency-epoch",
         "emergency_revision": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_voice_status_timeout_returns_an_explicit_browser_error_state():
+    relay = EmergencyRelay()
+    relay.viz_client = VoiceStatusTimeoutClient()
+    websocket = BrowserSocket([{"type": "get_voice_status"}])
+
+    await relay._handle_browser_client(websocket)
+
+    assert websocket.sent[-1] == {
+        "type": "voice_status",
+        "available": False,
+        "streaming": False,
+        "channel_type": "static",
+        "connected_players": 0,
+        "error": "Minecraft voice status timed out.",
     }
 
 

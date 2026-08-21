@@ -6,11 +6,14 @@
 export function setupConnectionLifecycle(app) {
     app.ws.addEventListener('connecting', (event) => {
         const detail = event.detail || {};
+        app.state.connected = false;
+        app.voice?.resetCapabilityStatus?.();
         app.ui.setConnectionStatus('connecting', detail.attempt, detail.maxAttempts);
     });
 
     app.ws.addEventListener('connected', () => {
         app.state.connected = true;
+        app.voice?.resetCapabilityStatus?.();
         app.onAuthenticated();
         app.ui.setConnectionStatus('connected');
         app.ui.showToast('Connected to server', 'success');
@@ -19,7 +22,6 @@ export function setupConnectionLifecycle(app) {
         root?.classList.add('just-connected');
         setTimeout(() => root?.classList.remove('just-connected'), 900);
 
-        app.voice?.resetCapabilityStatus?.();
         app.ws.send({ type: 'get_particle_effects' });
         app.ws.send({ type: 'get_stages' });
         app.ws.send({ type: 'get_zones' });
@@ -44,6 +46,7 @@ export function setupConnectionLifecycle(app) {
         app.state.connected = false;
         app.state.minecraftConnected = false;
         app.state.bitmap.dataFetched = false;
+        app.voice?.resetCapabilityStatus?.();
         app.ui.setConnectionStatus('disconnected');
         app.ui.updateServiceIndicators();
         app.connectCodes.resetGenerateButton();

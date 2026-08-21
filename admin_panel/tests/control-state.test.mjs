@@ -98,6 +98,7 @@ function withControlHarness(run) {
     const networkControl = new FakeElement('btn-blackout');
     networkControl.setAttribute('aria-describedby', 'emergency-control-reason');
     const minecraftControl = new FakeElement('btn-cleanup-zone');
+    const voiceControl = new FakeElement('voice-stream-toggle');
     const lastKnownContainer = new FakeElement('workspace-live');
     const lastKnownStatus = new FakeElement('last-known-state-status');
     const emergencyReason = new FakeElement('emergency-control-reason');
@@ -137,6 +138,7 @@ function withControlHarness(run) {
         querySelectorAll(selector) {
             if (selector === '[data-requires-connection]') return [networkControl];
             if (selector === '[data-requires-minecraft]') return [minecraftControl];
+            if (selector === '[data-requires-voice]') return [voiceControl];
             if (selector === '[data-last-known-state]') return [lastKnownContainer];
             return [];
         },
@@ -199,6 +201,7 @@ function withControlHarness(run) {
             reconnect,
             socket,
             voiceCapabilityReason,
+            voiceControl,
             voiceSection,
         });
     } finally {
@@ -339,11 +342,12 @@ test('capability loading, unavailable, and error states stay visible with explan
     });
 });
 
-test('authoritative unavailable voice status replaces reconnect loading presentation', () => {
+test('voice capability stays disabled across reconnect and resolves each authoritative outcome', () => {
     withControlHarness(({
         app,
         socket,
         voiceCapabilityReason,
+        voiceControl,
         voiceSection,
     }) => {
         const voiceDot = new FakeElement('voice-dot');
@@ -369,18 +373,24 @@ test('authoritative unavailable voice status replaces reconnect loading presenta
             voiceDistanceRow,
         });
         app.state.voiceChat = {
-            statusReceived: false,
-            available: false,
-            streaming: false,
-            enabled: false,
+            statusReceived: true,
+            available: true,
+            streaming: true,
+            enabled: true,
             channelType: 'static',
             distance: 100,
-            connectedPlayers: 0,
+            connectedPlayers: 4,
+            error: null,
         };
         app.voice = new VoiceChatManager(app);
         app.router = new MessageRouter(app);
 
         setupConnectionLifecycle(app);
+        socket.emit('connecting', { attempt: 1, maxAttempts: 10 });
+        assert.equal(app.state.voiceChat.statusReceived, false);
+        assert.equal(app.state.voiceChat.available, false);
+        assert.equal(voiceControl.disabled, true);
+
         socket.emit('connected');
 
         assert.equal(voiceSection.dataset.uiState, 'loading');
@@ -388,6 +398,7 @@ test('authoritative unavailable voice status replaces reconnect loading presenta
         assert.match(voiceCapabilityReason.textContent, /Checking/i);
         assert.match(voiceStatusText.textContent, /Checking/i);
         assert.equal(voiceUnavailableMsg.classList.contains('hidden'), true);
+        assert.equal(voiceControl.disabled, true);
 
         app.router.handleMessage({
             type: 'voice_status',
@@ -402,14 +413,59 @@ test('authoritative unavailable voice status replaces reconnect loading presenta
         assert.equal(voiceSection.getAttribute('aria-busy'), 'false');
         assert.match(voiceCapabilityReason.textContent, /not available/i);
         assert.equal(voiceStatusText.textContent, 'Unavailable');
-        assert.equal(voiceUnavailableMsg.classList.contains('hidden'), false);
+        assert.equal(voiceUnavailableMsg.hidden, true);
+        assert.equal(voiceUnavailableMsg.getAttribute('aria-hidden'), 'true');
+        assert.equal(voiceControl.disabled, true);
+
+        app.router.handleMessage({
+            type: 'voice_status',
+            available: true,
+            streaming: false,
+            channel_type: 'static',
+            connected_players: 2,
+        });
+        assert.equal(voiceSection.dataset.uiState, 'available');
+        assert.equal(voiceCapabilityReason.textContent, '');
+        assert.equal(voiceStatusText.textContent, 'Ready');
+        assert.equal(voiceControl.disabled, false);
+
+        app.router.handleMessage({
+            type: 'voice_status',
+            available: false,
+            streaming: false,
+            error: 'Minecraft voice status timed out.',
+        });
+        assert.equal(voiceSection.dataset.uiState, 'error');
+        assert.equal(voiceSection.getAttribute('aria-busy'), 'false');
+        assert.match(voiceCapabilityReason.textContent, /timed out/i);
+        assert.doesNotMatch(voiceCapabilityReason.textContent, /not available/i);
+        assert.equal(voiceStatusText.textContent, 'Error');
+        assert.equal(voiceControl.disabled, true);
 
         socket.emit('disconnected');
+        assert.equal(app.state.voiceChat.statusReceived, false);
+        assert.equal(app.state.voiceChat.available, false);
+        assert.equal(voiceControl.disabled, true);
+        socket.emit('connecting', { attempt: 1, maxAttempts: 10 });
+        assert.equal(app.state.voiceChat.statusReceived, false);
+        assert.equal(voiceControl.disabled, true);
         socket.emit('connected');
         assert.equal(voiceSection.dataset.uiState, 'loading');
         assert.match(voiceStatusText.textContent, /Checking/i);
         assert.equal(voiceUnavailableMsg.classList.contains('hidden'), true);
     });
+});
+
+test('voice capability has one accessible reason and no hard-coded integration claim', async () => {
+    const html = await readPanelFile('index.html');
+    const reason = html.match(/<p[^>]+id="voice-capability-reason"[^>]*>/)?.[0] || '';
+    const legacy = html.match(/<div[^>]+id="voice-unavailable-msg"[^>]*>[\s\S]*?<\/div>/)?.[0] || '';
+
+    assert.match(reason, /role="status"/);
+    assert.match(reason, /aria-live="polite"/);
+    assert.match(legacy, /\bhidden\b/);
+    assert.match(legacy, /aria-hidden="true"/);
+    assert.doesNotMatch(legacy, /Simple Voice Chat|not installed/i);
 });
 
 test('emergency state remains authoritative while a non-queued command is pending', () => {

@@ -72,7 +72,8 @@ export function createInitialState() {
             enabled: false,
             channelType: 'static',
             distance: 100,
-            connectedPlayers: 0
+            connectedPlayers: 0,
+            error: null
         },
         bitmap: {
             initialized: false,

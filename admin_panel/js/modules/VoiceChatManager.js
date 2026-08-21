@@ -80,6 +80,7 @@ export class VoiceChatManager {
         this.state.voiceChat.statusReceived = false;
         this.state.voiceChat.available = false;
         this.state.voiceChat.streaming = false;
+        this.state.voiceChat.error = null;
         this.updateVoiceChatUI();
         this.app.ui.applyControlState();
     }
@@ -88,9 +89,14 @@ export class VoiceChatManager {
         const wasStreaming = this.state.voiceChat.streaming;
 
         this.state.voiceChat.statusReceived = true;
-        this.state.voiceChat.available = data.available || false;
-        this.state.voiceChat.streaming = data.streaming || false;
-        this.state.voiceChat.connectedPlayers = data.connected_players || 0;
+        this.state.voiceChat.error = typeof data.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : null;
+        this.state.voiceChat.available = !this.state.voiceChat.error && Boolean(data.available);
+        this.state.voiceChat.streaming = !this.state.voiceChat.error && Boolean(data.streaming);
+        this.state.voiceChat.connectedPlayers = this.state.voiceChat.error
+            ? 0
+            : (data.connected_players || 0);
 
         if (data.channel_type) {
             this.state.voiceChat.channelType = data.channel_type;
@@ -113,6 +119,7 @@ export class VoiceChatManager {
     updateVoiceChatUI() {
         const vc = this.state.voiceChat;
         const statusPending = !vc.statusReceived;
+        const statusError = Boolean(vc.error);
         const dot = this.elements.voiceDot;
         const statusText = this.elements.voiceStatusText;
         const playersStat = this.elements.voicePlayersStat;
@@ -126,7 +133,7 @@ export class VoiceChatManager {
         if (dot) {
             dot.classList.remove('voice-dot-streaming', 'voice-dot-available', 'voice-dot-unavailable');
             if (!statusPending) {
-                if (!vc.available) {
+                if (statusError || !vc.available) {
                     dot.classList.add('voice-dot-unavailable');
                 } else if (vc.streaming) {
                     dot.classList.add('voice-dot-streaming');
@@ -139,6 +146,8 @@ export class VoiceChatManager {
         if (statusText) {
             if (statusPending) {
                 statusText.textContent = 'Checking…';
+            } else if (statusError) {
+                statusText.textContent = 'Error';
             } else if (!vc.available) {
                 statusText.textContent = 'Unavailable';
             } else if (vc.streaming) {
@@ -158,7 +167,9 @@ export class VoiceChatManager {
         }
 
         if (unavailableMsg) {
-            unavailableMsg.classList.toggle('hidden', statusPending || vc.available);
+            unavailableMsg.hidden = true;
+            unavailableMsg.classList.add('hidden');
+            unavailableMsg.setAttribute('aria-hidden', 'true');
         }
 
         if (controls) {

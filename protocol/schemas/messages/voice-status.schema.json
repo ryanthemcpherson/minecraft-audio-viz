@@ -28,6 +28,12 @@
       "type": "integer",
       "minimum": 0,
       "description": "Number of players connected to voice chat."
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "An explicit failure to determine voice capability."
     }
   },
   "required": ["type"]

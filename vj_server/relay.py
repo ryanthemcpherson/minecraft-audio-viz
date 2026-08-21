@@ -936,6 +936,19 @@ class RelayMixin:
                             response = await self.viz_client.send({"type": "get_voice_status"})
                             if response:
                                 await websocket.send(_json_str(response))
+                            else:
+                                await websocket.send(
+                                    _json_str(
+                                        {
+                                            "type": "voice_status",
+                                            "available": False,
+                                            "streaming": False,
+                                            "channel_type": "static",
+                                            "connected_players": 0,
+                                            "error": "Minecraft voice status timed out.",
+                                        }
+                                    )
+                                )
                         else:
                             await websocket.send(
                                 _json_str(

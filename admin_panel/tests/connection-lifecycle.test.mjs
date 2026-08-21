@@ -190,9 +190,10 @@ test('each authenticated connection resets and requeries voice capability until 
     setupConnectionLifecycle(app);
     app.ws.emit('connected');
     app.ws.emit('disconnected');
+    app.ws.emit('connecting', { attempt: 1, maxAttempts: 10 });
     app.ws.emit('connected');
 
-    assert.deepEqual(resets, ['reset', 'reset']);
+    assert.deepEqual(resets, ['reset', 'reset', 'reset', 'reset']);
     assert.equal(sent.filter(({ type }) => type === 'get_voice_status').length, 2);
   } finally {
     globalThis.document = originalDocument;
