@@ -93,6 +93,7 @@ with zipfile.ZipFile(archive) as release_zip:
     assert len(infos) == len(set(infos)), "duplicate ZIP entries"
     assert all(name.startswith("mcav-vj/") for name in infos)
     assert all(".release-secret." not in name for name in infos)
+    assert all(".test." not in name and ".spec." not in name for name in infos)
     assert release_zip.read("mcav-vj/VERSION").decode() == version
     assert release_zip.read("mcav-vj/release/AudioViz.jar") == b"fixture-plugin"
     for name in executables:
@@ -135,6 +136,32 @@ if python3 "$SCRIPT_DIR/release_archive.py" verify "$MISSING_SERVER_ARCHIVE" \
   exit 1
 fi
 grep -q 'Required release entries missing: mcav-vj/vj_server/cli.py' "$TEMP_ROOT/missing-server.log"
+
+TEST_FILE_ARCHIVE="$OUTPUT_DIR/injected-test-file.zip"
+python3 - "$ARCHIVE" "$TEST_FILE_ARCHIVE" <<'PY'
+import hashlib
+import sys
+import zipfile
+
+source_path, target_path = sys.argv[1:]
+test_name = "admin_panel/js/injected.test.mjs"
+test_payload = b"production archives must reject this"
+with zipfile.ZipFile(source_path) as source, zipfile.ZipFile(target_path, "w") as target:
+    for entry in source.infolist():
+        payload = source.read(entry.filename)
+        if entry.filename == "mcav-vj/MANIFEST.sha256":
+            digest = hashlib.sha256(test_payload).hexdigest()
+            payload += f"{digest}  {test_name}\n".encode()
+        target.writestr(entry, payload)
+    target.writestr(f"mcav-vj/{test_name}", test_payload)
+PY
+if python3 "$SCRIPT_DIR/release_archive.py" verify "$TEST_FILE_ARCHIVE" \
+  > "$TEMP_ROOT/injected-test-file.log" 2>&1; then
+  printf 'Verifier accepted a browser test file in the production archive.\n' >&2
+  exit 1
+fi
+grep -q 'Forbidden development or secret entries: mcav-vj/admin_panel/js/injected.test.mjs' \
+  "$TEMP_ROOT/injected-test-file.log"
 
 WRONG_RUNTIME_SOURCE="$TEMP_ROOT/wrong-runtimes"
 cp -a "$RUNTIME_SOURCE" "$WRONG_RUNTIME_SOURCE"

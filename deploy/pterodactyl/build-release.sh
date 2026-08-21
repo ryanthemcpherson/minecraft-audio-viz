@@ -84,6 +84,9 @@ fi
 
 while IFS= read -r -d '' relative_path; do
   case "$relative_path" in
+    *.test.*|*.spec.*)
+      continue
+      ;;
     vj_server/*.py)
       if [[ "${relative_path#vj_server/}" == */* ]]; then
         continue
