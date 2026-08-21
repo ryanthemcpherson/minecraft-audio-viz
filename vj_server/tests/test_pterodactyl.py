@@ -584,6 +584,81 @@ def test_post_switch_fsync_failure_rolls_back_to_old_current_identity(
     assert_current_identity_is_coherent(bootstrap_paths)
 
 
+def test_unrecoverable_post_switch_rollback_fails_until_entrypoints_are_reconciled(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    old_target = os.readlink(bootstrap_paths.identity_pointer)
+    original_replace = os.replace
+    original_fsync_directory = pterodactyl._fsync_directory
+    entrypoint_interrupted = False
+    durability_failure_injected = False
+
+    with monkeypatch.context() as faults:
+
+        def interrupt_entrypoint_before_pointer_switch(
+            source: str | os.PathLike[str],
+            destination: str | os.PathLike[str],
+        ) -> None:
+            nonlocal entrypoint_interrupted
+            source_path = Path(source)
+            destination_path = Path(destination)
+            if not entrypoint_interrupted and destination_path == bootstrap_paths.identity_pointer:
+                pointer_target = Path(os.readlink(source_path))
+                new_generation = (source_path.parent / pointer_target).resolve(strict=True)
+                bootstrap_paths.tls_cert.unlink()
+                bootstrap_paths.tls_cert.write_bytes((new_generation / "tls.crt").read_bytes())
+                os.chmod(bootstrap_paths.tls_cert, 0o644)
+                entrypoint_interrupted = True
+            original_replace(source, destination)
+
+        def fail_state_fsync_after_switch(path: Path) -> None:
+            nonlocal durability_failure_injected
+            pointer_was_switched = (
+                bootstrap_paths.identity_pointer.is_symlink()
+                and os.readlink(bootstrap_paths.identity_pointer) != old_target
+            )
+            if (
+                path == bootstrap_paths.state_dir
+                and pointer_was_switched
+                and not durability_failure_injected
+            ):
+                durability_failure_injected = True
+                raise OSError("injected post-switch state fsync failure")
+            original_fsync_directory(path)
+
+        faults.setattr(pterodactyl.os, "replace", interrupt_entrypoint_before_pointer_switch)
+        faults.setattr(pterodactyl, "_fsync_directory", fail_state_fsync_after_switch)
+        faults.setattr(pterodactyl, "_restore_identity_pointer", lambda *_: False)
+
+        with pytest.raises(BootstrapError, match="entrypoints"):
+            bootstrap_pterodactyl(
+                bootstrap_paths,
+                "26.1-test",
+                public_host=SECOND_PUBLIC_IPV4,
+                rotate_tls_identity=True,
+            )
+
+    assert entrypoint_interrupted
+    assert durability_failure_injected
+    assert os.readlink(bootstrap_paths.identity_pointer) != old_target
+    assert not bootstrap_paths.tls_cert.is_symlink()
+    current_metadata = json.loads(
+        (current_identity_generation(bootstrap_paths) / "identity.json").read_text(encoding="utf-8")
+    )
+    assert current_metadata["public_host"] == SECOND_PUBLIC_IPV4
+
+    recovered = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1-test",
+        public_host=SECOND_PUBLIC_IPV4,
+    )
+
+    assert recovered.credentials_created is False
+    assert_current_identity_is_coherent(bootstrap_paths)
+
+
 def test_concurrent_rotations_are_serialized_and_commit_complete_generations(
     bootstrap_paths: BootstrapPaths,
 ) -> None:
@@ -981,6 +1056,93 @@ def test_fd0b918_adoption_entrypoint_failure_restores_flat_identity(
     ):
         assert path.is_file()
         assert not path.is_symlink()
+
+
+def test_fd0b918_double_failure_stops_rotation_then_next_bootstrap_repairs(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    convert_current_identity_to_fd0b918_layout(bootstrap_paths)
+    original_replace = os.replace
+    entrypoint_failure_injected = False
+    restoration_failure_injected = False
+    rotation_requests = 0
+
+    def track_rotation_requests(
+        arguments: Sequence[str],
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal rotation_requests
+        if len(arguments) > 1 and arguments[1] == "req":
+            rotation_requests += 1
+        return run_openssl(arguments)
+
+    with monkeypatch.context() as faults:
+
+        def fail_entrypoint_conversion_and_flat_restoration(
+            source: str | os.PathLike[str],
+            destination: str | os.PathLike[str],
+        ) -> None:
+            nonlocal entrypoint_failure_injected, restoration_failure_injected
+            source_path = Path(source)
+            destination_path = Path(destination)
+            if (
+                not entrypoint_failure_injected
+                and destination_path == bootstrap_paths.auth_file
+                and source_path.is_symlink()
+            ):
+                entrypoint_failure_injected = True
+                raise OSError("injected legacy entrypoint conversion failure")
+            if (
+                entrypoint_failure_injected
+                and not restoration_failure_injected
+                and destination_path == bootstrap_paths.runtime_env
+                and not source_path.is_symlink()
+            ):
+                restoration_failure_injected = True
+                raise OSError("injected legacy flat restoration failure")
+            original_replace(source, destination)
+
+        faults.setattr(
+            pterodactyl.os,
+            "replace",
+            fail_entrypoint_conversion_and_flat_restoration,
+        )
+
+        with pytest.raises(BootstrapError, match="entrypoint reconciliation"):
+            bootstrap_pterodactyl(
+                bootstrap_paths,
+                "26.1-test",
+                public_host=SECOND_PUBLIC_IPV4,
+                rotate_tls_identity=True,
+                command_runner=track_rotation_requests,
+            )
+
+    assert entrypoint_failure_injected
+    assert restoration_failure_injected
+    assert rotation_requests == 0
+    adopted_generation = current_identity_generation(bootstrap_paths)
+    generations = [path for path in bootstrap_paths.identity_generations.iterdir() if path.is_dir()]
+    assert generations == [adopted_generation]
+    adopted_metadata = json.loads(
+        (adopted_generation / "identity.json").read_text(encoding="utf-8")
+    )
+    assert adopted_metadata["public_host"] == PUBLIC_IPV4
+    assert not pterodactyl.certificate_covers_ip(
+        adopted_generation / "tls.crt",
+        ipaddress.ip_address(SECOND_PUBLIC_IPV4),
+    )
+
+    recovered = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1-test",
+        public_host=PUBLIC_IPV4,
+    )
+
+    assert recovered.credentials_created is False
+    assert current_identity_generation(bootstrap_paths) == adopted_generation
+    metadata = assert_current_identity_is_coherent(bootstrap_paths)
+    assert metadata["public_host"] == PUBLIC_IPV4
 
 
 def test_rejects_release_jar_with_wrong_plugin_name(bootstrap_paths: BootstrapPaths) -> None:

@@ -343,6 +343,28 @@ def _validate_or_prepare_entrypoints(
             temporary_link.unlink(missing_ok=True)
 
 
+def _verify_identity_entrypoints(paths: BootstrapPaths, generation: Path) -> None:
+    generation_filenames = _identity_entrypoint_filenames(paths)
+    for entrypoint, target in _identity_entrypoints(paths).items():
+        expected_file = generation / generation_filenames[entrypoint]
+        try:
+            entrypoint_is_current = _is_expected_symlink(entrypoint, target) and entrypoint.resolve(
+                strict=True
+            ) == expected_file.resolve(strict=True)
+        except (OSError, RuntimeError):
+            entrypoint_is_current = False
+        if not entrypoint_is_current:
+            raise BootstrapError(
+                "Deployment identity entrypoint reconciliation failed; "
+                "compatibility entrypoints are not current"
+            )
+
+
+def _reconcile_identity_entrypoints(paths: BootstrapPaths, generation: Path) -> None:
+    _validate_or_prepare_entrypoints(paths, generation)
+    _verify_identity_entrypoints(paths, generation)
+
+
 def _persist_identity_generation(
     paths: BootstrapPaths,
     files: Mapping[str, tuple[bytes, int]],
@@ -395,10 +417,14 @@ def _commit_identity_generation(
                 "Identity pointer durability failed; the previous identity was restored"
             ) from exc
         if pointer_switched and _current_identity_generation(paths) == generation:
+            if prepare_entrypoints:
+                _verify_identity_entrypoints(paths, generation)
             return generation
         raise BootstrapError("Failed to commit immutable identity generation") from exc
     finally:
         temporary_pointer.unlink(missing_ok=True)
+    if prepare_entrypoints:
+        _verify_identity_entrypoints(paths, generation)
     return generation
 
 
@@ -689,14 +715,16 @@ def _adopt_legacy_identity(paths: BootstrapPaths, identity: _LegacyIdentity) -> 
         prepare_entrypoints=False,
     )
     try:
-        _validate_or_prepare_entrypoints(paths, generation)
+        _reconcile_identity_entrypoints(paths, generation)
     except BootstrapError as exc:
         if _restore_legacy_flat_identity(paths, identity):
             raise BootstrapError(
                 "Legacy identity adoption failed; the flat identity was restored"
             ) from exc
         if _current_identity_generation(paths) == generation:
-            return generation
+            raise BootstrapError(
+                "Legacy identity entrypoint reconciliation failed; recovery is required"
+            ) from exc
         raise BootstrapError("Legacy identity adoption recovery failed") from exc
     return generation
 
@@ -983,7 +1011,7 @@ def _ensure_identity(
         generation,
         command_runner,
     )
-    _validate_or_prepare_entrypoints(paths, generation)
+    _reconcile_identity_entrypoints(paths, generation)
     if rotate_tls_identity:
         _rotate_tls_identity(paths, generation, public_ip, command_runner)
     elif identity_public_ip != public_ip or not certificate_covers_ip(
