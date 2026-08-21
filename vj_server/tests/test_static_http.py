@@ -21,6 +21,7 @@ from vj_server.models import (
     _REJECTED_STATIC_PATH,
     MultiDirectoryHandler,
     _make_directory_handler,
+    _make_threaded_http_server_class,
     _resolve_static_path,
     _static_path_parts,
     run_http_server,
@@ -418,6 +419,15 @@ def test_http_handlers_reject_symlinked_directory_index_escape(
 
 def test_http_server_defaults_to_loopback() -> None:
     assert signature(run_http_server).parameters["host"].default == "127.0.0.1"
+
+
+def test_http_listener_uses_threaded_requests_with_clean_close_semantics() -> None:
+    server_class = _make_threaded_http_server_class()
+
+    assert issubclass(server_class, socketserver.ThreadingMixIn)
+    assert server_class.allow_reuse_address is True
+    assert server_class.daemon_threads is True
+    assert server_class.block_on_close is True
 
 
 @pytest.mark.parametrize("host", ["", " \t "])

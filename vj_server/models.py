@@ -827,6 +827,17 @@ def build_server_ssl_context(
     return context
 
 
+def _make_threaded_http_server_class():
+    """Build a reusable threaded listener while retaining testable bind injection."""
+
+    class ReusableThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+        block_on_close = True
+
+    return ReusableThreadingHTTPServer
+
+
 def run_http_server(
     port: int,
     directory: str,
@@ -848,12 +859,9 @@ def run_http_server(
     }
     handler_cls = _make_directory_handler(dir_map)
 
-    # Allow port reuse so restarts don't fail with "Address already in use"
-    class ReusableTCPServer(socketserver.TCPServer):
-        allow_reuse_address = True
-
     try:
-        with ReusableTCPServer((host, port), handler_cls) as httpd:
+        server_class = _make_threaded_http_server_class()
+        with server_class((host, port), handler_cls) as httpd:
             if ssl_context is not None:
                 httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
             httpd.serve_forever()

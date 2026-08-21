@@ -3,6 +3,30 @@ import test from 'node:test';
 
 import { WebSocketService } from './WebSocketService.js';
 
+globalThis.WebSocket ??= class WebSocket {
+    static OPEN = 1;
+};
+
+function openSocket(sentMessages = []) {
+    return {
+        readyState: 1,
+        closeCalls: [],
+        send(message) {
+            sentMessages.push(JSON.parse(message));
+        },
+        close(code, reason) {
+            this.closeCalls.push({ code, reason });
+        },
+    };
+}
+
+function serviceWithoutTimers(options = {}) {
+    const service = new WebSocketService(options);
+    service._startPingInterval = () => {};
+    service._stopPingInterval = () => {};
+    return service;
+}
+
 test('sends an exact username and password authentication message', () => {
     const sentMessages = [];
     const service = new WebSocketService({
@@ -54,4 +78,111 @@ test('uses wss when the control panel is served over HTTPS', () => {
     } finally {
         globalThis.WebSocket = originalWebSocket;
     }
+});
+
+test('opens a no-auth session after explicit server negotiation', () => {
+    const sentMessages = [];
+    const events = [];
+    const service = serviceWithoutTimers();
+    service.ws = openSocket(sentMessages);
+    service.addEventListener('connected', () => events.push('connected'));
+
+    service._onOpen();
+    assert.deepEqual(sentMessages, []);
+
+    service._onMessage({ data: JSON.stringify({ type: 'auth_success' }) });
+
+    assert.deepEqual(events, ['connected']);
+    assert.equal(service.isAuthenticated, true);
+    assert.deepEqual(sentMessages, [{ type: 'get_state' }]);
+});
+
+test('keeps an auth-required session gated until credentials are supplied', () => {
+    const events = [];
+    const service = serviceWithoutTimers();
+    service.ws = openSocket();
+    service.addEventListener('auth_required', () => events.push('auth-required'));
+
+    service._onOpen();
+    service._onMessage({ data: JSON.stringify({ type: 'auth_required' }) });
+
+    assert.deepEqual(events, ['auth-required']);
+    assert.equal(service.isAuthenticated, false);
+    assert.equal(service.shouldReconnect, false);
+    assert.equal(service.ws.closeCalls.length, 1);
+});
+
+test('drops pre-auth commands instead of carrying them into a later session', () => {
+    const sentMessages = [];
+    const service = serviceWithoutTimers();
+    service.ws = openSocket(sentMessages);
+
+    assert.equal(service.send({ type: 'blackout' }), false);
+    assert.deepEqual(service.messageQueue, []);
+
+    service._onMessage({ data: JSON.stringify({ type: 'auth_success' }) });
+    assert.deepEqual(sentMessages, [{ type: 'get_state' }]);
+});
+
+test('auth failure clears pending commands and suppresses reconnect', () => {
+    const service = serviceWithoutTimers({ username: 'operator', password: 'wrong' });
+    service.ws = openSocket();
+    service.messageQueue.push({ type: 'freeze' });
+    service._sessionEstablished = true;
+    service._awaitingAuth = true;
+
+    service._onMessage({
+        data: JSON.stringify({ type: 'auth_error', error: 'Invalid username or password' }),
+    });
+
+    assert.deepEqual(service.messageQueue, []);
+    assert.equal(service.isAuthenticated, false);
+    assert.equal(service._sessionEstablished, false);
+    assert.equal(service.shouldReconnect, false);
+});
+
+test('logout clears credentials and queued controls', () => {
+    const service = serviceWithoutTimers({ username: 'operator', password: 'secret' });
+    service.ws = openSocket();
+    service.isAuthenticated = true;
+    service._sessionEstablished = true;
+    service.messageQueue.push({ type: 'set_pattern', pattern: 'spectrum' });
+
+    service.disconnect();
+
+    assert.deepEqual(service.messageQueue, []);
+    assert.equal(service.username, '');
+    assert.equal(service.password, '');
+    assert.equal(service.isAuthenticated, false);
+    assert.equal(service._sessionEstablished, false);
+});
+
+test('new authentication never flushes controls from an ended session', () => {
+    const sentMessages = [];
+    const service = serviceWithoutTimers({ username: 'operator', password: 'secret' });
+    service.ws = openSocket(sentMessages);
+    service.messageQueue.push({ type: 'blackout' });
+    service._sessionEstablished = false;
+    service._awaitingAuth = true;
+
+    service._onMessage({ data: JSON.stringify({ type: 'auth_success' }) });
+
+    assert.deepEqual(sentMessages, [{ type: 'get_state' }]);
+    assert.deepEqual(service.messageQueue, []);
+});
+
+test('same-session reconnect flushes only controls queued during that reconnect', () => {
+    const sentMessages = [];
+    const service = serviceWithoutTimers({ username: 'operator', password: 'secret' });
+    service.ws = openSocket(sentMessages);
+    service._sessionEstablished = true;
+    service.messageQueue.push({ type: 'set_pattern', pattern: 'rings' });
+    service._awaitingAuth = true;
+
+    service._onMessage({ data: JSON.stringify({ type: 'auth_success' }) });
+
+    assert.deepEqual(sentMessages, [
+        { type: 'get_state' },
+        { type: 'set_pattern', pattern: 'rings' },
+    ]);
 });

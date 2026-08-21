@@ -127,3 +127,16 @@ test('returns authentication failures to the login gate without prompting or per
     globalThis.prompt = originalPrompt;
   }
 });
+
+test('returns an authentication challenge to the login gate', () => {
+  const calls = [];
+  const app = {
+    ws: new FakeWebSocket(),
+    onAuthRequired: () => calls.push('auth-required'),
+  };
+
+  setupConnectionLifecycle(app);
+  app.ws.emit('auth_required');
+
+  assert.deepEqual(calls, ['auth-required']);
+});

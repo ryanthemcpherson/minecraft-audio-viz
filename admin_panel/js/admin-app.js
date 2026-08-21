@@ -8,6 +8,7 @@ import { createInitialState } from './modules/InitialState.js';
 import { cacheElements } from './modules/ElementCache.js';
 import { setupEventListeners } from './modules/EventWiring.js';
 import { setupConnectionLifecycle } from './modules/ConnectionLifecycle.js';
+import { setupAdminLogin } from './modules/AdminLoginController.js';
 import { MessageRouter } from './modules/MessageRouter.js';
 import { UIHelpers } from './modules/UIHelpers.js';
 import { AudioManager } from './modules/AudioManager.js';
@@ -26,6 +27,7 @@ import { PreviewManager } from './managers/PreviewManager.js';
 class AdminApp {
     constructor(options = {}) {
         this.onAuthenticated = options.onAuthenticated || (() => {});
+        this.onAuthRequired = options.onAuthRequired || (() => {});
         this.onAuthFailed = options.onAuthFailed || (() => {});
 
         // WebSocket connection - use same host as the page was served from
@@ -5965,71 +5967,11 @@ class AdminApp {
     }
 }
 
-function setupAdminLogin() {
-    const authGate = document.getElementById('auth-gate');
-    const authForm = document.getElementById('auth-form');
-    const authError = document.getElementById('auth-error');
-    const usernameInput = document.getElementById('auth-username');
-    const passwordInput = document.getElementById('auth-password');
-    const submitButton = document.getElementById('auth-submit');
-    const appElement = document.getElementById('app');
-    const logoutButton = document.getElementById('btn-logout');
-
-    const showLogin = (message = '') => {
-        authGate.hidden = false;
-        appElement.hidden = true;
-        appElement.setAttribute('aria-hidden', 'true');
-        authError.textContent = message;
-        passwordInput.value = '';
-        submitButton.disabled = false;
-        submitButton.textContent = 'Open Control Center';
-        (usernameInput.value ? passwordInput : usernameInput).focus();
-    };
-
-    const showApp = () => {
-        authGate.hidden = true;
-        appElement.hidden = false;
-        appElement.removeAttribute('aria-hidden');
-        authError.textContent = '';
-        submitButton.disabled = false;
-        submitButton.textContent = 'Open Control Center';
-    };
-
-    authForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const username = usernameInput.value.trim();
-        const password = passwordInput.value;
-        if (!username || !password) {
-            authError.textContent = 'Enter the username and password from FIRST_LOGIN.txt.';
-            return;
-        }
-
-        authError.textContent = '';
-        submitButton.disabled = true;
-        submitButton.textContent = 'Authenticating…';
-
-        if (!window.adminApp) {
-            window.adminApp = new AdminApp({
-                username,
-                password,
-                onAuthenticated: showApp,
-                onAuthFailed: () => showLogin('Invalid username or password.'),
-            });
-        } else {
-            window.adminApp.ws.setCredentials(username, password);
-            window.adminApp.ws.manualReconnect();
-        }
-    });
-
-    logoutButton.addEventListener('click', () => {
-        window.adminApp?.ws.disconnect();
-        window.adminApp?.ws.setCredentials('', '');
-        usernameInput.value = '';
-        showLogin('Signed out.');
-    });
-
-    showLogin();
-}
-
 // Initialize the protected control surface when DOM is ready.
-document.addEventListener('DOMContentLoaded', setupAdminLogin);
+document.addEventListener('DOMContentLoaded', () => {
+    setupAdminLogin({
+        createApp: (options) => new AdminApp(options),
+        getApp: () => window.adminApp,
+        setApp: (app) => { window.adminApp = app; },
+    });
+});
