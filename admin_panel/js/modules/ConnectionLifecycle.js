@@ -11,6 +11,7 @@ export function setupConnectionLifecycle(app) {
 
     app.ws.addEventListener('connected', () => {
         app.state.connected = true;
+        app.onAuthenticated();
         app.ui.setConnectionStatus('connected');
         app.ui.showToast('Connected to server', 'success');
 
@@ -51,12 +52,7 @@ export function setupConnectionLifecycle(app) {
         const detail = event.detail || {};
         const message = detail.error || 'Authentication failed';
         app.ui.setConnectionStatus('disconnected');
-        const newPassword = prompt(`VJ Auth Failed: ${message}\nEnter VJ password:`);
-        if (newPassword) {
-            localStorage.setItem('mcav_vj_password', newPassword);
-            app.ws.vjPassword = newPassword;
-            app.ws.manualReconnect();
-        }
+        app.onAuthFailed(message);
     });
 
     app.ws.addEventListener('error', () => {

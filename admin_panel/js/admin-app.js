@@ -24,22 +24,20 @@ import { BitmapManager } from './managers/BitmapManager.js';
 import { PreviewManager } from './managers/PreviewManager.js';
 
 class AdminApp {
-    constructor() {
+    constructor(options = {}) {
+        this.onAuthenticated = options.onAuthenticated || (() => {});
+        this.onAuthFailed = options.onAuthFailed || (() => {});
+
         // WebSocket connection - use same host as the page was served from
         const wsHost = window.location.hostname || 'localhost';
-        // VJ password: check URL param, then localStorage, then prompt
         const urlParams = new URLSearchParams(window.location.search);
-        let vjPassword = urlParams.get('vj_password')
-            || localStorage.getItem('mcav_vj_password')
-            || '';
-        if (vjPassword) {
-            localStorage.setItem('mcav_vj_password', vjPassword);
-        }
         const wsPort = parseInt(urlParams.get('port'), 10) || 8766;
         this.ws = new WebSocketService({
             host: wsHost,
             port: wsPort,
-            vjPassword: vjPassword,
+            pageProtocol: window.location.protocol,
+            username: options.username || '',
+            password: options.password || '',
         });
 
         /*
@@ -1015,6 +1013,7 @@ class AdminApp {
 
         this.ws.addEventListener('connected', () => {
             this.state.connected = true;
+            this.onAuthenticated();
             this.ui.setConnectionStatus('connected');
             this.ui.showToast('Connected to server', 'success');
 
@@ -1058,13 +1057,7 @@ class AdminApp {
             const detail = e.detail || {};
             const msg = detail.error || 'Authentication failed';
             this.ui.setConnectionStatus('disconnected');
-            // Prompt user for VJ password and retry
-            const newPassword = prompt(`VJ Auth Failed: ${msg}\nEnter VJ password:`);
-            if (newPassword) {
-                localStorage.setItem('mcav_vj_password', newPassword);
-                this.ws.vjPassword = newPassword;
-                this.ws.manualReconnect();
-            }
+            this.onAuthFailed(msg);
         });
 
         this.ws.addEventListener('error', () => {
@@ -5972,7 +5965,71 @@ class AdminApp {
     }
 }
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    window.adminApp = new AdminApp();
-});
+function setupAdminLogin() {
+    const authGate = document.getElementById('auth-gate');
+    const authForm = document.getElementById('auth-form');
+    const authError = document.getElementById('auth-error');
+    const usernameInput = document.getElementById('auth-username');
+    const passwordInput = document.getElementById('auth-password');
+    const submitButton = document.getElementById('auth-submit');
+    const appElement = document.getElementById('app');
+    const logoutButton = document.getElementById('btn-logout');
+
+    const showLogin = (message = '') => {
+        authGate.hidden = false;
+        appElement.hidden = true;
+        appElement.setAttribute('aria-hidden', 'true');
+        authError.textContent = message;
+        passwordInput.value = '';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Open Control Center';
+        (usernameInput.value ? passwordInput : usernameInput).focus();
+    };
+
+    const showApp = () => {
+        authGate.hidden = true;
+        appElement.hidden = false;
+        appElement.removeAttribute('aria-hidden');
+        authError.textContent = '';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Open Control Center';
+    };
+
+    authForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value;
+        if (!username || !password) {
+            authError.textContent = 'Enter the username and password from FIRST_LOGIN.txt.';
+            return;
+        }
+
+        authError.textContent = '';
+        submitButton.disabled = true;
+        submitButton.textContent = 'Authenticating…';
+
+        if (!window.adminApp) {
+            window.adminApp = new AdminApp({
+                username,
+                password,
+                onAuthenticated: showApp,
+                onAuthFailed: () => showLogin('Invalid username or password.'),
+            });
+        } else {
+            window.adminApp.ws.setCredentials(username, password);
+            window.adminApp.ws.manualReconnect();
+        }
+    });
+
+    logoutButton.addEventListener('click', () => {
+        window.adminApp?.ws.disconnect();
+        window.adminApp?.ws.setCredentials('', '');
+        usernameInput.value = '';
+        showLogin('Signed out.');
+    });
+
+    showLogin();
+}
+
+// Initialize the protected control surface when DOM is ready.
+document.addEventListener('DOMContentLoaded', setupAdminLogin);
