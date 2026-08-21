@@ -26,6 +26,7 @@ rustls-pki-types = { version = "1", default-features = false, features = ["std"]
 rustls-webpki = { version = "0.103", default-features = false, features = ["std"] }
 futures-util = "0.3"
 sha2 = "0.10"
+subtle = "2"
 rustfft = "6"
 cpal = "0.15"
 log = "0.4"

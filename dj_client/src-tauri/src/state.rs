@@ -5,7 +5,7 @@ use crate::protocol::DjClient;
 use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 /// Connection status
@@ -63,6 +63,16 @@ pub struct AppState {
     /// Validated SHA-256 fingerprint for a self-signed TLS server certificate
     pub tls_fingerprint: Option<String>,
 
+    /// Monotonically increasing identity for connection replacements.
+    pub connection_generation: u64,
+
+    /// Cancels the connection attempt owned by `connection_generation`.
+    pub connection_attempt_cancel_tx: Option<oneshot::Sender<()>>,
+
+    /// Serializes teardown/publication while still allowing a newer command
+    /// to cancel the connection future currently holding the lock.
+    pub connection_operation_lock: Arc<tokio::sync::Mutex<()>>,
+
     /// Selected audio source ID
     pub audio_source_id: Option<String>,
 
@@ -101,6 +111,9 @@ impl Default for AppState {
             server_host: "192.168.1.204".to_string(),
             server_port: 9000,
             tls_fingerprint: None,
+            connection_generation: 0,
+            connection_attempt_cancel_tx: None,
+            connection_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
             audio_source_id: None,
             bridge_shutdown_tx: None,
             bridge_task_handle: None,
@@ -145,6 +158,9 @@ mod tests {
         assert_eq!(state.server_host, "192.168.1.204");
         assert_eq!(state.server_port, 9000);
         assert!(state.tls_fingerprint.is_none());
+        assert_eq!(state.connection_generation, 0);
+        assert!(state.connection_attempt_cancel_tx.is_none());
+        assert!(state.connection_operation_lock.try_lock().is_ok());
         assert!(state.bridge_shutdown_tx.is_none());
         assert!(state.bridge_task_handle.is_none());
         assert!(state.voice_streamer.is_none());
