@@ -546,16 +546,25 @@ export class PreviewManager {
 
     /** Synchronize bitmap planes from the latest server-authoritative zone state. */
     syncBitmapZones() {
-        if (!this._initialized || !this._scene || !this._bitmapPreview) return;
-
         const initializedZones = this.state.bitmap.initializedZones || new Set();
-        const knownZones = new Set((this.state.allZones || []).map(zone => zone.name));
-
-        for (const zoneName of Object.keys(this._bitmapPreview.zones)) {
-            if (!initializedZones.has(zoneName) || !knownZones.has(zoneName)) {
-                this._bitmapPreview.deactivate(zoneName);
-            }
+        for (const zoneName of this._pendingBitmapFrames?.keys() || []) {
+            if (!initializedZones.has(zoneName)) this.purgeBitmapZone(zoneName);
         }
+
+        if (!this._bitmapPreview) return;
+
+        const retainedZones = new Set([
+            ...Object.keys(this._bitmapPreview.zones),
+            ...Object.keys(this._bitmapPreview.exactFrames),
+            ...Object.keys(this._bitmapPreview.frameBuffers),
+            ...Object.keys(this._bitmapPreview.pendingPatterns),
+        ]);
+
+        for (const zoneName of retainedZones) {
+            if (!initializedZones.has(zoneName)) this.purgeBitmapZone(zoneName);
+        }
+
+        if (!this._initialized || !this._scene) return;
 
         for (const zoneName of initializedZones) {
             const zoneGroup = this._zoneGroups[zoneName] || this._ensureZoneGroup(zoneName);
@@ -582,6 +591,26 @@ export class PreviewManager {
         const zones = this.state.allZones || [];
         if (zones.length <= 1 && initializedZones.size > 0) {
             this._blocks.forEach(block => { block.visible = false; });
+        }
+    }
+
+    /** Permanently release bitmap resources for a removed or block-mode zone. */
+    purgeBitmapZone(zoneName) {
+        this._bitmapPreview?.purgeZone(zoneName);
+        this._pendingBitmapFrames?.delete(zoneName);
+    }
+
+    /** Purge retained bitmap data after an authoritative zone inventory update. */
+    reconcileBitmapZoneInventory(knownZoneNames) {
+        const retainedZones = new Set(this._pendingBitmapFrames?.keys() || []);
+        if (this._bitmapPreview) {
+            Object.keys(this._bitmapPreview.zones).forEach(name => retainedZones.add(name));
+            Object.keys(this._bitmapPreview.exactFrames).forEach(name => retainedZones.add(name));
+            Object.keys(this._bitmapPreview.frameBuffers).forEach(name => retainedZones.add(name));
+            Object.keys(this._bitmapPreview.pendingPatterns).forEach(name => retainedZones.add(name));
+        }
+        for (const zoneName of retainedZones) {
+            if (!knownZoneNames.has(zoneName)) this.purgeBitmapZone(zoneName);
         }
     }
 

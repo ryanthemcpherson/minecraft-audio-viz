@@ -11,6 +11,7 @@ class BitmapPreview {
         this.zones = {};
         this.pendingPatterns = {};
         this.exactFrames = {};
+        this.frameBuffers = {};
         this.nextFrameId = 1;
         this.frameFreshnessMs = 750;
         this.time = 0;
@@ -77,6 +78,14 @@ class BitmapPreview {
         delete this.zones[zoneName];
     }
 
+    /** Permanently release all preview state retained for a bitmap zone. */
+    purgeZone(zoneName) {
+        this.deactivate(zoneName);
+        delete this.exactFrames[zoneName];
+        delete this.frameBuffers[zoneName];
+        delete this.pendingPatterns[zoneName];
+    }
+
     isActive(zoneName) { return !!this.zones[zoneName]; }
 
     setPattern(zoneName, pattern) {
@@ -91,12 +100,29 @@ class BitmapPreview {
      * Returns false for malformed frames without disturbing prior state.
      */
     ingestFrame(message) {
-        const frame = this._decodeFrame(message);
-        if (!frame) return false;
+        const validated = this._validateFrame(message);
+        if (!validated) return false;
 
+        const { zone, width, height } = validated;
+        let storage = this.frameBuffers[zone];
+        if (!storage || storage.width !== width || storage.height !== height) {
+            storage = this._createFrameStorage(width, height);
+        }
+
+        if (!this._decodeIntoScratch(validated, storage)) return false;
+
+        // Publish only after the complete frame has decoded successfully. The
+        // currently rendered RGBA buffer is never partially mutated.
+        storage.rgba.set(storage.scratchRgba);
+        this.frameBuffers[zone] = storage;
+
+        let frame = this.exactFrames[zone];
+        if (!frame || frame.width !== width || frame.height !== height) {
+            frame = { zone, width, height, rgba: storage.rgba };
+            this.exactFrames[zone] = frame;
+        }
         frame.id = this.nextFrameId++;
         frame.receivedAt = performance.now();
-        this.exactFrames[frame.zone] = frame;
         return true;
     }
 
@@ -136,7 +162,7 @@ class BitmapPreview {
         }
     }
 
-    _decodeFrame(message) {
+    _validateFrame(message) {
         if (!message || typeof message !== 'object' || typeof message.zone !== 'string'
             || message.zone.length === 0) {
             return null;
@@ -158,7 +184,6 @@ class BitmapPreview {
         const hasBase64 = typeof message.pixels === 'string';
         if (hasPixelArray === hasBase64) return null;
 
-        const argbPixels = new Uint32Array(pixelCount);
         if (hasPixelArray) {
             if (message.pixel_array.length !== pixelCount) return null;
             for (let index = 0; index < pixelCount; index++) {
@@ -166,43 +191,82 @@ class BitmapPreview {
                 if (!Number.isInteger(value) || value < -2_147_483_648 || value > 4_294_967_295) {
                     return null;
                 }
-                argbPixels[index] = value >>> 0;
             }
-        } else {
-            let bytes;
-            try {
-                const encoded = message.pixels;
-                if (encoded.length === 0 || encoded.length % 4 !== 0
-                    || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
-                    return null;
-                }
-                const binary = atob(encoded);
-                if (binary.length !== pixelCount * 4) return null;
-                bytes = new Uint8Array(binary.length);
-                for (let index = 0; index < binary.length; index++) {
-                    bytes[index] = binary.charCodeAt(index);
-                }
-            } catch (_) {
+            return {
+                zone: message.zone,
+                width,
+                height,
+                pixelCount,
+                pixelArray: message.pixel_array,
+                binary: null,
+            };
+        }
+
+        try {
+            const encoded = message.pixels;
+            if (encoded.length === 0 || encoded.length % 4 !== 0
+                || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
                 return null;
             }
+            const binary = atob(encoded);
+            if (binary.length !== pixelCount * 4) return null;
+            return {
+                zone: message.zone,
+                width,
+                height,
+                pixelCount,
+                pixelArray: null,
+                binary,
+            };
+        } catch (_) {
+            return null;
+        }
+    }
 
-            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-            for (let index = 0; index < pixelCount; index++) {
-                argbPixels[index] = view.getUint32(index * 4, true);
+    _createFrameStorage(width, height) {
+        const byteLength = width * height * 4;
+        const decodeBytes = new Uint8Array(byteLength);
+        return {
+            width,
+            height,
+            rgba: new Uint8ClampedArray(byteLength),
+            scratchRgba: new Uint8ClampedArray(byteLength),
+            decodeBytes,
+            decodeView: new DataView(decodeBytes.buffer),
+        };
+    }
+
+    _decodeIntoScratch(frame, storage) {
+        try {
+            if (frame.pixelArray) {
+                for (let index = 0; index < frame.pixelCount; index++) {
+                    this._writeArgb(storage.scratchRgba, index, frame.pixelArray[index] >>> 0);
+                }
+                return true;
             }
-        }
 
-        const rgba = new Uint8ClampedArray(pixelCount * 4);
-        for (let index = 0; index < pixelCount; index++) {
-            const argb = argbPixels[index];
-            const offset = index * 4;
-            rgba[offset] = (argb >>> 16) & 0xff;
-            rgba[offset + 1] = (argb >>> 8) & 0xff;
-            rgba[offset + 2] = argb & 0xff;
-            rgba[offset + 3] = (argb >>> 24) & 0xff;
+            for (let index = 0; index < frame.binary.length; index++) {
+                storage.decodeBytes[index] = frame.binary.charCodeAt(index);
+            }
+            for (let index = 0; index < frame.pixelCount; index++) {
+                this._writeArgb(
+                    storage.scratchRgba,
+                    index,
+                    storage.decodeView.getUint32(index * 4, true),
+                );
+            }
+            return true;
+        } catch (_) {
+            return false;
         }
+    }
 
-        return { zone: message.zone, width, height, rgba };
+    _writeArgb(rgba, index, argb) {
+        const offset = index * 4;
+        rgba[offset] = (argb >>> 16) & 0xff;
+        rgba[offset + 1] = (argb >>> 8) & 0xff;
+        rgba[offset + 2] = argb & 0xff;
+        rgba[offset + 3] = (argb >>> 24) & 0xff;
     }
 
     _renderExactFrame(zoneState, frame) {
