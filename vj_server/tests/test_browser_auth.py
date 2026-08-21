@@ -10,7 +10,7 @@ import msgspec.json as mjson
 import pytest
 from aiohttp import ClientSession, TCPConnector, WSMsgType
 from aiohttp.client_exceptions import WSServerHandshakeError
-from websockets.asyncio.client import connect as ws_connect
+from websockets import connect as ws_connect
 from websockets.exceptions import InvalidHandshake
 
 import vj_server.vj_server as vj_server_module
