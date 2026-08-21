@@ -32,7 +32,10 @@ test('presentation modes move the existing preview wrapper and pause only hidden
   const zoneSlot = {
     append(node) { node.parentElement = this; },
   };
-  const destinations = new Map([['live', liveSlot], ['zones', zoneSlot]]);
+  const visualsSlot = {
+    append(node) { node.parentElement = this; },
+  };
+  const destinations = new Map([['live', liveSlot], ['visuals', visualsSlot], ['zones', zoneSlot]]);
   let created = 0;
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
@@ -62,19 +65,60 @@ test('presentation modes move the existing preview wrapper and pause only hidden
     assert.equal(manager.started, 1);
 
     manager.setPresentationMode('visuals');
-    assert.equal(manager._presentationMode, 'hidden');
-    assert.equal(strip.parentElement, liveSlot, 'Task 5 may add the compact destination later');
-    assert.equal(manager.stopped, 1, 'a renderer hidden inside Live must not keep running');
+    assert.equal(manager._presentationMode, 'compact');
+    assert.equal(strip.parentElement, visualsSlot);
+    assert.equal(manager.started, 2);
 
     manager.setPresentationMode('zones');
     assert.equal(manager._presentationMode, 'compact');
     assert.equal(strip.parentElement, zoneSlot);
-    assert.equal(manager.started, 2);
+    assert.equal(manager.started, 3);
 
     manager.setPresentationMode('djs');
     assert.equal(manager._presentationMode, 'hidden');
-    assert.equal(manager.stopped, 2);
+    assert.equal(manager.stopped, 1);
     assert.equal(created, 0, 'presentation changes never clone or recreate the canvas');
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else delete globalThis.document;
+    if (originalRaf) Object.defineProperty(globalThis, 'requestAnimationFrame', originalRaf);
+    else delete globalThis.requestAnimationFrame;
+  }
+});
+
+test('presentation mode pauses when its destination panel is still hidden', () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const originalRaf = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  const strip = { parentElement: null };
+  const panel = { hidden: true };
+  const visualsSlot = {
+    append(node) { node.parentElement = this; },
+    closest(selector) { return selector === '[data-workspace-panel]' ? panel : null; },
+  };
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { querySelector() { return visualsSlot; } },
+  });
+  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+    configurable: true,
+    value() { throw new Error('hidden preview must not schedule a frame'); },
+  });
+
+  try {
+    const manager = Object.create(PreviewManager.prototype);
+    Object.assign(manager, {
+      elements: { previewStrip: strip },
+      _stripCollapsed: false,
+      startAnimation() { this.started = true; },
+      stopAnimation() { this.stopped = true; },
+      _onResize() {},
+    });
+
+    manager.setPresentationMode('visuals');
+
+    assert.equal(manager._presentationMode, 'hidden');
+    assert.equal(manager.started, undefined);
+    assert.equal(manager.stopped, true);
   } finally {
     if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
     else delete globalThis.document;
