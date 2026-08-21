@@ -458,6 +458,7 @@ export class ZoneManager {
 
     handleZonesList(data) {
         const zones = data.zones || [];
+        const nextZoneNames = new Set(zones.map(zone => zone.name));
 
         if (zones.length > 0 && !zones[0].stage) {
             const names = zones.map(z => z.name);
@@ -474,6 +475,14 @@ export class ZoneManager {
         }
 
         this.state.allZones = zones;
+        for (const zoneName of [...this.state.bitmap.initializedZones]) {
+            if (!nextZoneNames.has(zoneName)) {
+                this.state.bitmap.initializedZones.delete(zoneName);
+                delete this.state.bitmap.zones?.[zoneName];
+            }
+        }
+        this.state.bitmap.initialized = this.state.bitmap.initializedZones.size > 0;
+        this.app.preview?.reconcileBitmapZoneInventory(nextZoneNames);
 
         const zonePatterns = this.state.zonePatterns || {};
         const patterns = this.state.patterns || [];

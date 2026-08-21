@@ -179,3 +179,170 @@ test('routes exact frames without preventing particle updates in the preview loo
     [255, 0, 0, 255, 0, 255, 0, 255],
   );
 });
+
+test('hydrates state and an exact frame received before zone layout', async () => {
+  const { app, preview } = await createHarness([]);
+  app.router.handleMessage({
+    type: 'vj_state',
+    patterns: [],
+    zone_patterns: { main: { pattern: 'bmp_plasma', render_mode: 'bitmap' } },
+    bitmap_zones: { main: { initialized: true, width: 2, height: 1 } },
+  });
+  app.router.handleMessage({
+    type: 'bitmap_frame',
+    zone: 'main',
+    width: 2,
+    height: 1,
+    pixel_array: [0xffff0000, 0xff00ff00],
+  });
+
+  assert.equal(preview.bitmapPreview.isActive('main'), false);
+  const retainedStorage = preview.bitmapPreview.frameBuffers.main;
+
+  app.router.handleMessage({
+    type: 'zones',
+    zones: [{
+      name: 'main',
+      stage: 'show',
+      origin: { x: 0, y: 0, z: 0 },
+      size: { x: 8, y: 6, z: 1 },
+    }],
+  });
+  preview.bitmapPreview.update(0.016, { bands: [0, 0, 0, 0, 0] });
+
+  assert.equal(preview.bitmapPreview.isActive('main'), true);
+  assert.equal(preview.bitmapPreview.frameBuffers.main, retainedStorage);
+  assert.deepEqual(
+    [...preview.bitmapPreview.zones.main.ctx.lastImageData.data],
+    [255, 0, 0, 255, 0, 255, 0, 255],
+  );
+});
+
+test('preserves exact frame storage across a transient layout rebuild', async () => {
+  const { app, preview } = await createHarness([
+    { name: 'main', stage: 'show', origin: { x: 0, y: 0, z: 0 }, size: { x: 8, y: 6, z: 1 } },
+  ]);
+  app.router.handleMessage({
+    type: 'vj_state',
+    patterns: [],
+    zone_patterns: { main: { pattern: 'bmp_plasma', render_mode: 'bitmap' } },
+    bitmap_zones: { main: { initialized: true, width: 2, height: 1 } },
+  });
+  app.router.handleMessage({
+    type: 'bitmap_frame',
+    zone: 'main',
+    width: 2,
+    height: 1,
+    pixel_array: [0xff112233, 0xff445566],
+  });
+  const frame = preview.bitmapPreview.exactFrames.main;
+  const storage = preview.bitmapPreview.frameBuffers.main;
+
+  preview.rebuildZoneLayout();
+  preview.bitmapPreview.update(0.016, { bands: [0, 0, 0, 0, 0] });
+
+  assert.equal(preview.bitmapPreview.exactFrames.main, frame);
+  assert.equal(preview.bitmapPreview.frameBuffers.main, storage);
+  assert.deepEqual(
+    [...preview.bitmapPreview.zones.main.ctx.lastImageData.data],
+    [17, 34, 51, 255, 68, 85, 102, 255],
+  );
+});
+
+test('purges GPU and retained frame state when a zone leaves bitmap mode', async () => {
+  const { app, preview } = await createHarness([
+    { name: 'main', stage: 'show', origin: { x: 0, y: 0, z: 0 }, size: { x: 8, y: 6, z: 1 } },
+  ]);
+  app.router.handleMessage({
+    type: 'vj_state',
+    patterns: [],
+    zone_patterns: { main: { pattern: 'bmp_plasma', render_mode: 'bitmap' } },
+    bitmap_zones: { main: { initialized: true, width: 2, height: 1 } },
+  });
+  app.router.handleMessage({ type: 'bitmap_pattern_set', zone: 'main', pattern: 'bmp_waveform' });
+  app.router.handleMessage({
+    type: 'bitmap_frame',
+    zone: 'main',
+    width: 2,
+    height: 1,
+    pixel_array: [0xff112233, 0xff445566],
+  });
+  preview._pendingBitmapFrames = new Map([['main', { zone: 'main' }]]);
+  const plane = preview.bitmapPreview.zones.main;
+
+  app.state.zonePatterns = { main: { pattern: 'spectrum', render_mode: 'block' } };
+  app.zones.syncBitmapStateFromZonePatterns();
+
+  assert.equal(plane.mesh.geometry.disposed, true);
+  assert.equal(plane.mesh.material.disposed, true);
+  assert.equal(plane.texture.disposed, true);
+  assert.equal(preview.bitmapPreview.zones.main, undefined);
+  assert.equal(preview.bitmapPreview.exactFrames.main, undefined);
+  assert.equal(preview.bitmapPreview.frameBuffers.main, undefined);
+  assert.equal(preview.bitmapPreview.pendingPatterns.main, undefined);
+  assert.equal(preview._pendingBitmapFrames.has('main'), false);
+});
+
+test('purges retained frame state when an initialized zone disappears', async () => {
+  const { app, preview } = await createHarness([
+    { name: 'main', stage: 'show', origin: { x: 0, y: 0, z: 0 }, size: { x: 8, y: 6, z: 1 } },
+  ]);
+  app.router.handleMessage({
+    type: 'vj_state',
+    patterns: [],
+    zone_patterns: { main: { pattern: 'bmp_plasma', render_mode: 'bitmap' } },
+    bitmap_zones: { main: { initialized: true, width: 2, height: 1 } },
+  });
+  app.router.handleMessage({
+    type: 'bitmap_frame',
+    zone: 'main',
+    width: 2,
+    height: 1,
+    pixel_array: [0xff112233, 0xff445566],
+  });
+  preview._pendingBitmapFrames = new Map([['main', { zone: 'main' }]]);
+
+  app.router.handleMessage({ type: 'zones', zones: [] });
+
+  assert.equal(preview.bitmapPreview.exactFrames.main, undefined);
+  assert.equal(preview.bitmapPreview.frameBuffers.main, undefined);
+  assert.equal(preview._pendingBitmapFrames.has('main'), false);
+});
+
+test('purges a queued frame when bitmap mode exits before preview initialization', async () => {
+  const { app, preview } = await createHarness([
+    { name: 'main', stage: 'show', origin: { x: 0, y: 0, z: 0 }, size: { x: 8, y: 6, z: 1 } },
+  ]);
+  preview._bitmapPreview = null;
+  preview._initialized = false;
+  preview._pendingBitmapFrames = new Map([['main', { zone: 'main' }]]);
+  app.state.bitmap.initializedZones.add('main');
+  app.state.zonePatterns = { main: { pattern: 'spectrum', render_mode: 'block' } };
+
+  app.zones.syncBitmapStateFromZonePatterns();
+
+  assert.equal(preview._pendingBitmapFrames.has('main'), false);
+});
+
+test('purges a pre-layout exact frame after an authoritative empty zone inventory', async () => {
+  const { app, preview } = await createHarness([]);
+  app.router.handleMessage({
+    type: 'vj_state',
+    patterns: [],
+    zone_patterns: { main: { pattern: 'bmp_plasma', render_mode: 'bitmap' } },
+    bitmap_zones: { main: { initialized: true, width: 2, height: 1 } },
+  });
+  app.router.handleMessage({
+    type: 'bitmap_frame',
+    zone: 'main',
+    width: 2,
+    height: 1,
+    pixel_array: [0xff112233, 0xff445566],
+  });
+
+  app.router.handleMessage({ type: 'zones', zones: [] });
+
+  assert.equal(preview.bitmapPreview.exactFrames.main, undefined);
+  assert.equal(preview.bitmapPreview.frameBuffers.main, undefined);
+  assert.equal(app.state.bitmap.initializedZones.has('main'), false);
+});
