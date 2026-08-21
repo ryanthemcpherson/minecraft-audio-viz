@@ -703,6 +703,104 @@ async def test_run_repeated_cancellation_in_unified_cleanup_closes_gateway_once(
 
 
 @pytest.mark.asyncio
+async def test_run_first_cancellation_during_failed_cleanup_remains_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CountingListener:
+        def __init__(
+            self,
+            *,
+            wait_started: asyncio.Event | None = None,
+            release_wait: asyncio.Event | None = None,
+            wait_error: Exception | None = None,
+        ) -> None:
+            self.wait_started = wait_started
+            self.release_wait = release_wait
+            self.wait_error = wait_error
+            self.close_calls = 0
+            self.wait_closed_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_closed_calls += 1
+            if self.wait_started is not None:
+                self.wait_started.set()
+            if self.release_wait is not None:
+                await self.release_wait.wait()
+            if self.wait_error is not None:
+                raise self.wait_error
+
+    class CountingGatewayRunner:
+        def __init__(self) -> None:
+            self.cleanup_calls = 0
+
+        async def cleanup(self) -> None:
+            self.cleanup_calls += 1
+
+    import vj_server.metrics as metrics_module
+
+    metrics_wait_started = asyncio.Event()
+    release_metrics_wait = asyncio.Event()
+    dj_listener = CountingListener()
+    metrics_listener = CountingListener(
+        wait_started=metrics_wait_started,
+        release_wait=release_metrics_wait,
+        wait_error=RuntimeError("metrics wait failed"),
+    )
+    gateway_runner = CountingGatewayRunner()
+
+    async def fake_gateway(*_args, **_kwargs):
+        return gateway_runner
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        return dj_listener
+
+    async def fake_start_metrics_server(*_args, **_kwargs):
+        return metrics_listener
+
+    async def no_op() -> None:
+        return None
+
+    monkeypatch.setattr(vj_mod, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    monkeypatch.setattr(metrics_module, "start_metrics_server", fake_start_metrics_server)
+    server = _make_unified_server(monkeypatch, metrics_port=19001)
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+
+    run_task = asyncio.create_task(server.run())
+    try:
+        await asyncio.wait_for(metrics_wait_started.wait(), timeout=1.0)
+        assert run_task.done() is False
+
+        run_task.cancel()
+        await asyncio.sleep(0)
+        release_metrics_wait.set()
+
+        with pytest.raises(asyncio.CancelledError) as cancel_info:
+            await asyncio.wait_for(run_task, timeout=1.0)
+
+        cleanup_failure = cancel_info.value.__cause__
+        assert isinstance(cleanup_failure, ExceptionGroup)
+        assert [str(error) for error in cleanup_failure.exceptions] == ["metrics wait failed"]
+        for listener in (metrics_listener, dj_listener):
+            assert listener.close_calls == 1
+            assert listener.wait_closed_calls == 1
+        assert gateway_runner.cleanup_calls == 1
+    finally:
+        release_metrics_wait.set()
+        if not run_task.done():
+            run_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await run_task
+
+
+@pytest.mark.asyncio
 async def test_run_reports_cleanup_failure_after_closing_remaining_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

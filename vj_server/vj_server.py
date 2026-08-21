@@ -1239,8 +1239,11 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             raise ExceptionGroup("VJ server cleanup failed", cleanup_errors)
         logger.info("VJ server shutdown complete")
 
-    async def _await_run_cleanup(self, cleanup_task: asyncio.Task) -> bool:
-        """Wait for full cleanup despite repeated cancellation of the run task."""
+    async def _await_run_cleanup(
+        self,
+        cleanup_task: asyncio.Task,
+    ) -> tuple[bool, BaseException | None]:
+        """Wait for full cleanup and retain cancellation and failure independently."""
         cancellation_requested = False
         while not cleanup_task.done():
             try:
@@ -1250,8 +1253,12 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             except Exception:
                 break
 
-        cleanup_task.result()
-        return cancellation_requested
+        cleanup_failure = None
+        try:
+            cleanup_task.result()
+        except BaseException as exc:
+            cleanup_failure = exc
+        return cancellation_requested, cleanup_failure
 
     async def run(self):
         """Start the VJ server."""
@@ -1380,7 +1387,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             cleanup_failure = None
             cancellation_during_cleanup = False
             try:
-                cancellation_during_cleanup = await self._await_run_cleanup(cleanup_task)
+                cancellation_during_cleanup, cleanup_failure = await self._await_run_cleanup(
+                    cleanup_task
+                )
             except asyncio.CancelledError as exc:
                 cancellation_during_cleanup = True
                 if run_cancellation is None:
