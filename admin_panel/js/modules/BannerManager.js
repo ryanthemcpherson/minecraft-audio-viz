@@ -8,9 +8,13 @@ export class BannerManager {
         this.state = app.state;
         this.ws = app.ws;
         this.elements = app.elements;
+        this._listenersRegistered = false;
     }
 
     setupBannerListeners() {
+        if (this._listenersRegistered) return;
+        this._listenersRegistered = true;
+
         // Banner mode toggle
         const modeButtons = document.querySelectorAll('[data-banner-mode]');
         modeButtons.forEach(btn => {
