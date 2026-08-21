@@ -168,6 +168,15 @@ jobs:
             --plugin-jar "${PLUGIN_JARS[0]}" \
             --output-dir dist
 
+      - name: Cross-check Pterodactyl bundle with PowerShell verifier
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath dist -Filter 'mcav-pterodactyl-*.zip')
+          if ($archives.Count -ne 1) {
+            throw "Expected exactly one Pterodactyl archive, found $($archives.Count)."
+          }
+          ./deploy/pterodactyl/verify-release.ps1 -Archive $archives[0].FullName
+
       - name: Upload Pterodactyl bundle
         uses: actions/upload-artifact@v7
         with:

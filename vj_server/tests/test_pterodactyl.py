@@ -1256,3 +1256,22 @@ def test_bootstrap_cli_rejects_public_listener_port_collision(
     assert vj_server() == 2
     assert "HTTP and DJ listener ports must differ" in capsys.readouterr().out
     assert not bootstrap_paths.tls_cert.exists()
+
+
+def test_pterodactyl_operator_guide_exposes_only_the_two_tls_ports() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    deployment = (repository_root / "docs/deployment/PTERODACTYL.md").read_text(encoding="utf-8")
+    allocation_section = deployment.split("## Allocations", 1)[1].split("##", 1)[0]
+
+    assert re.findall(r"(?m)^- `(\d+)`", allocation_section) == ["8080", "25808"]
+    assert "/ws" in allocation_section
+    assert "8766" not in allocation_section
+    assert "9000" not in allocation_section
+    assert "MCAV_PUBLIC_HOST=<public-ip>" in deployment
+    assert "state/tls.crt" in deployment
+    assert "TLS_SHA256_FINGERPRINT" in deployment
+    assert "Get-FileHash" not in deployment
+    assert "ComputeHash($der)" in deployment
+    assert "--rotate-tls-identity" in deployment
+    assert "trust-on-first-use" in deployment.casefold()
+    assert "ws://" not in deployment.casefold()

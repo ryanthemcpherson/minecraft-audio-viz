@@ -30,8 +30,12 @@ try {
         'mcav-vj/bin/linux-arm64/python/bin/python3.12',
         'mcav-vj/release/AudioViz.jar',
         'mcav-vj/release/plugin-config.default.yml',
+        'mcav-vj/release/runtime-lock.json',
         'mcav-vj/admin_panel/index.html',
+        'mcav-vj/admin_panel/runtime-config.js',
         'mcav-vj/preview_tool/frontend/index.html',
+        'mcav-vj/preview_tool/frontend/runtime-config.js',
+        'mcav-vj/vj_server/web_gateway.py',
         'mcav-vj/MANIFEST.sha256'
     )
     foreach ($requiredEntry in $required) {

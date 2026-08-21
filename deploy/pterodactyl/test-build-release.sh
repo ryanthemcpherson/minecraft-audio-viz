@@ -58,16 +58,25 @@ test -f "$CHECKSUM"
   sha256sum --check "$(basename "$CHECKSUM")"
 )
 
-python3 - "$ARCHIVE" "$VERSION" <<'PY'
+python3 - "$ARCHIVE" "$VERSION" "$REPO_ROOT" <<'PY'
 import hashlib
+import json
+import re
 import sys
 import zipfile
+from pathlib import Path
 
-archive, version = sys.argv[1:]
+archive, version, repository_root_text = sys.argv[1:]
+repository_root = Path(repository_root_text)
 required = {
     "mcav-vj/start-mcav.sh",
     "mcav-vj/VERSION",
+    "mcav-vj/mcav.env.example",
     "mcav-vj/release/AudioViz.jar",
+    "mcav-vj/release/runtime-lock.json",
+    "mcav-vj/admin_panel/runtime-config.js",
+    "mcav-vj/preview_tool/frontend/runtime-config.js",
+    "mcav-vj/vj_server/web_gateway.py",
     "mcav-vj/bin/linux-amd64/audioviz-vj",
     "mcav-vj/bin/linux-amd64/python/bin/python3.12",
     "mcav-vj/bin/linux-arm64/audioviz-vj",
@@ -82,6 +91,32 @@ executables = {
     "mcav-vj/bin/linux-arm64/python/bin/python3.12",
 }
 
+runtime_lock = json.loads(
+    (repository_root / "deploy/pterodactyl/runtime-lock.json").read_text(encoding="utf-8")
+)
+locked_dependencies = {
+    name.casefold(): version
+    for dependency in runtime_lock["dependencies"]
+    for name, version in [dependency.split("==", 1)]
+}
+expected_aiohttp_closure = {
+    "aiohttp": "3.14.3",
+    "aiohappyeyeballs": "2.7.1",
+    "aiosignal": "1.4.0",
+    "attrs": "26.1.0",
+    "frozenlist": "1.8.0",
+    "idna": "3.19",
+    "multidict": "6.7.1",
+    "propcache": "0.5.2",
+    "typing-extensions": "4.16.0",
+    "yarl": "1.24.5",
+}
+assert expected_aiohttp_closure.items() <= locked_dependencies.items(), {
+    name: (version, locked_dependencies.get(name))
+    for name, version in expected_aiohttp_closure.items()
+    if locked_dependencies.get(name) != version
+}
+
 with zipfile.ZipFile(archive) as release_zip:
     infos = {entry.filename: entry for entry in release_zip.infolist() if not entry.is_dir()}
     assert required <= infos.keys(), required - infos.keys()
@@ -89,6 +124,11 @@ with zipfile.ZipFile(archive) as release_zip:
     assert all(name.startswith("mcav-vj/") for name in infos)
     assert release_zip.read("mcav-vj/VERSION").decode() == version
     assert release_zip.read("mcav-vj/release/AudioViz.jar") == b"fixture-plugin"
+    assert json.loads(release_zip.read("mcav-vj/release/runtime-lock.json")) == runtime_lock
+    environment = release_zip.read("mcav-vj/mcav.env.example").decode("utf-8")
+    assert "HTTP_PORT=8080" in environment
+    assert "VJ_SERVER_PORT=25808" in environment
+    assert "UNIFIED_WEB=true" in environment
     for name in executables:
         assert ((infos[name].external_attr >> 16) & 0o111) != 0, name
 
@@ -105,6 +145,21 @@ with zipfile.ZipFile(archive) as release_zip:
     for relative_name, expected_digest in manifest.items():
         payload = release_zip.read(f"mcav-vj/{relative_name}")
         assert hashlib.sha256(payload).hexdigest() == expected_digest, relative_name
+
+deployment = (repository_root / "docs/deployment/PTERODACTYL.md").read_text(encoding="utf-8")
+allocation_section = deployment.split("## Allocations", 1)[1].split("##", 1)[0]
+assert re.findall(r"(?m)^- `(\d+)`", allocation_section) == ["8080", "25808"]
+assert "/ws" in allocation_section
+assert "8766" not in allocation_section
+assert "9000" not in allocation_section
+assert "MCAV_PUBLIC_HOST=<public-ip>" in deployment
+assert "state/tls.crt" in deployment
+assert "TLS_SHA256_FINGERPRINT" in deployment
+assert "Get-FileHash" not in deployment
+assert "ComputeHash($der)" in deployment
+assert "--rotate-tls-identity" in deployment
+assert "trust-on-first-use" in deployment.casefold()
+assert "ws://" not in deployment.casefold()
 PY
 
 MISSING_SERVER_ARCHIVE="$OUTPUT_DIR/missing-vj-server.zip"
