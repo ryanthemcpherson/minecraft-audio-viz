@@ -18,6 +18,47 @@ import {
   DEFAULT_AUDIO_DATA,
 } from '../types';
 
+function normalizeTlsFingerprint(value: string): string {
+  return value.replace(/[:\s]/g, '').toUpperCase();
+}
+
+function formatConnectionError(error: unknown): string {
+  const errorText = String(error);
+  const normalizedError = errorText.toLowerCase();
+
+  if (normalizedError.includes('invalid tls certificate fingerprint')) {
+    return 'The server fingerprint must contain exactly 64 hexadecimal characters.';
+  }
+  if (normalizedError.includes('tls peer did not provide a certificate')) {
+    return 'The server did not provide a TLS certificate. Check the address and ask your VJ operator to verify TLS.';
+  }
+  if (normalizedError.includes('tls certificate fingerprint mismatch')) {
+    return 'The server certificate does not match the saved fingerprint. Stop and ask your VJ operator to verify the certificate.';
+  }
+  if (normalizedError.includes('tls certificate is not valid for the requested server host')) {
+    return 'The server certificate is for a different host. Use the hostname or IP address listed in the certificate.';
+  }
+  if (normalizedError.includes('tls handshake failed') || normalizedError.includes('certificate')) {
+    return 'Secure connection failed. Check the server address and certificate configuration.';
+  }
+  if (
+    normalizedError.includes('timeout') ||
+    normalizedError.includes('timed out') ||
+    normalizedError.includes('connection refused')
+  ) {
+    return "Can't reach server. Check that the VJ server is running.";
+  }
+  if (
+    normalizedError.includes('auth') ||
+    normalizedError.includes('invalid') ||
+    normalizedError.includes('unauthorized')
+  ) {
+    return 'Authentication failed. Ask your VJ operator for a new code.';
+  }
+
+  return errorText;
+}
+
 export interface UseConnectionReturn {
   // Connection state
   djName: string;
@@ -31,6 +72,9 @@ export interface UseConnectionReturn {
   setServerHost: (host: string) => void;
   serverPort: number;
   setServerPort: (port: number) => void;
+  tlsFingerprint: string;
+  setTlsFingerprint: (fingerprint: string) => void;
+  isTlsFingerprintValid: boolean;
   status: ConnectionStatus;
   isConnecting: boolean;
 
@@ -74,6 +118,15 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   const [serverPort, setServerPort] = useState(
     () => parseInt(localStorage.getItem('mcav.serverPort') || '9000', 10),
   );
+  const [tlsFingerprint, setTlsFingerprintState] = useState(() =>
+    normalizeTlsFingerprint(localStorage.getItem('mcav.tlsFingerprint') ?? ''),
+  );
+  const normalizedTlsFingerprint = normalizeTlsFingerprint(tlsFingerprint);
+  const isTlsFingerprintValid =
+    normalizedTlsFingerprint.length === 0 || /^[0-9A-F]{64}$/.test(normalizedTlsFingerprint);
+  const setTlsFingerprint = (fingerprint: string) => {
+    setTlsFingerprintState(normalizeTlsFingerprint(fingerprint));
+  };
 
   // Audio state
   const audioRef = useRef<AudioData>(DEFAULT_AUDIO_DATA);
@@ -128,6 +181,9 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   useEffect(() => {
     localStorage.setItem('mcav.serverPort', String(serverPort));
   }, [serverPort]);
+  useEffect(() => {
+    localStorage.setItem('mcav.tlsFingerprint', normalizedTlsFingerprint);
+  }, [normalizedTlsFingerprint]);
 
   // Persist preset selection
   useEffect(() => {
@@ -205,7 +261,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     handleStopTest: () => Promise<void>,
   ) => {
     const code = connectCode;
-    if (code.length !== 8 || !djName.trim()) {
+    if ((!directConnect && code.length !== 8) || !djName.trim() || !isTlsFingerprintValid) {
       return;
     }
 
@@ -217,37 +273,34 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
         await handleStopTest();
       }
 
-      // Format code as XXXX-XXXX
-      const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
-
-      let connHost: string;
-      let connPort: number;
-      let djSessionId: string | null = null;
-
       if (directConnect) {
-        connHost = serverHost;
-        connPort = serverPort;
+        await invoke('connect_direct', {
+          djName: djName.trim(),
+          serverHost,
+          serverPort,
+          tlsFingerprint: normalizedTlsFingerprint || null,
+        });
       } else {
+        // Format code as XXXX-XXXX
+        const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
         const idempotencyKey =
           typeof crypto !== 'undefined' && crypto.randomUUID
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const resolved = await api.resolveConnectCode(formattedCode, idempotencyKey);
         const wsUrl = new URL(resolved.websocket_url);
-        connHost = wsUrl.hostname;
-        connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
+        const connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
         setShowName(resolved.show_name);
-        djSessionId = resolved.dj_session_id ?? null;
+        await invoke('connect_with_code', {
+          code: formattedCode,
+          djName: djName.trim(),
+          serverHost: wsUrl.hostname,
+          serverPort: connPort,
+          tlsFingerprint: normalizedTlsFingerprint || null,
+          blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
+          djSessionId: resolved.dj_session_id ?? null,
+        });
       }
-
-      await invoke('connect_with_code', {
-        code: formattedCode,
-        djName: djName.trim(),
-        serverHost: connHost,
-        serverPort: connPort,
-        blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
-        djSessionId,
-      });
 
       // Start audio capture
       if (selectedSource) {
@@ -256,8 +309,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
 
       setStatus((prev) => ({ ...prev, connected: true }));
     } catch (e) {
-      const errStr = String(e);
-      let errorMessage = errStr;
+      let errorMessage: string;
 
       if (e instanceof api.ApiError) {
         if (e.status === 404) {
@@ -269,18 +321,8 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
         } else {
           errorMessage = e.message;
         }
-      } else if (
-        errStr.includes('timeout') ||
-        errStr.includes('timed out') ||
-        errStr.includes('connection refused')
-      ) {
-        errorMessage = "Can't reach server. Check that the VJ server is running.";
-      } else if (
-        errStr.includes('auth') ||
-        errStr.includes('invalid') ||
-        errStr.includes('unauthorized')
-      ) {
-        errorMessage = 'Authentication failed. Ask your VJ operator for a new code.';
+      } else {
+        errorMessage = formatConnectionError(e);
       }
 
       setStatus((prev) => ({ ...prev, error: errorMessage }));
@@ -336,6 +378,9 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     setServerHost,
     serverPort,
     setServerPort,
+    tlsFingerprint,
+    setTlsFingerprint,
+    isTlsFingerprintValid,
     status,
     isConnecting,
     audioRef,
