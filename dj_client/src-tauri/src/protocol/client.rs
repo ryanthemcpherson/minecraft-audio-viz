@@ -209,6 +209,11 @@ impl DjClient {
         self.mc_connected.store(val, Ordering::Relaxed);
     }
 
+    #[cfg(test)]
+    pub(crate) fn configured_server_host(&self) -> &str {
+        &self.config.server_host
+    }
+
     /// Connect to the VJ server
     pub async fn connect(&mut self) -> Result<(), ClientError> {
         if self.state.lock().connected {
@@ -223,10 +228,8 @@ impl DjClient {
         } else {
             "wss"
         };
-        let url = format!(
-            "{}://{}:{}",
-            scheme, self.config.server_host, self.config.server_port
-        );
+        let url =
+            crate::format_websocket_url(scheme, &self.config.server_host, self.config.server_port);
 
         log::info!("Connecting to VJ server at {}", url);
 

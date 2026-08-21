@@ -3,6 +3,7 @@ use native_tls::TlsConnector;
 use rustls_pki_types::{CertificateDer as PkiCertificateDer, ServerName};
 use sha2::{Digest, Sha256};
 use std::net::Ipv6Addr;
+use subtle::ConstantTimeEq;
 use tokio::net::TcpStream;
 use tokio_native_tls::TlsConnector as TokioTlsConnector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -100,7 +101,7 @@ pub async fn connect_verified(
         .map_err(|error| ClientError::TlsHandshake(error.to_string()))?;
     verify_certificate_host(&certificate_der, tls_host)?;
     let observed_bytes: [u8; 32] = Sha256::digest(&certificate_der).into();
-    if observed_bytes != expected_bytes {
+    if !fingerprints_match(&expected_bytes, &observed_bytes) {
         return Err(ClientError::TlsFingerprintMismatch {
             expected: format_fingerprint(&expected_bytes),
             observed: format_fingerprint(&observed_bytes),
@@ -112,6 +113,10 @@ pub async fn connect_verified(
         .await
         .map_err(map_websocket_connection_error)?;
     Ok(websocket)
+}
+
+fn fingerprints_match(expected: &[u8; 32], observed: &[u8; 32]) -> bool {
+    bool::from(expected.ct_eq(observed))
 }
 
 fn map_websocket_connection_error(error: tokio_tungstenite::tungstenite::Error) -> ClientError {
@@ -154,9 +159,10 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::task::{Context, Poll};
+    use std::time::Duration;
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio::net::TcpListener;
-    use tokio::sync::{Mutex, oneshot};
+    use tokio::sync::{Mutex, mpsc, oneshot, watch};
     use tokio::task::JoinHandle;
     use tokio_rustls::TlsAcceptor;
     use tokio_rustls::rustls::ServerConfig;
@@ -172,6 +178,8 @@ mod tests {
         received_application_bytes: Arc<StdMutex<Vec<u8>>>,
         shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
         server_task: Mutex<Option<JoinHandle<()>>>,
+        read_ready_rx: watch::Receiver<bool>,
+        read_complete_rx: watch::Receiver<bool>,
     }
 
     impl ApplicationFrameRecorder {
@@ -180,12 +188,16 @@ mod tests {
             received_application_bytes: Arc<StdMutex<Vec<u8>>>,
             shutdown_tx: oneshot::Sender<()>,
             server_task: JoinHandle<()>,
+            read_ready_rx: watch::Receiver<bool>,
+            read_complete_rx: watch::Receiver<bool>,
         ) -> Self {
             Self {
                 received,
                 received_application_bytes,
                 shutdown_tx: Mutex::new(Some(shutdown_tx)),
                 server_task: Mutex::new(Some(server_task)),
+                read_ready_rx,
+                read_complete_rx,
             }
         }
 
@@ -203,14 +215,55 @@ mod tests {
         }
 
         async fn stop(&self) {
+            let read_ready =
+                Self::wait_for_signal(self.read_ready_rx.clone(), Duration::from_secs(1)).await;
+            if read_ready {
+                assert!(
+                    Self::wait_for_signal(self.read_complete_rx.clone(), Duration::from_secs(1),)
+                        .await,
+                    "test server must finish reading the HTTP upgrade or post-TLS EOF"
+                );
+            }
+
             if let Some(shutdown_tx) = self.shutdown_tx.lock().await.take() {
                 let _ = shutdown_tx.send(());
             }
-            if let Some(server_task) = self.server_task.lock().await.take() {
-                server_task
-                    .await
-                    .expect("test WebSocket server task should not panic");
+            if let Some(mut server_task) = self.server_task.lock().await.take() {
+                match tokio::time::timeout(Duration::from_secs(1), &mut server_task).await {
+                    Ok(join_result) => {
+                        join_result.expect("test WebSocket server task should not panic")
+                    }
+                    Err(_) => {
+                        server_task.abort();
+                        let join_error = server_task
+                            .await
+                            .expect_err("aborted test WebSocket server task should be cancelled");
+                        assert!(join_error.is_cancelled());
+                    }
+                }
             }
+        }
+
+        async fn wait_for_read_ready(&self) -> bool {
+            Self::wait_for_signal(self.read_ready_rx.clone(), Duration::from_secs(1)).await
+        }
+
+        async fn wait_for_signal(
+            mut signal_rx: watch::Receiver<bool>,
+            timeout_duration: Duration,
+        ) -> bool {
+            tokio::time::timeout(timeout_duration, async move {
+                loop {
+                    if *signal_rx.borrow() {
+                        return true;
+                    }
+                    if signal_rx.changed().await.is_err() {
+                        return false;
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
         }
     }
 
@@ -282,6 +335,8 @@ mod tests {
         port: u16,
         fingerprint: String,
         recorder: ApplicationFrameRecorder,
+        tcp_accepted_rx: Mutex<Option<oneshot::Receiver<()>>>,
+        release_tls_tx: Mutex<Option<oneshot::Sender<()>>>,
     }
 
     impl TlsWebSocketFixture {
@@ -297,6 +352,19 @@ mod tests {
             url_host: &str,
             subject_alt_name: &str,
             common_name: Option<&str>,
+        ) -> Self {
+            Self::start_configured(url_host, subject_alt_name, common_name, false).await
+        }
+
+        async fn start_with_delayed_tls() -> Self {
+            Self::start_configured("127.0.0.1", "127.0.0.1", None, true).await
+        }
+
+        async fn start_configured(
+            url_host: &str,
+            subject_alt_name: &str,
+            common_name: Option<&str>,
+            delay_tls_handshake: bool,
         ) -> Self {
             let key_pair = KeyPair::generate().expect("test key should generate");
             let mut certificate_params = CertificateParams::new(vec![subject_alt_name.to_string()])
@@ -334,6 +402,15 @@ mod tests {
             let received_application_bytes = Arc::new(StdMutex::new(Vec::new()));
             let received_application_bytes_by_server = Arc::clone(&received_application_bytes);
             let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+            let (tcp_accepted_tx, tcp_accepted_rx) = oneshot::channel();
+            let (release_tls_tx, mut release_tls_rx) = oneshot::channel();
+            let release_tls_tx = if delay_tls_handshake {
+                Some(release_tls_tx)
+            } else {
+                None
+            };
+            let (read_ready_tx, read_ready_rx) = watch::channel(false);
+            let (read_complete_tx, read_complete_rx) = watch::channel(false);
 
             let server_task = tokio::spawn(async move {
                 let accepted = tokio::select! {
@@ -343,6 +420,13 @@ mod tests {
                 let Ok((tcp_stream, _)) = accepted else {
                     return;
                 };
+                let _ = tcp_accepted_tx.send(());
+                if delay_tls_handshake {
+                    tokio::select! {
+                        _ = &mut release_tls_rx => {}
+                        _ = &mut shutdown_rx => return,
+                    }
+                }
                 let tls_stream = tokio::select! {
                     tls_stream = tls_acceptor.accept(tcp_stream) => tls_stream,
                     _ = &mut shutdown_rx => return,
@@ -350,12 +434,11 @@ mod tests {
                 let Ok(tls_stream) = tls_stream else {
                     return;
                 };
+                let _ = read_ready_tx.send(true);
                 let recording_stream =
                     RecordingStream::new(tls_stream, received_application_bytes_by_server);
-                let websocket = tokio::select! {
-                    websocket = accept_async(recording_stream) => websocket,
-                    _ = &mut shutdown_rx => return,
-                };
+                let websocket = accept_async(recording_stream).await;
+                let _ = read_complete_tx.send(true);
                 let Ok(mut websocket) = websocket else {
                     return;
                 };
@@ -388,7 +471,11 @@ mod tests {
                     received_application_bytes,
                     shutdown_tx,
                     server_task,
+                    read_ready_rx,
+                    read_complete_rx,
                 ),
+                tcp_accepted_rx: Mutex::new(Some(tcp_accepted_rx)),
+                release_tls_tx: Mutex::new(release_tls_tx),
             }
         }
 
@@ -407,6 +494,32 @@ mod tests {
 
         async fn received_application_bytes(&self) -> Vec<u8> {
             self.recorder.stop_and_read_application_bytes().await
+        }
+
+        async fn wait_for_post_tls_ready(&self) {
+            assert!(
+                self.recorder.wait_for_read_ready().await,
+                "test server should complete TLS before the client rejects the certificate"
+            );
+        }
+
+        async fn wait_for_tcp_accept(&self) {
+            let tcp_accepted_rx = self
+                .tcp_accepted_rx
+                .lock()
+                .await
+                .take()
+                .expect("TCP accept barrier should only be awaited once");
+            tokio::time::timeout(Duration::from_secs(1), tcp_accepted_rx)
+                .await
+                .expect("test server should accept the delayed connection")
+                .expect("test server should signal the delayed connection");
+        }
+
+        async fn release_tls_handshake(&self) {
+            if let Some(release_tls_tx) = self.release_tls_tx.lock().await.take() {
+                let _ = release_tls_tx.send(());
+            }
         }
     }
 
@@ -429,6 +542,8 @@ mod tests {
             let received_application_bytes = Arc::new(StdMutex::new(Vec::new()));
             let received_application_bytes_by_server = Arc::clone(&received_application_bytes);
             let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+            let (read_ready_tx, read_ready_rx) = watch::channel(false);
+            let (read_complete_tx, read_complete_rx) = watch::channel(false);
 
             let server_task = tokio::spawn(async move {
                 let accepted = tokio::select! {
@@ -438,12 +553,11 @@ mod tests {
                 let Ok((tcp_stream, _)) = accepted else {
                     return;
                 };
+                let _ = read_ready_tx.send(true);
                 let recording_stream =
                     RecordingStream::new(tcp_stream, received_application_bytes_by_server);
-                let websocket = tokio::select! {
-                    websocket = accept_async(recording_stream) => websocket,
-                    _ = &mut shutdown_rx => return,
-                };
+                let websocket = accept_async(recording_stream).await;
+                let _ = read_complete_tx.send(true);
                 let Ok(mut websocket) = websocket else {
                     return;
                 };
@@ -474,6 +588,8 @@ mod tests {
                     received_application_bytes,
                     shutdown_tx,
                     server_task,
+                    read_ready_rx,
+                    read_complete_rx,
                 ),
             }
         }
@@ -489,6 +605,18 @@ mod tests {
 
     fn format_fingerprint(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn assert_websocket_upgrade_observed(application_bytes: &[u8]) {
+        let request = String::from_utf8_lossy(application_bytes).to_ascii_lowercase();
+        assert!(
+            request.starts_with("get "),
+            "HTTP Upgrade request was not read"
+        );
+        assert!(
+            request.contains("\r\nupgrade: websocket\r\n"),
+            "WebSocket Upgrade header was not read"
+        );
     }
 
     #[test]
@@ -550,6 +678,21 @@ mod tests {
         assert!(matches!(result, Err(ClientError::InvalidTlsFingerprint)));
     }
 
+    #[test]
+    fn fingerprint_comparison_accepts_equal_digests_and_rejects_any_difference() {
+        let expected = [0x5a; 32];
+        assert!(fingerprints_match(&expected, &expected));
+
+        for index in [0, 15, 31] {
+            let mut observed = expected;
+            observed[index] ^= 0xff;
+            assert!(
+                !fingerprints_match(&expected, &observed),
+                "digest mismatch at byte {index} must be rejected"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn matching_fingerprint_connects_to_self_signed_ip_certificate() {
         let fixture = TlsWebSocketFixture::start().await;
@@ -566,6 +709,8 @@ mod tests {
             .close(None)
             .await
             .expect("test WebSocket should close");
+        let application_bytes = fixture.received_application_bytes().await;
+        assert_websocket_upgrade_observed(&application_bytes);
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -604,6 +749,101 @@ mod tests {
             result,
             Err(ClientError::TlsFingerprintMismatch { .. })
         ));
+        fixture.wait_for_post_tls_ready().await;
+        assert!(fixture.received_application_bytes().await.is_empty());
+        assert!(fixture.received_messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn replacement_cancels_delayed_pinned_attempt_before_upgrade_or_authentication() {
+        let fixture = TlsWebSocketFixture::start_with_delayed_tls().await;
+        let state = Arc::new(parking_lot::Mutex::new(crate::state::AppState::default()));
+        let old_config = DjClientConfig {
+            server_host: "127.0.0.1".to_string(),
+            server_port: fixture.port,
+            dj_name: "Old DJ".to_string(),
+            connect_code: Some("old-secret-code".to_string()),
+            tls_fingerprint: Some(fixture.fingerprint.clone()),
+            ..Default::default()
+        };
+        let old_attempt =
+            crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()));
+        let old_generation = old_attempt.generation;
+        let old_task = tokio::spawn(crate::connect_client_until_cancelled(
+            DjClient::new(old_config.clone()),
+            None,
+            old_attempt.cancellation_rx,
+        ));
+
+        fixture.wait_for_tcp_accept().await;
+
+        let replacement_config = DjClientConfig {
+            server_host: "new.example".to_string(),
+            server_port: 9443,
+            dj_name: "Replacement DJ".to_string(),
+            connect_code: Some("replacement-code".to_string()),
+            tls_fingerprint: Some("ab".repeat(32)),
+            ..Default::default()
+        };
+        let replacement_attempt = crate::prepare_connection_replacement(
+            &state,
+            &replacement_config,
+            Some("replacement-code".into()),
+        );
+        replacement_attempt
+            .previous_cancellation_tx
+            .expect("replacement should cancel the old connection attempt")
+            .send(())
+            .expect("old attempt should still be awaiting TLS");
+
+        let replacement_generation = replacement_attempt.generation;
+        let (replacement_shutdown_tx, _replacement_shutdown_rx) = mpsc::channel(1);
+        let replacement_publish = crate::publish_connected_client_if_current(
+            &state,
+            replacement_generation,
+            DjClient::new(replacement_config.clone()),
+            replacement_shutdown_tx,
+        );
+        assert!(
+            replacement_publish.is_none(),
+            "current replacement should publish"
+        );
+
+        fixture.release_tls_handshake().await;
+        let old_result = tokio::time::timeout(Duration::from_secs(1), old_task)
+            .await
+            .expect("cancelled old attempt must terminate")
+            .expect("old attempt task must be awaited");
+        let old_error = match old_result {
+            Err(error) => error,
+            Ok(_) => panic!("old attempt must be superseded"),
+        };
+        assert!(old_error.contains("superseded"));
+
+        let (stale_shutdown_tx, _stale_shutdown_rx) = mpsc::channel(1);
+        assert!(
+            crate::publish_connected_client_if_current(
+                &state,
+                old_generation,
+                DjClient::new(old_config),
+                stale_shutdown_tx,
+            )
+            .is_some(),
+            "stale generation must not overwrite the replacement client"
+        );
+        {
+            let app_state = state.lock();
+            assert_eq!(app_state.server_host, "new.example");
+            assert_eq!(app_state.server_port, 9443);
+            assert_eq!(
+                app_state
+                    .client
+                    .as_ref()
+                    .expect("replacement client should remain installed")
+                    .configured_server_host(),
+                "new.example"
+            );
+        }
         assert!(fixture.received_application_bytes().await.is_empty());
         assert!(fixture.received_messages().await.is_empty());
     }
