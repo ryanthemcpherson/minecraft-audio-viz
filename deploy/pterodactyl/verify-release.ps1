@@ -41,6 +41,7 @@ try {
     $forbidden = @($names | Where-Object {
         $_ -match '(^|/)(node_modules|\.git|\.venv|__pycache__|tests?)(/|$)' -or
         $_ -match '\.(pyc|pyo)$' -or
+        $_ -match '(^|/)[^/]+\.(test|spec)\.[^/]+$' -or
         $_ -eq 'mcav-vj/state/dj_auth.json' -or
         $_ -eq 'mcav-vj/state/runtime.env' -or
         $_ -eq 'mcav-vj/state/tls.key' -or

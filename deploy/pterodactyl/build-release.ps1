@@ -77,8 +77,10 @@ $wslRepoRoot = (& wsl wslpath -a ($repoRoot -replace '\\', '/')).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Portable runtime build failed.' }
 }
 
+$developmentAssetPattern = '(^|/)(node_modules|\.git|\.venv|__pycache__|\.pytest_cache|tests?)(/|$)|(^|/)\.coverage($|/)|\.(pyc|pyo)$|(^|/)[^/]+\.(test|spec)\.[^/]+$'
 Get-ChildItem -LiteralPath $mcavRoot -Recurse -File | Where-Object {
-    $_.FullName -match '(__pycache__|\.pytest_cache|\.coverage)' -or $_.Extension -in @('.pyc', '.pyo')
+    $relativePath = $_.FullName.Substring($mcavRoot.Length + 1).Replace('\', '/')
+    $relativePath -match $developmentAssetPattern
 } | Remove-Item -Force
 
 $manifestPath = Join-Path $mcavRoot 'MANIFEST.sha256'
@@ -117,6 +119,6 @@ try {
 $archiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText($checksum, "$archiveHash  $([IO.Path]::GetFileName($archive))`n", [Text.UTF8Encoding]::new($false))
 & (Join-Path $PSScriptRoot 'verify-release.ps1') -Archive $archive
-if ($LASTEXITCODE -ne 0) { throw 'Release verification failed.' }
+if (-not $?) { throw 'Release verification failed.' }
 Write-Host "Release: $archive"
 Write-Host "SHA-256: $archiveHash"
