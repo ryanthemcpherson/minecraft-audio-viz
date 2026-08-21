@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from aiohttp import WSMessage, WSMsgType
+from aiohttp import WSCloseCode, WSMessage, WSMsgType
 from aiohttp.client_exceptions import WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
 from yarl import URL
@@ -278,6 +278,31 @@ async def test_browser_websocket_adapts_text_binary_and_remote_address(
         echoed_binary = await socket.receive()
         assert echoed_binary.type is WSMsgType.BINARY
         assert echoed_binary.data == b"binary frame"
+    finally:
+        await socket.close()
+
+
+async def test_browser_websocket_rejects_wrong_path(gateway_client: TestClient) -> None:
+    with pytest.raises(WSServerHandshakeError) as error:
+        await gateway_client.ws_connect(
+            "/ws/",
+            headers={"Origin": PUBLIC_ORIGIN},
+        )
+
+    assert error.value.status == 404
+
+
+async def test_browser_websocket_closes_oversized_messages(
+    gateway_client: TestClient,
+) -> None:
+    socket = await gateway_client.ws_connect("/ws", headers={"Origin": PUBLIC_ORIGIN})
+    try:
+        await socket.receive()
+        await socket.send_bytes(b"x" * 65_537)
+        message = await socket.receive(timeout=1.0)
+
+        assert message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED}
+        assert socket.close_code == WSCloseCode.MESSAGE_TOO_BIG
     finally:
         await socket.close()
 

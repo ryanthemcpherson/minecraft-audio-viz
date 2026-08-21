@@ -113,6 +113,15 @@ Examples:
         help="HTTPS/HTTP port for admin panel (default: 8080 or $HTTP_PORT)",
     )
     parser.add_argument(
+        "--unified-web",
+        action="store_true",
+        help="Serve admin, preview, and browser WebSocket traffic on the HTTPS port",
+    )
+    parser.add_argument(
+        "--public-origin",
+        help="Exact public HTTPS origin for unified browser WebSocket validation",
+    )
+    parser.add_argument(
         "--project-root",
         type=Path,
         default=(Path(value) if (value := os.environ.get("MCAV_PROJECT_ROOT")) else None),
@@ -306,6 +315,8 @@ Examples:
         project_root=args.project_root,
         tls_cert=args.tls_cert,
         tls_key=args.tls_key,
+        unified_web=args.unified_web,
+        public_origin=args.public_origin,
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,

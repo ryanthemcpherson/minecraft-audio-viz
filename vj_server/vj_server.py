@@ -30,6 +30,7 @@ import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -71,9 +72,36 @@ from vj_server.relay import RelayMixin
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.stage_manager import StageManagerMixin
 from vj_server.viz_client import VizClient
+from vj_server.web_gateway import UnifiedWebConfig, start_unified_web_gateway
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("vj_server")
+
+
+def _normalize_public_origin(public_origin: str) -> str:
+    """Return a canonical HTTPS origin suitable for an exact Origin check."""
+    try:
+        parsed = urlsplit(public_origin)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Public origin must be an exact https://host:port origin") from exc
+
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname is None
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Public origin must be an exact https://host:port origin")
+
+    hostname = parsed.hostname.lower()
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    return f"https://{hostname}:{port}"
 
 
 class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
@@ -110,6 +138,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         project_root: str | Path | None = None,
         tls_cert: str | Path | None = None,
         tls_key: str | Path | None = None,
+        unified_web: bool = False,
+        public_origin: str | None = None,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -129,6 +159,19 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             if self.tls_cert is not None and self.tls_key is not None
             else None
         )
+        self.unified_web = unified_web
+        if self.unified_web:
+            if self.server_ssl_context is None:
+                raise ValueError("Unified web mode requires a TLS certificate and key")
+            if public_origin is None:
+                raise ValueError("Unified web mode requires a public origin")
+            if self.http_port <= 0:
+                raise ValueError("Unified web mode requires a positive HTTP port")
+            if self.http_port == self.dj_port:
+                raise ValueError("Unified web and DJ listeners must use different ports")
+            self.public_origin = _normalize_public_origin(public_origin)
+        else:
+            self.public_origin = public_origin
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
         self.minecraft_ws_secret = minecraft_ws_secret
@@ -1021,15 +1064,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 else:
                     await asyncio.sleep(frame_interval)
 
-    async def run(self):
-        """Start the VJ server."""
-        if not HAS_WEBSOCKETS:
-            logger.error("websockets not installed. Run: pip install websockets")
-            return
-
-        self._running = True
-
-        # Start HTTP server for admin panel
+    def _start_legacy_http_thread(self) -> None:
+        """Start the split-port static server used by legacy deployments."""
         if self.http_port > 0:
             http_thread = threading.Thread(
                 target=run_http_server,
@@ -1046,81 +1082,112 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
             logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
 
-        # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
-        dj_server = await ws_serve(
-            self._handle_dj_connection,
-            "0.0.0.0",
-            self.dj_port,
-            max_size=65_536,
-        )
-        logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
+    async def run(self):
+        """Start the VJ server."""
+        if not HAS_WEBSOCKETS:
+            logger.error("websockets not installed. Run: pip install websockets")
+            return
 
-        # Start browser broadcast server (64KB — browsers only receive viz data)
-        broadcast_server = await ws_serve(
-            self._handle_browser_client,
-            "0.0.0.0",
-            self.broadcast_port,
-            max_size=65_536,
-            ssl=self.server_ssl_context,
-        )
-        browser_scheme = "wss" if self.server_ssl_context is not None else "ws"
-        logger.info(f"Browser WebSocket: {browser_scheme}://localhost:{self.broadcast_port}")
-
-        # Start metrics HTTP server if enabled
+        self._running = True
+        gateway_runner = None
+        dj_server = None
+        broadcast_server = None
         metrics_server = None
-        if self.metrics_port is not None:
-            from vj_server.metrics import start_metrics_server
-
-            metrics_server = await start_metrics_server(self, self.metrics_port)
-
-        # Register with coordinator if configured
-        await self._init_coordinator()
-
-        _ft = getattr(sys, "_is_gil_enabled", None)
-        _ft_label = f"free-threaded (GIL={'on' if _ft() else 'off'})" if _ft else "standard"
-        logger.info(
-            "VJ Server ready. Python %s (%s), async_lua=%s",
-            sys.version.split()[0],
-            _ft_label,
-            _USE_ASYNC_LUA,
-        )
-
-        # Start Minecraft reconnection loop (runs in background)
-        # Skip when --no-minecraft is set to avoid spamming connection attempts
-        if not self._skip_minecraft:
-            self._mc_reconnect_task = asyncio.create_task(self._minecraft_reconnect_loop())
-            logger.debug("Started Minecraft reconnection monitor")
-        else:
-            logger.info("Minecraft reconnection disabled (--no-minecraft mode)")
-
-        # Start browser heartbeat loop (runs in background)
-        self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
-        logger.debug("Started browser heartbeat monitor")
-
-        # Start pattern hot-reload loop (runs in background)
-        if self._pattern_hot_reload_enabled:
-            self._pattern_hot_reload_task = asyncio.create_task(self._pattern_hot_reload_loop())
-            logger.info("Pattern hot-reload enabled (checking every 2.5s)")
-        else:
-            logger.info("Pattern hot-reload disabled")
-
-        # Start Ableton Link sync loop (runs in background)
-        if self._link_enabled and self._link is not None:
-            self._link_task = asyncio.create_task(self._link_sync_loop())
-            logger.info("Ableton Link sync loop started")
-
-        # Register signal handlers for graceful shutdown
-        import signal as _signal
-
-        loop = asyncio.get_running_loop()
-        for sig in (_signal.SIGINT, _signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, self.stop)
-            except NotImplementedError:
-                # Windows doesn't support add_signal_handler for all signals
-                pass
 
         try:
+            if self.unified_web:
+                gateway_runner = await start_unified_web_gateway(
+                    self._handle_browser_client,
+                    self.http_host,
+                    self.http_port,
+                    self.server_ssl_context,
+                    UnifiedWebConfig(self.project_root, self.public_origin),
+                )
+                logger.info("Admin panel: %s/", self.public_origin)
+                logger.info("3D Preview: %s/preview/", self.public_origin)
+                logger.info(
+                    "Browser WebSocket: %s/ws",
+                    self.public_origin.replace("https://", "wss://", 1),
+                )
+            else:
+                self._start_legacy_http_thread()
+
+            # Start DJ listener (64KB max message — valid audio frames are ~200 bytes)
+            dj_server = await ws_serve(
+                self._handle_dj_connection,
+                "0.0.0.0",
+                self.dj_port,
+                max_size=65_536,
+            )
+            logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
+
+            if not self.unified_web:
+                # Start split-port browser listener for legacy deployments.
+                broadcast_server = await ws_serve(
+                    self._handle_browser_client,
+                    "0.0.0.0",
+                    self.broadcast_port,
+                    max_size=65_536,
+                    ssl=self.server_ssl_context,
+                )
+                browser_scheme = "wss" if self.server_ssl_context is not None else "ws"
+                logger.info(
+                    f"Browser WebSocket: {browser_scheme}://localhost:{self.broadcast_port}"
+                )
+
+            # Start metrics HTTP server if enabled
+            if self.metrics_port is not None:
+                from vj_server.metrics import start_metrics_server
+
+                metrics_server = await start_metrics_server(self, self.metrics_port)
+
+            # Register with coordinator if configured
+            await self._init_coordinator()
+
+            _ft = getattr(sys, "_is_gil_enabled", None)
+            _ft_label = f"free-threaded (GIL={'on' if _ft() else 'off'})" if _ft else "standard"
+            logger.info(
+                "VJ Server ready. Python %s (%s), async_lua=%s",
+                sys.version.split()[0],
+                _ft_label,
+                _USE_ASYNC_LUA,
+            )
+
+            # Start Minecraft reconnection loop (runs in background)
+            # Skip when --no-minecraft is set to avoid spamming connection attempts
+            if not self._skip_minecraft:
+                self._mc_reconnect_task = asyncio.create_task(self._minecraft_reconnect_loop())
+                logger.debug("Started Minecraft reconnection monitor")
+            else:
+                logger.info("Minecraft reconnection disabled (--no-minecraft mode)")
+
+            # Start browser heartbeat loop (runs in background)
+            self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
+            logger.debug("Started browser heartbeat monitor")
+
+            # Start pattern hot-reload loop (runs in background)
+            if self._pattern_hot_reload_enabled:
+                self._pattern_hot_reload_task = asyncio.create_task(self._pattern_hot_reload_loop())
+                logger.info("Pattern hot-reload enabled (checking every 2.5s)")
+            else:
+                logger.info("Pattern hot-reload disabled")
+
+            # Start Ableton Link sync loop (runs in background)
+            if self._link_enabled and self._link is not None:
+                self._link_task = asyncio.create_task(self._link_sync_loop())
+                logger.info("Ableton Link sync loop started")
+
+            # Register signal handlers for graceful shutdown
+            import signal as _signal
+
+            loop = asyncio.get_running_loop()
+            for sig in (_signal.SIGINT, _signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, self.stop)
+                except NotImplementedError:
+                    # Windows doesn't support add_signal_handler for all signals
+                    pass
+
             await self._main_loop()
         finally:
             # Notify all connected clients of shutdown
@@ -1165,14 +1232,22 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 except Exception:
                     pass
 
-            # Close WebSocket servers
-            dj_server.close()
-            broadcast_server.close()
-            if metrics_server:
-                metrics_server.close()
-                await metrics_server.wait_closed()
-            await dj_server.wait_closed()
-            await broadcast_server.wait_closed()
+            # Close all listeners acquired before normal shutdown or a startup failure.
+            try:
+                if dj_server is not None:
+                    dj_server.close()
+                if broadcast_server is not None:
+                    broadcast_server.close()
+                if metrics_server is not None:
+                    metrics_server.close()
+                    await metrics_server.wait_closed()
+                if dj_server is not None:
+                    await dj_server.wait_closed()
+                if broadcast_server is not None:
+                    await broadcast_server.wait_closed()
+            finally:
+                if gateway_runner is not None:
+                    await gateway_runner.cleanup()
             logger.info("VJ server shutdown complete")
 
     def stop(self):
