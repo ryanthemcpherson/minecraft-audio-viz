@@ -42,13 +42,16 @@ test('AdminApp no longer contains extracted domain implementations', async () =>
   for (const method of prohibitedMethods) {
     assert.doesNotMatch(source, new RegExp(`\\n\\s+${method}\\(`), `${method} still lives in AdminApp`);
   }
+  for (const field of ['tapTimes', 'tapTimeout']) {
+    assert.doesNotMatch(source, new RegExp(`this\\.${field}\\b`), `${field} still lives on the AdminApp root`);
+  }
   assert.doesNotMatch(source, /cleanup-task-7:/);
   assert.ok(source.split(/\r?\n/).length < 700, 'AdminApp is still a domain monolith');
 });
 
 test('legacy layout selectors are gone', async () => {
   const css = await readPanelFile('css/admin.css');
-  for (const selector of ['#tab-bar', '#zone-overview', '#main-content', '#work-area']) {
+  for (const selector of ['#tab-bar', '#tab-content', 'tab-fade-in', '#zone-overview', '#main-content', '#work-area']) {
     assert.equal(css.includes(selector), false, `${selector} remains in legacy CSS`);
   }
 });
