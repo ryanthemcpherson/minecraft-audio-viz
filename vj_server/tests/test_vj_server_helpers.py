@@ -1,16 +1,223 @@
-"""Tests for VJ server helper functions — phase assist and audio frame sanitization edge cases."""
+"""Tests for VJ server helpers and listener lifecycle selection."""
 
+import asyncio
+import sys
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import msgspec.json as mjson
 import pytest
 
+import vj_server.cli as cli_module
 import vj_server.vj_server as vj_mod
 from vj_server.beat_predictor import BeatPredictor
 from vj_server.models import DJConnection
+from vj_server.web_gateway import UnifiedWebConfig
 
 from .conftest import FakeDJConnection, make_audio_frame
+
+
+def _make_unified_server(monkeypatch: pytest.MonkeyPatch, **overrides) -> vj_mod.VJServer:
+    ssl_context = object()
+    monkeypatch.setattr(vj_mod, "build_server_ssl_context", lambda *_args: ssl_context)
+    options = {
+        "http_port": 18080,
+        "unified_web": True,
+        "public_origin": "https://203.0.113.9:18080",
+        "tls_cert": "test-cert.pem",
+        "tls_key": "test-key.pem",
+        "metrics_port": None,
+        "show_spectrograph": False,
+    }
+    options.update(overrides)
+    return vj_mod.VJServer(**options)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"public_origin": None},
+        {"http_port": 0},
+        {"http_port": 18080, "dj_port": 18080},
+    ],
+)
+def test_unified_mode_rejects_missing_required_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict,
+) -> None:
+    with pytest.raises(ValueError):
+        _make_unified_server(monkeypatch, **overrides)
+
+
+def test_unified_mode_requires_tls() -> None:
+    with pytest.raises(ValueError):
+        vj_mod.VJServer(
+            unified_web=True,
+            public_origin="https://203.0.113.9:8080",
+            metrics_port=None,
+            show_spectrograph=False,
+        )
+
+
+@pytest.mark.parametrize(
+    "public_origin",
+    [
+        "http://203.0.113.9:18080",
+        "https://203.0.113.9",
+        "https://203.0.113.9:18080/admin",
+        "https://203.0.113.9:18080?query=1",
+        "https://203.0.113.9:18080#fragment",
+    ],
+)
+def test_unified_mode_rejects_non_exact_https_origin(
+    monkeypatch: pytest.MonkeyPatch,
+    public_origin: str,
+) -> None:
+    with pytest.raises(ValueError):
+        _make_unified_server(monkeypatch, public_origin=public_origin)
+
+
+def test_unified_mode_normalizes_https_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = _make_unified_server(
+        monkeypatch,
+        public_origin="HTTPS://VJ.EXAMPLE.COM:18080/",
+    )
+
+    assert server.public_origin == "https://vj.example.com:18080"
+
+
+def test_modern_cli_propagates_unified_web_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class FakeVJServer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def stop(self):
+            pass
+
+    def discard_coroutine(coroutine):
+        coroutine.close()
+
+    cert_file = tmp_path / "tls.crt"
+    key_file = tmp_path / "tls.key"
+    monkeypatch.setattr(vj_mod, "VJServer", FakeVJServer)
+    monkeypatch.setattr(cli_module.asyncio, "run", discard_coroutine)
+    monkeypatch.setattr(cli_module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--no-auth",
+            "--unified-web",
+            "--public-origin",
+            "https://203.0.113.9:18080",
+            "--tls-cert",
+            str(cert_file),
+            "--tls-key",
+            str(key_file),
+        ],
+    )
+
+    assert cli_module.vj_server() == 0
+    assert captured["unified_web"] is True
+    assert captured["public_origin"] == "https://203.0.113.9:18080"
+
+
+@pytest.mark.asyncio
+async def test_unified_mode_starts_gateway_without_legacy_browser_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    starts: list[tuple[str, int]] = []
+    cleanup_calls = 0
+    main_loop_entered = asyncio.Event()
+
+    class FakeListener:
+        def close(self):
+            return None
+
+        async def wait_closed(self):
+            return None
+
+    class FakeGatewayRunner:
+        async def cleanup(self):
+            nonlocal cleanup_calls
+            cleanup_calls += 1
+
+    async def fake_gateway(*args, **_kwargs):
+        starts.append(("gateway", args[2]))
+        assert isinstance(args[4], UnifiedWebConfig)
+        assert args[4].public_origin == "https://203.0.113.9:18080"
+        return FakeGatewayRunner()
+
+    async def fake_ws_serve(_handler, _host, port, **_kwargs):
+        starts.append(("websocket", port))
+        return FakeListener()
+
+    async def no_op():
+        return None
+
+    async def wait_for_cancellation():
+        main_loop_entered.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(vj_mod, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    monkeypatch.setattr(
+        vj_mod.threading,
+        "Thread",
+        lambda **_kwargs: pytest.fail("unified mode started the legacy HTTP thread"),
+    )
+    server = _make_unified_server(monkeypatch, broadcast_port=18766)
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = wait_for_cancellation
+
+    task = asyncio.create_task(server.run())
+    await asyncio.wait_for(main_loop_entered.wait(), timeout=1.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert starts.count(("gateway", 18080)) == 1
+    assert starts.count(("websocket", server.dj_port)) == 1
+    assert all(port != 18766 for _kind, port in starts)
+    assert cleanup_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unified_gateway_is_cleaned_up_when_dj_listener_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_calls = 0
+
+    class FakeGatewayRunner:
+        async def cleanup(self):
+            nonlocal cleanup_calls
+            cleanup_calls += 1
+
+    async def fake_gateway(*_args, **_kwargs):
+        return FakeGatewayRunner()
+
+    async def failing_ws_serve(*_args, **_kwargs):
+        raise OSError("DJ listener bind failed")
+
+    monkeypatch.setattr(vj_mod, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_mod, "ws_serve", failing_ws_serve)
+    server = _make_unified_server(monkeypatch)
+
+    with pytest.raises(OSError, match="DJ listener bind failed"):
+        await server.run()
+
+    assert cleanup_calls == 1
+
 
 # ============================================================================
 # _apply_phase_beat_assist
