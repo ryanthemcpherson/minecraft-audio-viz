@@ -24,3 +24,19 @@ test('panel IDs are unique and every literal getElementById binding exists', asy
     }
   }
 });
+
+test('panel exposes exactly five semantic workspaces and stable emergency controls', async () => {
+  const html = await readPanelFile('index.html');
+  const expected = WORKSPACES.map(({ id }) => id);
+  const navigation = [...html.matchAll(/\bdata-workspace-nav\b[^>]*\bdata-workspace="([^"]+)"/g)]
+    .map((match) => match[1]);
+  const panels = [...html.matchAll(/\bdata-workspace-panel\b[^>]*\bdata-workspace="([^"]+)"/g)]
+    .map((match) => match[1]);
+
+  assert.deepEqual(navigation, expected);
+  assert.deepEqual(panels, expected);
+  assert.ok(html.indexOf('id="btn-blackout"') < html.indexOf('class="workspace-stage"'));
+  assert.ok(html.indexOf('id="btn-freeze"') < html.indexOf('class="workspace-stage"'));
+  assert.equal(/\bid="tab-(?:mixer|zone|banner)"/.test(html), false);
+  assert.equal(/\bid="(?:mixer|zone|banner)-panel"/.test(html), false);
+});

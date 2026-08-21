@@ -73,9 +73,10 @@ export function cacheElements(elements) {
     elements.particleBeatEffects = document.getElementById('particle-beat-effects');
     elements.particleAmbientEffects = document.getElementById('particle-ambient-effects');
 
-    // Tabs
-    elements.tabs = document.querySelectorAll('.tab');
-    elements.tabPanels = document.querySelectorAll('.tab-panel');
+    // Workspaces
+    elements.workspaceNav = document.querySelectorAll('[data-workspace-nav]');
+    elements.workspacePanels = document.querySelectorAll('[data-workspace-panel]');
+    elements.workspaceLabel = document.getElementById('workspace-label');
 
     // FPS counter
     elements.fpsDisplay = document.getElementById('fps-display');

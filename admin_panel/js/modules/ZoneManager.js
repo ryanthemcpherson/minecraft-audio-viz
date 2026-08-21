@@ -244,7 +244,7 @@ export class ZoneManager {
             if (el) el.disabled = loading;
         });
 
-        const zonePanel = document.getElementById('zone-panel');
+        const zonePanel = document.getElementById('workspace-zones');
         if (zonePanel) zonePanel.classList.toggle('loading', loading);
     }
 

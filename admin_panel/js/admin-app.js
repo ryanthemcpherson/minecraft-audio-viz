@@ -10,6 +10,7 @@ import { setupEventListeners } from './modules/EventWiring.js';
 import { setupConnectionLifecycle } from './modules/ConnectionLifecycle.js';
 import { setupAdminLogin } from './modules/AdminLoginController.js';
 import { MessageRouter } from './modules/MessageRouter.js';
+import { WorkspaceManager } from './modules/WorkspaceManager.js';
 import { UIHelpers } from './modules/UIHelpers.js';
 import { AudioManager } from './modules/AudioManager.js';
 import { PatternManager } from './modules/PatternManager.js';
@@ -179,9 +180,13 @@ class AdminApp {
         this.banner = new BannerManager(this);
         this.bitmap = new BitmapManager(this);
         this.preview = new PreviewManager(this);
+        this.workspaces = new WorkspaceManager({
+            onChange: (workspace) => this.preview?.setPresentationMode?.(workspace),
+        });
         this.zones = new ZoneManager(this);
         this.router = new MessageRouter(this);
 
+        this.workspaces.setup();
         setupEventListeners(this);
         setupConnectionLifecycle(this);
         this.dj.setupQueueDelegation();
@@ -189,9 +194,6 @@ class AdminApp {
         this.bitmap.initControls();
         this.bitmap.setupDjLogoListeners();
         this.preview.initPreviewStrip();
-        this.ui.updateTabIndicator();
-        this._boundUpdateTabIndicator = () => this.ui.updateTabIndicator();
-        window.addEventListener('resize', this._boundUpdateTabIndicator);
 
         // Start connection
         this.ws.connect();
@@ -962,7 +964,7 @@ class AdminApp {
         });
 
         // Show loading indicator on zone panel
-        const zonePanel = document.getElementById('zone-panel');
+        const zonePanel = document.getElementById('workspace-zones');
         if (zonePanel) {
             zonePanel.classList.toggle('loading', loading);
         }
@@ -2687,13 +2689,8 @@ class AdminApp {
     }
 
     _updateTabIndicator() {
-        const bar = document.getElementById('tab-bar');
-        const active = bar?.querySelector('.tab.active');
-        if (!bar || !active) return;
-        const barRect = bar.getBoundingClientRect();
-        const tabRect = active.getBoundingClientRect();
-        bar.style.setProperty('--tab-indicator-left', `${tabRect.left - barRect.left}px`);
-        bar.style.setProperty('--tab-indicator-width', `${tabRect.width}px`);
+        // cleanup-task-7: compatibility wrapper for callers retained during extraction.
+        return this.workspaces?.activeWorkspace ?? null;
     }
 
     _setPattern(patternId) {

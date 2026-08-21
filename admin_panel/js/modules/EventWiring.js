@@ -3,14 +3,10 @@
  */
 
 import { debounce } from '../utils/debounce.js';
+import { workspaceFromShortcutEvent } from './WorkspaceManager.js';
 
 export function setupEventListeners(app) {
     const { elements, state, ws, ui, audio, patterns, actions, particles, scenes, zones, connectCodes, voice, banner } = app;
-
-    // Tab switching
-    elements.tabs.forEach(tab => {
-        tab.addEventListener('click', () => ui.switchTab(tab.dataset.tab));
-    });
 
     // Preset buttons
     elements.presetButtons.forEach(btn => {
@@ -143,7 +139,15 @@ export function setupEventListeners(app) {
     }
 
     // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => ui.handleKeyboard(e));
+    document.addEventListener('keydown', (event) => {
+        const workspace = workspaceFromShortcutEvent(event);
+        if (workspace) {
+            event.preventDefault();
+            app.workspaces.activate(workspace, { focus: true });
+            return;
+        }
+        ui.handleKeyboard(event);
+    });
 
     // Particle effects global intensity
     if (elements.particleGlobalIntensity) {
