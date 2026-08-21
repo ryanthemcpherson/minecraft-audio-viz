@@ -18,3 +18,13 @@ test('AdminApp composes every extracted manager', async () => {
   assert.match(source, /this\.state = createInitialState\(\)/);
   assert.match(source, /this\.router\.handleMessage\(event\.detail\)/);
 });
+
+test('AdminApp composes the workspace controller after the preview manager', async () => {
+  const source = await readPanelFile('js/admin-app.js');
+  const previewIndex = source.indexOf('this.preview = new PreviewManager(this)');
+  const workspaceIndex = source.indexOf('this.workspaces = new WorkspaceManager(');
+
+  assert.match(source, /import \{ WorkspaceManager \}/);
+  assert.ok(previewIndex >= 0 && workspaceIndex > previewIndex);
+  assert.match(source, /this\.workspaces\.setup\(\)/);
+});

@@ -131,13 +131,8 @@ export class UIHelpers {
     }
 
     updateTabIndicator() {
-        const bar = document.getElementById('tab-bar');
-        const active = bar?.querySelector('.tab.active');
-        if (!bar || !active) return;
-        const barRect = bar.getBoundingClientRect();
-        const tabRect = active.getBoundingClientRect();
-        bar.style.setProperty('--tab-indicator-left', `${tabRect.left - barRect.left}px`);
-        bar.style.setProperty('--tab-indicator-width', `${tabRect.width}px`);
+        // cleanup-task-7: compatibility wrapper for callers retained during extraction.
+        return this.app.workspaces?.activeWorkspace ?? null;
     }
 
     // === Keyboard Shortcuts ===

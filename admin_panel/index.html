@@ -9,10 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/mcav-tokens.css">
     <link rel="stylesheet" href="css/admin.css">
+    <link rel="stylesheet" href="css/control-panel.css">
 </head>
 <body>
-    <a href="#app" class="skip-link">Skip to content</a>
+    <a href="#workspace-live" class="skip-link">Skip to live controls</a>
     <section id="auth-gate" class="auth-gate" aria-labelledby="auth-title">
         <div class="auth-card">
             <img class="auth-logo" src="mcav-medium-square.png" alt="MCAV">
@@ -30,15 +32,15 @@
             <p class="auth-footnote">Credentials stay in memory for this tab only.</p>
         </div>
     </section>
-    <div id="app" hidden aria-hidden="true">
+    <div id="app" class="control-app" hidden aria-hidden="true">
         <!-- Header -->
-        <header id="header">
-            <div class="header-left">
+        <header id="header" class="command-bar">
+            <div class="header-left command-identity">
                 <div class="header-brand">
                     <img class="header-logo" src="mcav-medium-square.png" alt="MCAV" draggable="false">
                     <div class="header-title-group">
                         <h1>MCAV</h1>
-                        <span class="header-subtitle">Control Center</span>
+                        <span class="header-subtitle">VJ Control · <strong id="workspace-label" data-workspace-label>Live</strong></span>
                     </div>
                 </div>
                 <div class="connection-status-wrapper">
@@ -46,7 +48,7 @@
                     <button id="btn-reconnect" class="btn btn-reconnect hidden">Reconnect</button>
                 </div>
             </div>
-            <div class="header-center">
+            <div class="header-center command-context">
                 <select id="stage-select">
                     <!-- Populated by JS, no "All Stages" option -->
                 </select>
@@ -62,7 +64,7 @@
                     <option value="main">main</option>
                 </select>
             </div>
-            <div class="header-right">
+            <div class="header-right command-health">
                 <div class="service-status">
                     <div class="service-indicator" id="svc-python">
                         <span class="svc-dot"></span>
@@ -73,16 +75,39 @@
                         <span class="svc-label">Minecraft</span>
                     </div>
                 </div>
+                <div id="status-bar" class="command-telemetry telemetry" aria-label="Live telemetry">
+                    <span id="latency-display" class="latency">Latency: --ms</span>
+                    <span id="queue-depth-display" class="queue-depth hidden">Queue: 0/500</span>
+                    <span id="fps-display" class="fps-indicator">-- FPS</span>
+                </div>
                 <button id="btn-logout" class="btn btn-logout" type="button">Sign out</button>
-                <!-- Preview stats moved to preview strip header -->
+            </div>
+            <div class="command-emergency" aria-label="Emergency show controls">
+                <button id="btn-blackout" class="btn btn-perf btn-perf-blackout">
+                    <span class="perf-icon" aria-hidden="true">&#x26AB;</span>
+                    <span class="perf-label">Blackout</span>
+                    <span class="perf-shortcut">B</span>
+                </button>
+                <button id="btn-freeze" class="btn btn-perf btn-perf-freeze">
+                    <span class="perf-icon" aria-hidden="true">&#x2744;</span>
+                    <span class="perf-label">Freeze</span>
+                    <span class="perf-shortcut">F</span>
+                </button>
             </div>
         </header>
 
         <!-- Main Content -->
-        <div id="main-content">
+        <div id="main-content" class="control-shell">
+            <nav class="workspace-rail" aria-label="VJ workspaces">
+                <button data-workspace-nav data-workspace="live" aria-controls="workspace-live" aria-selected="true"><span class="workspace-key">1</span><span>Live</span></button>
+                <button data-workspace-nav data-workspace="visuals" aria-controls="workspace-visuals" aria-selected="false" tabindex="-1"><span class="workspace-key">2</span><span>Visuals</span></button>
+                <button data-workspace-nav data-workspace="zones" aria-controls="workspace-zones" aria-selected="false" tabindex="-1"><span class="workspace-key">3</span><span>Zones</span></button>
+                <button data-workspace-nav data-workspace="djs" aria-controls="workspace-djs" aria-selected="false" tabindex="-1"><span class="workspace-key">4</span><span>DJs</span></button>
+                <button data-workspace-nav data-workspace="system" aria-controls="workspace-system" aria-selected="false" tabindex="-1"><span class="workspace-key">5</span><span>System</span></button>
+            </nav>
             <!-- Left Sidebar: Zone Overview -->
-            <aside id="zone-overview">
-                <div class="panel">
+            <aside id="zone-overview" class="workspace-inventory">
+                <div class="panel control-surface" data-workspace-destination="live">
                     <h2 class="panel-title">Zone Status</h2>
 
                     <div class="status-item">
@@ -145,20 +170,8 @@
                     </div>
                 </div>
 
-                <!-- Performance Controls -->
-                <div class="panel panel-performance">
-                    <div class="perf-buttons">
-                        <button id="btn-blackout" class="btn btn-perf btn-perf-blackout">
-                            <span class="perf-icon">&#x26AB;</span>
-                            <span class="perf-label">Blackout</span>
-                            <span class="perf-shortcut">B</span>
-                        </button>
-                        <button id="btn-freeze" class="btn btn-perf btn-perf-freeze">
-                            <span class="perf-icon">&#x2744;</span>
-                            <span class="perf-label">Freeze</span>
-                            <span class="perf-shortcut">F</span>
-                        </button>
-                    </div>
+                <!-- Show Controls -->
+                <div class="panel panel-performance control-surface" data-workspace-destination="live">
                     <div class="tap-tempo">
                         <button id="btn-tap-tempo" class="btn btn-tap">Tap Tempo</button>
                         <span id="tap-bpm" class="bpm-display">-- BPM</span>
@@ -166,7 +179,7 @@
                 </div>
 
                 <!-- DJ Management -->
-                <div class="panel">
+                <div class="panel control-surface" data-workspace-destination="djs">
                     <h2 class="panel-title">DJ Management</h2>
 
                     <!-- Pending Approvals -->
@@ -197,16 +210,9 @@
             </aside>
 
             <!-- Main Work Area -->
-            <main id="work-area">
-                <!-- Tab Bar -->
-                <nav id="tab-bar" role="tablist">
-                    <button id="tab-mixer" class="tab active" data-tab="mixer" role="tab" aria-selected="true" aria-controls="mixer-panel">Live Mixer</button>
-                    <button id="tab-zone" class="tab" data-tab="zone" role="tab" aria-selected="false" aria-controls="zone-panel">Zone Settings</button>
-                    <button id="tab-banner" class="tab" data-tab="banner" role="tab" aria-selected="false" aria-controls="banner-panel">DJ Banner</button>
-                </nav>
-
+            <main id="work-area" class="workspace-stage">
                 <!-- Live Preview Strip (always visible, collapsible) -->
-                <div id="preview-strip" class="preview-strip">
+                <div id="preview-strip" class="preview-strip control-surface" data-workspace-destination="live">
                     <div class="preview-strip-header">
                         <span class="preview-strip-title">Live Preview</span>
                         <span id="preview-strip-stats" class="preview-strip-stats">
@@ -253,10 +259,8 @@
                     </div>
                 </div>
 
-                <!-- Tab Content -->
-                <div id="tab-content">
-                    <!-- Live Mixer Panel -->
-                    <div id="mixer-panel" class="tab-panel active" role="tabpanel" aria-labelledby="tab-mixer">
+                <!-- Workspace Content -->
+                    <section id="workspace-live" class="workspace-panel" data-workspace-panel data-workspace="live" aria-label="Live workspace">
                         <!-- Pattern Quick-Switch -->
                         <section class="mixer-section">
                             <h3 class="section-title">Patterns</h3>
@@ -373,7 +377,7 @@
                         </section>
 
                         <!-- Visual Sync -->
-                        <section class="mixer-section collapsible collapsed">
+                        <section class="mixer-section collapsible collapsed control-surface" data-workspace-destination="system">
                             <h3 class="section-title">Visual Sync</h3>
                             <div id="sync-controls" class="controls-grid">
                                 <div class="control-row">
@@ -431,7 +435,7 @@
                         </section>
 
                         <!-- Bitmap Patterns (LED Wall) -->
-                        <section class="mixer-section collapsible collapsed" id="ledwall-section">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-section" data-workspace-destination="visuals">
                             <h3 class="section-title">Bitmap Patterns <span id="bitmap-status" class="bitmap-status-dot" title="Not initialized"></span></h3>
                             <div id="bitmap-pattern-grid" class="bitmap-grid">
                                 <!-- Populated by JS -->
@@ -475,7 +479,7 @@
                         </section>
 
                         <!-- DJ Logo Controls (shown when bmp_dj_logo is active) -->
-                        <section class="mixer-section collapsible collapsed hidden" id="dj-logo-section">
+                        <section class="mixer-section collapsible collapsed hidden control-surface" id="dj-logo-section" data-workspace-destination="visuals">
                             <h3 class="section-title">DJ Logo</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -501,7 +505,7 @@
                         </section>
 
                         <!-- Bitmap Effects -->
-                        <section class="mixer-section collapsible collapsed" id="ledwall-effects-section">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-effects-section" data-workspace-destination="visuals">
                             <h3 class="section-title">Bitmap Effects</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -561,7 +565,7 @@
                         </section>
 
                         <!-- Bitmap Text Overlays -->
-                        <section class="mixer-section collapsible collapsed" id="ledwall-text-section">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-text-section" data-workspace-destination="visuals">
                             <h3 class="section-title">Bitmap Text</h3>
                             <div class="bitmap-overlay-group">
                                 <span class="bitmap-overlay-label">Marquee</span>
@@ -597,7 +601,7 @@
                         </section>
 
                         <!-- Bitmap Layers -->
-                        <section class="mixer-section collapsible collapsed" id="ledwall-layers-section">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-layers-section" data-workspace-destination="visuals">
                             <h3 class="section-title">Bitmap Layers</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -659,7 +663,7 @@
                         </section>
 
                         <!-- Particle Effects -->
-                        <section class="mixer-section collapsible collapsed">
+                        <section class="mixer-section collapsible collapsed control-surface" data-workspace-destination="visuals">
                             <h3 class="section-title">Particle Effects</h3>
                             <div class="control-row">
                                 <label for="particle-global-intensity">Global Intensity</label>
@@ -683,7 +687,7 @@
                         </section>
 
                         <!-- Voice Chat -->
-                        <section class="mixer-section collapsible collapsed" id="voice-chat-section">
+                        <section class="mixer-section collapsible collapsed control-surface" id="voice-chat-section" data-workspace-destination="system">
                             <h3 class="section-title">Voice Chat</h3>
                             <div class="voice-status-bar" id="voice-status-bar">
                                 <div class="voice-status-indicator" id="voice-status-indicator">
@@ -719,10 +723,17 @@
                                 </div>
                             </div>
                         </section>
-                    </div>
+                    </section>
+
+                    <section id="workspace-visuals" class="workspace-panel" data-workspace-panel data-workspace="visuals" aria-label="Visuals workspace" hidden>
+                        <header class="workspace-heading">
+                            <p class="workspace-kicker">Presentation</p>
+                            <h2>Visuals</h2>
+                        </header>
+                    </section>
 
                     <!-- Zone Settings Panel -->
-                    <div id="zone-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-zone">
+                    <section id="workspace-zones" class="workspace-panel" data-workspace-panel data-workspace="zones" aria-label="Zones workspace" hidden>
                         <!-- Stages & Zones -->
                         <section class="mixer-section">
                             <div class="section-header">
@@ -1072,14 +1083,14 @@
                                 <button id="btn-reset-defaults" class="btn btn-secondary">Reset Defaults</button>
                             </div>
                         </section>
-                    </div>
+                    </section>
 
                     <!-- 3D Preview Panel removed — preview is now in the always-visible strip above -->
 
                     <!-- LED Wall panel removed — controls moved into Live Mixer tab -->
 
                     <!-- DJ Banner Panel -->
-                    <div id="banner-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-banner">
+                    <section id="workspace-djs" class="workspace-panel" data-workspace-panel data-workspace="djs" aria-label="DJs workspace" hidden>
                         <!-- DJ Selector -->
                         <section class="mixer-section">
                             <h3 class="section-title">DJ Banner Profile</h3>
@@ -1209,20 +1220,14 @@
                                 <button id="btn-apply-banner-now" class="btn btn-secondary">Apply Now</button>
                             </div>
                         </section>
-                    </div>
+                    </section>
 
-                </div>
-
-                <!-- Status Bar -->
-                <footer id="status-bar">
-                    <div class="status-bar-left">
-                        <span id="latency-display" class="latency">Latency: --ms</span>
-                        <span id="queue-depth-display" class="queue-depth hidden">Queue: 0/500</span>
-                    </div>
-                    <div class="status-bar-right">
-                        <span id="fps-display" class="fps-indicator">-- FPS</span>
-                    </div>
-                </footer>
+                    <section id="workspace-system" class="workspace-panel" data-workspace-panel data-workspace="system" aria-label="System workspace" hidden>
+                        <header class="workspace-heading">
+                            <p class="workspace-kicker">Signal path</p>
+                            <h2>System</h2>
+                        </header>
+                    </section>
             </main>
         </div>
     </div>
