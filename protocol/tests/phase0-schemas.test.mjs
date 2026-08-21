@@ -232,3 +232,25 @@ test("emergency command and error schemas accept request correlation", () => {
   const errorSchema = readJson(resolve(repositoryRoot, "protocol", "schemas", "messages", "error.schema.json"));
   assert.deepEqual(errorSchema.properties.request_id, { type: "string", minLength: 1, maxLength: 128 });
 });
+
+test("voice status schema carries a bounded explicit capability error", () => {
+  const schema = readJson(
+    resolve(repositoryRoot, "protocol", "schemas", "messages", "voice-status.schema.json"),
+  );
+  assertValid(schema, {
+    type: "voice_status",
+    available: false,
+    streaming: false,
+    error: "Minecraft voice status timed out.",
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: false,
+    error: "",
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: false,
+    error: "x".repeat(513),
+  });
+});

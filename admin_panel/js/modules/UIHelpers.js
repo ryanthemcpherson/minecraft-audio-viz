@@ -213,14 +213,21 @@ export class UIHelpers {
         this._setCapabilityState('ledwall-section', 'bitmap-capability-reason', bitmapState, bitmapReason);
 
         const voiceStatusReceived = Boolean(this.state.voiceChat?.statusReceived);
+        const voiceError = this.state.voiceChat?.error;
         const voiceState = !serverAvailable
             ? 'unavailable'
-            : (!voiceStatusReceived ? 'loading' : (this.state.voiceChat?.available ? 'available' : 'unavailable'));
+            : (voiceError
+                ? 'error'
+                : (!voiceStatusReceived
+                    ? 'loading'
+                    : (this.state.voiceChat?.available ? 'available' : 'unavailable')));
         const voiceReason = !serverAvailable
             ? 'Connect to the VJ server to check voice chat.'
-            : (!voiceStatusReceived
-                ? 'Checking voice chat capability…'
-                : (this.state.voiceChat?.available ? '' : 'Voice chat is not available on this Minecraft server.'));
+            : (voiceError
+                ? `Voice chat status error: ${voiceError}`
+                : (!voiceStatusReceived
+                    ? 'Checking voice chat capability…'
+                    : (this.state.voiceChat?.available ? '' : 'Voice chat is not available on this Minecraft server.')));
         this._setCapabilityState('voice-chat-section', 'voice-capability-reason', voiceState, voiceReason);
 
         const previewFailed = Boolean(this.app.preview?.previewFailed);
