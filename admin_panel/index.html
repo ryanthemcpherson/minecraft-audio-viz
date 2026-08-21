@@ -80,35 +80,39 @@
                         <span class="svc-label">Minecraft</span>
                     </div>
                 </div>
+                <span id="capability-status" class="visually-hidden" role="status" aria-live="polite"></span>
                 <div id="status-bar" class="command-telemetry telemetry" aria-label="Live telemetry">
                     <span id="latency-display" class="latency">Latency: --ms</span>
-                    <span id="queue-depth-display" class="queue-depth hidden">Queue: 0/500</span>
-                    <span id="fps-display" class="fps-indicator">-- FPS</span>
+                    <span id="queue-depth-display" class="queue-depth telemetry-secondary hidden">Queue: 0/500</span>
+                    <span id="fps-display" class="fps-indicator telemetry-secondary">-- FPS</span>
                 </div>
                 <button id="btn-logout" class="btn btn-logout" type="button">Sign out</button>
             </div>
             <div class="command-emergency" aria-label="Emergency show controls">
-                <button id="btn-blackout" class="btn btn-perf btn-perf-blackout">
+                <button id="btn-blackout" class="btn btn-perf btn-perf-blackout" type="button"
+                        data-requires-connection aria-pressed="false" aria-describedby="emergency-control-reason">
                     <span class="perf-icon" aria-hidden="true">&#x26AB;</span>
                     <span class="perf-label">Blackout</span>
                     <span class="perf-shortcut">B</span>
                 </button>
-                <button id="btn-freeze" class="btn btn-perf btn-perf-freeze">
+                <button id="btn-freeze" class="btn btn-perf btn-perf-freeze" type="button"
+                        data-requires-connection aria-pressed="false" aria-describedby="emergency-control-reason">
                     <span class="perf-icon" aria-hidden="true">&#x2744;</span>
                     <span class="perf-label">Freeze</span>
                     <span class="perf-shortcut">F</span>
                 </button>
+                <span id="emergency-control-reason" class="command-availability" aria-live="polite"></span>
             </div>
         </header>
 
         <!-- Main Content -->
         <div id="main-content" class="control-shell">
             <nav class="workspace-rail" aria-label="VJ workspaces" role="tablist" aria-orientation="vertical" data-workspace-tablist>
-                <button id="workspace-tab-live" role="tab" data-workspace-nav data-workspace="live" aria-controls="workspace-live" aria-selected="true"><span class="workspace-key">1</span><span>Live</span></button>
-                <button id="workspace-tab-visuals" role="tab" data-workspace-nav data-workspace="visuals" aria-controls="workspace-visuals" aria-selected="false" tabindex="-1"><span class="workspace-key">2</span><span>Visuals</span></button>
-                <button id="workspace-tab-zones" role="tab" data-workspace-nav data-workspace="zones" aria-controls="workspace-zones" aria-selected="false" tabindex="-1"><span class="workspace-key">3</span><span>Zones</span></button>
-                <button id="workspace-tab-djs" role="tab" data-workspace-nav data-workspace="djs" aria-controls="workspace-djs" aria-selected="false" tabindex="-1"><span class="workspace-key">4</span><span>DJs</span></button>
-                <button id="workspace-tab-system" role="tab" data-workspace-nav data-workspace="system" aria-controls="workspace-system" aria-selected="false" tabindex="-1"><span class="workspace-key">5</span><span>System</span></button>
+                <button id="workspace-tab-live" role="tab" data-workspace-nav data-workspace="live" aria-controls="workspace-live" aria-selected="true"><span class="workspace-key">1</span><span class="workspace-nav-label">Live</span></button>
+                <button id="workspace-tab-visuals" role="tab" data-workspace-nav data-workspace="visuals" aria-controls="workspace-visuals" aria-selected="false" tabindex="-1"><span class="workspace-key">2</span><span class="workspace-nav-label">Visuals</span></button>
+                <button id="workspace-tab-zones" role="tab" data-workspace-nav data-workspace="zones" aria-controls="workspace-zones" aria-selected="false" tabindex="-1"><span class="workspace-key">3</span><span class="workspace-nav-label">Zones</span></button>
+                <button id="workspace-tab-djs" role="tab" data-workspace-nav data-workspace="djs" aria-controls="workspace-djs" aria-selected="false" tabindex="-1"><span class="workspace-key">4</span><span class="workspace-nav-label">DJs</span></button>
+                <button id="workspace-tab-system" role="tab" data-workspace-nav data-workspace="system" aria-controls="workspace-system" aria-selected="false" tabindex="-1"><span class="workspace-key">5</span><span class="workspace-nav-label">System</span></button>
             </nav>
             <!-- Left Sidebar: Zone Overview -->
             <aside id="zone-overview" class="workspace-inventory">
@@ -188,9 +192,12 @@
             <!-- Main Work Area -->
             <main id="work-area" class="workspace-stage">
                 <!-- Live performance workspace -->
-                <section id="workspace-live" class="workspace-panel live-workspace" role="tabpanel" aria-labelledby="workspace-tab-live" data-workspace-panel data-workspace="live">
+                <section id="workspace-live" class="workspace-panel live-workspace" role="tabpanel" aria-labelledby="workspace-tab-live"
+                         aria-describedby="last-known-state-status" data-last-known-state data-workspace-panel data-workspace="live">
+                <span id="last-known-state-status" class="visually-hidden" role="status" aria-live="polite"></span>
                 <section class="live-output" data-live-region="output" data-preview-slot="live" aria-label="Stage output preview">
-                <div id="preview-strip" class="preview-strip control-surface">
+                <div id="preview-strip" class="preview-strip control-surface" aria-describedby="preview-capability-reason">
+                    <span id="preview-capability-reason" class="capability-reason" role="status" aria-live="polite"></span>
                     <div class="preview-strip-header">
                         <span class="preview-strip-title">Live Preview</span>
                         <span id="preview-strip-stats" class="preview-strip-stats">
@@ -204,7 +211,7 @@
                             <button id="preview-reset-camera" class="btn-icon" title="Reset Camera" aria-label="Reset Camera">
                                 <span class="toggle-icon">&#x2302;</span>
                             </button>
-                            <button id="preview-scan-stage" class="btn-icon" title="Scan Stage Blocks" aria-label="Scan Stage Blocks" style="display:none">
+                            <button id="preview-scan-stage" class="btn-icon" title="Scan Stage Blocks" aria-label="Scan Stage Blocks" style="display:none" data-requires-minecraft>
                                 <span class="toggle-icon">&#x2315;</span>
                             </button>
                             <label class="preview-strip-toggle" title="Show Grid" style="display:none">
@@ -241,16 +248,16 @@
                     <aside class="show-rack" data-live-region="show" aria-label="Show control">
                         <div class="live-rack-heading">
                             <span>Show control</span>
-                            <span id="transition-status" class="transition-status hidden">Crossfading...</span>
+                            <span id="transition-status" class="transition-status hidden" role="status" aria-live="polite">Crossfading...</span>
                         </div>
                         <!-- Preset Buttons -->
                         <section class="mixer-section live-preset-bank">
                             <h3 class="section-title">Audio profile</h3>
                             <div id="preset-buttons" class="preset-buttons">
-                                <button class="preset-btn active" data-preset="auto">Auto</button>
-                                <button class="preset-btn" data-preset="edm">EDM</button>
-                                <button class="preset-btn" data-preset="chill">Chill</button>
-                                <button class="preset-btn" data-preset="rock">Rock</button>
+                                <button class="preset-btn active" data-preset="auto" data-requires-connection>Auto</button>
+                                <button class="preset-btn" data-preset="edm" data-requires-connection>EDM</button>
+                                <button class="preset-btn" data-preset="chill" data-requires-connection>Chill</button>
+                                <button class="preset-btn" data-preset="rock" data-requires-connection>Rock</button>
                             </div>
                             <div class="transition-control">
                                 <label for="transition-duration-slider" class="control-label">
@@ -258,7 +265,7 @@
                                     <span id="transition-duration-value" class="control-value">1.0s</span>
                                 </label>
                                 <input type="range" id="transition-duration-slider" class="slider"
-                                       min="0" max="3000" step="100" value="1000">
+                                       min="0" max="3000" step="100" value="1000" data-requires-connection>
                             </div>
                         </section>
                     </aside>
@@ -285,12 +292,13 @@
                                 <h3 id="effects-deck-title" class="section-title">Performance effects</h3>
                             </div>
                             <div id="effect-triggers" class="effect-grid">
-                                <button class="effect-btn" data-effect="bass_drop">Bass Drop</button>
-                                <button class="effect-btn" data-effect="strobe">Strobe</button>
-                                <button class="effect-btn" data-effect="flash">Flash</button>
-                                <button class="effect-btn" data-effect="spin_up">Spin Up</button>
-                                <button class="effect-btn" data-effect="spin_down">Spin Down</button>
+                                <button class="effect-btn" data-effect="bass_drop" data-requires-connection>Bass Drop</button>
+                                <button class="effect-btn" data-effect="strobe" data-requires-connection>Strobe</button>
+                                <button class="effect-btn" data-effect="flash" data-requires-connection>Flash</button>
+                                <button class="effect-btn" data-effect="spin_up" data-requires-connection>Spin Up</button>
+                                <button class="effect-btn" data-effect="spin_down" data-requires-connection>Spin Down</button>
                             </div>
+                            <span id="effect-result-status" class="visually-hidden" role="status" aria-live="polite"></span>
                         </section>
                     </section>
 
@@ -302,42 +310,42 @@
                                 <div class="fader" data-band="0">
                                     <span class="fader-label">Bass</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="1">
                                     <span class="fader-label">Low</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="2">
                                     <span class="fader-label">Mid</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="3">
                                     <span class="fader-label">High</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="4">
                                     <span class="fader-label">Air</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader fader-master" data-band="master">
                                     <span class="fader-label">Master</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical">
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
@@ -350,32 +358,32 @@
                             <div id="effect-controls" class="controls-grid">
                                 <div class="control-row">
                                     <label for="ctrl-attack">Attack</label>
-                                    <input type="range" id="ctrl-attack" min="5" max="90" value="35">
+                                    <input type="range" id="ctrl-attack" min="5" max="90" value="35" data-requires-connection>
                                     <span class="control-value" id="val-attack">35%</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="ctrl-release">Release</label>
-                                    <input type="range" id="ctrl-release" min="2" max="30" value="8">
+                                    <input type="range" id="ctrl-release" min="2" max="30" value="8" data-requires-connection>
                                     <span class="control-value" id="val-release">8%</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="ctrl-agc">AGC Gain</label>
-                                    <input type="range" id="ctrl-agc" min="1" max="12" value="8" step="0.5">
+                                    <input type="range" id="ctrl-agc" min="1" max="12" value="8" step="0.5" data-requires-connection>
                                     <span class="control-value" id="val-agc">8x</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="ctrl-beat-sens">Beat Sens</label>
-                                    <input type="range" id="ctrl-beat-sens" min="50" max="200" value="100">
+                                    <input type="range" id="ctrl-beat-sens" min="50" max="200" value="100" data-requires-connection>
                                     <span class="control-value" id="val-beat-sens">100%</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="ctrl-beat-thresh">Beat Thresh</label>
-                                    <input type="range" id="ctrl-beat-thresh" min="80" max="200" value="130">
+                                    <input type="range" id="ctrl-beat-thresh" min="80" max="200" value="130" data-requires-connection>
                                     <span class="control-value" id="val-beat-thresh">1.3x</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="ctrl-blocks">Block Count</label>
-                                    <input type="range" id="ctrl-blocks" min="8" max="64" value="16">
+                                    <input type="range" id="ctrl-blocks" min="8" max="64" value="16" data-requires-connection>
                                     <span class="control-value" id="val-blocks">16</span>
                                 </div>
                             </div>
@@ -405,6 +413,7 @@
                         <!-- Bitmap Patterns (LED Wall) -->
                         <section class="mixer-section collapsible collapsed control-surface" id="ledwall-section">
                             <h3 class="section-title">Bitmap Patterns <span id="bitmap-status" class="bitmap-status-dot" title="Not initialized"></span></h3>
+                            <p id="bitmap-capability-reason" class="capability-reason" role="status" aria-live="polite"></p>
                             <div id="bitmap-pattern-grid" class="bitmap-grid">
                                 <!-- Populated by JS -->
                             </div>
@@ -440,7 +449,7 @@
                                             <span class="ledwall-dim-sep">&times;</span>
                                             <input type="number" id="bitmap-height" class="control-input ledwall-dim" value="12" min="4" max="64">
                                         </span>
-                                        <button id="btn-bitmap-init" class="btn btn-secondary btn-sm">Re-init</button>
+                                        <button id="btn-bitmap-init" class="btn btn-secondary btn-sm" data-requires-minecraft>Re-init</button>
                                     </div>
                                 </div>
                             </div>
@@ -467,7 +476,7 @@
                                 <div class="control-row">
                                     <label for="dj-logo-file">Image</label>
                                     <input type="text" id="dj-logo-file" class="control-input" placeholder="path on server..." value="gnarlie_logo_whiteback.png" style="flex:1;">
-                                    <button id="btn-dj-logo-load" class="btn btn-secondary btn-sm" style="margin-left:4px;">Load</button>
+                                    <button id="btn-dj-logo-load" class="btn btn-secondary btn-sm" style="margin-left:4px;" data-requires-minecraft>Load</button>
                                 </div>
                             </div>
                         </section>
@@ -478,57 +487,57 @@
                             <div class="controls-grid">
                                 <div class="control-row">
                                     <label for="bitmap-brightness">Brightness</label>
-                                    <input type="range" id="bitmap-brightness" class="slider" min="0" max="100" value="100">
+                                    <input type="range" id="bitmap-brightness" class="slider" min="0" max="100" value="100" data-requires-minecraft>
                                     <span class="control-value" id="val-bitmap-brightness">100%</span>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label>Strobe</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="bitmap-strobe" aria-label="Strobe">
+                                        <input type="checkbox" id="bitmap-strobe" aria-label="Strobe" data-requires-minecraft>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label>Beat Flash</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="bitmap-beat-flash" aria-label="Beat Flash">
+                                        <input type="checkbox" id="bitmap-beat-flash" aria-label="Beat Flash" data-requires-minecraft>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row">
                                     <label for="bitmap-wash-color">Wash Color</label>
-                                    <input type="color" id="bitmap-wash-color" value="#ff0000">
+                                    <input type="color" id="bitmap-wash-color" value="#ff0000" data-requires-minecraft>
                                 </div>
                                 <div class="control-row">
                                     <label for="bitmap-wash-opacity">Wash Opacity</label>
-                                    <input type="range" id="bitmap-wash-opacity" class="slider" min="0" max="100" value="0">
+                                    <input type="range" id="bitmap-wash-opacity" class="slider" min="0" max="100" value="0" data-requires-minecraft>
                                     <span class="control-value" id="val-bitmap-wash-opacity">0%</span>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label>Bloom</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="bitmap-bloom" checked aria-label="Bloom">
+                                        <input type="checkbox" id="bitmap-bloom" checked aria-label="Bloom" data-requires-minecraft>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row">
                                     <label for="bitmap-bloom-strength">Bloom Strength</label>
-                                    <input type="range" id="bitmap-bloom-strength" class="slider" min="0" max="100" value="40">
+                                    <input type="range" id="bitmap-bloom-strength" class="slider" min="0" max="100" value="40" data-requires-minecraft>
                                     <span class="control-value" id="val-bitmap-bloom-strength">40%</span>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label>Ambient Lights</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="bitmap-ambient-lights" checked aria-label="Ambient Lights">
+                                        <input type="checkbox" id="bitmap-ambient-lights" checked aria-label="Ambient Lights" data-requires-minecraft>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                             </div>
                             <div class="effect-grid" style="margin-top: var(--spacing-sm);">
-                                <button class="effect-btn" id="btn-bitmap-blackout">Blackout</button>
-                                <button class="effect-btn" id="btn-bitmap-freeze">Freeze</button>
-                                <button class="effect-btn" id="btn-bitmap-reset">Reset</button>
-                                <button class="effect-btn" id="btn-bitmap-firework">Firework</button>
+                                <button class="effect-btn" id="btn-bitmap-blackout" data-requires-minecraft>Blackout</button>
+                                <button class="effect-btn" id="btn-bitmap-freeze" data-requires-minecraft>Freeze</button>
+                                <button class="effect-btn" id="btn-bitmap-reset" data-requires-minecraft>Reset</button>
+                                <button class="effect-btn" id="btn-bitmap-firework" data-requires-minecraft>Firework</button>
                             </div>
                         </section>
 
@@ -540,7 +549,7 @@
                                 <div class="bitmap-inline-form">
                                     <input type="text" id="bitmap-marquee-text" class="control-input" placeholder="Marquee text...">
                                     <input type="color" id="bitmap-marquee-color" value="#ffffff">
-                                    <button id="btn-bitmap-marquee" class="btn btn-secondary btn-sm">Send</button>
+                                    <button id="btn-bitmap-marquee" class="btn btn-secondary btn-sm" data-requires-minecraft>Send</button>
                                 </div>
                             </div>
                             <div class="bitmap-overlay-group">
@@ -548,22 +557,22 @@
                                 <div class="bitmap-inline-form">
                                     <input type="text" id="bitmap-track-artist" class="control-input" placeholder="Artist">
                                     <input type="text" id="bitmap-track-title" class="control-input" placeholder="Title">
-                                    <button id="btn-bitmap-track" class="btn btn-secondary btn-sm">Send</button>
+                                    <button id="btn-bitmap-track" class="btn btn-secondary btn-sm" data-requires-minecraft>Send</button>
                                 </div>
                             </div>
                             <div class="bitmap-overlay-group">
                                 <span class="bitmap-overlay-label">Countdown</span>
                                 <div class="bitmap-inline-form">
                                     <input type="number" id="bitmap-countdown-seconds" class="control-input" value="10" min="1" max="999" style="width:70px;">
-                                    <button id="btn-bitmap-countdown-start" class="btn btn-secondary btn-sm">Start</button>
-                                    <button id="btn-bitmap-countdown-stop" class="btn btn-secondary btn-sm">Stop</button>
+                                    <button id="btn-bitmap-countdown-start" class="btn btn-secondary btn-sm" data-requires-minecraft>Start</button>
+                                    <button id="btn-bitmap-countdown-stop" class="btn btn-secondary btn-sm" data-requires-minecraft>Stop</button>
                                 </div>
                             </div>
                             <div class="bitmap-overlay-group">
                                 <span class="bitmap-overlay-label">Chat</span>
                                 <div class="bitmap-inline-form">
                                     <input type="text" id="bitmap-chat-message" class="control-input" placeholder="Chat message...">
-                                    <button id="btn-bitmap-chat" class="btn btn-secondary btn-sm">Send</button>
+                                    <button id="btn-bitmap-chat" class="btn btn-secondary btn-sm" data-requires-minecraft>Send</button>
                                 </div>
                             </div>
                         </section>
@@ -593,14 +602,14 @@
                                 </div>
                             </div>
                             <div class="zone-actions" style="margin-top: var(--spacing-sm);">
-                                <button id="btn-bitmap-layer-set" class="btn btn-primary">Set Layer</button>
-                                <button id="btn-bitmap-layer-clear" class="btn btn-secondary">Clear Layer</button>
+                                <button id="btn-bitmap-layer-set" class="btn btn-primary" data-requires-minecraft>Set Layer</button>
+                                <button id="btn-bitmap-layer-clear" class="btn btn-secondary" data-requires-minecraft>Clear Layer</button>
                             </div>
                             <!-- Composition -->
                             <div class="controls-grid" style="margin-top: var(--spacing-md);">
                                 <div class="control-row">
                                     <label for="bitmap-sync-mode">Sync Mode</label>
-                                    <select id="bitmap-sync-mode" class="control-select">
+                                    <select id="bitmap-sync-mode" class="control-select" data-requires-minecraft>
                                         <option value="independent">Independent</option>
                                         <option value="synced">Synced</option>
                                         <option value="mirror">Mirror</option>
@@ -608,13 +617,13 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="bitmap-shared-palette">Shared Palette</label>
-                                    <select id="bitmap-shared-palette" class="control-select">
+                                    <select id="bitmap-shared-palette" class="control-select" data-requires-minecraft>
                                         <option value="">-- None --</option>
                                     </select>
                                 </div>
                             </div>
                             <div class="effect-grid" style="margin-top: var(--spacing-sm);">
-                                <button class="effect-btn" id="btn-bitmap-flash-all">Flash All</button>
+                                <button class="effect-btn" id="btn-bitmap-flash-all" data-requires-minecraft>Flash All</button>
                             </div>
                         </section>
 
@@ -623,7 +632,7 @@
                             <h3 class="section-title">Scenes</h3>
                             <div class="scene-save-controls">
                                 <input type="text" id="scene-name-input" placeholder="Scene name..." class="scene-name-input">
-                                <button id="save-scene-btn" class="btn btn-primary">Save</button>
+                                <button id="save-scene-btn" class="btn btn-primary" data-requires-connection>Save</button>
                             </div>
                             <div id="scenes-grid" class="scenes-grid">
                                 <!-- Populated by JS -->
@@ -635,7 +644,7 @@
                             <h3 class="section-title">Particle Effects</h3>
                             <div class="control-row">
                                 <label for="particle-global-intensity">Global Intensity</label>
-                                <input type="range" id="particle-global-intensity" min="0" max="200" value="100">
+                                <input type="range" id="particle-global-intensity" min="0" max="200" value="100" data-requires-connection>
                                 <span class="control-value" id="val-particle-intensity">100%</span>
                             </div>
                             <div id="particle-effects-container">
@@ -681,7 +690,7 @@
                         <section class="mixer-section" id="zones-stage-section">
                             <div class="section-header">
                                 <h3 class="section-title">Stages & Zones</h3>
-                                <button id="btn-refresh-zones" class="btn btn-secondary btn-sm">Refresh</button>
+                                <button id="btn-refresh-zones" class="btn btn-secondary btn-sm" data-requires-connection>Refresh</button>
                             </div>
                             <div id="stage-zone-list" class="stage-zone-list">
                                 <div class="zone-empty">Loading stages...</div>
@@ -692,17 +701,17 @@
                         <section class="mixer-section" id="zones-render-mode-section">
                             <h3 class="section-title">Render Mode</h3>
                             <div class="render-mode-selector">
-                                <button class="render-mode-btn active" data-mode="entities" id="mode-entities">
+                                <button class="render-mode-btn active" data-mode="entities" id="mode-entities" data-requires-connection>
                                     <span class="mode-icon">&#x1F9CA;</span>
                                     <span class="mode-label">Display Entities</span>
                                     <span class="mode-desc">Java Edition Only</span>
                                 </button>
-                                <button class="render-mode-btn" data-mode="particles" id="mode-particles">
+                                <button class="render-mode-btn" data-mode="particles" id="mode-particles" data-requires-connection>
                                     <span class="mode-icon">&#x2728;</span>
                                     <span class="mode-label">Particles Only</span>
                                     <span class="mode-desc">Bedrock Compatible</span>
                                 </button>
-                                <button class="render-mode-btn" data-mode="hybrid" id="mode-hybrid">
+                                <button class="render-mode-btn" data-mode="hybrid" id="mode-hybrid" data-requires-connection>
                                     <span class="mode-icon">&#x1F52E;</span>
                                     <span class="mode-label">Hybrid</span>
                                     <span class="mode-desc">Both (Mixed Server)</span>
@@ -720,7 +729,7 @@
                             <div class="controls-grid">
                                 <div class="control-row">
                                     <label for="particle-viz-type">Particle Type</label>
-                                    <select id="particle-viz-type" class="control-select">
+                                    <select id="particle-viz-type" class="control-select" data-requires-connection>
                                         <option value="DUST" selected>Colored Dust</option>
                                         <option value="FLAME">Flame</option>
                                         <option value="SOUL_FIRE_FLAME">Soul Fire</option>
@@ -732,12 +741,12 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="particle-viz-density">Particle Density</label>
-                                    <input type="range" id="particle-viz-density" min="1" max="10" value="3">
+                                    <input type="range" id="particle-viz-density" min="1" max="10" value="3" data-requires-connection>
                                     <span class="control-value" id="val-particle-density">3x</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="particle-viz-color">Color Mode</label>
-                                    <select id="particle-viz-color" class="control-select">
+                                    <select id="particle-viz-color" class="control-select" data-requires-connection>
                                         <option value="frequency" selected>By Frequency Band</option>
                                         <option value="rainbow">Rainbow Cycle</option>
                                         <option value="intensity">By Intensity</option>
@@ -746,17 +755,17 @@
                                 </div>
                                 <div class="control-row hidden" id="fixed-color-row">
                                     <label for="particle-viz-fixed-color">Fixed Color</label>
-                                    <input type="color" id="particle-viz-fixed-color" value="#00ffff">
+                                    <input type="color" id="particle-viz-fixed-color" value="#00ffff" data-requires-connection>
                                 </div>
                                 <div class="control-row">
                                     <label for="particle-viz-size">Particle Size</label>
-                                    <input type="range" id="particle-viz-size" min="5" max="30" value="15">
+                                    <input type="range" id="particle-viz-size" min="5" max="30" value="15" data-requires-connection>
                                     <span class="control-value" id="val-particle-size">1.5</span>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label for="particle-viz-trail">Trail Effect</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="particle-viz-trail" aria-label="Trail Effect">
+                                        <input type="checkbox" id="particle-viz-trail" aria-label="Trail Effect" data-requires-connection>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -769,12 +778,12 @@
                             <div class="controls-grid">
                                 <div class="control-row">
                                     <label for="zone-entity-count">Entity Count</label>
-                                    <input type="range" id="zone-entity-count" min="4" max="128" value="16">
+                                    <input type="range" id="zone-entity-count" min="4" max="128" value="16" data-requires-connection>
                                     <span class="control-value" id="val-entity-count">16</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-block-type">Block Type</label>
-                                    <select id="zone-block-type" class="control-select">
+                                    <select id="zone-block-type" class="control-select" data-requires-connection>
                                         <option value="SEA_LANTERN" selected>Sea Lantern</option>
                                         <option value="GLOWSTONE">Glowstone</option>
                                         <option value="SHROOMLIGHT">Shroomlight</option>
@@ -791,12 +800,12 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-base-scale">Base Scale</label>
-                                    <input type="range" id="zone-base-scale" min="10" max="100" value="50">
+                                    <input type="range" id="zone-base-scale" min="10" max="100" value="50" data-requires-connection>
                                     <span class="control-value" id="val-base-scale">0.5</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-max-scale">Max Scale</label>
-                                    <input type="range" id="zone-max-scale" min="50" max="200" value="100">
+                                    <input type="range" id="zone-max-scale" min="50" max="200" value="100" data-requires-connection>
                                     <span class="control-value" id="val-max-scale">1.0</span>
                                 </div>
                             </div>
@@ -808,25 +817,25 @@
                             <div class="controls-grid">
                                 <div class="control-row">
                                     <label for="zone-brightness">Brightness</label>
-                                    <input type="range" id="zone-brightness" min="0" max="15" value="15">
+                                    <input type="range" id="zone-brightness" min="0" max="15" value="15" data-requires-connection>
                                     <span class="control-value" id="val-brightness">15</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-interpolation">Interpolation</label>
-                                    <input type="range" id="zone-interpolation" min="0" max="10" value="2">
+                                    <input type="range" id="zone-interpolation" min="0" max="10" value="2" data-requires-connection>
                                     <span class="control-value" id="val-interpolation">2 ticks</span>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label id="label-glow-beat">Glow on Beat</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-glow-beat" aria-label="Glow on Beat">
+                                        <input type="checkbox" id="zone-glow-beat" aria-label="Glow on Beat" data-requires-connection>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label id="label-dynamic-brightness">Dynamic Brightness</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-dynamic-brightness" aria-label="Dynamic Brightness">
+                                        <input type="checkbox" id="zone-dynamic-brightness" aria-label="Dynamic Brightness" data-requires-connection>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -840,7 +849,7 @@
                             <div class="controls-grid">
                                 <div class="control-row">
                                     <label for="band-material-0">Bass (40-250Hz)</label>
-                                    <select id="band-material-0" class="control-select band-material-select">
+                                    <select id="band-material-0" class="control-select band-material-select" data-requires-connection>
                                         <option value="">Default</option>
                                         <option value="DIAMOND_BLOCK">Diamond</option>
                                         <option value="EMERALD_BLOCK">Emerald</option>
@@ -864,7 +873,7 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="band-material-1">Low-mid (250-500Hz)</label>
-                                    <select id="band-material-1" class="control-select band-material-select">
+                                    <select id="band-material-1" class="control-select band-material-select" data-requires-connection>
                                         <option value="">Default</option>
                                         <option value="DIAMOND_BLOCK">Diamond</option>
                                         <option value="EMERALD_BLOCK">Emerald</option>
@@ -888,7 +897,7 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="band-material-2">Mid (500-2000Hz)</label>
-                                    <select id="band-material-2" class="control-select band-material-select">
+                                    <select id="band-material-2" class="control-select band-material-select" data-requires-connection>
                                         <option value="">Default</option>
                                         <option value="DIAMOND_BLOCK">Diamond</option>
                                         <option value="EMERALD_BLOCK">Emerald</option>
@@ -912,7 +921,7 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="band-material-3">High-mid (2-6kHz)</label>
-                                    <select id="band-material-3" class="control-select band-material-select">
+                                    <select id="band-material-3" class="control-select band-material-select" data-requires-connection>
                                         <option value="">Default</option>
                                         <option value="DIAMOND_BLOCK">Diamond</option>
                                         <option value="EMERALD_BLOCK">Emerald</option>
@@ -936,7 +945,7 @@
                                 </div>
                                 <div class="control-row">
                                     <label for="band-material-4">High (6-20kHz)</label>
-                                    <select id="band-material-4" class="control-select band-material-select">
+                                    <select id="band-material-4" class="control-select band-material-select" data-requires-connection>
                                         <option value="">Default</option>
                                         <option value="DIAMOND_BLOCK">Diamond</option>
                                         <option value="EMERALD_BLOCK">Emerald</option>
@@ -968,22 +977,22 @@
                             <div class="controls-grid">
                                 <div class="control-row">
                                     <label for="zone-size-x">Size X</label>
-                                    <input type="range" id="zone-size-x" min="5" max="50" value="10">
+                                    <input type="range" id="zone-size-x" min="5" max="50" value="10" data-requires-connection>
                                     <span class="control-value" id="val-size-x">10</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-size-y">Size Y</label>
-                                    <input type="range" id="zone-size-y" min="5" max="50" value="10">
+                                    <input type="range" id="zone-size-y" min="5" max="50" value="10" data-requires-connection>
                                     <span class="control-value" id="val-size-y">10</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-size-z">Size Z</label>
-                                    <input type="range" id="zone-size-z" min="5" max="50" value="10">
+                                    <input type="range" id="zone-size-z" min="5" max="50" value="10" data-requires-connection>
                                     <span class="control-value" id="val-size-z">10</span>
                                 </div>
                                 <div class="control-row">
                                     <label for="zone-rotation">Rotation</label>
-                                    <input type="range" id="zone-rotation" min="0" max="360" value="0" step="15">
+                                    <input type="range" id="zone-rotation" min="0" max="360" value="0" step="15" data-requires-connection>
                                     <span class="control-value" id="val-rotation">0&deg;</span>
                                 </div>
                             </div>
@@ -996,21 +1005,21 @@
                                 <div class="control-row toggle-row">
                                     <label id="label-show-bpm">Show BPM</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-show-bpm" aria-label="Show BPM">
+                                        <input type="checkbox" id="zone-show-bpm" aria-label="Show BPM" data-requires-connection>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label id="label-show-pattern">Show Pattern Name</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-show-pattern" aria-label="Show Pattern Name">
+                                        <input type="checkbox" id="zone-show-pattern" aria-label="Show Pattern Name" data-requires-connection>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
                                 <div class="control-row toggle-row">
                                     <label id="label-show-bands">Show Band Values</label>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="zone-show-bands" aria-label="Show Band Values">
+                                        <input type="checkbox" id="zone-show-bands" aria-label="Show Band Values" data-requires-connection>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -1021,9 +1030,9 @@
                         <section class="mixer-section" id="zone-maintenance-section">
                             <h3 class="section-title">Zone Actions</h3>
                             <div class="zone-actions">
-                                <button id="btn-reinit-pool" class="btn btn-primary">Reinitialize Pool</button>
-                                <button id="btn-cleanup-zone" class="btn btn-warning">Cleanup Zone</button>
-                                <button id="btn-reset-defaults" class="btn btn-secondary">Reset Defaults</button>
+                                <button id="btn-reinit-pool" class="btn btn-primary" data-requires-minecraft>Reinitialize Pool</button>
+                                <button id="btn-cleanup-zone" class="btn btn-warning" data-requires-minecraft>Cleanup Zone</button>
+                                <button id="btn-reset-defaults" class="btn btn-secondary" data-requires-connection>Reset Defaults</button>
                             </div>
                         </section>
                             </div>
@@ -1069,7 +1078,7 @@
                             </div>
                             <!-- Connect Code Generator -->
                             <div class="connect-code-section">
-                                <button id="btn-generate-code" class="btn btn-primary btn-full">
+                                <button id="btn-generate-code" class="btn btn-primary btn-full" data-requires-connection>
                                     Generate connect code
                                 </button>
                                 <div id="generated-code-display" class="generated-code-display hidden">
@@ -1088,7 +1097,7 @@
                             <h3 class="section-title">DJ Banner Profile</h3>
                             <div class="control-row">
                                 <label for="banner-dj-select">Select DJ</label>
-                                <select id="banner-dj-select" class="control-select">
+                                <select id="banner-dj-select" class="control-select" data-requires-connection>
                                     <option value="">-- Select DJ --</option>
                                 </select>
                             </div>
@@ -1157,8 +1166,8 @@
                                 <div class="control-row">
                                     <label for="banner-logo-file">Logo Image</label>
                                     <div class="file-upload-area">
-                                        <input type="file" id="banner-logo-file" accept="image/png,image/jpeg,image/webp" class="hidden">
-                                        <button id="btn-upload-logo" class="btn btn-secondary">Upload Logo</button>
+                                        <input type="file" id="banner-logo-file" accept="image/png,image/jpeg,image/webp" class="hidden" data-requires-connection>
+                                        <button id="btn-upload-logo" class="btn btn-secondary" data-requires-connection>Upload Logo</button>
                                         <span id="banner-logo-filename" class="file-name">No file selected</span>
                                     </div>
                                 </div>
@@ -1208,8 +1217,8 @@
                         <!-- Save/Apply -->
                         <section class="mixer-section" id="dj-save-section">
                             <div class="zone-actions">
-                                <button id="btn-save-banner-profile" class="btn btn-primary">Save Profile</button>
-                                <button id="btn-apply-banner-now" class="btn btn-secondary">Apply Now</button>
+                                <button id="btn-save-banner-profile" class="btn btn-primary" data-requires-connection>Save Profile</button>
+                                <button id="btn-apply-banner-now" class="btn btn-secondary" data-requires-minecraft>Apply Now</button>
                             </div>
                         </section>
                             </div>
@@ -1238,7 +1247,7 @@
                                     <div id="sync-controls" class="controls-grid">
                                         <div class="control-row">
                                             <label for="sync-mode">Delay Mode</label>
-                                            <select id="sync-mode" class="control-select">
+                                            <select id="sync-mode" class="control-select" data-requires-connection>
                                                 <option value="manual">Manual</option>
                                                 <option value="auto">Auto</option>
                                                 <option value="svc">Voice Chat (~80ms)</option>
@@ -1248,14 +1257,14 @@
                                         <div class="control-row" id="sync-presets-row">
                                             <label id="sync-presets-label">Quick Presets</label>
                                             <div class="sync-preset-buttons" role="group" aria-labelledby="sync-presets-label">
-                                                <button class="sync-preset-btn" data-delay="0">Local (0ms)</button>
-                                                <button class="sync-preset-btn" data-delay="80">Voice Chat</button>
-                                                <button class="sync-preset-btn" data-delay="200">Discord</button>
+                                                <button class="sync-preset-btn" data-delay="0" data-requires-connection>Local (0ms)</button>
+                                                <button class="sync-preset-btn" data-delay="80" data-requires-connection>Voice Chat</button>
+                                                <button class="sync-preset-btn" data-delay="200" data-requires-connection>Discord</button>
                                             </div>
                                         </div>
                                         <div class="control-row" id="sync-delay-row">
                                             <label for="ctrl-visual-delay">Visual Delay</label>
-                                            <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10">
+                                            <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10" data-requires-connection>
                                             <span class="control-value" id="val-visual-delay">0ms</span>
                                         </div>
                                     </div>
@@ -1267,17 +1276,18 @@
                                         <span class="sync-metric" id="metric-jitter" title="Frame jitter">Jitter: --ms</span>
                                     </div>
                                     <div class="sync-test-row">
-                                        <button id="btn-sync-test" class="btn btn-secondary btn-sync-test">Sync Test</button>
-                                        <span id="sync-test-result" class="sync-test-result"></span>
+                                        <button id="btn-sync-test" class="btn btn-secondary btn-sync-test" data-requires-connection>Sync Test</button>
+                                        <span id="sync-test-result" class="sync-test-result" role="status" aria-live="polite"></span>
                                     </div>
                                     <div class="sync-test-row">
-                                        <button id="parity-check-btn" class="btn btn-secondary btn-sync-test">Parity Check</button>
+                                        <button id="parity-check-btn" class="btn btn-secondary btn-sync-test" data-requires-minecraft>Parity Check</button>
                                     </div>
                                 </section>
 
                                 <!-- Voice Chat -->
                                 <section class="mixer-section collapsible collapsed control-surface" id="voice-chat-section">
                                     <h3 class="section-title">Voice Chat</h3>
+                                    <p id="voice-capability-reason" class="capability-reason" role="status" aria-live="polite"></p>
                                     <div class="voice-status-bar" id="voice-status-bar">
                                         <div class="voice-status-indicator" id="voice-status-indicator">
                                             <span class="voice-dot" id="voice-dot"></span>
@@ -1294,20 +1304,20 @@
                                         <div class="control-row toggle-row">
                                             <label for="voice-stream-toggle">Stream to Voice</label>
                                             <label class="toggle-switch">
-                                                <input type="checkbox" id="voice-stream-toggle" aria-label="Stream to Voice Chat">
+                                                <input type="checkbox" id="voice-stream-toggle" aria-label="Stream to Voice Chat" data-requires-voice>
                                                 <span class="toggle-slider"></span>
                                             </label>
                                         </div>
                                         <div class="control-row">
                                             <label for="voice-channel-type">Channel Type</label>
-                                            <select id="voice-channel-type" class="control-select">
+                                            <select id="voice-channel-type" class="control-select" data-requires-voice>
                                                 <option value="static">Static (Everywhere)</option>
                                                 <option value="locational">Locational (3D Spatial)</option>
                                             </select>
                                         </div>
                                         <div class="control-row hidden" id="voice-distance-row">
                                             <label for="voice-distance">Hearing Distance</label>
-                                            <input type="range" id="voice-distance" min="10" max="200" value="100">
+                                            <input type="range" id="voice-distance" min="10" max="200" value="100" data-requires-voice>
                                             <span class="control-value" id="val-voice-distance">100</span>
                                         </div>
                                     </div>
@@ -1329,6 +1339,6 @@
     <script type="module" src="js/admin-app.js"></script>
 
     <!-- Toast Notifications -->
-    <div id="toast-container" class="toast-container"></div>
+    <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
 </body>
 </html>

@@ -7,6 +7,19 @@
   font-family: var(--mcav-font-body);
 }
 
+.visually-hidden {
+  position: absolute !important;
+  inline-size: 1px !important;
+  block-size: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 #header.command-bar {
   position: fixed;
   inset: 0 0 auto;
@@ -128,6 +141,29 @@
 .command-emergency .perf-shortcut {
   color: currentColor;
   opacity: 0.58;
+}
+
+.command-emergency {
+  position: relative;
+}
+
+.command-availability {
+  position: absolute;
+  top: calc(100% + var(--mcav-space-2));
+  right: 0;
+  width: max-content;
+  max-width: 22rem;
+  padding: var(--mcav-space-2) var(--mcav-space-3);
+  color: var(--mcav-state-warning);
+  background: rgba(15, 17, 24, 0.98);
+  border: 1px solid rgba(255, 209, 102, 0.28);
+  border-radius: var(--mcav-radius-sm);
+  box-shadow: var(--mcav-elevation-2, 0 12px 28px rgba(0, 0, 0, 0.32));
+  font: 500 0.68rem/1.4 var(--mcav-font-body);
+}
+
+.command-availability:empty {
+  display: none;
 }
 
 .header-title-group h1,
@@ -299,6 +335,7 @@ html[data-workspace="live"] #work-area.workspace-stage {
 }
 
 .live-workspace {
+  position: relative;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   grid-template-rows: minmax(20rem, 1fr) minmax(13rem, 0.68fr) 6.75rem;
   grid-template-areas:
@@ -314,6 +351,78 @@ html[data-workspace="live"] #work-area.workspace-stage {
   padding: var(--mcav-space-3);
   overflow: hidden;
   box-sizing: border-box;
+}
+
+[data-stale="true"] {
+  filter: saturate(0.55);
+}
+
+.live-workspace[data-stale="true"]::after {
+  content: "Last known state";
+  position: absolute;
+  z-index: 8;
+  top: var(--mcav-space-4);
+  left: 50%;
+  translate: -50% 0;
+  padding: 0.38rem 0.68rem;
+  color: var(--mcav-state-warning);
+  background: rgba(15, 17, 24, 0.94);
+  border: 1px solid rgba(255, 209, 102, 0.36);
+  border-radius: 999px;
+  font: 600 0.65rem/1 var(--mcav-font-data);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+#app[data-connection-state="stale"] .command-bar {
+  border-bottom-color: rgba(255, 209, 102, 0.34);
+}
+
+[data-ui-state="loading"] {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+[data-ui-state="unavailable"] {
+  opacity: 0.62;
+}
+
+[data-ui-state="error"] {
+  border-color: var(--mcav-state-danger) !important;
+}
+
+.capability-reason {
+  margin: 0 0 var(--mcav-space-2);
+  color: var(--mcav-state-warning);
+  font: 500 0.68rem/1.4 var(--mcav-font-body);
+}
+
+.capability-reason:empty {
+  display: none;
+}
+
+#preview-strip {
+  position: relative;
+}
+
+#preview-capability-reason:not(:empty) {
+  position: absolute;
+  z-index: 6;
+  inset: auto var(--mcav-space-3) var(--mcav-space-3);
+  max-width: 26rem;
+  margin: 0;
+  padding: var(--mcav-space-2) var(--mcav-space-3);
+  background: rgba(15, 17, 24, 0.94);
+  border: 1px solid currentColor;
+  border-radius: var(--mcav-radius-sm);
+}
+
+[data-requires-connection]:disabled,
+[data-requires-minecraft]:disabled,
+[data-requires-voice]:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .live-output,
@@ -898,12 +1007,21 @@ html[data-workspace="system"] .context-preview {
 }
 
 @media (max-width: 1599px) {
-  #header.command-bar {
-    grid-template-columns: auto minmax(18rem, 1fr) auto;
+  :root {
+    --mcav-rail-width: 4.25rem;
   }
 
-  .command-health {
+  #header.command-bar {
+    grid-template-columns: minmax(12rem, auto) minmax(16rem, 1fr) minmax(19rem, auto) auto;
+  }
+
+  .telemetry-secondary {
     display: none;
+  }
+
+  .command-dj-summary {
+    min-width: 8rem;
+    max-width: 10rem;
   }
 
   .pattern-library-grid {
@@ -912,8 +1030,54 @@ html[data-workspace="system"] .context-preview {
 }
 
 @media (max-width: 1279px) {
+  :root {
+    --mcav-command-height: 6.75rem;
+  }
+
+  #header.command-bar {
+    grid-template-columns: minmax(12rem, auto) minmax(0, 1fr) auto;
+    grid-template-rows: 3rem 3rem;
+  }
+
+  .command-identity {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .command-health {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-end;
+  }
+
+  .command-emergency {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .command-context {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .workspace-nav-label {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .live-workspace {
+    grid-template-rows: minmax(18rem, 1fr) minmax(13rem, 0.75fr) 6.5rem;
+  }
+
+  .audio-strip #effect-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .config-grid {
-    grid-template-columns: 9rem minmax(0, 1fr);
+    grid-template-columns: 4rem minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
@@ -948,18 +1112,57 @@ html[data-workspace="system"] .context-preview {
 
 @media (max-width: 899px) {
   :root {
-    --mcav-command-height: 7rem;
+    --mcav-command-height: 13rem;
     --mcav-rail-width: 4rem;
   }
 
   #header.command-bar {
+    position: relative;
     grid-template-columns: 1fr auto;
-    grid-template-rows: 3rem 3rem;
+    grid-template-rows: repeat(4, 3rem);
+  }
+
+  #main-content.control-shell {
+    display: block;
+    flex: none;
+    height: auto;
+    min-height: 0;
+    padding-top: 0;
+    overflow: visible;
+  }
+
+  .workspace-rail {
+    position: sticky;
+    inset: 0 0 auto;
+    z-index: 39;
+    display: flex;
+    flex-direction: row;
+    width: auto;
+    height: 3.75rem;
+    padding: var(--mcav-space-1) var(--mcav-space-2);
+    border-right: 0;
+    border-bottom: 1px solid var(--mcav-border-subtle);
+  }
+
+  .workspace-rail button {
+    flex: 1 1 0;
+    min-height: 3rem;
+  }
+
+  #work-area.workspace-stage {
+    height: auto;
+    margin-left: 0;
   }
 
   .command-context {
     grid-column: 1 / -1;
+    grid-row: 4;
+  }
+
+  .command-emergency {
+    grid-column: 1 / -1;
     grid-row: 2;
+    justify-self: end;
   }
 
   .workspace-rail button > span:last-child {
@@ -1056,7 +1259,7 @@ html[data-workspace="system"] .context-preview {
 
   .workspace-rail {
     position: sticky;
-    top: var(--mcav-command-height);
+    top: 0;
     right: 0;
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -1076,11 +1279,12 @@ html[data-workspace="system"] .context-preview {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workspace-rail button,
-  .pattern-btn,
-  .effect-btn,
-  .transition-status {
-    transition: none;
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

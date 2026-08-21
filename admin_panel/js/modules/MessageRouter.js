@@ -20,6 +20,12 @@ export class MessageRouter {
             case 'vj_state':
                 app.patterns.handlePatterns(data);
                 app.dj.handleDJRoster(data);
+                if (data.blackout !== undefined) {
+                    app.actions.setBlackoutState(data.blackout);
+                }
+                if (data.freeze !== undefined) {
+                    app.actions.setFreezeState(data.freeze);
+                }
                 if (data.current_pattern) {
                     app.state.currentPattern = data.current_pattern;
                     app.patterns.updatePatternDisplay();

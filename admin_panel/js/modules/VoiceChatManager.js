@@ -79,6 +79,7 @@ export class VoiceChatManager {
     handleVoiceStatus(data) {
         const wasStreaming = this.state.voiceChat.streaming;
 
+        this.state.voiceChat.statusReceived = true;
         this.state.voiceChat.available = data.available || false;
         this.state.voiceChat.streaming = data.streaming || false;
         this.state.voiceChat.connectedPlayers = data.connected_players || 0;
@@ -92,6 +93,7 @@ export class VoiceChatManager {
         }
 
         this.updateVoiceChatUI();
+        this.app.ui.applyControlState();
 
         if (data.streaming && !wasStreaming) {
             this.app.ui.showToast('Voice chat streaming started', 'success');

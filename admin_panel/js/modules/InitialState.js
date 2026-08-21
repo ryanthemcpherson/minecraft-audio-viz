@@ -66,6 +66,7 @@ export function createInitialState() {
         bandMaterials: [null, null, null, null, null],
         bandMaterialsSource: 'default',
         voiceChat: {
+            statusReceived: false,
             available: false,
             streaming: false,
             enabled: false,

@@ -46,6 +46,7 @@ export function setupConnectionLifecycle(app) {
         app.ui.setConnectionStatus('disconnected');
         app.ui.updateServiceIndicators();
         app.connectCodes.resetGenerateButton();
+        app.ui.applyControlState?.();
     });
 
     app.ws.addEventListener('auth_failed', (event) => {
@@ -59,7 +60,10 @@ export function setupConnectionLifecycle(app) {
         app.onAuthRequired();
     });
 
-    app.ws.addEventListener('error', () => {
+    app.ws.addEventListener('error', (event) => {
+        // WebSocketService also emits message-type events. A server payload
+        // named "error" describes a rejected command, not a transport drop.
+        if (event.detail?.type === 'error') return;
         app.ui.setConnectionStatus('error');
     });
 

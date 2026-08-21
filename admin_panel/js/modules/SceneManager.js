@@ -47,18 +47,28 @@ export class SceneManager {
             card.className = `scene-card${isActive ? ' active' : ''}${isBuiltIn ? ' built-in' : ''}`;
             card.dataset.scene = scene.name;
 
+            const launchButton = document.createElement('button');
+            launchButton.type = 'button';
+            launchButton.className = 'scene-card-launch';
+            launchButton.dataset.scene = scene.name;
+            launchButton.dataset.requiresConnection = '';
+            launchButton.setAttribute('aria-label', `Launch ${scene.name}`);
+
             if (!isBuiltIn) {
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'scene-card-delete';
                 deleteBtn.dataset.scene = scene.name;
                 deleteBtn.textContent = '\u00d7';
+                deleteBtn.type = 'button';
+                deleteBtn.dataset.requiresConnection = '';
+                deleteBtn.setAttribute('aria-label', `Delete ${scene.name}`);
                 card.appendChild(deleteBtn);
             }
 
             const nameDiv = document.createElement('div');
             nameDiv.className = 'scene-card-name';
             nameDiv.textContent = scene.name;
-            card.appendChild(nameDiv);
+            launchButton.appendChild(nameDiv);
 
             const detailsDiv = document.createElement('div');
             detailsDiv.className = 'scene-card-details';
@@ -72,16 +82,15 @@ export class SceneManager {
             infoDiv.textContent = `${scene.preset} \u00b7 ${scene.entity_count} blocks`;
             detailsDiv.appendChild(infoDiv);
 
-            card.appendChild(detailsDiv);
+            launchButton.appendChild(detailsDiv);
+            card.appendChild(launchButton);
             this.elements.scenesGrid.appendChild(card);
         });
 
-        // Add click handlers for scene cards
-        this.elements.scenesGrid.querySelectorAll('.scene-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                if (!e.target.classList.contains('scene-card-delete')) {
-                    this.loadScene(card.dataset.scene);
-                }
+        // Native launch buttons preserve keyboard activation and a single action.
+        this.elements.scenesGrid.querySelectorAll('.scene-card-launch').forEach(button => {
+            button.addEventListener('click', () => {
+                this.loadScene(button.dataset.scene);
             });
         });
 
@@ -92,5 +101,7 @@ export class SceneManager {
                 this.deleteScene(btn.dataset.scene);
             });
         });
+
+        this.app.ui?.applyControlState?.();
     }
 }

@@ -196,6 +196,7 @@ test('launching a pattern sends one action and records recency', () => {
   }, ({ manager, grid, sent }) => {
     manager.renderPatternGrid();
     const launch = descendants(grid).find((node) => node.dataset.pattern === 'helix');
+    assert.equal(Object.hasOwn(launch.dataset, 'requiresConnection'), true);
     launch.dispatch('click');
 
     assert.deepEqual(sent, [{ type: 'set_pattern', pattern: 'helix' }]);

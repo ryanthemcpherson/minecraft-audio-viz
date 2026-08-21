@@ -4,6 +4,7 @@
  */
 
 import { ModalDialog } from '../ui/ModalDialog.js';
+import { deriveControlState } from '../utils/control-state.js';
 import { debounce } from '../utils/debounce.js';
 
 const editableTags = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
@@ -14,6 +15,9 @@ export class UIHelpers {
         this.state = app.state;
         this.ws = app.ws;
         this.elements = app.elements;
+        if (typeof document !== 'undefined') {
+            this.applyControlState();
+        }
     }
 
     // === Toast Notification System ===
@@ -52,7 +56,7 @@ export class UIHelpers {
 
     setConnectionStatus(status, attempt = 0, maxAttempts = 10) {
         const el = this.elements.connectionStatus;
-        el.className = `status ${status}`;
+        if (el) el.className = `status ${status}`;
 
         let statusText;
         if (status === 'connecting' && attempt > 0) {
@@ -68,11 +72,14 @@ export class UIHelpers {
             statusText = statusTexts[status] || status;
         }
 
-        el.textContent = statusText;
+        if (el) el.textContent = statusText;
 
         // Show/hide reconnect button
         if (this.elements.btnReconnect) {
-            this.elements.btnReconnect.classList.toggle('hidden', status !== 'failed');
+            const reconnectAvailable = ['disconnected', 'error', 'failed'].includes(status);
+            this.elements.btnReconnect.classList.toggle('hidden', !reconnectAvailable);
+            this.elements.btnReconnect.disabled = false;
+            this.elements.btnReconnect.setAttribute('aria-disabled', 'false');
         }
 
         // Update service indicators
@@ -101,16 +108,132 @@ export class UIHelpers {
                     : 'Minecraft';
             }
         }
+
+        this.applyControlState();
+    }
+
+    applyControlState() {
+        const presentation = deriveControlState(this.state);
+        const root = document.getElementById('app');
+        if (root) root.dataset.connectionState = presentation.connectionState;
+
+        this._setControlGroupDisabled(
+            '[data-requires-connection]',
+            presentation.disableNetworkControls,
+        );
+        this._setControlGroupDisabled(
+            '[data-requires-minecraft]',
+            presentation.disableMinecraftControls,
+        );
+        this._setControlGroupDisabled(
+            '[data-requires-voice]',
+            !this.state.connected || !this.state.voiceChat?.available,
+        );
+
+        for (const container of document.querySelectorAll('[data-last-known-state]')) {
+            container.dataset.stale = String(presentation.connectionState === 'stale');
+        }
+
+        const staleStatus = document.getElementById('last-known-state-status');
+        if (staleStatus) {
+            staleStatus.textContent = presentation.connectionState === 'stale'
+                ? 'Last known show state'
+                : '';
+        }
+
+        const emergencyReason = document.getElementById('emergency-control-reason');
+        if (emergencyReason) {
+            if (!this.state.connected) {
+                emergencyReason.textContent = 'Blackout and freeze are unavailable while the VJ server is disconnected.';
+            } else if (!this.state.minecraftConnected) {
+                emergencyReason.textContent = 'Minecraft output is unavailable; server commands remain available.';
+            } else {
+                emergencyReason.textContent = '';
+            }
+        }
+
+        const capabilityStatus = document.getElementById('capability-status');
+        if (capabilityStatus) {
+            capabilityStatus.textContent = !this.state.connected
+                ? 'Server capabilities unavailable until reconnection.'
+                : (!this.state.minecraftConnected
+                    ? 'Minecraft capabilities unavailable; VJ server controls remain available.'
+                    : 'Server and Minecraft capabilities available.');
+        }
+
+        this._applyCapabilityStates();
+    }
+
+    _setControlGroupDisabled(selector, disabled) {
+        for (const element of document.querySelectorAll(selector)) {
+            if (disabled) {
+                if (!element.disabled || element.dataset.controlStateDisabled === 'true') {
+                    element.dataset.controlStateDisabled = 'true';
+                }
+                element.disabled = true;
+                element.setAttribute('aria-disabled', 'true');
+                if (!element.getAttribute('aria-describedby')) {
+                    element.setAttribute('aria-describedby', 'capability-status');
+                    element.dataset.controlStateDescription = 'true';
+                }
+            } else if (element.dataset.controlStateDisabled === 'true') {
+                element.disabled = false;
+                element.setAttribute('aria-disabled', 'false');
+                delete element.dataset.controlStateDisabled;
+                if (element.dataset.controlStateDescription === 'true') {
+                    element.removeAttribute('aria-describedby');
+                    delete element.dataset.controlStateDescription;
+                }
+            }
+        }
+    }
+
+    _setCapabilityState(elementId, reasonId, state, message) {
+        const element = document.getElementById(elementId);
+        const reason = document.getElementById(reasonId);
+        if (element) {
+            element.dataset.uiState = state;
+            element.setAttribute('aria-busy', String(state === 'loading'));
+        }
+        if (reason) reason.textContent = message;
+    }
+
+    _applyCapabilityStates() {
+        const serverAvailable = Boolean(this.state.connected);
+        const minecraftAvailable = serverAvailable && Boolean(this.state.minecraftConnected);
+
+        const bitmapState = !minecraftAvailable
+            ? 'unavailable'
+            : (this.state.bitmap?.dataFetched ? 'available' : 'loading');
+        const bitmapReason = !serverAvailable
+            ? 'Connect to the VJ server to load bitmap controls.'
+            : (!this.state.minecraftConnected
+                ? 'Minecraft is not connected, so bitmap output is unavailable.'
+                : (bitmapState === 'loading' ? 'Loading bitmap capabilities…' : ''));
+        this._setCapabilityState('ledwall-section', 'bitmap-capability-reason', bitmapState, bitmapReason);
+
+        const voiceStatusReceived = Boolean(this.state.voiceChat?.statusReceived);
+        const voiceState = !serverAvailable
+            ? 'unavailable'
+            : (!voiceStatusReceived ? 'loading' : (this.state.voiceChat?.available ? 'available' : 'unavailable'));
+        const voiceReason = !serverAvailable
+            ? 'Connect to the VJ server to check voice chat.'
+            : (!voiceStatusReceived
+                ? 'Checking voice chat capability…'
+                : (this.state.voiceChat?.available ? '' : 'Voice chat is not available on this Minecraft server.'));
+        this._setCapabilityState('voice-chat-section', 'voice-capability-reason', voiceState, voiceReason);
+
+        const previewFailed = Boolean(this.app.preview?.previewFailed);
+        const previewInitialized = Boolean(this.app.preview?.previewInitialized);
+        const previewState = previewFailed ? 'error' : (previewInitialized ? 'available' : 'loading');
+        const previewReason = previewFailed
+            ? 'Live preview failed to initialize. Show controls remain available.'
+            : (previewInitialized ? '' : 'Loading live preview…');
+        this._setCapabilityState('preview-strip', 'preview-capability-reason', previewState, previewReason);
     }
 
     updateMCDependentControls() {
-        const mcDependent = [this.elements.btnReinitPool, this.elements.btnCleanupZone];
-        mcDependent.forEach(btn => {
-            if (btn) {
-                btn.disabled = !this.state.minecraftConnected;
-                btn.title = this.state.minecraftConnected ? '' : 'Minecraft not connected';
-            }
-        });
+        this.applyControlState();
     }
 
     // === Tab Switching ===
@@ -161,12 +284,16 @@ export class UIHelpers {
         switch (e.key) {
             case 'b':
             case 'B':
-                this.app.actions.toggleBlackout();
+                if (!this.elements.btnBlackout?.disabled) {
+                    this.app.actions.toggleBlackout();
+                }
                 break;
 
             case 'f':
             case 'F':
-                this.app.actions.toggleFreeze();
+                if (!this.elements.btnFreeze?.disabled) {
+                    this.app.actions.toggleFreeze();
+                }
                 break;
 
             case 't':

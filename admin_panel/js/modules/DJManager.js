@@ -158,6 +158,7 @@ export class DJManager {
             }
             if (!isActive) {
                 const goLiveBtn = document.createElement('button');
+                goLiveBtn.dataset.requiresConnection = '';
                 goLiveBtn.className = 'btn btn-go-live';
                 goLiveBtn.dataset.action = 'activate';
                 goLiveBtn.dataset.dj = dj.dj_id;
@@ -171,6 +172,7 @@ export class DJManager {
 
             if (index > 0) {
                 const upBtn = document.createElement('button');
+                upBtn.dataset.requiresConnection = '';
                 upBtn.className = 'btn btn-queue-move';
                 upBtn.dataset.action = 'move_up';
                 upBtn.dataset.dj = dj.dj_id;
@@ -181,6 +183,7 @@ export class DJManager {
             }
             if (index < this.state.djRoster.length - 1) {
                 const downBtn = document.createElement('button');
+                downBtn.dataset.requiresConnection = '';
                 downBtn.className = 'btn btn-queue-move';
                 downBtn.dataset.action = 'move_down';
                 downBtn.dataset.dj = dj.dj_id;
@@ -191,6 +194,7 @@ export class DJManager {
             }
 
             const kickBtn = document.createElement('button');
+            kickBtn.dataset.requiresConnection = '';
             kickBtn.className = 'btn btn-kick';
             kickBtn.dataset.action = 'kick';
             kickBtn.dataset.dj = dj.dj_id;
@@ -353,12 +357,14 @@ export class DJManager {
             actions.className = 'dj-pending-actions';
 
             const approveBtn = document.createElement('button');
+            approveBtn.dataset.requiresConnection = '';
             approveBtn.className = 'btn btn-approve';
             approveBtn.dataset.action = 'approve';
             approveBtn.dataset.dj = dj.dj_id;
             approveBtn.textContent = 'Approve';
 
             const denyBtn = document.createElement('button');
+            denyBtn.dataset.requiresConnection = '';
             denyBtn.className = 'btn btn-deny';
             denyBtn.dataset.action = 'deny';
             denyBtn.dataset.dj = dj.dj_id;
