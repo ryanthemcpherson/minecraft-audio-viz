@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import socketserver
+import ssl
 import sys
 import time
 import urllib.parse
@@ -815,7 +816,23 @@ class MultiDirectoryHandler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRe
         pass
 
 
-def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
+def build_server_ssl_context(
+    cert_path: str | Path,
+    key_path: str | Path,
+) -> ssl.SSLContext:
+    """Build a TLS server context from an existing certificate and key."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    return context
+
+
+def run_http_server(
+    port: int,
+    directory: str,
+    host: str = "127.0.0.1",
+    ssl_context: ssl.SSLContext | None = None,
+) -> None:
     """Run HTTP server for admin panel."""
     host = validate_http_bind_host(host)
 
@@ -837,6 +854,8 @@ def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
 
     try:
         with ReusableTCPServer((host, port), handler_cls) as httpd:
+            if ssl_context is not None:
+                httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
             httpd.serve_forever()
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")

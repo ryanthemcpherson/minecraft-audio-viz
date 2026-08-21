@@ -14,6 +14,8 @@ from typing import Iterator
 import pytest
 
 import vj_server.models as models
+import vj_server.vj_server as vj_server_module
+from vj_server import cli as cli_module
 from vj_server.cli import vj_server as modern_cli_main
 from vj_server.models import (
     _REJECTED_STATIC_PATH,
@@ -451,6 +453,145 @@ def test_http_server_passes_explicit_wildcard_host_to_bind(
     run_http_server(4321, str(tmp_path), "0.0.0.0")
 
     assert bind_attempts == [("0.0.0.0", 4321)]
+
+
+def test_http_server_wraps_listener_with_supplied_ssl_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_socket = object()
+    wrapped_socket = object()
+    wrap_calls: list[tuple[object, bool]] = []
+
+    class CapturingTCPServer:
+        def __init__(self, server_address, handler_class):
+            self.socket = original_socket
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def serve_forever(self):
+            pass
+
+    class FakeSSLContext:
+        def wrap_socket(self, socket, *, server_side):
+            wrap_calls.append((socket, server_side))
+            return wrapped_socket
+
+    monkeypatch.setattr(models.socketserver, "TCPServer", CapturingTCPServer)
+
+    run_http_server(
+        4321,
+        str(tmp_path),
+        "127.0.0.1",
+        ssl_context=FakeSSLContext(),
+    )
+
+    assert wrap_calls == [(original_socket, True)]
+
+
+@pytest.mark.parametrize(
+    ("tls_cert", "tls_key"),
+    [("cert.pem", None), (None, "key.pem")],
+)
+def test_vj_server_rejects_incomplete_tls_pair(tls_cert, tls_key) -> None:
+    with pytest.raises(ValueError, match="TLS certificate and key"):
+        VJServer(tls_cert=tls_cert, tls_key=tls_key)
+
+
+def test_vj_server_uses_explicit_project_root(tmp_path: Path) -> None:
+    server = VJServer(project_root=tmp_path)
+
+    assert server.project_root == tmp_path.resolve()
+
+
+def test_modern_cli_propagates_secure_listener_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    auth_file.write_text('{"djs": {}, "vj_operators": {}}', encoding="utf-8")
+    cert_file = tmp_path / "tls.crt"
+    key_file = tmp_path / "tls.key"
+    cert_file.touch()
+    key_file.touch()
+    captured: dict = {}
+
+    class FakeVJServer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def stop(self):
+            pass
+
+    def discard_coroutine(coroutine):
+        coroutine.close()
+
+    monkeypatch.setattr(vj_server_module, "VJServer", FakeVJServer)
+    monkeypatch.setattr(cli_module.asyncio, "run", discard_coroutine)
+    monkeypatch.setattr(cli_module.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--auth-file",
+            str(auth_file),
+            "--http-port",
+            "18443",
+            "--project-root",
+            str(tmp_path),
+            "--tls-cert",
+            str(cert_file),
+            "--tls-key",
+            str(key_file),
+        ],
+    )
+
+    assert modern_cli_main() == 0
+    assert captured["http_port"] == 18443
+    assert captured["project_root"] == tmp_path
+    assert captured["tls_cert"] == cert_file
+    assert captured["tls_key"] == key_file
+
+
+@pytest.mark.asyncio
+async def test_vj_server_passes_tls_context_to_browser_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ssl_context = object()
+    listener_calls: list[dict] = []
+
+    class FakeWebSocketServer:
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    async def capture_listener(*args, **kwargs):
+        listener_calls.append(kwargs)
+        return FakeWebSocketServer()
+
+    async def no_op():
+        pass
+
+    server = VJServer(http_port=0, metrics_port=None, show_spectrograph=False)
+    server.server_ssl_context = ssl_context
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+    monkeypatch.setattr(vj_server_module, "ws_serve", capture_listener)
+
+    await server.run()
+
+    assert listener_calls[0].get("ssl") is None
+    assert listener_calls[1]["ssl"] is ssl_context
 
 
 def test_http_server_does_not_serve_project_files_when_ui_assets_are_missing(
