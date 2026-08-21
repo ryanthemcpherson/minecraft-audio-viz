@@ -1081,7 +1081,11 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             logger.error("Another instance may be running. Kill it or use a different port.")
             return None, None
 
-        http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+        http_thread = threading.Thread(
+            target=http_server.serve_forever,
+            daemon=True,
+            name="legacy-http-server",
+        )
         try:
             http_thread.start()
         except BaseException:
@@ -1093,62 +1097,46 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
         return http_server, http_thread
 
-    async def _run_bounded_legacy_http_action(
-        self,
-        step_name: str,
-        action: Any,
-        *,
-        timeout: float,
-    ) -> None:
-        """Run one cleanup action off-loop without retaining a stuck executor worker."""
+    async def _stop_legacy_http_thread(self, http_server: Any, http_thread: Any) -> None:
+        """Stop legacy HTTP resources with one sequential off-loop owner."""
         completed = threading.Event()
-        failures: list[Exception] = []
+        failures: list[tuple[str, Exception]] = []
+        cleanup_steps = (
+            ("shutdown", http_server.shutdown),
+            ("server close", http_server.server_close),
+            ("thread join", http_thread.join),
+        )
 
-        def run_action() -> None:
+        def clean_up() -> None:
             try:
-                action()
-            except Exception as exc:
-                failures.append(exc)
+                for step_name, action in cleanup_steps:
+                    try:
+                        action()
+                    except Exception as exc:
+                        failures.append((step_name, exc))
             finally:
                 completed.set()
 
-        action_thread = threading.Thread(target=run_action, daemon=True)
-        try:
-            action_thread.start()
-        except Exception as exc:
-            logger.warning("Legacy HTTP %s could not start: %s", step_name, exc)
-            return
-
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        while not completed.is_set():
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                logger.warning("Legacy HTTP %s timed out after %.1fs", step_name, timeout)
-                return
-            await asyncio.sleep(min(0.01, remaining))
-
-        action_thread.join(timeout=0.0)
-        if failures:
-            logger.warning("Legacy HTTP %s failed: %s", step_name, failures[0])
-
-    async def _stop_legacy_http_thread(self, http_server: Any, http_thread: Any) -> None:
-        """Stop the legacy HTTP listener and bound its daemon-thread teardown."""
-        timeout = 5.0
-        cleanup_steps = (
-            ("shutdown", http_server.shutdown, timeout),
-            ("server close", http_server.server_close, timeout),
-            ("thread join", lambda: http_thread.join(timeout=timeout), timeout + 0.5),
+        cleanup_thread = threading.Thread(
+            target=clean_up,
+            daemon=False,
+            name="legacy-http-cleanup",
         )
-        for step_name, action, step_timeout in cleanup_steps:
-            await self._run_bounded_legacy_http_action(
-                step_name,
-                action,
-                timeout=step_timeout,
-            )
+        cleanup_thread.start()
 
-        if http_thread.is_alive():
-            logger.warning("Legacy HTTP thread did not stop within %.1fs", timeout)
+        cancellation_requested = False
+        while not completed.is_set():
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                cancellation_requested = True
+
+        cleanup_thread.join()
+        for step_name, exc in failures:
+            logger.warning("Legacy HTTP %s failed: %s", step_name, exc)
+
+        if cancellation_requested:
+            raise asyncio.CancelledError()
 
     async def run(self):
         """Start the VJ server."""
