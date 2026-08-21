@@ -47,7 +47,9 @@ EXPECTED_ELF_MACHINES = {
     "mcav-vj/bin/linux-arm64/python/bin/python3.12": 183,
 }
 FORBIDDEN_PATH = re.compile(
-    r"(^|/)(node_modules|\.git|\.venv|__pycache__|tests?)(/|$)|\.(pyc|pyo)$"
+    r"(^|/)(node_modules|\.git|\.venv|__pycache__|tests?)(/|$)"
+    r"|\.(pyc|pyo)$|(^|/)[^/]+\.(test|spec)\.[^/]+$",
+    re.IGNORECASE,
 )
 FORBIDDEN_ENTRIES = {
     "mcav-vj/state/dj_auth.json",
