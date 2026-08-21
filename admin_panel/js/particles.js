@@ -78,7 +78,7 @@ class ParticleSystem {
         this.alphas = new Float32Array(maxParticles);
 
         this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-        this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+        this.geometry.setAttribute('particleColor', new THREE.BufferAttribute(this.colors, 3));
         this.geometry.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
 
         // Custom shader material for better particle rendering
@@ -88,12 +88,12 @@ class ParticleSystem {
             },
             vertexShader: `
                 attribute float size;
-                attribute vec3 color;
+                attribute vec3 particleColor;
                 varying vec3 vColor;
                 varying float vAlpha;
 
                 void main() {
-                    vColor = color;
+                    vColor = particleColor;
                     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
                     gl_PointSize = size * (300.0 / -mvPosition.z);
                     gl_Position = projectionMatrix * mvPosition;
@@ -112,7 +112,7 @@ class ParticleSystem {
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             transparent: true,
-            vertexColors: true
+            vertexColors: false
         });
 
         this.points = new THREE.Points(this.geometry, this.material);
@@ -307,7 +307,7 @@ class ParticleSystem {
         }
 
         this.geometry.attributes.position.needsUpdate = true;
-        this.geometry.attributes.color.needsUpdate = true;
+        this.geometry.attributes.particleColor.needsUpdate = true;
         this.geometry.attributes.size.needsUpdate = true;
     }
 
