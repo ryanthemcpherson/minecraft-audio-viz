@@ -150,6 +150,21 @@ class VoiceStatusRendererClient:
         return self.response
 
 
+class VoiceConfigRendererClient:
+    connected = True
+
+    def __init__(self, response=None, error: Exception | None = None):
+        self.response = response
+        self.error = error
+
+    async def send_voice_config(self, config: dict):
+        assert config["type"] == "voice_config"
+        assert config["enabled"] is True
+        if self.error:
+            raise self.error
+        return self.response
+
+
 class InterleavedVisibilityRendererClient:
     connected = True
 
@@ -343,6 +358,103 @@ async def test_voice_status_failures_return_bounded_schema_valid_errors(
         "error": expected_error,
     }
     assert "renderer-token" not in json.dumps(result)
+    assert_voice_status_schema(result)
+
+
+@pytest.mark.asyncio
+async def test_voice_config_status_is_rebuilt_and_private_renderer_fields_are_stripped():
+    relay = EmergencyRelay()
+    relay.viz_client = VoiceConfigRendererClient(
+        {
+            "type": "voice_status",
+            "available": True,
+            "streaming": True,
+            "channel_type": "locational",
+            "connected_players": 7,
+            "buffer_size": 4096,
+            "distance": 64.0,
+            "zone": "main",
+            "_seq": 91,
+            "renderer_secret": "must-not-cross-boundary",
+        }
+    )
+    websocket = BrowserSocket([{"type": "voice_config", "enabled": True}])
+
+    await relay._handle_browser_client(websocket)
+
+    result = websocket.sent[-1]
+    assert result == {
+        "type": "voice_status",
+        "available": True,
+        "streaming": True,
+        "channel_type": "locational",
+        "connected_players": 7,
+    }
+    assert "renderer_secret" not in json.dumps(result)
+    assert_voice_status_schema(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "exception", "expected_error"),
+    [
+        (
+            {"type": "error", "message": "renderer-token=do-not-leak", "_seq": 1},
+            None,
+            "Minecraft rejected the voice status request.",
+        ),
+        (
+            {"type": "voice_status", "available": "yes", "buffer_size": 4096},
+            None,
+            "Minecraft returned an invalid voice status.",
+        ),
+        ("not-a-status", None, "Minecraft returned an invalid voice status."),
+        (None, None, "Minecraft voice status timed out."),
+        (
+            None,
+            RuntimeError("renderer-token=do-not-leak"),
+            "Minecraft voice configuration failed.",
+        ),
+    ],
+)
+async def test_voice_config_failures_return_bounded_schema_valid_status(
+    response, exception, expected_error
+):
+    relay = EmergencyRelay()
+    relay.viz_client = VoiceConfigRendererClient(response, exception)
+    websocket = BrowserSocket([{"type": "voice_config", "enabled": True}])
+
+    await relay._handle_browser_client(websocket)
+
+    result = websocket.sent[-1]
+    assert result == {
+        "type": "voice_status",
+        "available": False,
+        "streaming": False,
+        "channel_type": "static",
+        "connected_players": 0,
+        "error": expected_error,
+    }
+    assert "renderer-token" not in json.dumps(result)
+    assert_voice_status_schema(result)
+
+
+@pytest.mark.asyncio
+async def test_voice_config_without_renderer_returns_bounded_schema_valid_status():
+    relay = EmergencyRelay()
+    websocket = BrowserSocket([{"type": "voice_config", "enabled": True}])
+
+    await relay._handle_browser_client(websocket)
+
+    result = websocket.sent[-1]
+    assert result == {
+        "type": "voice_status",
+        "available": False,
+        "streaming": False,
+        "channel_type": "static",
+        "connected_players": 0,
+        "error": "Minecraft voice service is unavailable.",
+    }
     assert_voice_status_schema(result)
 
 
