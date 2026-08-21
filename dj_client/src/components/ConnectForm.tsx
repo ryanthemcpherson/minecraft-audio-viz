@@ -20,6 +20,9 @@ interface ConnectFormProps {
   onServerHostChange: (host: string) => void;
   serverPort: number;
   onServerPortChange: (port: number) => void;
+  tlsFingerprint: string;
+  onTlsFingerprintChange: (fingerprint: string) => void;
+  isTlsFingerprintValid: boolean;
   error: string | null;
   isConnecting: boolean;
   djName: string;
@@ -39,6 +42,9 @@ export default function ConnectForm({
   onServerHostChange,
   serverPort,
   onServerPortChange,
+  tlsFingerprint,
+  onTlsFingerprintChange,
+  isTlsFingerprintValid,
   error,
   isConnecting,
   djName,
@@ -86,12 +92,51 @@ export default function ConnectForm({
         </div>
       )}
 
+      <div className="field-group">
+        <label className="field-label" htmlFor="tls-fingerprint">
+          Server certificate SHA-256 fingerprint
+        </label>
+        <input
+          id="tls-fingerprint"
+          type="text"
+          className="input input-sm"
+          style={{ fontFamily: 'var(--font-mono)' }}
+          value={tlsFingerprint}
+          onChange={e => onTlsFingerprintChange(e.target.value)}
+          placeholder="64 hexadecimal characters"
+          maxLength={95}
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          aria-describedby={
+            isTlsFingerprintValid
+              ? 'tls-fingerprint-help'
+              : 'tls-fingerprint-help tls-fingerprint-error'
+          }
+          aria-invalid={!isTlsFingerprintValid}
+        />
+        <div id="tls-fingerprint-help" className="capture-mode-info">
+          Safe to save; never share the server password. Required for a self-signed public endpoint
+          such as wss://IP:25808. Leave blank to use normal platform certificate validation.
+        </div>
+        {!isTlsFingerprintValid && (
+          <div id="tls-fingerprint-error" className="capture-mode-warning" role="alert">
+            Enter exactly 64 hexadecimal characters, or leave this field blank.
+          </div>
+        )}
+      </div>
+
       {error && <div className="error-message" role="alert">{error}</div>}
 
       <button
         className="btn btn-connect full-width"
         onClick={onConnect}
-        disabled={isConnecting || connectCode.length !== 8 || !djName.trim()}
+        disabled={
+          isConnecting ||
+          (!directConnect && connectCode.length !== 8) ||
+          !djName.trim() ||
+          !isTlsFingerprintValid
+        }
       >
         {isConnecting ? 'Connecting...' : 'Connect'}
       </button>
