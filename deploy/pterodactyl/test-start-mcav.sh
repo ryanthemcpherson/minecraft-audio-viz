@@ -22,6 +22,7 @@ make_fixture() {
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
+  printf '%s\n' "$@" > "$BOOTSTRAP_CAPTURE"
   if [[ "${FAKE_BOOTSTRAP_FAIL:-0}" == "1" ]]; then exit 17; fi
   mkdir -p "$MCAV_ROOT/state"
   printf 'MINECRAFT_WS_SECRET=test-secret-not-logged\n' > "$MCAV_ROOT/state/runtime.env"
@@ -31,6 +32,7 @@ if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
   exit 0
 fi
 printf '%s\n' "$@" > "$VJ_CAPTURE"
+printf '%s' "${MINECRAFT_WS_SECRET:-}" > "$SECRET_CAPTURE"
 if [[ "${FAKE_VJ_FAIL:-0}" == "1" ]]; then exit 23; fi
 sleep 1
 SCRIPT
@@ -53,8 +55,27 @@ run_wrapper() {
   MCAV_ARCH_OVERRIDE="${MCAV_ARCH_OVERRIDE:-x86_64}" \
   MCAV_STARTUP_WAIT_SECONDS="0.1" \
   PAPER_CAPTURE="$fixture/paper.args" \
+  BOOTSTRAP_CAPTURE="$fixture/bootstrap.args" \
   VJ_CAPTURE="$fixture/vj.args" \
+  SECRET_CAPTURE="$fixture/secret.env" \
+  MCAV_PUBLIC_HOST="${TEST_MCAV_PUBLIC_HOST-8.8.8.8}" \
   "$fixture/mcav-vj/start-mcav.sh" -- "$@"
+}
+
+assert_arg_value() {
+  local capture="$1"
+  local expected_flag="$2"
+  local expected_value="$3"
+  mapfile -t captured_args < "$capture"
+  local index
+  for ((index = 0; index < ${#captured_args[@]}; index++)); do
+    if [[ "${captured_args[$index]}" == "$expected_flag" ]]; then
+      [[ "${captured_args[$((index + 1))]:-}" == "$expected_value" ]] || \
+        fail "$expected_flag did not receive $expected_value"
+      return
+    fi
+  done
+  fail "$expected_flag was not supplied"
 }
 
 test_exact_paper_arguments_and_secure_vj_flags() {
@@ -69,7 +90,61 @@ test_exact_paper_arguments_and_secure_vj_flags() {
   grep -Fx -- '--tls-cert' "$fixture/vj.args" >/dev/null || fail 'TLS certificate flag missing'
   grep -Fx -- '--tls-key' "$fixture/vj.args" >/dev/null || fail 'TLS key flag missing'
   grep -Fx -- '--http-host' "$fixture/vj.args" >/dev/null || fail 'HTTP bind flag missing'
+  assert_arg_value "$fixture/bootstrap.args" '--public-host' '8.8.8.8'
+  assert_arg_value "$fixture/vj.args" '--http-port' '8080'
+  assert_arg_value "$fixture/vj.args" '--port' '25808'
+  assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:8080'
+  grep -Fx -- '--unified-web' "$fixture/vj.args" >/dev/null || fail 'unified web flag missing'
+  ! grep -Fx -- '--broadcast-port' "$fixture/vj.args" >/dev/null || \
+    fail 'broadcast port must not be supplied in unified mode'
   ! grep -Fx -- '--no-auth' "$fixture/vj.args" >/dev/null || fail 'insecure --no-auth present'
+  [[ "$(cat "$fixture/secret.env")" == 'test-secret-not-logged' ]] || \
+    fail 'shared secret environment was not passed to VJ'
+}
+
+test_ipv6_public_origin_is_bracketed() {
+  local fixture="$TEST_ROOT/ipv6"
+  make_fixture "$fixture"
+  TEST_MCAV_PUBLIC_HOST='2606:4700:4700::1111' run_wrapper "$fixture" "$fixture/paper"
+
+  assert_arg_value \
+    "$fixture/vj.args" \
+    '--public-origin' \
+    'https://[2606:4700:4700::1111]:8080'
+}
+
+test_missing_public_host_still_starts_paper() {
+  local fixture="$TEST_ROOT/missing-public-host"
+  make_fixture "$fixture"
+  TEST_MCAV_PUBLIC_HOST='' run_wrapper "$fixture" "$fixture/paper" --nogui
+
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start without MCAV_PUBLIC_HOST'
+  [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap ran without MCAV_PUBLIC_HOST'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ ran without MCAV_PUBLIC_HOST'
+}
+
+test_public_port_collision_still_starts_paper() {
+  local fixture="$TEST_ROOT/port-collision"
+  make_fixture "$fixture"
+  HTTP_PORT=25808 VJ_SERVER_PORT=25808 run_wrapper "$fixture" "$fixture/paper" --nogui
+
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start after public port collision'
+  [[ ! -f "$fixture/bootstrap.args" ]] || fail 'bootstrap ran with colliding public ports'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ ran with colliding public ports'
+}
+
+test_example_environment_uses_two_public_ports() {
+  local fixture="$TEST_ROOT/example-environment"
+  make_fixture "$fixture"
+  cp "$SOURCE_DIR/mcav.env.example" "$fixture/mcav-vj/mcav.env"
+  run_wrapper "$fixture" "$fixture/paper"
+
+  assert_arg_value "$fixture/vj.args" '--http-port' '8080'
+  assert_arg_value "$fixture/vj.args" '--port' '25808'
+  grep -Fx -- '--unified-web' "$fixture/vj.args" >/dev/null || \
+    fail 'example environment did not enable unified web mode'
+  ! grep -Fx -- '--broadcast-port' "$fixture/vj.args" >/dev/null || \
+    fail 'example environment exposed the legacy broadcast port'
 }
 
 test_arm64_runtime_selection() {
@@ -107,6 +182,10 @@ test_missing_paper_command_is_rejected() {
 }
 
 test_exact_paper_arguments_and_secure_vj_flags
+test_ipv6_public_origin_is_bracketed
+test_missing_public_host_still_starts_paper
+test_public_port_collision_still_starts_paper
+test_example_environment_uses_two_public_ports
 test_arm64_runtime_selection
 test_bootstrap_failure_still_starts_paper
 test_vj_bind_failure_still_starts_paper
