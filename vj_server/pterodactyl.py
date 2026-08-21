@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Iterator, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from vj_server.auth import hash_password
 
@@ -98,6 +99,14 @@ class BootstrapResult:
     first_login: Path
     auth_file: Path
     tls_cert: Path
+
+
+@dataclass(frozen=True)
+class _LegacyIdentity:
+    shared_secret: str
+    public_ip: PublicIPAddress
+    fingerprint: str
+    files: Mapping[str, tuple[bytes, int]]
 
 
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
@@ -249,6 +258,17 @@ def _identity_entrypoints(paths: BootstrapPaths) -> dict[Path, str]:
     }
 
 
+def _identity_entrypoint_filenames(paths: BootstrapPaths) -> dict[Path, str]:
+    return {
+        paths.runtime_env: "runtime.env",
+        paths.auth_file: "dj_auth.json",
+        paths.tls_cert: "tls.crt",
+        paths.tls_key: "tls.key",
+        paths.identity_metadata: "identity.json",
+        paths.first_login: "FIRST_LOGIN.txt",
+    }
+
+
 def _is_expected_symlink(path: Path, target: str) -> bool:
     return path.is_symlink() and os.readlink(path) == target
 
@@ -273,11 +293,40 @@ def _current_identity_generation(paths: BootstrapPaths) -> Path | None:
     return generation
 
 
-def _validate_or_prepare_entrypoints(paths: BootstrapPaths) -> None:
+def _entrypoint_matches_generation(
+    entrypoint: Path,
+    generation: Path,
+    filename: str,
+) -> bool:
+    try:
+        entrypoint_status = entrypoint.lstat()
+        generation_file = generation / filename
+        generation_status = generation_file.lstat()
+        return (
+            stat.S_ISREG(entrypoint_status.st_mode)
+            and stat.S_ISREG(generation_status.st_mode)
+            and entrypoint.read_bytes() == generation_file.read_bytes()
+        )
+    except OSError:
+        return False
+
+
+def _validate_or_prepare_entrypoints(
+    paths: BootstrapPaths,
+    equivalent_generation: Path | None = None,
+) -> None:
+    generation_filenames = _identity_entrypoint_filenames(paths)
     for entrypoint, target in _identity_entrypoints(paths).items():
         if _is_expected_symlink(entrypoint, target):
             continue
-        if os.path.lexists(entrypoint):
+        is_equivalent_legacy_file = equivalent_generation is not None and (
+            _entrypoint_matches_generation(
+                entrypoint,
+                equivalent_generation,
+                generation_filenames[entrypoint],
+            )
+        )
+        if os.path.lexists(entrypoint) and not is_equivalent_legacy_file:
             raise BootstrapError(
                 f"Refusing non-transactional or partial deployment identity: {entrypoint}"
             )
@@ -323,20 +372,57 @@ def _persist_identity_generation(
 def _commit_identity_generation(
     paths: BootstrapPaths,
     files: Mapping[str, tuple[bytes, int]],
+    *,
+    prepare_entrypoints: bool = True,
 ) -> Path:
     generation = _persist_identity_generation(paths, files)
-    _validate_or_prepare_entrypoints(paths)
+    if prepare_entrypoints:
+        _validate_or_prepare_entrypoints(paths)
     pointer_target = generation.relative_to(paths.state_dir)
+    previous_pointer_target = (
+        os.readlink(paths.identity_pointer) if paths.identity_pointer.is_symlink() else None
+    )
     temporary_pointer = paths.state_dir / f".current-identity.{secrets.token_hex(8)}"
+    pointer_switched = False
     try:
         os.symlink(pointer_target, temporary_pointer, target_is_directory=True)
         os.replace(temporary_pointer, paths.identity_pointer)
+        pointer_switched = True
         _fsync_directory(paths.state_dir)
     except OSError as exc:
+        if pointer_switched and _restore_identity_pointer(paths, previous_pointer_target):
+            raise BootstrapError(
+                "Identity pointer durability failed; the previous identity was restored"
+            ) from exc
+        if pointer_switched and _current_identity_generation(paths) == generation:
+            return generation
         raise BootstrapError("Failed to commit immutable identity generation") from exc
     finally:
         temporary_pointer.unlink(missing_ok=True)
     return generation
+
+
+def _restore_identity_pointer(paths: BootstrapPaths, previous_target: str | None) -> bool:
+    """Best-effort rollback after a post-switch directory durability failure."""
+    temporary_pointer = paths.state_dir / f".current-identity.rollback.{secrets.token_hex(8)}"
+    try:
+        if previous_target is None:
+            paths.identity_pointer.unlink()
+        else:
+            os.symlink(previous_target, temporary_pointer, target_is_directory=True)
+            os.replace(temporary_pointer, paths.identity_pointer)
+        try:
+            _fsync_directory(paths.state_dir)
+        except OSError:
+            pass
+    except OSError:
+        pass
+    finally:
+        temporary_pointer.unlink(missing_ok=True)
+
+    if previous_target is None:
+        return not os.path.lexists(paths.identity_pointer)
+    return _is_expected_symlink(paths.identity_pointer, previous_target)
 
 
 def _plugin_name(jar_path: Path) -> str | None:
@@ -428,6 +514,76 @@ def _login_values(content: str) -> dict[str, str]:
     return values
 
 
+def _secure_private_key(private_key: Path) -> None:
+    if stat.S_IMODE(private_key.stat().st_mode) != 0o600:
+        os.chmod(private_key, 0o600)
+    if stat.S_IMODE(private_key.stat().st_mode) != 0o600:
+        raise ValueError("tls.key must be owner-only (0600)")
+
+
+def _validate_credentials(runtime: Path, auth_file: Path) -> str:
+    runtime_text = runtime.read_text(encoding="utf-8")
+    secret_match = re.fullmatch(r"MINECRAFT_WS_SECRET=([^\s]+)\n?", runtime_text)
+    if not secret_match or len(secret_match.group(1)) < 32:
+        raise ValueError("missing or short MINECRAFT_WS_SECRET")
+
+    auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
+    if not auth_data.get("djs") or not auth_data.get("vj_operators"):
+        raise ValueError("DJ or administrator identity is missing")
+    for section_name in ("djs", "vj_operators"):
+        for entry in auth_data[section_name].values():
+            if not str(entry.get("key_hash", "")).startswith("bcrypt:"):
+                raise ValueError(f"{section_name} contains a non-bcrypt credential")
+    return secret_match.group(1)
+
+
+def _inspect_tls_pair(
+    certificate: Path,
+    private_key: Path,
+    command_runner: CommandRunner,
+) -> str:
+    _secure_private_key(private_key)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certificate, private_key)
+    return _certificate_fingerprint(certificate, command_runner)
+
+
+def _validate_first_login(
+    first_login: Path,
+    public_ip: PublicIPAddress,
+    fingerprint: str,
+) -> None:
+    login = _login_values(first_login.read_text(encoding="utf-8"))
+    for field in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "DJ_USERNAME", "DJ_PASSWORD"):
+        if not login.get(field):
+            raise ValueError(f"{field} is missing")
+    expected_endpoints = _endpoint_values(public_ip, fingerprint)
+    if any(login.get(field) != value for field, value in expected_endpoints.items()):
+        raise ValueError("first-login endpoint metadata is inconsistent")
+
+
+def _legacy_public_ip(first_login: Path) -> PublicIPAddress:
+    login = _login_values(first_login.read_text(encoding="utf-8"))
+    admin_url = login.get("ADMIN_URL", "")
+    parsed = urlsplit(admin_url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("legacy ADMIN_URL has an invalid port") from exc
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or port != PTERODACTYL_HTTP_PORT
+        or parsed.path != "/"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("legacy ADMIN_URL is invalid")
+    return parse_public_ip(parsed.hostname)
+
+
 def _validate_existing_identity(
     paths: BootstrapPaths,
     generation: Path,
@@ -440,25 +596,6 @@ def _validate_existing_identity(
         private_key = _regular_identity_file(generation, "tls.key")
         first_login = _regular_identity_file(generation, "FIRST_LOGIN.txt")
         metadata_file = _regular_identity_file(generation, "identity.json")
-
-        key_mode = stat.S_IMODE(private_key.stat().st_mode)
-        if key_mode != 0o600:
-            os.chmod(private_key, 0o600)
-        if stat.S_IMODE(private_key.stat().st_mode) != 0o600:
-            raise ValueError("tls.key must be owner-only (0600)")
-
-        runtime_text = runtime.read_text(encoding="utf-8")
-        secret_match = re.fullmatch(r"MINECRAFT_WS_SECRET=([^\s]+)\n?", runtime_text)
-        if not secret_match or len(secret_match.group(1)) < 32:
-            raise ValueError("missing or short MINECRAFT_WS_SECRET")
-
-        auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
-        if not auth_data.get("djs") or not auth_data.get("vj_operators"):
-            raise ValueError("DJ or administrator identity is missing")
-        for section_name in ("djs", "vj_operators"):
-            for entry in auth_data[section_name].values():
-                if not str(entry.get("key_hash", "")).startswith("bcrypt:"):
-                    raise ValueError(f"{section_name} contains a non-bcrypt credential")
 
         metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
         expected_topology = {
@@ -474,23 +611,116 @@ def _validate_existing_identity(
         if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
             raise ValueError("identity metadata has an invalid TLS fingerprint")
 
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(certificate, private_key)
-        if _certificate_fingerprint(certificate, command_runner) != fingerprint:
+        shared_secret = _validate_credentials(runtime, auth_file)
+        if _inspect_tls_pair(certificate, private_key, command_runner) != fingerprint:
             raise ValueError("certificate fingerprint does not match identity metadata")
-
-        login = _login_values(first_login.read_text(encoding="utf-8"))
-        for field in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "DJ_USERNAME", "DJ_PASSWORD"):
-            if not login.get(field):
-                raise ValueError(f"{field} is missing")
-        expected_endpoints = _endpoint_values(identity_public_ip, fingerprint)
-        if any(login.get(field) != value for field, value in expected_endpoints.items()):
-            raise ValueError("first-login endpoint metadata is inconsistent")
-        return secret_match.group(1), identity_public_ip
+        _validate_first_login(first_login, identity_public_ip, fingerprint)
+        return shared_secret, identity_public_ip
     except BootstrapError:
         raise
     except (OSError, ValueError, TypeError, json.JSONDecodeError, ssl.SSLError) as exc:
         raise BootstrapError(f"Invalid deployment identity at {paths.state_dir}: {exc}") from exc
+
+
+def _legacy_identity_paths(paths: BootstrapPaths) -> tuple[Path, ...]:
+    return (
+        paths.runtime_env,
+        paths.auth_file,
+        paths.tls_cert,
+        paths.tls_key,
+        paths.first_login,
+    )
+
+
+def _is_regular_path(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _has_complete_legacy_identity(paths: BootstrapPaths) -> bool:
+    return all(
+        _is_regular_path(path) for path in _legacy_identity_paths(paths)
+    ) and not os.path.lexists(paths.identity_metadata)
+
+
+def _validate_legacy_identity(
+    paths: BootstrapPaths,
+    command_runner: CommandRunner,
+) -> _LegacyIdentity:
+    try:
+        shared_secret = _validate_credentials(paths.runtime_env, paths.auth_file)
+        fingerprint = _inspect_tls_pair(paths.tls_cert, paths.tls_key, command_runner)
+        public_ip = _legacy_public_ip(paths.first_login)
+        _validate_first_login(paths.first_login, public_ip, fingerprint)
+        if not certificate_covers_ip(
+            paths.tls_cert,
+            public_ip,
+            command_runner=command_runner,
+        ):
+            raise ValueError("legacy TLS certificate does not cover its public endpoint")
+        files = {
+            "runtime.env": (paths.runtime_env.read_bytes(), 0o600),
+            "dj_auth.json": (paths.auth_file.read_bytes(), 0o600),
+            "tls.crt": (paths.tls_cert.read_bytes(), 0o644),
+            "tls.key": (paths.tls_key.read_bytes(), 0o600),
+            "FIRST_LOGIN.txt": (paths.first_login.read_bytes(), 0o600),
+            "identity.json": (_identity_metadata(public_ip, fingerprint), 0o600),
+        }
+        return _LegacyIdentity(shared_secret, public_ip, fingerprint, files)
+    except (
+        BootstrapError,
+        OSError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+        ssl.SSLError,
+    ) as exc:
+        raise BootstrapError(
+            f"Invalid legacy deployment identity at {paths.state_dir}: {exc}"
+        ) from exc
+
+
+def _adopt_legacy_identity(paths: BootstrapPaths, identity: _LegacyIdentity) -> Path:
+    generation = _commit_identity_generation(
+        paths,
+        identity.files,
+        prepare_entrypoints=False,
+    )
+    try:
+        _validate_or_prepare_entrypoints(paths, generation)
+    except BootstrapError as exc:
+        if _restore_legacy_flat_identity(paths, identity):
+            raise BootstrapError(
+                "Legacy identity adoption failed; the flat identity was restored"
+            ) from exc
+        if _current_identity_generation(paths) == generation:
+            return generation
+        raise BootstrapError("Legacy identity adoption recovery failed") from exc
+    return generation
+
+
+def _restore_legacy_flat_identity(
+    paths: BootstrapPaths,
+    identity: _LegacyIdentity,
+) -> bool:
+    legacy_files = {
+        paths.runtime_env: identity.files["runtime.env"],
+        paths.auth_file: identity.files["dj_auth.json"],
+        paths.tls_cert: identity.files["tls.crt"],
+        paths.tls_key: identity.files["tls.key"],
+        paths.first_login: identity.files["FIRST_LOGIN.txt"],
+    }
+    try:
+        for path, (content, mode) in legacy_files.items():
+            _atomic_write(path, content, mode)
+        paths.identity_metadata.unlink(missing_ok=True)
+        _fsync_directory(paths.state_dir)
+        _fsync_directory(paths.project_root)
+    except OSError:
+        return False
+    return _restore_identity_pointer(paths, None)
 
 
 def _generate_tls_material(
@@ -722,6 +952,18 @@ def _ensure_identity(
 ) -> tuple[str, bool]:
     generation = _current_identity_generation(paths)
     if generation is None:
+        if _has_complete_legacy_identity(paths):
+            legacy_identity = _validate_legacy_identity(paths, command_runner)
+            if not rotate_tls_identity and legacy_identity.public_ip != public_ip:
+                raise BootstrapError(
+                    "Existing TLS certificate does not cover MCAV_PUBLIC_HOST. "
+                    f"Rotate it explicitly with: {_rotation_command(paths, public_ip)}"
+                )
+            generation = _adopt_legacy_identity(paths, legacy_identity)
+            if rotate_tls_identity:
+                _rotate_tls_identity(paths, generation, public_ip, command_runner)
+            return legacy_identity.shared_secret, False
+
         unexpected_entrypoints = [
             entrypoint
             for entrypoint, target in _identity_entrypoints(paths).items()
@@ -741,7 +983,7 @@ def _ensure_identity(
         generation,
         command_runner,
     )
-    _validate_or_prepare_entrypoints(paths)
+    _validate_or_prepare_entrypoints(paths, generation)
     if rotate_tls_identity:
         _rotate_tls_identity(paths, generation, public_ip, command_runner)
     elif identity_public_ip != public_ip or not certificate_covers_ip(

@@ -58,13 +58,6 @@ if [[ "$http_port" != '8080' || "$dj_port" != '25808' || "$unified_web_enabled" 
   launch_paper
 fi
 
-endpoint_host="$public_host"
-if [[ "$public_host" == *:* ]]; then
-  endpoint_host="[$public_host]"
-fi
-public_origin="https://${endpoint_host}:8080"
-web_arguments=(--unified-web --public-origin "$public_origin")
-
 architecture="${MCAV_ARCH_OVERRIDE:-$(uname -m)}"
 case "$architecture" in
   x86_64|amd64)
@@ -96,7 +89,7 @@ if ! "$runtime" \
   --public-host "$public_host" \
   --http-port "$http_port" \
   --port "$dj_port" \
-  "${web_arguments[@]}"; then
+  --unified-web; then
   log 'Bootstrap failed; VJ is disabled for this start. Paper will still launch.' >&2
   launch_paper
 fi
@@ -134,6 +127,23 @@ if [[ -z "$shared_secret" ]]; then
   launch_paper
 fi
 
+admin_url=''
+preview_url=''
+dj_endpoint=''
+while IFS='=' read -r key value; do
+  case "$key" in
+    ADMIN_URL) admin_url="$value" ;;
+    PREVIEW_URL) preview_url="$value" ;;
+    DJ_ENDPOINT) dj_endpoint="$value" ;;
+  esac
+done < "$identity_dir/FIRST_LOGIN.txt"
+if [[ -z "$admin_url" || -z "$preview_url" || -z "$dj_endpoint" ]]; then
+  log "Canonical endpoints are missing from $identity_dir/FIRST_LOGIN.txt; VJ is disabled for this start." >&2
+  launch_paper
+fi
+public_origin="${admin_url%/}"
+web_arguments=(--unified-web --public-origin "$public_origin")
+
 log 'Starting authenticated HTTPS/WSS VJ service.'
 MINECRAFT_WS_SECRET="$shared_secret" "$runtime" \
   --project-root "$MCAV_ROOT" \
@@ -157,9 +167,9 @@ if ! kill -0 "$vj_pid" 2>/dev/null; then
   exit_code=$?
   log "VJ exited during startup (status $exit_code); Paper will continue without it." >&2
 else
-  log "Admin:   ${public_origin}/"
-  log "Preview: ${public_origin}/preview/"
-  log "DJ:      wss://${endpoint_host}:${dj_port}"
+  log "Admin:   $admin_url"
+  log "Preview: $preview_url"
+  log "DJ:      $dj_endpoint"
   log "Login:   $MCAV_ROOT/FIRST_LOGIN.txt"
 fi
 

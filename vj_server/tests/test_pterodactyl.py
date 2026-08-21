@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import ssl
 import subprocess
 import sys
@@ -25,6 +26,7 @@ PUBLIC_IPV4 = "8.8.8.8"
 SECOND_PUBLIC_IPV4 = "1.1.1.1"
 THIRD_PUBLIC_IPV4 = "9.9.9.9"
 PUBLIC_IPV6 = "2606:4700:4700::1111"
+EXPANDED_PUBLIC_IPV6 = "2606:4700:4700:0:0:0:0:1111"
 
 
 def write_plugin_jar(path: Path, payload: bytes = b"release") -> None:
@@ -140,6 +142,36 @@ def current_identity_generation(paths: BootstrapPaths) -> Path:
     generation = pointer.resolve(strict=True)
     assert generation.parent == (paths.state_dir / "identity-generations").resolve()
     return generation
+
+
+def convert_current_identity_to_fd0b918_layout(paths: BootstrapPaths) -> dict[str, bytes]:
+    """Replace the transactional fixture with the exact prior flat identity layout."""
+    legacy_content = identity_snapshot(paths)
+    for entrypoint in (
+        paths.runtime_env,
+        paths.auth_file,
+        paths.tls_cert,
+        paths.tls_key,
+        paths.identity_metadata,
+        paths.first_login,
+    ):
+        entrypoint.unlink()
+    paths.identity_pointer.unlink()
+    shutil.rmtree(paths.identity_generations)
+    paths.identity_lock.unlink()
+
+    legacy_modes = {
+        "state/runtime.env": 0o600,
+        "state/dj_auth.json": 0o600,
+        "state/tls.crt": 0o644,
+        "state/tls.key": 0o600,
+        "FIRST_LOGIN.txt": 0o600,
+    }
+    for relative_path, content in legacy_content.items():
+        path = paths.project_root / relative_path
+        path.write_bytes(content)
+        os.chmod(path, legacy_modes[relative_path])
+    return legacy_content
 
 
 def assert_current_identity_is_coherent(paths: BootstrapPaths) -> dict[str, str]:
@@ -511,6 +543,47 @@ def test_rotation_failure_before_atomic_pointer_commit_keeps_old_generation_curr
     assert_current_identity_is_coherent(bootstrap_paths)
 
 
+def test_post_switch_fsync_failure_rolls_back_to_old_current_identity(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    old_target = os.readlink(bootstrap_paths.identity_pointer)
+    old_identity = identity_snapshot(bootstrap_paths)
+    original_fsync_directory = pterodactyl._fsync_directory
+    failure_injected = False
+
+    def fail_first_state_fsync_after_switch(path: Path) -> None:
+        nonlocal failure_injected
+        pointer_was_switched = (
+            bootstrap_paths.identity_pointer.is_symlink()
+            and os.readlink(bootstrap_paths.identity_pointer) != old_target
+        )
+        if path == bootstrap_paths.state_dir and pointer_was_switched and not failure_injected:
+            failure_injected = True
+            raise OSError("injected post-switch state fsync failure")
+        original_fsync_directory(path)
+
+    monkeypatch.setattr(
+        pterodactyl,
+        "_fsync_directory",
+        fail_first_state_fsync_after_switch,
+    )
+
+    with pytest.raises(BootstrapError, match="commit|durability|rolled back"):
+        bootstrap_pterodactyl(
+            bootstrap_paths,
+            "26.1-test",
+            public_host=SECOND_PUBLIC_IPV4,
+            rotate_tls_identity=True,
+        )
+
+    assert failure_injected
+    assert os.readlink(bootstrap_paths.identity_pointer) == old_target
+    assert identity_snapshot(bootstrap_paths) == old_identity
+    assert_current_identity_is_coherent(bootstrap_paths)
+
+
 def test_concurrent_rotations_are_serialized_and_commit_complete_generations(
     bootstrap_paths: BootstrapPaths,
 ) -> None:
@@ -736,6 +809,178 @@ def test_partial_identity_state_is_refused_without_rotation(
     assert (
         bootstrap_paths.runtime_env.read_text(encoding="utf-8") == "MINECRAFT_WS_SECRET=keep-this\n"
     )
+
+
+def test_matching_fd0b918_flat_identity_is_adopted_with_canonical_ipv6_origin(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1-test",
+        public_host=EXPANDED_PUBLIC_IPV6,
+    )
+    legacy_identity = convert_current_identity_to_fd0b918_layout(bootstrap_paths)
+    os.chmod(bootstrap_paths.tls_key, 0o644)
+
+    result = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1-test",
+        public_host=f"  {EXPANDED_PUBLIC_IPV6}  ",
+    )
+
+    assert result.credentials_created is False
+    assert identity_snapshot(bootstrap_paths) == legacy_identity
+    metadata = assert_current_identity_is_coherent(bootstrap_paths)
+    assert metadata["public_host"] == PUBLIC_IPV6
+    assert first_login_values(bootstrap_paths)["ADMIN_URL"] == (
+        "https://[2606:4700:4700::1111]:8080/"
+    )
+    assert bootstrap_paths.tls_key.stat().st_mode & 0o777 == 0o600
+
+
+def test_fd0b918_flat_identity_mismatch_is_refused_without_migration(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    legacy_identity = convert_current_identity_to_fd0b918_layout(bootstrap_paths)
+
+    with pytest.raises(BootstrapError, match="rotate-tls-identity"):
+        bootstrap_pterodactyl(
+            bootstrap_paths,
+            "26.1-test",
+            public_host=SECOND_PUBLIC_IPV4,
+        )
+
+    assert not os.path.lexists(bootstrap_paths.identity_pointer)
+    assert identity_snapshot(bootstrap_paths) == legacy_identity
+    for path in (
+        bootstrap_paths.runtime_env,
+        bootstrap_paths.auth_file,
+        bootstrap_paths.tls_cert,
+        bootstrap_paths.tls_key,
+        bootstrap_paths.first_login,
+    ):
+        assert path.is_file()
+        assert not path.is_symlink()
+
+
+def test_fd0b918_flat_identity_can_rotate_without_release_or_plugin_mutation(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    legacy_identity = convert_current_identity_to_fd0b918_layout(bootstrap_paths)
+    bootstrap_paths.plugin_config.write_bytes(b"operator-owned plugin configuration\n")
+    installed_plugin = bootstrap_paths.plugins_dir / "AudioViz.jar"
+    plugin_before = bootstrap_paths.plugin_config.read_bytes()
+    installed_before = installed_plugin.read_bytes()
+    backups_before = sorted(
+        path.relative_to(bootstrap_paths.backups_dir)
+        for path in bootstrap_paths.backups_dir.rglob("*")
+    )
+    bootstrap_paths.release_jar.unlink()
+    bootstrap_paths.default_config.unlink()
+
+    result = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1-test",
+        public_host=SECOND_PUBLIC_IPV4,
+        rotate_tls_identity=True,
+    )
+
+    assert result.credentials_created is False
+    assert bootstrap_paths.runtime_env.read_bytes() == legacy_identity["state/runtime.env"]
+    assert bootstrap_paths.auth_file.read_bytes() == legacy_identity["state/dj_auth.json"]
+    assert bootstrap_paths.tls_cert.read_bytes() != legacy_identity["state/tls.crt"]
+    assert bootstrap_paths.tls_key.read_bytes() != legacy_identity["state/tls.key"]
+    assert bootstrap_paths.plugin_config.read_bytes() == plugin_before
+    assert installed_plugin.read_bytes() == installed_before
+    assert (
+        sorted(
+            path.relative_to(bootstrap_paths.backups_dir)
+            for path in bootstrap_paths.backups_dir.rglob("*")
+        )
+        == backups_before
+    )
+    metadata = assert_current_identity_is_coherent(bootstrap_paths)
+    assert metadata["public_host"] == SECOND_PUBLIC_IPV4
+
+
+def test_fd0b918_adoption_pointer_failure_preserves_flat_identity(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    legacy_identity = convert_current_identity_to_fd0b918_layout(bootstrap_paths)
+    original_replace = os.replace
+    failure_injected = False
+
+    def fail_pointer_switch(
+        source: str | os.PathLike[str],
+        destination: str | os.PathLike[str],
+    ) -> None:
+        nonlocal failure_injected
+        if not failure_injected and Path(destination) == bootstrap_paths.identity_pointer:
+            failure_injected = True
+            raise OSError("injected legacy adoption pointer failure")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(pterodactyl.os, "replace", fail_pointer_switch)
+
+    with pytest.raises(BootstrapError, match="commit"):
+        bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+
+    assert failure_injected
+    assert not os.path.lexists(bootstrap_paths.identity_pointer)
+    assert not os.path.lexists(bootstrap_paths.identity_metadata)
+    assert identity_snapshot(bootstrap_paths) == legacy_identity
+    for path in (
+        bootstrap_paths.runtime_env,
+        bootstrap_paths.auth_file,
+        bootstrap_paths.tls_cert,
+        bootstrap_paths.tls_key,
+        bootstrap_paths.first_login,
+    ):
+        assert path.is_file()
+        assert not path.is_symlink()
+
+
+def test_fd0b918_adoption_entrypoint_failure_restores_flat_identity(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+    legacy_identity = convert_current_identity_to_fd0b918_layout(bootstrap_paths)
+    original_replace = os.replace
+    failure_injected = False
+
+    def fail_first_entrypoint_switch(
+        source: str | os.PathLike[str],
+        destination: str | os.PathLike[str],
+    ) -> None:
+        nonlocal failure_injected
+        if not failure_injected and Path(destination) == bootstrap_paths.runtime_env:
+            failure_injected = True
+            raise OSError("injected legacy entrypoint failure")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(pterodactyl.os, "replace", fail_first_entrypoint_switch)
+
+    with pytest.raises(BootstrapError, match="adoption|restored"):
+        bootstrap_pterodactyl(bootstrap_paths, "26.1-test", public_host=PUBLIC_IPV4)
+
+    assert failure_injected
+    assert not os.path.lexists(bootstrap_paths.identity_pointer)
+    assert not os.path.lexists(bootstrap_paths.identity_metadata)
+    assert identity_snapshot(bootstrap_paths) == legacy_identity
+    for path in (
+        bootstrap_paths.runtime_env,
+        bootstrap_paths.auth_file,
+        bootstrap_paths.tls_cert,
+        bootstrap_paths.tls_key,
+        bootstrap_paths.first_login,
+    ):
+        assert path.is_file()
+        assert not path.is_symlink()
 
 
 def test_rejects_release_jar_with_wrong_plugin_name(bootstrap_paths: BootstrapPaths) -> None:
