@@ -28,6 +28,7 @@ test('delegates representative WebSocket lifecycle events to managers', () => {
       updateServiceIndicators: () => calls.push(['indicators']),
     },
     connectCodes: { resetGenerateButton: () => calls.push(['reset-code']) },
+    actions: { handleConnectionLost: () => calls.push(['emergency-disconnect']) },
     router: { handleMessage: (message) => calls.push(['message', message]) },
   };
 
@@ -44,6 +45,7 @@ test('delegates representative WebSocket lifecycle events to managers', () => {
     ['status', 'disconnected'],
     ['indicators'],
     ['reset-code'],
+    ['emergency-disconnect'],
     ['message', { type: 'patterns' }],
   ]);
 });

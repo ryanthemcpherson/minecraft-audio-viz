@@ -39,6 +39,9 @@ export class ActionsManager {
     }
 
     applyEmergencyState(data) {
+        const reconciledPending = data.type === 'vj_state'
+            ? this._clearAllEmergencyPending()
+            : false;
         if (typeof data.blackout === 'boolean') {
             this.setBlackoutState(data.blackout);
         }
@@ -54,6 +57,9 @@ export class ActionsManager {
                 this._setEmergencyStatus(`${this._emergencyLabel(pendingName)} ${enabled ? 'on' : 'off'}`);
             }
         }
+        if (reconciledPending) {
+            this._setEmergencyStatus('Emergency state synchronized');
+        }
     }
 
     handleEmergencyError(requestId, message) {
@@ -61,6 +67,12 @@ export class ActionsManager {
         if (!pendingName) return false;
         this._clearEmergencyPending(pendingName);
         this._setEmergencyStatus(message || `${this._emergencyLabel(pendingName)} could not be delivered`);
+        return true;
+    }
+
+    handleConnectionLost() {
+        if (!this._clearAllEmergencyPending()) return false;
+        this._setEmergencyStatus('Emergency request cancelled: connection lost');
         return true;
     }
 
@@ -103,6 +115,14 @@ export class ActionsManager {
         if (pending) clearTimeout(pending.timeoutId);
         this._pendingEmergency.delete(name);
         this._renderEmergencyState(name);
+    }
+
+    _clearAllEmergencyPending() {
+        const pendingNames = [...this._pendingEmergency.keys()];
+        for (const name of pendingNames) {
+            this._clearEmergencyPending(name);
+        }
+        return pendingNames.length > 0;
     }
 
     _emergencyLabel(name) {

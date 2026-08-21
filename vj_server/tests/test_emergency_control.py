@@ -1,5 +1,6 @@
 """Real browser relay behavior for server-authoritative emergency controls."""
 
+import asyncio
 from types import SimpleNamespace
 
 import msgspec.json as mjson
@@ -24,6 +25,43 @@ class BrowserSocket:
 
     async def send(self, message: str):
         self.sent.append(mjson.decode(message))
+
+
+_CLOSE_SOCKET = object()
+
+
+class ConcurrentBrowserSocket:
+    def __init__(self, remote_port: int):
+        self.incoming: asyncio.Queue[str | object] = asyncio.Queue()
+        self.sent: list[dict] = []
+        self.message_sent = asyncio.Event()
+        self.remote_address = ("127.0.0.1", remote_port)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        message = await self.incoming.get()
+        if message is _CLOSE_SOCKET:
+            raise StopAsyncIteration
+        return message
+
+    async def send(self, message: str):
+        self.sent.append(mjson.decode(message))
+        self.message_sent.set()
+
+    async def send_from_browser(self, message: dict):
+        await self.incoming.put(_json_str(message))
+
+    async def close_input(self):
+        await self.incoming.put(_CLOSE_SOCKET)
+
+    async def wait_for_message(self, predicate):
+        while not any(predicate(message) for message in self.sent):
+            self.message_sent.clear()
+            if any(predicate(message) for message in self.sent):
+                break
+            await asyncio.wait_for(self.message_sent.wait(), timeout=1)
 
 
 class EmergencyRelay(RelayMixin):
@@ -149,3 +187,71 @@ async def test_rate_limit_error_preserves_request_correlation():
     errors = [message for message in websocket.sent if message["type"] == "error"]
     assert errors
     assert all(error["request_id"].startswith("emergency-rate-") for error in errors)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_clients_scope_same_request_id_ack_to_each_requester():
+    relay = EmergencyRelay()
+    first = ConcurrentBrowserSocket(50001)
+    second = ConcurrentBrowserSocket(50002)
+    first_task = asyncio.create_task(relay._handle_browser_client(first))
+    second_task = asyncio.create_task(relay._handle_browser_client(second))
+
+    try:
+        await first.wait_for_message(lambda message: message["type"] == "vj_state")
+        await second.wait_for_message(lambda message: message["type"] == "vj_state")
+
+        await first.send_from_browser(
+            {
+                "type": "set_blackout",
+                "enabled": True,
+                "request_id": "shared-emergency-id",
+            }
+        )
+        await first.wait_for_message(
+            lambda message: message.get("request_id") == "shared-emergency-id"
+        )
+        await second.wait_for_message(lambda message: message["type"] == "emergency_state")
+
+        first_blackout = [message for message in first.sent if message["type"] == "emergency_state"]
+        second_blackout = [
+            message for message in second.sent if message["type"] == "emergency_state"
+        ]
+        assert first_blackout == [
+            {
+                "type": "emergency_state",
+                "blackout": True,
+                "freeze": False,
+                "request_id": "shared-emergency-id",
+            }
+        ]
+        assert second_blackout == [{"type": "emergency_state", "blackout": True, "freeze": False}]
+
+        await second.send_from_browser(
+            {
+                "type": "set_freeze",
+                "enabled": True,
+                "request_id": "shared-emergency-id",
+            }
+        )
+        await second.wait_for_message(
+            lambda message: message.get("request_id") == "shared-emergency-id"
+        )
+        await first.wait_for_message(
+            lambda message: message["type"] == "emergency_state" and message.get("freeze") is True
+        )
+
+        assert [
+            message.get("request_id")
+            for message in first.sent
+            if message["type"] == "emergency_state"
+        ] == ["shared-emergency-id", None]
+        assert [
+            message.get("request_id")
+            for message in second.sent
+            if message["type"] == "emergency_state"
+        ] == [None, "shared-emergency-id"]
+    finally:
+        await first.close_input()
+        await second.close_input()
+        await asyncio.gather(first_task, second_task)

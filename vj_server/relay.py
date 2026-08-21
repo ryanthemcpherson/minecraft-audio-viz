@@ -778,7 +778,7 @@ class RelayMixin:
 
                         await self._broadcast_effect_trigger(effect)
                         if effect in ("blackout", "freeze"):
-                            await self._broadcast_emergency_state(data.get("request_id"))
+                            await self._broadcast_emergency_state(websocket, data.get("request_id"))
 
                     elif msg_type in ("blackout", "set_blackout"):
                         self._blackout = data.get("enabled", not self._blackout)
@@ -802,7 +802,7 @@ class RelayMixin:
                                 except Exception:
                                     pass
                         logger.info(f"Blackout: {self._blackout}")
-                        await self._broadcast_emergency_state(data.get("request_id"))
+                        await self._broadcast_emergency_state(websocket, data.get("request_id"))
 
                     elif msg_type in ("freeze", "set_freeze"):
                         self._freeze = data.get("enabled", not self._freeze)
@@ -816,7 +816,7 @@ class RelayMixin:
                         else:
                             self._active_effects.pop("freeze", None)
                         logger.info(f"Freeze: {self._freeze}")
-                        await self._broadcast_emergency_state(data.get("request_id"))
+                        await self._broadcast_emergency_state(websocket, data.get("request_id"))
 
                     # ========== Banner Profile Management ==========
 
@@ -1485,16 +1485,28 @@ class RelayMixin:
             except Exception:
                 pass
 
-    async def _broadcast_emergency_state(self, request_id: str | None = None):
-        """Broadcast the current server-authoritative emergency state."""
+    async def _broadcast_emergency_state(self, requester=None, request_id: str | None = None):
+        """Broadcast authority while scoping correlation to the requesting socket."""
         payload = {
             "type": "emergency_state",
             "blackout": self._blackout,
             "freeze": self._freeze,
         }
-        if request_id:
-            payload["request_id"] = request_id
-        await self._broadcast_to_browsers(_json_str(payload))
+        uncorrelated_message = _json_str(payload)
+        correlated_message = (
+            _json_str({**payload, "request_id": request_id})
+            if requester is not None and request_id
+            else uncorrelated_message
+        )
+        dead_clients = set()
+        for client in list(self._broadcast_clients):
+            try:
+                await client.send(
+                    correlated_message if client is requester else uncorrelated_message
+                )
+            except Exception:
+                dead_clients.add(client)
+        self._broadcast_clients -= dead_clients
 
     async def _broadcast_to_djs(self, msg: dict):
         """Broadcast a message dict to all connected DJs."""
