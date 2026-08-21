@@ -394,12 +394,12 @@
                         </header>
                         <div class="config-grid">
                             <nav class="section-index" aria-label="Visuals sections">
-                                <a href="#ledwall-section">Bitmap source</a>
-                                <a href="#ledwall-effects-section">Effects</a>
-                                <a href="#ledwall-text-section">Text</a>
-                                <a href="#ledwall-layers-section">Layers</a>
-                                <a href="#particle-effects-section">Particles</a>
-                                <a href="#dj-logo-section">DJ logo</a>
+                                <button type="button" data-section-target="ledwall-section">Bitmap source</button>
+                                <button type="button" data-section-target="ledwall-effects-section">Effects</button>
+                                <button type="button" data-section-target="ledwall-text-section">Text</button>
+                                <button type="button" data-section-target="ledwall-layers-section">Layers</button>
+                                <button type="button" data-section-target="particle-effects-section">Particles</button>
+                                <button type="button" data-section-target="dj-logo-section">DJ logo</button>
                             </nav>
                             <div class="config-sections">
                         <!-- Bitmap Patterns (LED Wall) -->
@@ -669,16 +669,16 @@
                         </header>
                         <div class="config-grid">
                             <nav class="section-index" aria-label="Zones sections">
-                                <a href="#stage-zone-list">Stages and zones</a>
-                                <a href="#mode-entities">Render mode</a>
-                                <a href="#entity-config-section">Entities</a>
-                                <a href="#band-materials-section">Band materials</a>
-                                <a href="#zone-size-x">Dimensions</a>
-                                <a href="#btn-cleanup-zone">Maintenance</a>
+                                <button type="button" data-section-target="zones-stage-section">Stages and zones</button>
+                                <button type="button" data-section-target="zones-render-mode-section">Render mode</button>
+                                <button type="button" data-section-target="entity-config-section">Entities</button>
+                                <button type="button" data-section-target="band-materials-section">Band materials</button>
+                                <button type="button" data-section-target="zone-dimensions-section">Dimensions</button>
+                                <button type="button" data-section-target="zone-maintenance-section">Maintenance</button>
                             </nav>
                             <div class="config-sections">
                         <!-- Stages & Zones -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="zones-stage-section">
                             <div class="section-header">
                                 <h3 class="section-title">Stages & Zones</h3>
                                 <button id="btn-refresh-zones" class="btn btn-secondary btn-sm">Refresh</button>
@@ -689,7 +689,7 @@
                         </section>
 
                         <!-- Render Mode -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="zones-render-mode-section">
                             <h3 class="section-title">Render Mode</h3>
                             <div class="render-mode-selector">
                                 <button class="render-mode-btn active" data-mode="entities" id="mode-entities">
@@ -963,7 +963,7 @@
                         </section>
 
                         <!-- Zone Dimensions -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="zone-dimensions-section">
                             <h3 class="section-title">Zone Dimensions</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -1018,7 +1018,7 @@
                         </section>
 
                         <!-- Zone Actions -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="zone-maintenance-section">
                             <h3 class="section-title">Zone Actions</h3>
                             <div class="zone-actions">
                                 <button id="btn-reinit-pool" class="btn btn-primary">Reinitialize Pool</button>
@@ -1046,11 +1046,11 @@
                         </header>
                         <div class="config-grid config-grid-without-preview">
                             <nav class="section-index" aria-label="DJ sections">
-                                <a href="#dj-roster-section">Roster and approvals</a>
-                                <a href="#btn-generate-code">Connect codes</a>
-                                <a href="#banner-dj-select">Banner profile</a>
-                                <a href="#banner-mode-text">Banner mode</a>
-                                <a href="#btn-save-banner-profile">Save and apply</a>
+                                <button type="button" data-section-target="dj-roster-section">Roster and approvals</button>
+                                <button type="button" data-section-target="dj-roster-section" data-focus-target="btn-generate-code">Connect codes</button>
+                                <button type="button" data-section-target="dj-banner-profile-section">Banner profile</button>
+                                <button type="button" data-section-target="dj-banner-mode-section">Banner mode</button>
+                                <button type="button" data-section-target="dj-save-section" data-focus-target="btn-save-banner-profile">Save and apply</button>
                             </nav>
                             <div class="config-sections">
                         <!-- DJ Management -->
@@ -1084,7 +1084,7 @@
                         </section>
 
                         <!-- DJ Selector -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="dj-banner-profile-section">
                             <h3 class="section-title">DJ Banner Profile</h3>
                             <div class="control-row">
                                 <label for="banner-dj-select">Select DJ</label>
@@ -1095,7 +1095,7 @@
                         </section>
 
                         <!-- Banner Mode -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="dj-banner-mode-section">
                             <h3 class="section-title">Banner Mode</h3>
                             <div class="banner-mode-selector">
                                 <button class="render-mode-btn active" data-banner-mode="text" id="banner-mode-text">
@@ -1206,7 +1206,7 @@
                         </section>
 
                         <!-- Save/Apply -->
-                        <section class="mixer-section">
+                        <section class="mixer-section" id="dj-save-section">
                             <div class="zone-actions">
                                 <button id="btn-save-banner-profile" class="btn btn-primary">Save Profile</button>
                                 <button id="btn-apply-banner-now" class="btn btn-secondary">Apply Now</button>
@@ -1226,14 +1226,14 @@
                         </header>
                         <div class="config-grid config-grid-without-preview">
                             <nav class="section-index" aria-label="System sections">
-                                <a href="#sync-controls">Visual sync</a>
-                                <a href="#sync-dashboard">Signal diagnostics</a>
-                                <a href="#parity-check-btn">Renderer parity</a>
-                                <a href="#voice-chat-section">Voice chat</a>
+                                <button type="button" data-section-target="system-sync-section">Visual sync</button>
+                                <button type="button" data-section-target="system-sync-section">Signal diagnostics</button>
+                                <button type="button" data-section-target="system-sync-section" data-focus-target="parity-check-btn">Renderer parity</button>
+                                <button type="button" data-section-target="voice-chat-section">Voice chat</button>
                             </nav>
                             <div class="config-sections">
                                 <!-- Visual Sync -->
-                                <section class="mixer-section collapsible collapsed control-surface">
+                                <section class="mixer-section collapsible collapsed control-surface" id="system-sync-section">
                                     <h3 class="section-title">Visual Sync</h3>
                                     <div id="sync-controls" class="controls-grid">
                                         <div class="control-row">

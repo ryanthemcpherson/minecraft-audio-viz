@@ -782,28 +782,35 @@ html[data-workspace="live"] #work-area.workspace-stage {
   border-left: 1px solid rgba(0, 204, 255, 0.18);
 }
 
-.section-index a {
+.section-index button {
   display: flex;
   align-items: center;
+  width: 100%;
   min-height: 2.5rem;
   padding: 0 var(--mcav-space-3);
   color: var(--mcav-text-secondary);
   border: 1px solid transparent;
   border-radius: var(--mcav-radius-sm);
+  background: transparent;
   font: 600 0.68rem/1.2 var(--mcav-font-heading);
   letter-spacing: 0.045em;
-  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
 }
 
-.section-index a:hover {
+.section-index button:hover {
   color: var(--mcav-text-primary);
   background: rgba(255, 255, 255, 0.025);
 }
 
-.section-index a:focus-visible {
+.section-index button:focus-visible {
   outline: none;
   color: var(--mcav-cyan);
   box-shadow: var(--mcav-focus-ring);
+}
+
+.section-index button[hidden] {
+  display: none;
 }
 
 .config-sections {
@@ -1017,7 +1024,7 @@ html[data-workspace="system"] .context-preview {
     overflow-x: auto;
   }
 
-  .section-index a {
+  .section-index button {
     flex: 0 0 auto;
   }
 

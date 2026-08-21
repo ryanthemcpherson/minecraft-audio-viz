@@ -182,3 +182,111 @@ test('moves each marked control surface into its semantic workspace', () => {
   assert.deepEqual(panels.find(({ dataset }) => dataset.workspace === 'visuals').children, [controls[1]]);
   assert.deepEqual(panels.find(({ dataset }) => dataset.workspace === 'system').children, [controls[2]]);
 });
+
+test('section index activation opens Visuals and System accordions, focuses, and scrolls', () => {
+  function collapsibleSection(id) {
+    const classes = new Set(['mixer-section', 'collapsible', 'collapsed']);
+    const heading = fakeNode('');
+    const section = {
+      id,
+      hidden: false,
+      classList: {
+        contains: (name) => classes.has(name),
+        remove: (name) => classes.delete(name),
+      },
+      querySelector: (selector) => selector === ':scope > .section-title' ? heading : null,
+      scrollIntoView() { this.scrolled = true; },
+    };
+    heading.click = () => classes.delete('collapsed');
+    return { section, heading };
+  }
+
+  function sectionIndexButton(sectionTarget, focusTarget = '') {
+    const button = fakeNode('');
+    button.dataset.sectionTarget = sectionTarget;
+    button.dataset.focusTarget = focusTarget;
+    return button;
+  }
+
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const visuals = collapsibleSection('ledwall-section');
+  const system = collapsibleSection('system-sync-section');
+  const parityButton = fakeNode('');
+  parityButton.id = 'parity-check-btn';
+  const indexButtons = [
+    sectionIndexButton('ledwall-section'),
+    sectionIndexButton('system-sync-section', 'parity-check-btn'),
+  ];
+  const byId = new Map([
+    ['ledwall-section', visuals.section],
+    ['system-sync-section', system.section],
+    ['parity-check-btn', parityButton],
+  ]);
+  const root = {
+    documentElement: { dataset: {} },
+    getElementById: (id) => byId.get(id) ?? null,
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      if (selector === '[data-section-target]') return indexButtons;
+      return [];
+    },
+  };
+
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  indexButtons[0].click();
+  assert.equal(visuals.section.classList.contains('collapsed'), false);
+  assert.equal(visuals.heading.focused, true);
+  assert.equal(visuals.section.scrolled, true);
+
+  indexButtons[1].click();
+  assert.equal(system.section.classList.contains('collapsed'), false);
+  assert.equal(parityButton.focused, true);
+  assert.equal(system.section.scrolled, true);
+});
+
+test('section index hides an unavailable DJ logo capability until its section becomes visible', () => {
+  let observerCallback;
+  class FakeMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe() {}
+  }
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const logoClasses = new Set(['hidden']);
+  const logoSection = {
+    hidden: false,
+    classList: {
+      contains: (name) => logoClasses.has(name),
+      remove: (name) => logoClasses.delete(name),
+    },
+  };
+  const logoIndexButton = fakeNode('');
+  logoIndexButton.dataset.sectionTarget = 'dj-logo-section';
+  const root = {
+    defaultView: { MutationObserver: FakeMutationObserver },
+    documentElement: { dataset: {} },
+    getElementById: (id) => id === 'dj-logo-section' ? logoSection : null,
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      if (selector === '[data-section-target]') return [logoIndexButton];
+      return [];
+    },
+  };
+
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+  assert.equal(logoIndexButton.hidden, true);
+  assert.equal(logoIndexButton.disabled, true);
+
+  logoClasses.delete('hidden');
+  observerCallback();
+  assert.equal(logoIndexButton.hidden, false);
+  assert.equal(logoIndexButton.disabled, false);
+});

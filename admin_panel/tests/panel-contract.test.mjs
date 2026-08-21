@@ -74,3 +74,19 @@ test('Visuals and Zones expose the only compact preview destinations', async () 
   assert.equal(extractIds(html).filter((id) => id === 'preview-strip').length, 1);
   assert.equal(extractIds(html).filter((id) => id === 'preview-canvas').length, 1);
 });
+
+test('every section-index action targets a real top-level section', async () => {
+  const html = await readPanelFile('index.html');
+  const targets = [...html.matchAll(/<button\b[^>]*\bdata-section-target="([^"]+)"[^>]*>/g)]
+    .map((match) => match[1]);
+
+  assert.ok(targets.length > 0);
+  assert.equal(/<nav class="section-index"[^>]*>[\s\S]*?<a\b/.test(html), false);
+  for (const target of targets) {
+    assert.match(
+      html,
+      new RegExp(`<section\\b[^>]*\\bid="${target}"`),
+      `section-index target #${target} must be a section`,
+    );
+  }
+});
