@@ -4,7 +4,8 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError
+from websockets.frames import Close
 
 from vj_server.models import ConnectCode, DJConnection
 
@@ -18,6 +19,78 @@ def test_connection_closed_exception_is_available_at_runtime() -> None:
     from vj_server import dj_manager
 
     assert dj_manager.ConnectionClosed is ConnectionClosed
+
+
+class DisconnectingDJSocket:
+    """Complete the no-auth handshake, then drop the live frame stream."""
+
+    remote_address = ("127.0.0.1", 43210)
+
+    def __init__(self) -> None:
+        self._received = [
+            json.dumps(
+                {
+                    "type": "dj_auth",
+                    "dj_id": "disconnect-dj",
+                    "dj_key": "unused-no-auth",
+                    "dj_name": "Disconnect DJ",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "clock_sync_response",
+                    "dj_recv_time": 100.0,
+                    "dj_send_time": 100.0,
+                }
+            ),
+        ]
+        self.sent: list[str] = []
+
+    async def recv(self) -> str:
+        return self._received.pop(0)
+
+    async def send(self, message: str) -> None:
+        self.sent.append(message)
+
+    async def close(self, code: int, reason: str) -> None:
+        raise AssertionError(f"unexpected close {code}: {reason}")
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise ConnectionClosedError(Close(1011, "transport lost"), None, None)
+
+
+@pytest.mark.asyncio
+async def test_handler_cleans_up_after_installed_connection_closed(caplog) -> None:
+    """A real stream disconnect must clean up without masking it with NameError."""
+    from vj_server.vj_server import VJServer
+
+    server = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    websocket = DisconnectingDJSocket()
+
+    await server._handle_dj_connection(websocket)
+
+    assert "disconnect-dj" not in server._djs
+    assert server._active_dj_id is None
+    assert server._dj_disconnects == 1
+    assert "connection closed: code=1011, reason=transport lost" in caplog.text
+    assert "NameError" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_handler_logs_unrelated_connection_errors(caplog) -> None:
+    """The specific disconnect catch must not hide unrelated handler failures."""
+    from vj_server.vj_server import VJServer
+
+    server = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    websocket = AsyncMock()
+    websocket.recv.side_effect = RuntimeError("unexpected auth transport failure")
+
+    await server._handle_dj_connection(websocket)
+
+    assert "DJ connection error: unexpected auth transport failure" in caplog.text
 
 
 class FakeDJManager:
