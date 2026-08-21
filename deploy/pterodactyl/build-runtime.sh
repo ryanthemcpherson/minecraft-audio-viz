@@ -84,9 +84,9 @@ done
 
 native_arch="$(uname -m)"
 if [[ "$native_arch" == x86_64 ]]; then
-  "$OUTPUT_ROOT/bin/linux-amd64/python/bin/python3.12" -c \
-    'import bcrypt,lupa,msgspec,numpy,websockets; print("AMD64 runtime imports passed")'
+  PYTHONDONTWRITEBYTECODE=1 "$OUTPUT_ROOT/bin/linux-amd64/python/bin/python3.12" -c \
+    'import aiohttp,bcrypt,lupa,msgspec,numpy,websockets; print("AMD64 runtime imports passed")'
 elif [[ "$native_arch" == aarch64 ]]; then
-  "$OUTPUT_ROOT/bin/linux-arm64/python/bin/python3.12" -c \
-    'import bcrypt,lupa,msgspec,numpy,websockets; print("ARM64 runtime imports passed")'
+  PYTHONDONTWRITEBYTECODE=1 "$OUTPUT_ROOT/bin/linux-arm64/python/bin/python3.12" -c \
+    'import aiohttp,bcrypt,lupa,msgspec,numpy,websockets; print("ARM64 runtime imports passed")'
 fi
