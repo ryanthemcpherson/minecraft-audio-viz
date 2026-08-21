@@ -13,3 +13,26 @@ test('ignores malformed message envelopes at the router boundary', () => {
   assert.equal(notices.length, 2);
   assert.equal(notices.every(({ type }) => type === 'warning'), true);
 });
+
+test('routes representative valid protocol messages to their domain manager', () => {
+  const calls = [];
+  const app = {
+    ui: { showToast: () => {} },
+    patterns: { handlePatterns: (data) => calls.push(['patterns', data.type]) },
+    audio: { handleAudioState: (data) => calls.push(['audio', data.type]) },
+    particles: { handleParticleEffects: (data) => calls.push(['particles', data.type]) },
+  };
+  const router = new MessageRouter(app);
+
+  const routes = [
+    { message: { type: 'patterns', patterns: [] }, expected: ['patterns', 'patterns'] },
+    { message: { type: 'audio', bands: [] }, expected: ['audio', 'audio'] },
+    { message: { type: 'particle_effects', effects: [] }, expected: ['particles', 'particle_effects'] },
+  ];
+
+  for (const { message, expected } of routes) {
+    router.handleMessage(message);
+  }
+
+  assert.deepEqual(calls, routes.map(({ expected }) => expected));
+});

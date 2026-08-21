@@ -5,7 +5,7 @@
 import { debounce } from '../utils/debounce.js';
 
 export function setupEventListeners(app) {
-    const { elements, state, ws, ui, audio, patterns, actions, particles, scenes, zones, connectCodes, voice } = app;
+    const { elements, state, ws, ui, audio, patterns, actions, particles, scenes, zones, connectCodes, voice, banner } = app;
 
     // Tab switching
     elements.tabs.forEach(tab => {
@@ -197,6 +197,9 @@ export function setupEventListeners(app) {
 
     // Voice chat
     voice.setupListeners();
+
+    // Banner controls have this single listener-registration owner.
+    banner.setupBannerListeners();
 
     // Collapsible sections
     ui.setupCollapsibleSections();

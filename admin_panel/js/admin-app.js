@@ -7,6 +7,7 @@ import { WebSocketService } from './services/WebSocketService.js';
 import { createInitialState } from './modules/InitialState.js';
 import { cacheElements } from './modules/ElementCache.js';
 import { setupEventListeners } from './modules/EventWiring.js';
+import { setupConnectionLifecycle } from './modules/ConnectionLifecycle.js';
 import { MessageRouter } from './modules/MessageRouter.js';
 import { UIHelpers } from './modules/UIHelpers.js';
 import { AudioManager } from './modules/AudioManager.js';
@@ -182,10 +183,9 @@ class AdminApp {
         this.router = new MessageRouter(this);
 
         setupEventListeners(this);
-        this._setupWebSocket();
+        setupConnectionLifecycle(this);
         this.dj.setupQueueDelegation();
         this.dj.setupPendingDelegation();
-        this.banner.setupBannerListeners();
         this.bitmap.initControls();
         this.bitmap.setupDjLogoListeners();
         this.preview.initPreviewStrip();
