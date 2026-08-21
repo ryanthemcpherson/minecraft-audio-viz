@@ -1,114 +1,41 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import React, { StrictMode, useEffect } from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
+import { createServer } from 'vite';
 
-const projectRequire = createRequire(new URL('../package.json', import.meta.url));
-const typescript = projectRequire('typescript');
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-function compiledDataUrl(source) {
-  const output = typescript.transpileModule(source, {
-    compilerOptions: {
-      module: typescript.ModuleKind.ES2022,
-      target: typescript.ScriptTarget.ES2021,
-    },
-  }).outputText;
-  return `data:text/javascript;base64,${Buffer.from(output).toString('base64')}`;
-}
-
-const runtimeUrl = compiledDataUrl(`
-  let activeRenderer = null;
-
-  export function useState(initialValue) {
-    const renderer = activeRenderer;
-    const slot = renderer.cursor++;
-    if (!(slot in renderer.slots)) {
-      renderer.slots[slot] = typeof initialValue === 'function' ? initialValue() : initialValue;
-    }
-    return [renderer.slots[slot], (nextValue) => {
-      renderer.slots[slot] = typeof nextValue === 'function'
-        ? nextValue(renderer.slots[slot])
-        : nextValue;
-      renderer.render();
-    }];
-  }
-
-  export function useRef(initialValue) {
-    const renderer = activeRenderer;
-    const slot = renderer.cursor++;
-    if (!(slot in renderer.slots)) {
-      renderer.slots[slot] = { current: initialValue };
-    }
-    return renderer.slots[slot];
-  }
-
-  export function useEffect(effect, dependencies) {
-    const renderer = activeRenderer;
-    const slot = renderer.cursor++;
-    const previous = renderer.effects[slot];
-    const changed = !previous || dependencies.some(
-      (dependency, index) => !Object.is(dependency, previous.dependencies[index]),
-    );
-    renderer.effects[slot] = { dependencies };
-    if (changed) renderer.pendingEffects.push(effect);
-  }
-
-  export function mount(callback) {
-    const renderer = {
-      slots: [],
-      effects: [],
-      pendingEffects: [],
-      current: undefined,
-      cursor: 0,
-      render() {
-        this.cursor = 0;
-        this.pendingEffects = [];
-        activeRenderer = this;
-        this.current = callback();
-        activeRenderer = null;
-        for (const effect of this.pendingEffects) effect();
-      },
-    };
-    renderer.render();
-    return renderer;
-  }
-`);
-
-const profileUrl = compiledDataUrl(
-  readFileSync(new URL('../src/lib/connectionProfile.ts', import.meta.url), 'utf8'),
+const clientRoot = fileURLToPath(new URL('..', import.meta.url));
+const vite = await createServer({
+  root: clientRoot,
+  appType: 'custom',
+  logLevel: 'silent',
+  server: { middlewareMode: true },
+});
+const { useTlsFingerprintProfile } = await vite.ssrLoadModule(
+  '/src/hooks/useTlsFingerprintProfile.ts',
 );
-const hookFileUrl = new URL('../src/hooks/useTlsFingerprintProfile.ts', import.meta.url);
-const hookExists = existsSync(hookFileUrl);
-let hooks = null;
-let runtime = null;
 
-if (hookExists) {
-  const hookSource = readFileSync(hookFileUrl, 'utf8');
-  const compiledHook = typescript.transpileModule(hookSource, {
-    compilerOptions: {
-      module: typescript.ModuleKind.ES2022,
-      target: typescript.ScriptTarget.ES2021,
-    },
-  }).outputText
-    .replace("'react'", `'${runtimeUrl}'`)
-    .replace("'../lib/connectionProfile'", `'${profileUrl}'`);
-  hooks = await import(
-    `data:text/javascript;base64,${Buffer.from(compiledHook).toString('base64')}`
-  );
-  runtime = await import(runtimeUrl);
-}
+test.after(async () => {
+  await vite.close();
+});
 
 function createStorage(initial = {}) {
   const values = new Map(Object.entries(initial));
+  const operations = [];
   return {
     getItem(key) {
       return values.has(key) ? values.get(key) : null;
     },
     setItem(key, value) {
       values.set(key, value);
+      operations.push({ type: 'set', key, value });
     },
     removeItem(key) {
       values.delete(key);
+      operations.push({ type: 'remove', key });
     },
     has(key) {
       return values.has(key);
@@ -116,28 +43,119 @@ function createStorage(initial = {}) {
     value(key) {
       return values.get(key);
     },
+    operations,
   };
 }
 
-test('mounted fingerprint persistence preserves legacy absence, migrates, and saves user edits', () => {
-  assert.equal(hookExists, true, 'the executable fingerprint persistence hook must exist');
+function ProfileHarness({ storage, observe, lifecycle }) {
+  const profile = useTlsFingerprintProfile(storage);
 
-  const absentStorage = createStorage();
-  runtime.mount(() => hooks.useTlsFingerprintProfile(absentStorage));
-  assert.equal(absentStorage.has('mcav.tlsFingerprint'), false);
-  runtime.mount(() => hooks.useTlsFingerprintProfile(absentStorage));
-  assert.equal(absentStorage.has('mcav.tlsFingerprint'), false);
+  useEffect(() => {
+    lifecycle.mounts += 1;
+    return () => {
+      lifecycle.cleanups += 1;
+    };
+  }, [lifecycle]);
 
-  const storedFingerprint = `${'ab:'.repeat(31)}ab`;
-  const migratedStorage = createStorage({ 'mcav.tlsFingerprint': storedFingerprint });
-  const mounted = runtime.mount(() => hooks.useTlsFingerprintProfile(migratedStorage));
-  assert.equal(mounted.current.tlsFingerprint, 'AB'.repeat(32));
-  assert.equal(migratedStorage.value('mcav.tlsFingerprint'), 'AB'.repeat(32));
+  useEffect(() => {
+    observe(profile);
+  }, [observe, profile]);
 
-  mounted.current.setTlsFingerprint(`${'cd '.repeat(31)}cd`);
-  assert.equal(mounted.current.tlsFingerprint, 'CD'.repeat(32));
-  assert.equal(migratedStorage.value('mcav.tlsFingerprint'), 'CD'.repeat(32));
+  return React.createElement('output', null, profile.tlsFingerprint);
+}
 
-  mounted.current.setTlsFingerprint('');
-  assert.equal(migratedStorage.has('mcav.tlsFingerprint'), false);
+async function mountProfile(storage) {
+  const lifecycle = { mounts: 0, cleanups: 0 };
+  let currentProfile = null;
+  const observe = (profile) => {
+    currentProfile = profile;
+  };
+  let renderer;
+
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        StrictMode,
+        null,
+        React.createElement(ProfileHarness, { storage, observe, lifecycle }),
+      ),
+    );
+  });
+
+  return {
+    lifecycle,
+    renderer,
+    profile() {
+      return currentProfile;
+    },
+  };
+}
+
+test('StrictMode mount and reload preserve an absent legacy fingerprint without writes', async () => {
+  const storage = createStorage();
+  const firstMount = await mountProfile(storage);
+
+  assert.equal(firstMount.lifecycle.mounts, 2);
+  assert.equal(firstMount.lifecycle.cleanups, 1);
+  assert.equal(firstMount.profile().tlsFingerprint, '');
+  assert.equal(storage.has('mcav.tlsFingerprint'), false);
+  assert.deepEqual(storage.operations, []);
+
+  await act(async () => firstMount.renderer.unmount());
+  assert.equal(firstMount.lifecycle.cleanups, 2);
+  assert.deepEqual(storage.operations, []);
+
+  const reload = await mountProfile(storage);
+  assert.equal(reload.lifecycle.mounts, 2);
+  assert.equal(reload.profile().tlsFingerprint, '');
+  assert.equal(storage.has('mcav.tlsFingerprint'), false);
+  assert.deepEqual(storage.operations, []);
+
+  await act(async () => reload.renderer.unmount());
+  assert.equal(reload.lifecycle.cleanups, 2);
+  assert.deepEqual(storage.operations, []);
+});
+
+test('real effects migrate once, persist edits, delete clears, and clean up safely', async () => {
+  const storage = createStorage({
+    'mcav.tlsFingerprint': `${'ab:'.repeat(31)}ab`,
+  });
+  const mounted = await mountProfile(storage);
+
+  assert.equal(mounted.lifecycle.mounts, 2);
+  assert.equal(mounted.profile().tlsFingerprint, 'AB'.repeat(32));
+  assert.equal(storage.value('mcav.tlsFingerprint'), 'AB'.repeat(32));
+  assert.deepEqual(storage.operations, [
+    {
+      type: 'set',
+      key: 'mcav.tlsFingerprint',
+      value: 'AB'.repeat(32),
+    },
+  ]);
+
+  await act(async () => {
+    mounted.profile().setTlsFingerprint(`${'cd '.repeat(31)}cd`);
+  });
+  assert.equal(mounted.profile().tlsFingerprint, 'CD'.repeat(32));
+  assert.equal(storage.value('mcav.tlsFingerprint'), 'CD'.repeat(32));
+  assert.deepEqual(storage.operations.at(-1), {
+    type: 'set',
+    key: 'mcav.tlsFingerprint',
+    value: 'CD'.repeat(32),
+  });
+
+  await act(async () => {
+    mounted.profile().setTlsFingerprint('');
+  });
+  assert.equal(mounted.profile().tlsFingerprint, '');
+  assert.equal(storage.has('mcav.tlsFingerprint'), false);
+  assert.deepEqual(storage.operations.at(-1), {
+    type: 'remove',
+    key: 'mcav.tlsFingerprint',
+  });
+  assert.equal(storage.operations.length, 3);
+
+  await act(async () => mounted.renderer.unmount());
+  assert.equal(mounted.lifecycle.cleanups, 2);
+  assert.equal(storage.operations.length, 3);
 });
