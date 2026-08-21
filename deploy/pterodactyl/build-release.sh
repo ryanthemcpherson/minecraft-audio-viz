@@ -56,6 +56,7 @@ mkdir -p "$MCAV_ROOT/release" "$MCAV_ROOT/configs"
 
 install -m 644 "$PLUGIN_JAR" "$MCAV_ROOT/release/AudioViz.jar"
 install -m 644 "$SCRIPT_DIR/plugin-config.default.yml" "$MCAV_ROOT/release/plugin-config.default.yml"
+install -m 644 "$SCRIPT_DIR/runtime-lock.json" "$MCAV_ROOT/release/runtime-lock.json"
 install -m 755 "$SCRIPT_DIR/start-mcav.sh" "$MCAV_ROOT/start-mcav.sh"
 install -m 644 "$SCRIPT_DIR/mcav.env.example" "$MCAV_ROOT/mcav.env.example"
 printf '%s' "$VERSION" > "$MCAV_ROOT/VERSION"
