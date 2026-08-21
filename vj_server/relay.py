@@ -2147,12 +2147,16 @@ class RelayMixin:
     async def _forward_voice_config(self, config: dict):
         """Forward voice_config to the Minecraft plugin and relay voice_status response."""
         if not self.viz_client or not self.viz_client.connected:
-            return
+            browser_status = _voice_status_error("Minecraft voice service is unavailable.")
+        else:
+            try:
+                response = await self.viz_client.send_voice_config(config)
+                browser_status = _normalize_renderer_voice_status(response)
+            except Exception:
+                logger.warning("Minecraft voice configuration failed")
+                browser_status = _voice_status_error("Minecraft voice configuration failed.")
 
-        response = await self.viz_client.send_voice_config(config)
-        if response and response.get("type") == "voice_status":
-            # Broadcast voice_status to all connected browser clients
-            await self._broadcast_voice_status(response)
+        await self._broadcast_voice_status(browser_status)
 
     async def _broadcast_voice_status(self, status: dict):
         """Broadcast voice_status to all connected browser clients."""
