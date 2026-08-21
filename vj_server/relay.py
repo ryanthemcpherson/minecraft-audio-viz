@@ -205,6 +205,7 @@ class RelayMixin:
                     "minecraft_connected": mc_connected,
                     "blackout": self._blackout,
                     "freeze": self._freeze,
+                    "emergency_revision": self._emergency_revision,
                     "minecraft_server_type": (
                         getattr(self.viz_client, "server_type", None) if self.viz_client else None
                     ),
@@ -293,6 +294,7 @@ class RelayMixin:
                                     "minecraft_connected": mc_status,
                                     "blackout": self._blackout,
                                     "freeze": self._freeze,
+                                    "emergency_revision": self._emergency_revision,
                                     "minecraft_server_type": (
                                         getattr(self.viz_client, "server_type", None)
                                         if self.viz_client
@@ -732,6 +734,7 @@ class RelayMixin:
                                 # Turn off
                                 if effect == "blackout":
                                     self._blackout = False
+                                    emergency_state = self._record_emergency_mutation()
                                     if effect in self._active_effects:
                                         del self._active_effects[effect]
                                     # Re-show entities
@@ -742,6 +745,7 @@ class RelayMixin:
                                             pass
                                 elif effect == "freeze":
                                     self._freeze = False
+                                    emergency_state = self._record_emergency_mutation()
                                     if effect in self._active_effects:
                                         del self._active_effects[effect]
                                 logger.info(f"{effect.capitalize()} OFF")
@@ -749,6 +753,7 @@ class RelayMixin:
                                 # Turn on
                                 if effect == "blackout":
                                     self._blackout = True
+                                    emergency_state = self._record_emergency_mutation()
                                     # Hide entities in MC
                                     if self.viz_client and self.viz_client.connected:
                                         try:
@@ -757,6 +762,7 @@ class RelayMixin:
                                             pass
                                 elif effect == "freeze":
                                     self._freeze = True
+                                    emergency_state = self._record_emergency_mutation()
                                 self._active_effects[effect] = {
                                     "intensity": intensity,
                                     "end_time": time.time() + 999999,
@@ -778,10 +784,13 @@ class RelayMixin:
 
                         await self._broadcast_effect_trigger(effect)
                         if effect in ("blackout", "freeze"):
-                            await self._broadcast_emergency_state(websocket, data.get("request_id"))
+                            await self._broadcast_emergency_state(
+                                websocket, data.get("request_id"), emergency_state
+                            )
 
                     elif msg_type in ("blackout", "set_blackout"):
                         self._blackout = data.get("enabled", not self._blackout)
+                        emergency_state = self._record_emergency_mutation()
                         if self._blackout:
                             self._active_effects["blackout"] = {
                                 "intensity": 1.0,
@@ -802,10 +811,13 @@ class RelayMixin:
                                 except Exception:
                                     pass
                         logger.info(f"Blackout: {self._blackout}")
-                        await self._broadcast_emergency_state(websocket, data.get("request_id"))
+                        await self._broadcast_emergency_state(
+                            websocket, data.get("request_id"), emergency_state
+                        )
 
                     elif msg_type in ("freeze", "set_freeze"):
                         self._freeze = data.get("enabled", not self._freeze)
+                        emergency_state = self._record_emergency_mutation()
                         if self._freeze:
                             self._active_effects["freeze"] = {
                                 "intensity": 1.0,
@@ -816,7 +828,9 @@ class RelayMixin:
                         else:
                             self._active_effects.pop("freeze", None)
                         logger.info(f"Freeze: {self._freeze}")
-                        await self._broadcast_emergency_state(websocket, data.get("request_id"))
+                        await self._broadcast_emergency_state(
+                            websocket, data.get("request_id"), emergency_state
+                        )
 
                     # ========== Banner Profile Management ==========
 
@@ -1485,16 +1499,23 @@ class RelayMixin:
             except Exception:
                 pass
 
-    async def _broadcast_emergency_state(self, requester=None, request_id: str | None = None):
-        """Broadcast authority while scoping correlation to the requesting socket."""
-        payload = {
+    def _record_emergency_mutation(self):
+        """Synchronously capture one monotonic authoritative emergency mutation."""
+        self._emergency_revision += 1
+        return {
             "type": "emergency_state",
             "blackout": self._blackout,
             "freeze": self._freeze,
+            "emergency_revision": self._emergency_revision,
         }
-        uncorrelated_message = _json_str(payload)
+
+    async def _broadcast_emergency_state(
+        self, requester, request_id: str | None, emergency_state: dict
+    ):
+        """Broadcast authority while scoping correlation to the requesting socket."""
+        uncorrelated_message = _json_str(emergency_state)
         correlated_message = (
-            _json_str({**payload, "request_id": request_id})
+            _json_str({**emergency_state, "request_id": request_id})
             if requester is not None and request_id
             else uncorrelated_message
         )

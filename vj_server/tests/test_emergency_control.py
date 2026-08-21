@@ -31,11 +31,20 @@ _CLOSE_SOCKET = object()
 
 
 class ConcurrentBrowserSocket:
-    def __init__(self, remote_port: int):
+    def __init__(
+        self,
+        remote_port: int,
+        blocked_revision: int,
+        revision_blocked: asyncio.Event,
+        release_revision: asyncio.Event,
+    ):
         self.incoming: asyncio.Queue[str | object] = asyncio.Queue()
         self.sent: list[dict] = []
         self.message_sent = asyncio.Event()
         self.remote_address = ("127.0.0.1", remote_port)
+        self.blocked_revision = blocked_revision
+        self.revision_blocked = revision_blocked
+        self.release_revision = release_revision
 
     def __aiter__(self):
         return self
@@ -47,7 +56,14 @@ class ConcurrentBrowserSocket:
         return message
 
     async def send(self, message: str):
-        self.sent.append(mjson.decode(message))
+        decoded = mjson.decode(message)
+        if (
+            decoded.get("type") == "emergency_state"
+            and decoded.get("emergency_revision") == self.blocked_revision
+        ):
+            self.revision_blocked.set()
+            await self.release_revision.wait()
+        self.sent.append(decoded)
         self.message_sent.set()
 
     async def send_from_browser(self, message: dict):
@@ -82,6 +98,7 @@ class EmergencyRelay(RelayMixin):
         self._pattern_name = "spectrum"
         self._blackout = False
         self._freeze = False
+        self._emergency_revision = 0
         self._active_effects = {}
         self._band_materials = []
         self._band_materials_source = "default"
@@ -135,6 +152,7 @@ async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlate
     assert len(snapshots) == 2
     assert all(snapshot["blackout"] is False for snapshot in snapshots)
     assert all(snapshot["freeze"] is False for snapshot in snapshots)
+    assert [snapshot["emergency_revision"] for snapshot in snapshots] == [0, 0]
     assert {message["type"] for message in websocket.sent} >= {
         "effect_triggered",
         "emergency_state",
@@ -142,12 +160,13 @@ async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlate
     assert {
         key: value
         for key, value in websocket.sent[-1].items()
-        if key in {"type", "blackout", "freeze", "request_id"}
+        if key in {"type", "blackout", "freeze", "request_id", "emergency_revision"}
     } == {
         "type": "emergency_state",
         "blackout": True,
         "freeze": False,
         "request_id": "emergency-blackout-1",
+        "emergency_revision": 1,
     }
 
 
@@ -165,6 +184,7 @@ async def test_direct_freeze_broadcasts_current_emergency_state():
         "blackout": False,
         "freeze": True,
         "request_id": "emergency-freeze-1",
+        "emergency_revision": 1,
     }
 
 
@@ -190,10 +210,12 @@ async def test_rate_limit_error_preserves_request_correlation():
 
 
 @pytest.mark.asyncio
-async def test_concurrent_clients_scope_same_request_id_ack_to_each_requester():
+async def test_concurrent_clients_receive_monotonic_revisions_despite_inverse_delivery():
     relay = EmergencyRelay()
-    first = ConcurrentBrowserSocket(50001)
-    second = ConcurrentBrowserSocket(50002)
+    revision_blocked = asyncio.Event()
+    release_revision = asyncio.Event()
+    first = ConcurrentBrowserSocket(50001, 1, revision_blocked, release_revision)
+    second = ConcurrentBrowserSocket(50002, 1, revision_blocked, release_revision)
     first_task = asyncio.create_task(relay._handle_browser_client(first))
     second_task = asyncio.create_task(relay._handle_browser_client(second))
 
@@ -208,50 +230,49 @@ async def test_concurrent_clients_scope_same_request_id_ack_to_each_requester():
                 "request_id": "shared-emergency-id",
             }
         )
-        await first.wait_for_message(
-            lambda message: message.get("request_id") == "shared-emergency-id"
-        )
-        await second.wait_for_message(lambda message: message["type"] == "emergency_state")
-
-        first_blackout = [message for message in first.sent if message["type"] == "emergency_state"]
-        second_blackout = [
-            message for message in second.sent if message["type"] == "emergency_state"
-        ]
-        assert first_blackout == [
-            {
-                "type": "emergency_state",
-                "blackout": True,
-                "freeze": False,
-                "request_id": "shared-emergency-id",
-            }
-        ]
-        assert second_blackout == [{"type": "emergency_state", "blackout": True, "freeze": False}]
-
+        await asyncio.wait_for(revision_blocked.wait(), timeout=1)
         await second.send_from_browser(
             {
-                "type": "set_freeze",
-                "enabled": True,
+                "type": "set_blackout",
+                "enabled": False,
                 "request_id": "shared-emergency-id",
             }
         )
-        await second.wait_for_message(
-            lambda message: message.get("request_id") == "shared-emergency-id"
-        )
-        await first.wait_for_message(
-            lambda message: message["type"] == "emergency_state" and message.get("freeze") is True
+        await first.wait_for_message(lambda message: message.get("emergency_revision") == 2)
+        await second.wait_for_message(lambda message: message.get("emergency_revision") == 2)
+        assert not any(
+            message.get("emergency_revision") == 1 for message in [*first.sent, *second.sent]
         )
 
+        release_revision.set()
+        await first.wait_for_message(lambda message: message.get("emergency_revision") == 1)
+        await second.wait_for_message(lambda message: message.get("emergency_revision") == 1)
+
         assert [
-            message.get("request_id")
+            message["emergency_revision"]
             for message in first.sent
             if message["type"] == "emergency_state"
-        ] == ["shared-emergency-id", None]
+        ] == [2, 1]
         assert [
-            message.get("request_id")
+            message["emergency_revision"]
             for message in second.sent
             if message["type"] == "emergency_state"
-        ] == [None, "shared-emergency-id"]
+        ] == [2, 1]
+        first_states = [message for message in first.sent if message["type"] == "emergency_state"]
+        second_states = [message for message in second.sent if message["type"] == "emergency_state"]
+        assert first_states[0] == {
+            "type": "emergency_state",
+            "blackout": False,
+            "freeze": False,
+            "emergency_revision": 2,
+        }
+        assert first_states[1]["request_id"] == "shared-emergency-id"
+        assert second_states[0]["request_id"] == "shared-emergency-id"
+        assert "request_id" not in second_states[1]
+        assert relay._emergency_revision == 2
+        assert relay._blackout is False
     finally:
+        release_revision.set()
         await first.close_input()
         await second.close_input()
         await asyncio.gather(first_task, second_task)

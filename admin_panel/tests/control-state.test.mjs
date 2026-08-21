@@ -382,9 +382,11 @@ test('emergency state remains authoritative while a non-queued command is pendin
         assert.match(immediate[0].request_id, /^emergency-/);
 
         actions.applyEmergencyState({
+            type: 'emergency_state',
             blackout: true,
             freeze: false,
             request_id: immediate[0].request_id,
+            emergency_revision: 1,
         });
         assert.equal(app.state.blackout, true);
         assert.equal(blackout.getAttribute('aria-pressed'), 'true');
@@ -435,7 +437,7 @@ test('correlated protocol errors clear emergency pending state without changing 
     }
 });
 
-test('disconnect and fresh snapshot reconcile emergency pending without a late timeout', () => {
+test('older correlated ack after reconnect cannot overwrite a newer snapshot or clear fresh pending', () => {
     const originalDocument = globalThis.document;
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
@@ -467,6 +469,12 @@ test('disconnect and fresh snapshot reconcile emergency pending without a late t
         assert.equal(blackout.getAttribute('aria-busy'), 'false');
         assert.match(status.textContent, /connection lost/i);
 
+        actions.applyEmergencyState({
+            type: 'vj_state',
+            blackout: false,
+            freeze: true,
+            emergency_revision: 8,
+        });
         actions.toggleBlackout();
         const freshRequestId = sent[1].request_id;
         assert.notEqual(freshRequestId, endedRequestId);
@@ -477,16 +485,20 @@ test('disconnect and fresh snapshot reconcile emergency pending without a late t
             blackout: true,
             freeze: false,
             request_id: endedRequestId,
+            emergency_revision: 7,
         });
-        assert.equal(app.state.blackout, true);
+        assert.equal(app.state.blackout, false);
+        assert.equal(app.state.freeze, true);
         assert.equal(blackout.getAttribute('aria-busy'), 'true');
+        assert.match(status.textContent, /pending/i);
 
         actions.applyEmergencyState({
             type: 'vj_state',
-            blackout: false,
+            blackout: true,
             freeze: true,
+            emergency_revision: 9,
         });
-        assert.equal(app.state.blackout, false);
+        assert.equal(app.state.blackout, true);
         assert.equal(app.state.freeze, true);
         assert.equal(blackout.getAttribute('aria-busy'), 'false');
         assert.match(status.textContent, /synchronized/i);
@@ -498,6 +510,95 @@ test('disconnect and fresh snapshot reconcile emergency pending without a late t
         globalThis.document = originalDocument;
         globalThis.setTimeout = originalSetTimeout;
         globalThis.clearTimeout = originalClearTimeout;
+    }
+});
+
+test('legacy emergency state is accepted only until revisioned authority is observed', () => {
+    const originalDocument = globalThis.document;
+    const appRoot = new FakeElement('app');
+    const blackout = new FakeElement('btn-blackout');
+    globalThis.document = {
+        getElementById: (id) => id === 'app' ? appRoot : null,
+    };
+    const app = {
+        state: { blackout: false, freeze: false },
+        elements: { btnBlackout: blackout, btnFreeze: new FakeElement('btn-freeze') },
+        ws: { sendImmediate: () => true },
+    };
+    const actions = new ActionsManager(app);
+
+    try {
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: false,
+        }), true);
+        assert.equal(app.state.blackout, true);
+
+        assert.equal(actions.applyEmergencyState({
+            type: 'vj_state',
+            blackout: false,
+            freeze: false,
+            emergency_revision: 4,
+        }), true);
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: true,
+        }), false);
+        assert.equal(app.state.blackout, false);
+        assert.equal(app.state.freeze, false);
+    } finally {
+        globalThis.document = originalDocument;
+    }
+});
+
+test('equal revision affects only the matching in-flight request', () => {
+    const originalDocument = globalThis.document;
+    const originalSetTimeout = globalThis.setTimeout;
+    const appRoot = new FakeElement('app');
+    const blackout = new FakeElement('btn-blackout');
+    const sent = [];
+    globalThis.document = {
+        getElementById: (id) => id === 'app' ? appRoot : null,
+    };
+    globalThis.setTimeout = () => 23;
+    const app = {
+        state: { blackout: false, freeze: false },
+        elements: { btnBlackout: blackout, btnFreeze: new FakeElement('btn-freeze') },
+        ws: { sendImmediate: (message) => (sent.push(message), true) },
+    };
+    const actions = new ActionsManager(app);
+
+    try {
+        actions.applyEmergencyState({
+            type: 'vj_state',
+            blackout: false,
+            freeze: false,
+            emergency_revision: 5,
+        });
+        actions.toggleBlackout();
+
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: false,
+            emergency_revision: 5,
+        }), false);
+        assert.equal(app.state.blackout, false);
+        assert.equal(blackout.getAttribute('aria-busy'), 'true');
+
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: false,
+            freeze: false,
+            emergency_revision: 5,
+            request_id: sent[0].request_id,
+        }), true);
+        assert.equal(blackout.getAttribute('aria-busy'), 'false');
+    } finally {
+        globalThis.document = originalDocument;
+        globalThis.setTimeout = originalSetTimeout;
     }
 });
 

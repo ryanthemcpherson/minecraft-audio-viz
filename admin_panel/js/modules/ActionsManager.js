@@ -14,6 +14,7 @@ export class ActionsManager {
         this.tapTimeout = null;
         this._emergencySequence = 0;
         this._pendingEmergency = new Map();
+        this._lastEmergencyRevision = null;
         this.emergencyTimeoutMs = 5000;
 
         this._renderEmergencyState('blackout');
@@ -39,6 +40,32 @@ export class ActionsManager {
     }
 
     applyEmergencyState(data) {
+        const hasRevision = data.emergency_revision !== undefined;
+        const pendingName = data.request_id
+            ? this._findPendingByRequestId(data.request_id)
+            : null;
+        if (hasRevision
+            && (!Number.isInteger(data.emergency_revision) || data.emergency_revision < 0)) {
+            return false;
+        }
+        if (!hasRevision && this._lastEmergencyRevision !== null) {
+            return false;
+        }
+        if (hasRevision
+            && this._lastEmergencyRevision !== null
+            && data.emergency_revision < this._lastEmergencyRevision) {
+            return false;
+        }
+        if (hasRevision
+            && data.emergency_revision === this._lastEmergencyRevision
+            && data.type !== 'vj_state'
+            && !pendingName) {
+            return false;
+        }
+        if (hasRevision) {
+            this._lastEmergencyRevision = data.emergency_revision;
+        }
+
         const reconciledPending = data.type === 'vj_state'
             ? this._clearAllEmergencyPending()
             : false;
@@ -50,7 +77,6 @@ export class ActionsManager {
         }
 
         if (data.request_id) {
-            const pendingName = this._findPendingByRequestId(data.request_id);
             if (pendingName) {
                 this._clearEmergencyPending(pendingName);
                 const enabled = Boolean(this.state[pendingName]);
@@ -60,6 +86,7 @@ export class ActionsManager {
         if (reconciledPending) {
             this._setEmergencyStatus('Emergency state synchronized');
         }
+        return true;
     }
 
     handleEmergencyError(requestId, message) {
@@ -71,6 +98,7 @@ export class ActionsManager {
     }
 
     handleConnectionLost() {
+        this._lastEmergencyRevision = null;
         if (!this._clearAllEmergencyPending()) return false;
         this._setEmergencyStatus('Emergency request cancelled: connection lost');
         return true;

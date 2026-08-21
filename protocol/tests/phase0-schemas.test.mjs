@@ -54,6 +54,16 @@ function validationErrors(schema, value) {
       if (propertySchema.type === "boolean" && typeof propertyValue !== "boolean") {
         errors.push(`${propertyName} must be a boolean`);
       }
+      if (propertySchema.type === "integer" && !Number.isInteger(propertyValue)) {
+        errors.push(`${propertyName} must be an integer`);
+      }
+      if (
+        typeof propertyValue === "number" &&
+        propertySchema.minimum !== undefined &&
+        propertyValue < propertySchema.minimum
+      ) {
+        errors.push(`${propertyName} is less than ${propertySchema.minimum}`);
+      }
       if (
         typeof propertyValue === "string" &&
         propertySchema.minLength !== undefined &&
@@ -174,15 +184,36 @@ test("emergency state is inventoried and requires authoritative toggle values", 
   assert.equal(inventory.messages.emergency_state, "messages/emergency-state.schema.json");
   const schema = readJson(resolve(repositoryRoot, "protocol", "schemas", inventory.messages.emergency_state));
 
-  assertValid(schema, { type: "emergency_state", blackout: true, freeze: false });
+  assertValid(schema, {
+    type: "emergency_state",
+    blackout: true,
+    freeze: false,
+    emergency_revision: 0,
+  });
   assertValid(schema, {
     type: "emergency_state",
     blackout: false,
     freeze: true,
     request_id: "emergency-123",
+    emergency_revision: 12,
   });
+  assertInvalid(schema, { type: "emergency_state", blackout: true, freeze: false });
   assertInvalid(schema, { type: "emergency_state", blackout: true });
   assertInvalid(schema, { type: "emergency_state", blackout: "true", freeze: false });
+  assertInvalid(schema, {
+    type: "emergency_state",
+    blackout: true,
+    freeze: false,
+    emergency_revision: -1,
+  });
+
+  const vjStateSchema = readJson(
+    resolve(repositoryRoot, "protocol", "schemas", "messages", "vj-state.schema.json"),
+  );
+  assert.deepEqual(vjStateSchema.properties.emergency_revision, {
+    type: "integer",
+    minimum: 0,
+  });
 });
 
 test("emergency command and error schemas accept request correlation", () => {

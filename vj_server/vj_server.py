@@ -201,6 +201,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         # Control state
         self._blackout = False
         self._freeze = False
+        self._emergency_revision = 0
         self._active_effects = {}  # Active effects with end times
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
         self._band_materials: List[Optional[str]] = [
