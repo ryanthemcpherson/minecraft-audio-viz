@@ -110,6 +110,65 @@ async def test_unified_mode_run_refuses_missing_tls_before_opening_listeners(
 
 
 @pytest.mark.parametrize(
+    "replacement_context",
+    [None, object()],
+    ids=["cleared", "replaced"],
+)
+@pytest.mark.asyncio
+async def test_unified_mode_snapshots_tls_context_before_listener_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    replacement_context: object | None,
+) -> None:
+    server = _make_unified_server(monkeypatch, dj_port=25808)
+    original_context = server.server_ssl_context
+    gateway_contexts: list[object] = []
+    dj_contexts: list[object | None] = []
+
+    class FakeListener:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    class FakeGatewayRunner:
+        async def cleanup(self) -> None:
+            return None
+
+    async def mutate_context_during_gateway_start(*args, **_kwargs):
+        gateway_contexts.append(args[3])
+        server.server_ssl_context = replacement_context
+        return FakeGatewayRunner()
+
+    async def capture_dj_listener(*_args, **kwargs):
+        dj_contexts.append(kwargs["ssl"])
+        return FakeListener()
+
+    async def no_op() -> None:
+        return None
+
+    monkeypatch.setattr(
+        vj_mod,
+        "start_unified_web_gateway",
+        mutate_context_during_gateway_start,
+    )
+    monkeypatch.setattr(vj_mod, "ws_serve", capture_dj_listener)
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+
+    with caplog.at_level("INFO", logger="vj_server"):
+        await server.run()
+
+    assert gateway_contexts == [original_context]
+    assert dj_contexts == [original_context]
+    assert "DJ WebSocket server: wss://localhost:25808" in caplog.messages
+
+
+@pytest.mark.parametrize(
     "public_origin",
     [
         "http://203.0.113.9:18080",

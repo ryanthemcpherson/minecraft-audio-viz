@@ -1064,7 +1064,10 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 else:
                     await asyncio.sleep(frame_interval)
 
-    def _start_legacy_http_thread(self) -> tuple[Any | None, Any | None]:
+    def _start_legacy_http_thread(
+        self,
+        ssl_context: Any,
+    ) -> tuple[Any | None, Any | None]:
         """Start and return the split-port static server and its serve thread."""
         if self.http_port <= 0:
             return None, None
@@ -1074,7 +1077,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 self.http_port,
                 str(self.project_root),
                 self.http_host,
-                self.server_ssl_context,
+                ssl_context,
             )
         except OSError as exc:
             logger.error(f"HTTP server failed to start on port {self.http_port}: {exc}")
@@ -1092,7 +1095,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             http_server.server_close()
             raise
 
-        http_scheme = "https" if self.server_ssl_context is not None else "http"
+        http_scheme = "https" if ssl_context is not None else "http"
         logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
         logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
         return http_server, http_thread
@@ -1265,7 +1268,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         if not HAS_WEBSOCKETS:
             logger.error("websockets not installed. Run: pip install websockets")
             return
-        if self.unified_web and self.server_ssl_context is None:
+        listener_ssl_context = self.server_ssl_context
+        if self.unified_web and listener_ssl_context is None:
             raise RuntimeError("Unified web mode requires TLS for all public listeners")
 
         self._running = True
@@ -1283,7 +1287,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     self._handle_browser_client,
                     self.http_host,
                     self.http_port,
-                    self.server_ssl_context,
+                    listener_ssl_context,
                     UnifiedWebConfig(self.project_root, self.public_origin),
                 )
                 logger.info("Admin panel: %s/", self.public_origin)
@@ -1293,7 +1297,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     self.public_origin.replace("https://", "wss://", 1),
                 )
             else:
-                legacy_http_server, legacy_http_thread = self._start_legacy_http_thread()
+                legacy_http_server, legacy_http_thread = self._start_legacy_http_thread(
+                    listener_ssl_context
+                )
 
             # Start DJ listener (64KB max message — valid audio frames are ~200 bytes)
             dj_server = await ws_serve(
@@ -1301,9 +1307,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 "0.0.0.0",
                 self.dj_port,
                 max_size=65_536,
-                ssl=self.server_ssl_context,
+                ssl=listener_ssl_context,
             )
-            dj_scheme = "wss" if self.server_ssl_context is not None else "ws"
+            dj_scheme = "wss" if listener_ssl_context is not None else "ws"
             logger.info(f"DJ WebSocket server: {dj_scheme}://localhost:{self.dj_port}")
 
             if not self.unified_web:
@@ -1313,9 +1319,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     "0.0.0.0",
                     self.broadcast_port,
                     max_size=65_536,
-                    ssl=self.server_ssl_context,
+                    ssl=listener_ssl_context,
                 )
-                browser_scheme = "wss" if self.server_ssl_context is not None else "ws"
+                browser_scheme = "wss" if listener_ssl_context is not None else "ws"
                 logger.info(
                     f"Browser WebSocket: {browser_scheme}://localhost:{self.broadcast_port}"
                 )
