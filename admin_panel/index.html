@@ -183,35 +183,6 @@
                     </div>
                 </div>
 
-                <!-- DJ Management -->
-                <div class="panel control-surface" data-workspace-destination="djs">
-                    <h2 class="panel-title">DJ Management</h2>
-
-                    <!-- Pending Approvals -->
-                    <div id="dj-pending-section" class="dj-pending-section hidden">
-                        <h3 class="subsection-title">Pending Approval</h3>
-                        <div id="dj-pending-queue" class="dj-pending-queue"></div>
-                    </div>
-
-                    <!-- Active DJ Queue -->
-                    <div id="dj-queue" class="dj-queue">
-                        <div class="dj-empty">No DJs connected</div>
-                    </div>
-                    <!-- Connect Code Generator -->
-                    <div class="connect-code-section">
-                        <button id="btn-generate-code" class="btn btn-primary btn-full">
-                            Generate Connect Code
-                        </button>
-                        <div id="generated-code-display" class="generated-code-display hidden">
-                            <div class="generated-code-row">
-                                <span class="generated-code-text" id="generated-code-text"></span>
-                                <button id="btn-copy-code" class="btn btn-copy-inline" title="Copy code">Copy</button>
-                            </div>
-                            <span class="generated-code-ttl">Expires in <span id="generated-code-ttl">30</span>m</span>
-                        </div>
-                        <div id="active-codes" class="active-codes"></div>
-                    </div>
-                </div>
             </aside>
 
             <!-- Main Work Area -->
@@ -411,54 +382,28 @@
                         </section>
                     </section>
 
-                        <!-- Visual Sync -->
-                        <section class="mixer-section collapsible collapsed control-surface" data-workspace-destination="system">
-                            <h3 class="section-title">Visual Sync</h3>
-                            <div id="sync-controls" class="controls-grid">
-                                <div class="control-row">
-                                    <label for="sync-mode">Delay Mode</label>
-                                    <select id="sync-mode" class="control-select">
-                                        <option value="manual">Manual</option>
-                                        <option value="auto">Auto</option>
-                                        <option value="svc">Voice Chat (~80ms)</option>
-                                        <option value="discord">Discord (~200ms)</option>
-                                    </select>
-                                </div>
-                                <div class="control-row" id="sync-presets-row">
-                                    <label id="sync-presets-label">Quick Presets</label>
-                                    <div class="sync-preset-buttons" role="group" aria-labelledby="sync-presets-label">
-                                        <button class="sync-preset-btn" data-delay="0">Local (0ms)</button>
-                                        <button class="sync-preset-btn" data-delay="80">Voice Chat</button>
-                                        <button class="sync-preset-btn" data-delay="200">Discord</button>
-                                    </div>
-                                </div>
-                                <div class="control-row" id="sync-delay-row">
-                                    <label for="ctrl-visual-delay">Visual Delay</label>
-                                    <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10">
-                                    <span class="control-value" id="val-visual-delay">0ms</span>
-                                </div>
-                            </div>
-                            <!-- Sync Dashboard -->
-                            <div class="sync-dashboard" id="sync-dashboard">
-                                <span class="sync-metric" id="metric-ping" title="Network RTT">Ping: --ms</span>
-                                <span class="sync-metric" id="metric-pipeline" title="End-to-end pipeline">Pipeline: --ms</span>
-                                <span class="sync-metric" id="metric-delay" title="Applied visual delay">Delay: --ms</span>
-                                <span class="sync-metric" id="metric-sync" title="Sync quality score">Sync: --%</span>
-                                <span class="sync-metric" id="metric-jitter" title="Frame jitter">Jitter: --ms</span>
-                            </div>
-                            <!-- Sync Test -->
-                            <div class="sync-test-row">
-                                <button id="btn-sync-test" class="btn btn-secondary btn-sync-test">Sync Test</button>
-                                <span id="sync-test-result" class="sync-test-result"></span>
-                            </div>
-                            <!-- Parity Check -->
-                            <div class="sync-test-row">
-                                <button id="parity-check-btn" class="btn btn-secondary btn-sync-test">Parity Check</button>
-                            </div>
-                        </section>
+                    </section>
 
+                    <section id="workspace-visuals" class="workspace-panel config-workspace" role="tabpanel" aria-labelledby="workspace-tab-visuals" data-workspace-panel data-workspace="visuals" hidden>
+                        <header class="workspace-heading">
+                            <div>
+                                <p class="workspace-kicker">Presentation</p>
+                                <h2>Visuals</h2>
+                            </div>
+                            <p>Build bitmap layers, particle treatments, and reusable show assets.</p>
+                        </header>
+                        <div class="config-grid">
+                            <nav class="section-index" aria-label="Visuals sections">
+                                <a href="#ledwall-section">Bitmap source</a>
+                                <a href="#ledwall-effects-section">Effects</a>
+                                <a href="#ledwall-text-section">Text</a>
+                                <a href="#ledwall-layers-section">Layers</a>
+                                <a href="#particle-effects-section">Particles</a>
+                                <a href="#dj-logo-section">DJ logo</a>
+                            </nav>
+                            <div class="config-sections">
                         <!-- Bitmap Patterns (LED Wall) -->
-                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-section" data-workspace-destination="visuals">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-section">
                             <h3 class="section-title">Bitmap Patterns <span id="bitmap-status" class="bitmap-status-dot" title="Not initialized"></span></h3>
                             <div id="bitmap-pattern-grid" class="bitmap-grid">
                                 <!-- Populated by JS -->
@@ -502,7 +447,7 @@
                         </section>
 
                         <!-- DJ Logo Controls (shown when bmp_dj_logo is active) -->
-                        <section class="mixer-section collapsible collapsed hidden control-surface" id="dj-logo-section" data-workspace-destination="visuals">
+                        <section class="mixer-section collapsible collapsed hidden control-surface" id="dj-logo-section">
                             <h3 class="section-title">DJ Logo</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -528,7 +473,7 @@
                         </section>
 
                         <!-- Bitmap Effects -->
-                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-effects-section" data-workspace-destination="visuals">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-effects-section">
                             <h3 class="section-title">Bitmap Effects</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -588,7 +533,7 @@
                         </section>
 
                         <!-- Bitmap Text Overlays -->
-                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-text-section" data-workspace-destination="visuals">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-text-section">
                             <h3 class="section-title">Bitmap Text</h3>
                             <div class="bitmap-overlay-group">
                                 <span class="bitmap-overlay-label">Marquee</span>
@@ -624,7 +569,7 @@
                         </section>
 
                         <!-- Bitmap Layers -->
-                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-layers-section" data-workspace-destination="visuals">
+                        <section class="mixer-section collapsible collapsed control-surface" id="ledwall-layers-section">
                             <h3 class="section-title">Bitmap Layers</h3>
                             <div class="controls-grid">
                                 <div class="control-row">
@@ -686,7 +631,7 @@
                         </section>
 
                         <!-- Particle Effects -->
-                        <section class="mixer-section collapsible collapsed control-surface" data-workspace-destination="visuals">
+                        <section class="mixer-section collapsible collapsed control-surface" id="particle-effects-section">
                             <h3 class="section-title">Particle Effects</h3>
                             <div class="control-row">
                                 <label for="particle-global-intensity">Global Intensity</label>
@@ -708,55 +653,30 @@
                                 </div>
                             </div>
                         </section>
-
-                        <!-- Voice Chat -->
-                        <section class="mixer-section collapsible collapsed control-surface" id="voice-chat-section" data-workspace-destination="system">
-                            <h3 class="section-title">Voice Chat</h3>
-                            <div class="voice-status-bar" id="voice-status-bar">
-                                <div class="voice-status-indicator" id="voice-status-indicator">
-                                    <span class="voice-dot" id="voice-dot"></span>
-                                    <span class="voice-status-text" id="voice-status-text">Checking...</span>
-                                </div>
-                                <div class="voice-status-stats" id="voice-status-stats">
-                                    <span class="voice-stat" id="voice-players-stat"></span>
-                                </div>
                             </div>
-                            <div class="voice-unavailable-msg hidden" id="voice-unavailable-msg">
-                                Simple Voice Chat not installed on server
-                            </div>
-                            <div class="voice-controls" id="voice-controls">
-                                <div class="control-row toggle-row">
-                                    <label for="voice-stream-toggle">Stream to Voice</label>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="voice-stream-toggle" aria-label="Stream to Voice Chat">
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="control-row">
-                                    <label for="voice-channel-type">Channel Type</label>
-                                    <select id="voice-channel-type" class="control-select">
-                                        <option value="static">Static (Everywhere)</option>
-                                        <option value="locational">Locational (3D Spatial)</option>
-                                    </select>
-                                </div>
-                                <div class="control-row" id="voice-distance-row" class="hidden">
-                                    <label for="voice-distance">Hearing Distance</label>
-                                    <input type="range" id="voice-distance" min="10" max="200" value="100">
-                                    <span class="control-value" id="val-voice-distance">100</span>
-                                </div>
-                            </div>
-                        </section>
-                    </section>
-
-                    <section id="workspace-visuals" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-visuals" data-workspace-panel data-workspace="visuals" hidden>
-                        <header class="workspace-heading">
-                            <p class="workspace-kicker">Presentation</p>
-                            <h2>Visuals</h2>
-                        </header>
+                            <aside class="context-preview" data-preview-slot="visuals" aria-label="Output preview"></aside>
+                        </div>
                     </section>
 
                     <!-- Zone Settings Panel -->
-                    <section id="workspace-zones" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-zones" data-workspace-panel data-workspace="zones" hidden>
+                    <section id="workspace-zones" class="workspace-panel config-workspace" role="tabpanel" aria-labelledby="workspace-tab-zones" data-workspace-panel data-workspace="zones" hidden>
+                        <header class="workspace-heading">
+                            <div>
+                                <p class="workspace-kicker">Stage geometry</p>
+                                <h2>Zones</h2>
+                            </div>
+                            <p>Shape each output zone and choose how Minecraft renders it.</p>
+                        </header>
+                        <div class="config-grid">
+                            <nav class="section-index" aria-label="Zones sections">
+                                <a href="#stage-zone-list">Stages and zones</a>
+                                <a href="#mode-entities">Render mode</a>
+                                <a href="#entity-config-section">Entities</a>
+                                <a href="#band-materials-section">Band materials</a>
+                                <a href="#zone-size-x">Dimensions</a>
+                                <a href="#btn-cleanup-zone">Maintenance</a>
+                            </nav>
+                            <div class="config-sections">
                         <!-- Stages & Zones -->
                         <section class="mixer-section">
                             <div class="section-header">
@@ -1106,14 +1026,63 @@
                                 <button id="btn-reset-defaults" class="btn btn-secondary">Reset Defaults</button>
                             </div>
                         </section>
+                            </div>
+                            <aside class="context-preview" data-preview-slot="zones" aria-label="Output preview"></aside>
+                        </div>
                     </section>
 
-                    <!-- 3D Preview Panel removed — preview is now in the always-visible strip above -->
+                    <!-- 3D Preview Panel removed — preview moves between workspace slots -->
 
                     <!-- LED Wall panel removed — controls moved into Live Mixer tab -->
 
                     <!-- DJ Banner Panel -->
-                    <section id="workspace-djs" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-djs" data-workspace-panel data-workspace="djs" hidden>
+                    <section id="workspace-djs" class="workspace-panel config-workspace" role="tabpanel" aria-labelledby="workspace-tab-djs" data-workspace-panel data-workspace="djs" hidden>
+                        <header class="workspace-heading">
+                            <div>
+                                <p class="workspace-kicker">Performers</p>
+                                <h2>DJs</h2>
+                            </div>
+                            <p>Approve performers, issue connect codes, and tune on-stage identity.</p>
+                        </header>
+                        <div class="config-grid config-grid-without-preview">
+                            <nav class="section-index" aria-label="DJ sections">
+                                <a href="#dj-roster-section">Roster and approvals</a>
+                                <a href="#btn-generate-code">Connect codes</a>
+                                <a href="#banner-dj-select">Banner profile</a>
+                                <a href="#banner-mode-text">Banner mode</a>
+                                <a href="#btn-save-banner-profile">Save and apply</a>
+                            </nav>
+                            <div class="config-sections">
+                        <!-- DJ Management -->
+                        <section class="panel control-surface" id="dj-roster-section">
+                            <h3 class="section-title">DJ roster</h3>
+
+                            <!-- Pending Approvals -->
+                            <div id="dj-pending-section" class="dj-pending-section hidden">
+                                <h4 class="subsection-title">Pending approval</h4>
+                                <div id="dj-pending-queue" class="dj-pending-queue"></div>
+                            </div>
+
+                            <!-- Active DJ Queue -->
+                            <div id="dj-queue" class="dj-queue">
+                                <div class="dj-empty">No DJs connected</div>
+                            </div>
+                            <!-- Connect Code Generator -->
+                            <div class="connect-code-section">
+                                <button id="btn-generate-code" class="btn btn-primary btn-full">
+                                    Generate connect code
+                                </button>
+                                <div id="generated-code-display" class="generated-code-display hidden">
+                                    <div class="generated-code-row">
+                                        <span class="generated-code-text" id="generated-code-text"></span>
+                                        <button id="btn-copy-code" class="btn btn-copy-inline" title="Copy code">Copy</button>
+                                    </div>
+                                    <span class="generated-code-ttl">Expires in <span id="generated-code-ttl">30</span>m</span>
+                                </div>
+                                <div id="active-codes" class="active-codes"></div>
+                            </div>
+                        </section>
+
                         <!-- DJ Selector -->
                         <section class="mixer-section">
                             <h3 class="section-title">DJ Banner Profile</h3>
@@ -1243,13 +1212,108 @@
                                 <button id="btn-apply-banner-now" class="btn btn-secondary">Apply Now</button>
                             </div>
                         </section>
+                            </div>
+                        </div>
                     </section>
 
-                    <section id="workspace-system" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-system" data-workspace-panel data-workspace="system" hidden>
+                    <section id="workspace-system" class="workspace-panel config-workspace" role="tabpanel" aria-labelledby="workspace-tab-system" data-workspace-panel data-workspace="system" hidden>
                         <header class="workspace-heading">
-                            <p class="workspace-kicker">Signal path</p>
-                            <h2>System</h2>
+                            <div>
+                                <p class="workspace-kicker">Signal path</p>
+                                <h2>System</h2>
+                            </div>
+                            <p>Calibrate timing, verify renderer parity, and monitor the voice link.</p>
                         </header>
+                        <div class="config-grid config-grid-without-preview">
+                            <nav class="section-index" aria-label="System sections">
+                                <a href="#sync-controls">Visual sync</a>
+                                <a href="#sync-dashboard">Signal diagnostics</a>
+                                <a href="#parity-check-btn">Renderer parity</a>
+                                <a href="#voice-chat-section">Voice chat</a>
+                            </nav>
+                            <div class="config-sections">
+                                <!-- Visual Sync -->
+                                <section class="mixer-section collapsible collapsed control-surface">
+                                    <h3 class="section-title">Visual Sync</h3>
+                                    <div id="sync-controls" class="controls-grid">
+                                        <div class="control-row">
+                                            <label for="sync-mode">Delay Mode</label>
+                                            <select id="sync-mode" class="control-select">
+                                                <option value="manual">Manual</option>
+                                                <option value="auto">Auto</option>
+                                                <option value="svc">Voice Chat (~80ms)</option>
+                                                <option value="discord">Discord (~200ms)</option>
+                                            </select>
+                                        </div>
+                                        <div class="control-row" id="sync-presets-row">
+                                            <label id="sync-presets-label">Quick Presets</label>
+                                            <div class="sync-preset-buttons" role="group" aria-labelledby="sync-presets-label">
+                                                <button class="sync-preset-btn" data-delay="0">Local (0ms)</button>
+                                                <button class="sync-preset-btn" data-delay="80">Voice Chat</button>
+                                                <button class="sync-preset-btn" data-delay="200">Discord</button>
+                                            </div>
+                                        </div>
+                                        <div class="control-row" id="sync-delay-row">
+                                            <label for="ctrl-visual-delay">Visual Delay</label>
+                                            <input type="range" id="ctrl-visual-delay" min="0" max="500" value="0" step="10">
+                                            <span class="control-value" id="val-visual-delay">0ms</span>
+                                        </div>
+                                    </div>
+                                    <div class="sync-dashboard" id="sync-dashboard">
+                                        <span class="sync-metric" id="metric-ping" title="Network RTT">Ping: --ms</span>
+                                        <span class="sync-metric" id="metric-pipeline" title="End-to-end pipeline">Pipeline: --ms</span>
+                                        <span class="sync-metric" id="metric-delay" title="Applied visual delay">Delay: --ms</span>
+                                        <span class="sync-metric" id="metric-sync" title="Sync quality score">Sync: --%</span>
+                                        <span class="sync-metric" id="metric-jitter" title="Frame jitter">Jitter: --ms</span>
+                                    </div>
+                                    <div class="sync-test-row">
+                                        <button id="btn-sync-test" class="btn btn-secondary btn-sync-test">Sync Test</button>
+                                        <span id="sync-test-result" class="sync-test-result"></span>
+                                    </div>
+                                    <div class="sync-test-row">
+                                        <button id="parity-check-btn" class="btn btn-secondary btn-sync-test">Parity Check</button>
+                                    </div>
+                                </section>
+
+                                <!-- Voice Chat -->
+                                <section class="mixer-section collapsible collapsed control-surface" id="voice-chat-section">
+                                    <h3 class="section-title">Voice Chat</h3>
+                                    <div class="voice-status-bar" id="voice-status-bar">
+                                        <div class="voice-status-indicator" id="voice-status-indicator">
+                                            <span class="voice-dot" id="voice-dot"></span>
+                                            <span class="voice-status-text" id="voice-status-text">Checking...</span>
+                                        </div>
+                                        <div class="voice-status-stats" id="voice-status-stats">
+                                            <span class="voice-stat" id="voice-players-stat"></span>
+                                        </div>
+                                    </div>
+                                    <div class="voice-unavailable-msg hidden" id="voice-unavailable-msg">
+                                        Simple Voice Chat not installed on server
+                                    </div>
+                                    <div class="voice-controls" id="voice-controls">
+                                        <div class="control-row toggle-row">
+                                            <label for="voice-stream-toggle">Stream to Voice</label>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="voice-stream-toggle" aria-label="Stream to Voice Chat">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div class="control-row">
+                                            <label for="voice-channel-type">Channel Type</label>
+                                            <select id="voice-channel-type" class="control-select">
+                                                <option value="static">Static (Everywhere)</option>
+                                                <option value="locational">Locational (3D Spatial)</option>
+                                            </select>
+                                        </div>
+                                        <div class="control-row hidden" id="voice-distance-row">
+                                            <label for="voice-distance">Hearing Distance</label>
+                                            <input type="range" id="voice-distance" min="10" max="200" value="100">
+                                            <span class="control-value" id="val-voice-distance">100</span>
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
                     </section>
             </main>
         </div>

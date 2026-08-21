@@ -139,13 +139,14 @@ export class PreviewManager {
         const slot = supportsPreview
             ? document.querySelector(`[data-preview-slot="${workspace}"]`)
             : null;
-        const visible = Boolean(slot);
+        const workspacePanel = slot?.closest?.('[data-workspace-panel]');
+        const visible = Boolean(slot && !workspacePanel?.hidden);
         this._presentationMode = workspace === 'live' && visible
             ? 'live'
             : (visible ? 'compact' : 'hidden');
         const strip = this.elements.previewStrip;
 
-        if (slot && strip?.parentElement !== slot) {
+        if (visible && strip?.parentElement !== slot) {
             slot.append(strip);
         }
 

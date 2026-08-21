@@ -718,18 +718,172 @@ html[data-workspace="live"] #work-area.workspace-stage {
   width: 100%;
 }
 
-#workspace-visuals > #ledwall-section,
-#workspace-visuals > #ledwall-effects-section,
-#workspace-visuals > #ledwall-text-section,
-#workspace-visuals > #ledwall-layers-section {
-  grid-column: span 6;
+.config-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mcav-space-3);
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: var(--mcav-space-1);
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-#workspace-zones > .mixer-section,
-#workspace-djs > .mixer-section,
-#workspace-system > .mixer-section,
-#workspace-djs > .panel {
-  grid-column: span 6;
+.config-workspace .workspace-heading {
+  flex: 0 0 auto;
+  justify-content: space-between;
+  min-height: 3rem;
+  padding: var(--mcav-space-1) var(--mcav-space-2) var(--mcav-space-3);
+  border-bottom: 1px solid var(--mcav-border-subtle);
+}
+
+.config-workspace .workspace-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mcav-space-3);
+}
+
+.config-workspace .workspace-heading > p {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--mcav-text-secondary);
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: 11rem minmax(28rem, 1fr) minmax(18rem, 26rem);
+  gap: var(--mcav-space-4);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.config-grid-without-preview {
+  grid-template-columns: 11rem minmax(0, 1fr);
+}
+
+.section-index,
+.context-preview {
+  position: sticky;
+  top: 0;
+  align-self: start;
+}
+
+.section-index {
+  display: grid;
+  grid-column: 1;
+  align-content: start;
+  gap: var(--mcav-space-1);
+  padding: var(--mcav-space-2);
+  border-left: 1px solid rgba(0, 204, 255, 0.18);
+}
+
+.section-index a {
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0 var(--mcav-space-3);
+  color: var(--mcav-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--mcav-radius-sm);
+  font: 600 0.68rem/1.2 var(--mcav-font-heading);
+  letter-spacing: 0.045em;
+  text-decoration: none;
+}
+
+.section-index a:hover {
+  color: var(--mcav-text-primary);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.section-index a:focus-visible {
+  outline: none;
+  color: var(--mcav-cyan);
+  box-shadow: var(--mcav-focus-ring);
+}
+
+.config-sections {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  padding-right: var(--mcav-space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 204, 255, 0.3) transparent;
+}
+
+.config-sections::-webkit-scrollbar {
+  width: 0.42rem;
+}
+
+.config-sections::-webkit-scrollbar-thumb {
+  background: rgba(0, 204, 255, 0.24);
+  border-radius: 999px;
+}
+
+.config-sections > .mixer-section,
+.config-sections > .panel {
+  margin: 0 0 var(--mcav-space-3);
+  padding: var(--mcav-space-4);
+  background: rgba(255, 255, 255, 0.022);
+  border: 1px solid var(--mcav-border-subtle);
+  border-radius: var(--mcav-radius-md);
+}
+
+.config-sections > .mixer-section:target,
+.config-sections > .panel:target {
+  border-color: rgba(0, 204, 255, 0.38);
+}
+
+.context-preview {
+  grid-column: 3;
+  min-width: 0;
+  overflow: hidden;
+  background: #05070b;
+  border: 1px solid rgba(0, 204, 255, 0.16);
+  border-radius: var(--mcav-radius-md);
+  box-shadow: inset 0 0 0 1px rgba(0, 204, 255, 0.025);
+}
+
+.context-preview:empty::before {
+  content: "Preview loads when this workspace is active";
+  display: grid;
+  place-items: center;
+  min-height: 14rem;
+  padding: var(--mcav-space-4);
+  color: var(--mcav-text-secondary);
+  font: 500 0.68rem/1.5 var(--mcav-font-data);
+  text-align: center;
+}
+
+.context-preview #preview-strip {
+  width: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.context-preview .preview-strip-header {
+  min-height: 2.5rem;
+  background: rgba(8, 9, 13, 0.82);
+  border-color: var(--mcav-border-subtle);
+}
+
+.context-preview .preview-strip-body {
+  height: clamp(14rem, 34vh, 22rem);
+}
+
+.context-preview .preview-strip.collapsed .preview-strip-body {
+  height: 0;
+}
+
+html[data-workspace="djs"] .context-preview,
+html[data-workspace="system"] .context-preview {
+  display: none;
 }
 
 .workspace-inventory {
@@ -747,6 +901,41 @@ html[data-workspace="live"] #work-area.workspace-stage {
 
   .pattern-library-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1279px) {
+  .config-grid {
+    grid-template-columns: 9rem minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .config-grid-without-preview {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .section-index {
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+
+  .config-sections {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .config-grid-without-preview .config-sections {
+    grid-row: 1;
+  }
+
+  .context-preview {
+    position: relative;
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .context-preview .preview-strip-body {
+    height: 12rem;
   }
 }
 
@@ -800,6 +989,40 @@ html[data-workspace="live"] #work-area.workspace-stage {
 
   .live-output {
     min-height: 24rem;
+  }
+
+  .config-workspace {
+    height: auto;
+    overflow: visible;
+  }
+
+  .config-workspace .workspace-heading {
+    align-items: flex-start;
+  }
+
+  .config-grid,
+  .config-grid-without-preview {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .section-index,
+  .context-preview {
+    position: relative;
+    width: 100%;
+  }
+
+  .section-index {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .section-index a {
+    flex: 0 0 auto;
+  }
+
+  .config-sections {
+    overflow: visible;
   }
 
   .audio-strip {
