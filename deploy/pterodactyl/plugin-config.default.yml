@@ -1,0 +1,30 @@
+# AudioViz Plugin Configuration
+
+websocket:
+  # The bundled VJ service runs inside this same container.
+  address: "127.0.0.1"
+  port: 8765
+
+# Generated and synchronized automatically by mcav-vj/start-mcav.sh.
+ws-secret: ""
+
+defaults:
+  entity_count: 160
+  material: GLOWSTONE
+  interpolation_duration: 1
+
+bitmap:
+  max_pixels_per_zone: 2000
+  pixels_per_block: 5
+  adaptive_merge: false
+
+performance:
+  max_entities_per_zone: 256
+  min_update_interval: 1
+
+bedrock:
+  auto_detect: true
+  force_particle_fallback: false
+  particle_quality: 3
+  particle_size: 1.8
+  max_render_distance: 48

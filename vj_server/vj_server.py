@@ -59,6 +59,7 @@ from vj_server.models import (
     DJConnection,
     ZonePatternState,
     _sanitize_audio_frame,
+    build_server_ssl_context,
     run_http_server,
 )
 from vj_server.patterns import (
@@ -105,11 +106,28 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         visual_delay_ms: float = 0.0,
         visual_delay_mode: str = "manual",
         enable_link: bool = False,
+        project_root: str | Path | None = None,
+        tls_cert: str | Path | None = None,
+        tls_key: str | Path | None = None,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
         self.http_port = http_port
         self.http_host = validate_http_bind_host(http_host)
+        self.project_root = (
+            Path(project_root).resolve()
+            if project_root is not None
+            else Path(__file__).resolve().parent.parent
+        )
+        if bool(tls_cert) != bool(tls_key):
+            raise ValueError("TLS certificate and key must be provided together")
+        self.tls_cert = Path(tls_cert).resolve() if tls_cert is not None else None
+        self.tls_key = Path(tls_key).resolve() if tls_key is not None else None
+        self.server_ssl_context = (
+            build_server_ssl_context(self.tls_cert, self.tls_key)
+            if self.tls_cert is not None and self.tls_key is not None
+            else None
+        )
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
         self.minecraft_ws_secret = minecraft_ws_secret
@@ -143,6 +161,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self._auth_rate_limit_max: int = 5  # max attempts per window
         self._auth_rate_limit_window: float = 60.0  # seconds
         self._auth_last_cleanup: float = time.time()  # For time-based periodic cleanup
+        self._browser_auth_attempts: dict[str, list[float]] = {}
+        self._browser_auth_rate_limit_max: int = 5
+        self._browser_auth_rate_limit_window: float = 60.0
 
         # Coordinator integration (for centralized connect codes)
         self._coordinator: Optional["CoordinatorClient"] = None
@@ -1006,15 +1027,20 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
         # Start HTTP server for admin panel
         if self.http_port > 0:
-            project_root = Path(__file__).parent.parent
             http_thread = threading.Thread(
                 target=run_http_server,
-                args=(self.http_port, str(project_root), self.http_host),
+                args=(
+                    self.http_port,
+                    str(self.project_root),
+                    self.http_host,
+                    self.server_ssl_context,
+                ),
                 daemon=True,
             )
             http_thread.start()
-            logger.info(f"Admin panel: http://{self.http_host}:{self.http_port}/")
-            logger.info(f"3D Preview: http://{self.http_host}:{self.http_port}/preview/")
+            http_scheme = "https" if self.server_ssl_context is not None else "http"
+            logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
+            logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
 
         # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
         dj_server = await ws_serve(
@@ -1031,8 +1057,10 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             "0.0.0.0",
             self.broadcast_port,
             max_size=65_536,
+            ssl=self.server_ssl_context,
         )
-        logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
+        browser_scheme = "wss" if self.server_ssl_context is not None else "ws"
+        logger.info(f"Browser WebSocket: {browser_scheme}://localhost:{self.broadcast_port}")
 
         # Start metrics HTTP server if enabled
         metrics_server = None

@@ -13,7 +13,24 @@
 </head>
 <body>
     <a href="#app" class="skip-link">Skip to content</a>
-    <div id="app">
+    <section id="auth-gate" class="auth-gate" aria-labelledby="auth-title">
+        <div class="auth-card">
+            <img class="auth-logo" src="mcav-medium-square.png" alt="MCAV">
+            <p class="auth-eyebrow">Secure operator access</p>
+            <h1 id="auth-title">Control Center</h1>
+            <p class="auth-copy">Use the credentials generated in <code>mcav-vj/FIRST_LOGIN.txt</code>.</p>
+            <form id="auth-form" class="auth-form">
+                <label for="auth-username">Username</label>
+                <input id="auth-username" name="username" type="text" autocomplete="username" required>
+                <label for="auth-password">Password</label>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+                <p id="auth-error" class="auth-error" role="alert" aria-live="polite"></p>
+                <button id="auth-submit" class="auth-submit" type="submit">Open Control Center</button>
+            </form>
+            <p class="auth-footnote">Credentials stay in memory for this tab only. On first visit, verify the certificate fingerprint in <code>FIRST_LOGIN.txt</code> before accepting the browser warning.</p>
+        </div>
+    </section>
+    <div id="app" hidden aria-hidden="true">
         <!-- Header -->
         <header id="header">
             <div class="header-left">
@@ -56,6 +73,7 @@
                         <span class="svc-label">Minecraft</span>
                     </div>
                 </div>
+                <button id="btn-logout" class="btn btn-logout" type="button">Sign out</button>
                 <!-- Preview stats moved to preview strip header -->
             </div>
         </header>
