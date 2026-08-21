@@ -13,15 +13,16 @@ export type ConnectionErrorCode =
   | 'tls_certificate_host_mismatch'
   | 'tls_handshake';
 
-interface StorageReader {
+export interface StorageReader {
   getItem: (key: string) => string | null;
 }
 
-interface StorageWriter {
+export interface StorageWriter {
   setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
 }
 
-type FingerprintStorage = StorageReader & StorageWriter;
+export type FingerprintStorage = StorageReader & StorageWriter;
 
 export interface TlsFingerprintFieldState {
   normalizedValue: string;
@@ -44,17 +45,9 @@ export interface CodeConnectionArgs extends DirectConnectionArgs {
   djSessionId: string | null;
 }
 
-const TLS_ERROR_MESSAGES: Record<
-  Extract<
-    ConnectionErrorCode,
-    | 'invalid_tls_fingerprint'
-    | 'missing_peer_certificate'
-    | 'tls_fingerprint_mismatch'
-    | 'tls_certificate_host_mismatch'
-    | 'tls_handshake'
-  >,
-  string
-> = {
+const SAFE_ERROR_MESSAGES = {
+  authentication_failed:
+    'Authentication failed. Ask your VJ operator for new connection details.',
   invalid_tls_fingerprint:
     'Server certificate fingerprint must contain exactly 64 hexadecimal characters.',
   missing_peer_certificate:
@@ -65,7 +58,7 @@ const TLS_ERROR_MESSAGES: Record<
     'The server certificate is for a different host. Use the hostname or IP address listed in the certificate.',
   tls_handshake:
     'Secure connection failed during the TLS handshake. Check the server address and certificate configuration.',
-};
+} satisfies Partial<Record<ConnectionErrorCode, string>>;
 
 export function normalizeTlsFingerprint(value: string): string {
   return value.replace(/[:\s]/g, '').toUpperCase();
@@ -106,7 +99,11 @@ export function loadTlsFingerprint(storage: FingerprintStorage): string {
 
 export function saveTlsFingerprint(storage: StorageWriter, value: string): string {
   const normalizedValue = normalizeTlsFingerprint(value);
-  storage.setItem(TLS_FINGERPRINT_STORAGE_KEY, normalizedValue);
+  if (normalizedValue) {
+    storage.setItem(TLS_FINGERPRINT_STORAGE_KEY, normalizedValue);
+  } else {
+    storage.removeItem(TLS_FINGERPRINT_STORAGE_KEY);
+  }
   return normalizedValue;
 }
 
@@ -148,7 +145,7 @@ export function buildCodeConnectionArgs(input: {
   };
 }
 
-function tlsErrorCodeFromText(errorText: string): keyof typeof TLS_ERROR_MESSAGES | null {
+function tlsErrorCodeFromText(errorText: string): keyof typeof SAFE_ERROR_MESSAGES | null {
   const normalizedError = errorText.toLowerCase();
   if (
     normalizedError.includes('invalid tls certificate fingerprint') ||
@@ -181,14 +178,14 @@ export function formatConnectionError(
   error: unknown,
   errorCode?: ConnectionErrorCode | null,
 ): string {
-  if (errorCode && errorCode in TLS_ERROR_MESSAGES) {
-    return TLS_ERROR_MESSAGES[errorCode as keyof typeof TLS_ERROR_MESSAGES];
+  if (errorCode && errorCode in SAFE_ERROR_MESSAGES) {
+    return SAFE_ERROR_MESSAGES[errorCode as keyof typeof SAFE_ERROR_MESSAGES];
   }
 
   const errorText = String(error);
   const tlsErrorCode = tlsErrorCodeFromText(errorText);
   if (tlsErrorCode) {
-    return TLS_ERROR_MESSAGES[tlsErrorCode];
+    return SAFE_ERROR_MESSAGES[tlsErrorCode];
   }
 
   const normalizedError = errorText.toLowerCase();

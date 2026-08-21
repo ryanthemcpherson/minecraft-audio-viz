@@ -456,38 +456,69 @@ fn reconnect_failure_log(error: &ClientError) -> String {
     format!("Reconnect failed [{}]: {error}", error.code().as_str())
 }
 
-fn reconnect_error_status_if_current(
+fn update_and_emit_status_if_current<Update, Emit>(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    update: Update,
+    emit: Emit,
+) -> bool
+where
+    Update: FnOnce(&mut state::ConnectionStatus),
+    Emit: FnOnce(&state::ConnectionStatus),
+{
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return false;
+    }
+    update(&mut app_state.status);
+    emit(&app_state.status);
+    true
+}
+
+fn emit_reconnect_error_if_current<Emit>(
     state_arc: &Arc<Mutex<AppState>>,
     generation: u64,
     error: &ClientError,
-) -> Option<state::ConnectionStatus> {
-    let mut app_state = state_arc.lock();
-    if app_state.connection_generation != generation {
-        return None;
-    }
-    app_state.status.connected = false;
-    app_state.status.error = Some(error.to_string());
-    app_state.status.error_code = Some(error.code());
-    Some(app_state.status.clone())
+    emit: Emit,
+) -> bool
+where
+    Emit: FnOnce(&state::ConnectionStatus),
+{
+    update_and_emit_status_if_current(
+        state_arc,
+        generation,
+        |status| {
+            status.connected = false;
+            status.error = Some(error.to_string());
+            status.error_code = Some(error.code());
+        },
+        emit,
+    )
 }
 
-fn reconnect_backoff_status_if_current(
+fn emit_reconnect_backoff_if_current<Emit>(
     state_arc: &Arc<Mutex<AppState>>,
     generation: u64,
     delay_secs: u64,
     reconnect_count: u32,
-) -> Option<state::ConnectionStatus> {
-    let mut app_state = state_arc.lock();
-    if app_state.connection_generation != generation {
-        return None;
-    }
-    if app_state.status.error_code.is_none() {
-        app_state.status.error = Some(format!(
-            "Reconnecting in {}s ({}/{})",
-            delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
-        ));
-    }
-    Some(app_state.status.clone())
+    emit: Emit,
+) -> bool
+where
+    Emit: FnOnce(&state::ConnectionStatus),
+{
+    update_and_emit_status_if_current(
+        state_arc,
+        generation,
+        |status| {
+            if status.error_code.is_none() {
+                status.error = Some(format!(
+                    "Reconnecting in {}s ({}/{})",
+                    delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
+                ));
+            }
+        },
+        emit,
+    )
 }
 
 /// List available audio sources
@@ -1040,16 +1071,19 @@ async fn run_bridge(
             reconnect_count,
             MAX_RECONNECT_ATTEMPTS
         );
-        let Some(backoff_status) = reconnect_backoff_status_if_current(
+        let emitted = emit_reconnect_backoff_if_current(
             &state_arc,
             generation,
             delay_secs,
             reconnect_count,
-        ) else {
+            |status| {
+                let _ = app_handle.emit("dj-status", status);
+            },
+        );
+        if !emitted {
             log::info!("Reconnect backoff skipped because its connection was superseded");
             break 'reconnect;
-        };
-        let _ = app_handle.emit("dj-status", &backoff_status);
+        }
 
         // Wait for backoff delay or shutdown signal
         tokio::select! {
@@ -1123,11 +1157,14 @@ async fn run_bridge(
             }
             Err(e) => {
                 if let Some(client_error) = e.client_error() {
-                    if let Some(status) =
-                        reconnect_error_status_if_current(&state_arc, generation, client_error)
-                    {
-                        let _ = app_handle.emit("dj-status", &status);
-                    }
+                    emit_reconnect_error_if_current(
+                        &state_arc,
+                        generation,
+                        client_error,
+                        |status| {
+                            let _ = app_handle.emit("dj-status", status);
+                        },
+                    );
                     log::warn!("{}", reconnect_failure_log(client_error));
                 } else {
                     log::warn!("Reconnect failed: {e}");
@@ -1762,8 +1799,14 @@ mod tests {
         let error =
             protocol::ClientError::tls_fingerprint_mismatch(EXPECTED_DIGEST, OBSERVED_DIGEST);
 
-        let event = reconnect_error_status_if_current(&state, 7, &error)
-            .expect("current reconnect generation should publish an error");
+        let mut event = None;
+        assert!(emit_reconnect_error_if_current(
+            &state,
+            7,
+            &error,
+            |status| event = Some(status.clone()),
+        ));
+        let event = event.expect("current reconnect generation should publish an error");
         let event_json = serde_json::to_string(&event).expect("status event should serialize");
         let log_line = reconnect_failure_log(&error);
 
@@ -1798,11 +1841,18 @@ mod tests {
             ..Default::default()
         }));
         let error = protocol::ClientError::TlsFingerprintMismatch;
-        reconnect_error_status_if_current(&state, 11, &error)
-            .expect("current reconnect generation should publish an error");
+        assert!(emit_reconnect_error_if_current(&state, 11, &error, |_| {},));
 
-        let backoff_status = reconnect_backoff_status_if_current(&state, 11, 4, 3)
-            .expect("current reconnect generation should publish backoff state");
+        let mut backoff_status = None;
+        assert!(emit_reconnect_backoff_if_current(
+            &state,
+            11,
+            4,
+            3,
+            |status| backoff_status = Some(status.clone()),
+        ));
+        let backoff_status =
+            backoff_status.expect("current reconnect generation should publish backoff state");
 
         assert_eq!(
             backoff_status.error_code,
@@ -1814,5 +1864,87 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| message.contains("update the configured fingerprint"))
         );
+    }
+
+    #[test]
+    fn reconnect_emission_is_atomic_with_generation_replacement() {
+        let state = Arc::new(Mutex::new(AppState {
+            connection_generation: 21,
+            status: state::ConnectionStatus {
+                queue_position: 3,
+                total_djs: 8,
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+        let error = protocol::ClientError::TlsFingerprintMismatch;
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+
+        let current_emitted = Arc::clone(&emitted);
+        let current_state = Arc::clone(&state);
+        assert!(emit_reconnect_error_if_current(
+            &state,
+            21,
+            &error,
+            |status| {
+                assert!(
+                    current_state.try_lock().is_none(),
+                    "generation lock must remain held through synchronous emission"
+                );
+                current_emitted.lock().push(status.clone());
+            },
+        ));
+
+        {
+            let mut replacement = state.lock();
+            replacement.connection_generation = 22;
+            replacement.status = state::ConnectionStatus {
+                queue_position: 1,
+                total_djs: 2,
+                ..Default::default()
+            };
+        }
+
+        assert!(!emit_reconnect_error_if_current(
+            &state,
+            21,
+            &error,
+            |_| panic!("stale mismatch status emitted"),
+        ));
+        assert!(!emit_reconnect_backoff_if_current(
+            &state,
+            21,
+            2,
+            2,
+            |_| panic!("stale backoff status emitted"),
+        ));
+
+        let replacement_emitted = Arc::clone(&emitted);
+        let replacement_state = Arc::clone(&state);
+        assert!(emit_reconnect_backoff_if_current(
+            &state,
+            22,
+            2,
+            2,
+            |status| {
+                assert!(replacement_state.try_lock().is_none());
+                replacement_emitted.lock().push(status.clone());
+            },
+        ));
+
+        let emitted = emitted.lock();
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(
+            emitted[0].error_code,
+            Some(protocol::ConnectionErrorCode::TlsFingerprintMismatch)
+        );
+        assert_eq!(emitted[0].queue_position, 3);
+        assert_eq!(emitted[1].error_code, None);
+        assert_eq!(emitted[1].queue_position, 1);
+        assert_eq!(
+            emitted[1].error.as_deref(),
+            Some("Reconnecting in 2s (2/10)")
+        );
+        assert_eq!(state.lock().connection_generation, 22);
     }
 }

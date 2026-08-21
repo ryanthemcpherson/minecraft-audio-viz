@@ -455,9 +455,7 @@ impl DjClient {
                                 }
                             }
                             "auth_error" => {
-                                if let Ok(error) = serde_json::from_value::<AuthErrorMessage>(msg) {
-                                    return Err(ClientError::authentication_failed(error.error));
-                                }
+                                return Err(ClientError::AuthenticationFailed);
                             }
                             "clock_sync_request" => {
                                 let now = std::time::SystemTime::now()
@@ -747,10 +745,10 @@ async fn handle_server_message(
                 auth.is_active
             );
         }
-        ServerMessage::AuthError(err) => {
+        ServerMessage::AuthError(_) => {
             let mut s = state.lock();
             s.authenticated = false;
-            log::error!("Authentication failed: {}", err.error);
+            log::error!("{}", authentication_failure_log());
         }
         ServerMessage::StatusUpdate(update) => {
             let mut s = state.lock();
@@ -891,9 +889,51 @@ async fn handle_server_message(
     }
 }
 
+fn authentication_failure_log() -> String {
+    let error = ClientError::AuthenticationFailed;
+    format!(
+        "Server rejected authentication [{}]: {error}",
+        error.code().as_str()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    struct CapturingLogger {
+        messages: StdMutex<Vec<String>>,
+    }
+
+    impl log::Log for CapturingLogger {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record<'_>) {
+            self.messages
+                .lock()
+                .expect("capturing logger lock")
+                .push(record.args().to_string());
+        }
+
+        fn flush(&self) {}
+    }
+
+    static CAPTURING_LOGGER: CapturingLogger = CapturingLogger {
+        messages: StdMutex::new(Vec::new()),
+    };
+
+    fn start_log_capture() {
+        let _ = log::set_logger(&CAPTURING_LOGGER);
+        log::set_max_level(log::LevelFilter::Trace);
+        CAPTURING_LOGGER
+            .messages
+            .lock()
+            .expect("capturing logger lock")
+            .clear();
+    }
 
     #[test]
     fn client_error_display_and_debug_never_expose_sensitive_details() {
@@ -959,6 +999,38 @@ mod tests {
             assert_eq!(error.code(), expected_code);
             assert!(error.to_string().contains(expected_guidance));
         }
+    }
+
+    #[tokio::test]
+    async fn server_auth_error_payload_is_replaced_by_fixed_safe_log() {
+        const SENTINEL: &str = "SERVER_PAYLOAD_password=DO_NOT_LOG";
+        start_log_capture();
+        let state = Arc::new(Mutex::new(ConnectionState {
+            authenticated: true,
+            ..Default::default()
+        }));
+        let (tx, _rx) = mpsc::channel(1);
+
+        let server_message: ServerMessage = serde_json::from_value(serde_json::json!({
+            "type": "auth_error",
+            "error": SENTINEL,
+        }))
+        .expect("auth error should deserialize");
+        let debug = format!("{server_message:?}");
+
+        handle_server_message(&state, &tx, server_message).await;
+
+        let messages = CAPTURING_LOGGER
+            .messages
+            .lock()
+            .expect("capturing logger lock")
+            .clone();
+        let rendered = messages.join("\n");
+        assert!(!state.lock().authenticated);
+        assert!(rendered.contains("authentication_failed"));
+        assert!(rendered.contains("Ask your VJ operator"));
+        assert!(!debug.contains(SENTINEL));
+        assert!(!rendered.contains(SENTINEL));
     }
 
     #[test]

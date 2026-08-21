@@ -8,12 +8,9 @@ import {
   buildCodeConnectionArgs,
   buildDirectConnectionArgs,
   formatConnectionError,
-  getTlsFingerprintFieldState,
-  loadTlsFingerprint,
-  normalizeTlsFingerprint,
   sanitizeConnectionStatus,
-  saveTlsFingerprint,
 } from '../lib/connectionProfile';
+import { useTlsFingerprintProfile } from './useTlsFingerprintProfile';
 import type {
   ConnectionStatus,
   AudioLevels,
@@ -87,15 +84,12 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   const [serverPort, setServerPort] = useState(
     () => parseInt(localStorage.getItem('mcav.serverPort') || '9000', 10),
   );
-  const [tlsFingerprint, setTlsFingerprintState] = useState(() =>
-    loadTlsFingerprint(localStorage),
-  );
-  const tlsFingerprintFieldState = getTlsFingerprintFieldState(tlsFingerprint);
-  const normalizedTlsFingerprint = tlsFingerprintFieldState.normalizedValue;
-  const isTlsFingerprintValid = tlsFingerprintFieldState.isValid;
-  const setTlsFingerprint = (fingerprint: string) => {
-    setTlsFingerprintState(normalizeTlsFingerprint(fingerprint));
-  };
+  const {
+    tlsFingerprint,
+    setTlsFingerprint,
+    normalizedTlsFingerprint,
+    isTlsFingerprintValid,
+  } = useTlsFingerprintProfile();
 
   // Audio state
   const audioRef = useRef<AudioData>(DEFAULT_AUDIO_DATA);
@@ -150,10 +144,6 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   useEffect(() => {
     localStorage.setItem('mcav.serverPort', String(serverPort));
   }, [serverPort]);
-  useEffect(() => {
-    saveTlsFingerprint(localStorage, normalizedTlsFingerprint);
-  }, [normalizedTlsFingerprint]);
-
   // Persist preset selection
   useEffect(() => {
     localStorage.setItem('mcav.preset', activePreset);

@@ -29,6 +29,9 @@ function createStorage(initial = {}) {
     setItem(key, value) {
       values.set(key, value);
     },
+    removeItem(key) {
+      values.delete(key);
+    },
     value(key) {
       return values.get(key);
     },
@@ -129,4 +132,18 @@ test('initial and reconnect TLS errors map distinctly without rendering sentinel
     profile.formatConnectionError('', 'tls_handshake'),
   ];
   assert.equal(new Set(messages).size, 5);
+});
+
+test('server-controlled authentication event text is replaced by fixed safe UI guidance', () => {
+  assert.ok(profile);
+  const sentinel = 'SERVER_PAYLOAD_password=DO_NOT_RENDER';
+  const status = profile.sanitizeConnectionStatus({
+    connected: false,
+    error_code: 'authentication_failed',
+    error: sentinel,
+  });
+
+  assert.match(status.error, /Authentication failed/i);
+  assert.match(status.error, /VJ operator/i);
+  assert.doesNotMatch(status.error, /SERVER_PAYLOAD|DO_NOT_RENDER/);
 });
