@@ -10,7 +10,8 @@
     "v": { "type": "string" },
     "blackout": { "type": "boolean" },
     "freeze": { "type": "boolean" },
+    "emergency_revision": { "type": "integer", "minimum": 0 },
     "request_id": { "type": "string", "minLength": 1, "maxLength": 128 }
   },
-  "required": ["type", "blackout", "freeze"]
+  "required": ["type", "blackout", "freeze", "emergency_revision"]
 }
