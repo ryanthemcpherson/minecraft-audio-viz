@@ -15,6 +15,7 @@ import pytest
 
 import vj_server.models as models
 import vj_server.vj_server as vj_server_module
+from preview_tool.backend.server import MultiDirectoryHandler as PreviewMultiDirectoryHandler
 from vj_server import cli as cli_module
 from vj_server.cli import vj_server as modern_cli_main
 from vj_server.models import (
@@ -86,6 +87,20 @@ def _http_get(address: tuple[str, int], path: str) -> tuple[int, bytes, str | No
         connection.request("GET", path)
         response = connection.getresponse()
         return response.status, response.read(), response.getheader("Location")
+    finally:
+        connection.close()
+
+
+def _http_response(
+    address: tuple[str, int],
+    method: str,
+    path: str,
+) -> tuple[int, bytes, list[tuple[str, str]]]:
+    connection = http.client.HTTPConnection(*address, timeout=5)
+    try:
+        connection.request(method, path)
+        response = connection.getresponse()
+        return response.status, response.read(), response.getheaders()
     finally:
         connection.close()
 
@@ -369,30 +384,87 @@ def test_http_handlers_serve_safe_file(
 
 
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])
-def test_http_handlers_disable_static_asset_caching(
+@pytest.mark.parametrize(
+    ("method", "path", "expected_status", "expected_location"),
+    [
+        ("GET", "/preview/app.js", HTTPStatus.OK, None),
+        ("HEAD", "/preview/app.js", HTTPStatus.OK, None),
+        ("GET", "/preview/docs", HTTPStatus.MOVED_PERMANENTLY, "/preview/docs/"),
+        ("GET", "/preview/missing.js", HTTPStatus.NOT_FOUND, None),
+    ],
+)
+def test_http_handlers_disable_static_asset_caching_on_every_response(
     tmp_path: Path,
     implementation: str,
+    method: str,
+    path: str,
+    expected_status: HTTPStatus,
+    expected_location: str | None,
 ) -> None:
     """Admin modules must not be combined from different deployment revisions."""
     static_root = tmp_path / "static"
     static_root.mkdir()
     (static_root / "app.js").write_text("safe asset", encoding="utf-8")
+    docs = static_root / "docs"
+    docs.mkdir()
+    (docs / "index.html").write_text("safe index", encoding="utf-8")
     handler_class = _build_handler_class(
         implementation,
         {"/preview": str(static_root)},
     )
 
     with _running_http_server(handler_class) as address:
-        connection = http.client.HTTPConnection(*address, timeout=5)
-        try:
-            connection.request("GET", "/preview/app.js")
-            response = connection.getresponse()
-            response.read()
-            cache_control = response.getheader("Cache-Control")
-        finally:
-            connection.close()
+        status, body, headers = _http_response(address, method, path)
 
-    assert cache_control == "no-store"
+    assert status == expected_status
+    assert [value for name, value in headers if name.lower() == "cache-control"] == ["no-store"]
+    assert (
+        next((value for name, value in headers if name.lower() == "location"), None)
+        == expected_location
+    )
+    if method == "HEAD":
+        assert body == b""
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected_status", "expected_location"),
+    [
+        ("GET", "/admin/app.js", HTTPStatus.OK, None),
+        ("HEAD", "/admin/app.js", HTTPStatus.OK, None),
+        ("GET", "/admin/docs", HTTPStatus.MOVED_PERMANENTLY, "/admin/docs/"),
+        ("GET", "/admin/missing.js", HTTPStatus.NOT_FOUND, None),
+    ],
+)
+def test_preview_server_disables_admin_asset_caching_on_every_response(
+    tmp_path: Path,
+    method: str,
+    path: str,
+    expected_status: HTTPStatus,
+    expected_location: str | None,
+) -> None:
+    admin_root = tmp_path / "admin"
+    admin_root.mkdir()
+    (admin_root / "app.js").write_text("safe asset", encoding="utf-8")
+    docs = admin_root / "docs"
+    docs.mkdir()
+    (docs / "index.html").write_text("safe index", encoding="utf-8")
+
+    class _PreviewHandler(PreviewMultiDirectoryHandler):
+        pass
+
+    _PreviewHandler.directory_map = {"/admin": str(admin_root)}
+
+    with _running_http_server(_PreviewHandler) as address:
+        status, body, headers = _http_response(address, method, path)
+
+    assert status == expected_status
+    assert [value for name, value in headers if name.lower() == "cache-control"] == ["no-store"]
+    assert (
+        next((value for name, value in headers if name.lower() == "location"), None)
+        == expected_location
+    )
+    if method == "HEAD":
+        assert body == b""
 
 
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])

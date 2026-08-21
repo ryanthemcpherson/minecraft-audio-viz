@@ -3,19 +3,19 @@ Browser Preview Tool - Backend Server
 Serves the web interface and broadcasts audio visualization data via WebSocket.
 """
 
-import asyncio
-import json
-import os
-import sys
-import math
-import time
 import argparse
+import asyncio
+import http.server
+import json
 import logging
+import math
+import os
+import socketserver
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Set
-import http.server
-import socketserver
-import threading
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -27,8 +27,8 @@ except ImportError:
     print("Please install websockets: pip install websockets")
     sys.exit(1)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-logger = logging.getLogger('preview_server')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+logger = logging.getLogger("preview_server")
 
 # Connected browser clients
 clients: Set = set()
@@ -41,7 +41,7 @@ current_state = {
     "amplitude": 0.0,
     "is_beat": False,
     "beat_intensity": 0.0,
-    "frame": 0
+    "frame": 0,
 }
 
 
@@ -115,11 +115,11 @@ async def run_demo_mode():
 
         # Simulate 5 frequency bands: Bass, Low-mid, Mid, High-mid, High
         current_state["bands"] = [
-            0.5 + 0.4 * math.sin(t * 0.8 + 0),       # Bass (40-250Hz)
-            0.4 + 0.35 * math.sin(t * 1.1 + 0.5),     # Low-mid (250-500Hz)
-            0.35 + 0.3 * math.sin(t * 1.5 + 1.0),     # Mid (500-2kHz)
-            0.3 + 0.25 * math.sin(t * 2.0 + 1.5),     # High-mid (2-6kHz)
-            0.25 + 0.2 * math.sin(t * 2.8 + 2.0),     # High (6-20kHz)
+            0.5 + 0.4 * math.sin(t * 0.8 + 0),  # Bass (40-250Hz)
+            0.4 + 0.35 * math.sin(t * 1.1 + 0.5),  # Low-mid (250-500Hz)
+            0.35 + 0.3 * math.sin(t * 1.5 + 1.0),  # Mid (500-2kHz)
+            0.3 + 0.25 * math.sin(t * 2.0 + 1.5),  # High-mid (2-6kHz)
+            0.25 + 0.2 * math.sin(t * 2.8 + 2.0),  # High (6-20kHz)
         ]
 
         # Simulate amplitude
@@ -172,21 +172,26 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
     # Map URL prefixes to directories
     directory_map = {}
 
+    def end_headers(self):
+        """Prevent incompatible frontend assets from surviving a deployment."""
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def translate_path(self, path):
         """Translate URL path to file system path."""
         # Remove query string and fragment
-        path = path.split('?')[0].split('#')[0]
+        path = path.split("?")[0].split("#")[0]
 
         # Check each directory mapping
         for url_prefix, fs_directory in self.directory_map.items():
             if path.startswith(url_prefix):
                 # Remove the URL prefix and join with the filesystem directory
-                relative_path = path[len(url_prefix):].lstrip('/')
+                relative_path = path[len(url_prefix) :].lstrip("/")
                 return os.path.join(fs_directory, relative_path)
 
         # Default to the first directory for root
-        if '/' in self.directory_map:
-            return os.path.join(self.directory_map['/'], path.lstrip('/'))
+        if "/" in self.directory_map:
+            return os.path.join(self.directory_map["/"], path.lstrip("/"))
 
         return super().translate_path(path)
 
@@ -201,8 +206,8 @@ def run_http_server(port: int, directory: str):
 
     # Configure directory mapping
     MultiDirectoryHandler.directory_map = {
-        '/admin': str(project_root / 'admin_panel'),
-        '/': str(directory),  # Default to preview_tool/frontend
+        "/admin": str(project_root / "admin_panel"),
+        "/": str(directory),  # Default to preview_tool/frontend
     }
 
     # Start server from project root
@@ -216,34 +221,36 @@ def run_http_server(port: int, directory: str):
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='AudioViz Browser Preview Server')
-    parser.add_argument('--ws-port', type=int, default=8766,
-                        help='WebSocket port (default: 8766)')
-    parser.add_argument('--http-port', type=int, default=8080,
-                        help='HTTP port for web interface (default: 8080)')
-    parser.add_argument('--http-only', action='store_true',
-                        help='Only run HTTP server (when app_capture.py is running)')
-    parser.add_argument('--demo', action='store_true',
-                        help='Run with simulated audio data')
-    parser.add_argument('--capture-host', type=str, default=None,
-                        help='Audio capture host to connect to')
-    parser.add_argument('--capture-port', type=int, default=8767,
-                        help='Audio capture port (default: 8767)')
+    parser = argparse.ArgumentParser(description="AudioViz Browser Preview Server")
+    parser.add_argument("--ws-port", type=int, default=8766, help="WebSocket port (default: 8766)")
+    parser.add_argument(
+        "--http-port", type=int, default=8080, help="HTTP port for web interface (default: 8080)"
+    )
+    parser.add_argument(
+        "--http-only",
+        action="store_true",
+        help="Only run HTTP server (when app_capture.py is running)",
+    )
+    parser.add_argument("--demo", action="store_true", help="Run with simulated audio data")
+    parser.add_argument(
+        "--capture-host", type=str, default=None, help="Audio capture host to connect to"
+    )
+    parser.add_argument(
+        "--capture-port", type=int, default=8767, help="Audio capture port (default: 8767)"
+    )
 
     args = parser.parse_args()
 
     # Start HTTP server in background thread
     frontend_dir = Path(__file__).parent.parent / "frontend"
     http_thread = threading.Thread(
-        target=run_http_server,
-        args=(args.http_port, str(frontend_dir)),
-        daemon=True
+        target=run_http_server, args=(args.http_port, str(frontend_dir)), daemon=True
     )
     http_thread.start()
 
     # If http-only mode, just keep running for static file serving
     if args.http_only:
-        logger.info(f"HTTP-only mode - connect browsers to app_capture.py WebSocket")
+        logger.info("HTTP-only mode - connect browsers to app_capture.py WebSocket")
         logger.info(f"Open http://localhost:{args.http_port} for preview")
         logger.info(f"Open http://localhost:{args.http_port}/admin/ for control panel")
         # Keep running
