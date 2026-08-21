@@ -48,10 +48,6 @@ class AdminApp {
         // Zone pattern change tracking (debounce chip re-rendering)
         this._lastZonePatternsJson = '';
 
-        // Tap tempo tracking
-        this.tapTimes = [];
-        this.tapTimeout = null;
-
         this.elements = {};
         cacheElements(this.elements);
 
