@@ -3,7 +3,24 @@
  */
 
 import { debounce } from '../utils/debounce.js';
-import { workspaceFromShortcutEvent } from './WorkspaceManager.js';
+import {
+    isWorkspaceShortcutEvent,
+    workspaceFromShortcutEvent,
+} from './WorkspaceManager.js';
+
+export function handleGlobalKeyboardEvent(event, app) {
+    const workspace = workspaceFromShortcutEvent(event);
+    if (workspace) {
+        event.preventDefault();
+        app.workspaces.activate(workspace, { focus: true });
+        return true;
+    }
+    if (isWorkspaceShortcutEvent(event)) {
+        return true;
+    }
+    app.ui.handleKeyboard(event);
+    return false;
+}
 
 export function setupEventListeners(app) {
     const { elements, state, ws, ui, audio, patterns, actions, particles, scenes, zones, connectCodes, voice, banner } = app;
@@ -140,13 +157,7 @@ export function setupEventListeners(app) {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (event) => {
-        const workspace = workspaceFromShortcutEvent(event);
-        if (workspace) {
-            event.preventDefault();
-            app.workspaces.activate(workspace, { focus: true });
-            return;
-        }
-        ui.handleKeyboard(event);
+        handleGlobalKeyboardEvent(event, app);
     });
 
     // Particle effects global intensity

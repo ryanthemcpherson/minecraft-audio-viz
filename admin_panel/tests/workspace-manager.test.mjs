@@ -9,6 +9,7 @@ function fakeNode(workspace) {
   const attributes = new Map();
   const listeners = new Map();
   return {
+    id: '',
     dataset: { workspace },
     hidden: false,
     focused: false,
@@ -17,6 +18,15 @@ function fakeNode(workspace) {
     getAttribute(name) { return attributes.get(name); },
     addEventListener(name, listener) { listeners.set(name, listener); },
     click() { listeners.get('click')?.(); },
+    keydown(key) {
+      const event = {
+        key,
+        preventDefault() { this.defaultPrevented = true; },
+        defaultPrevented: false,
+      };
+      listeners.get('keydown')?.(event);
+      return event;
+    },
     focus() { this.focused = true; },
   };
 }
@@ -66,6 +76,72 @@ test('workspace navigation survives unavailable local storage', () => {
   assert.doesNotThrow(() => manager.setup());
   assert.doesNotThrow(() => manager.activate('visuals'));
   assert.equal(manager.activeWorkspace, 'visuals');
+});
+
+test('workspace navigation survives a throwing window.localStorage getter', () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const root = {
+    documentElement: { dataset: {} },
+    querySelector: () => null,
+    querySelectorAll: (selector) => selector === '[data-workspace-nav]' ? buttons : panels,
+  };
+  const throwingWindow = {};
+  Object.defineProperty(throwingWindow, 'localStorage', {
+    get() { throw new Error('storage access denied'); },
+  });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: throwingWindow });
+
+  try {
+    let manager;
+    assert.doesNotThrow(() => {
+      manager = new WorkspaceManager({ root });
+      manager.setup();
+    });
+    assert.equal(manager.activeWorkspace, 'live');
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else delete globalThis.window;
+  }
+});
+
+test('workspace tabs expose semantics and activate with rail navigation keys', () => {
+  const tablist = fakeNode('');
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const root = {
+    documentElement: { dataset: {} },
+    querySelector: (selector) => selector === '[data-workspace-tablist]' ? tablist : null,
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      return [];
+    },
+  };
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  assert.equal(tablist.getAttribute('role'), 'tablist');
+  assert.equal(tablist.getAttribute('aria-orientation'), 'vertical');
+  assert.equal(buttons[0].getAttribute('role'), 'tab');
+  assert.equal(buttons[0].getAttribute('aria-controls'), 'workspace-live');
+  assert.equal(panels[0].getAttribute('role'), 'tabpanel');
+  assert.equal(panels[0].getAttribute('aria-labelledby'), 'workspace-tab-live');
+
+  assert.equal(buttons[0].keydown('ArrowDown').defaultPrevented, true);
+  assert.equal(manager.activeWorkspace, 'visuals');
+  assert.equal(buttons[1].focused, true);
+  buttons[1].keydown('End');
+  assert.equal(manager.activeWorkspace, 'system');
+  buttons[4].keydown('Home');
+  assert.equal(manager.activeWorkspace, 'live');
+  buttons[0].keydown('ArrowUp');
+  assert.equal(manager.activeWorkspace, 'system');
+  buttons[4].keydown('ArrowRight');
+  assert.equal(manager.activeWorkspace, 'live');
+  buttons[0].keydown('ArrowLeft');
+  assert.equal(manager.activeWorkspace, 'system');
 });
 
 test('maps Alt+1 through Alt+5 while ignoring editable targets', () => {

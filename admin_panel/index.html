@@ -65,6 +65,11 @@
                 </select>
             </div>
             <div class="header-right command-health">
+                <div id="active-dj-summary" class="command-dj-summary" data-health="idle" aria-live="polite" aria-atomic="true">
+                    <span class="command-dj-label">DJ feed</span>
+                    <strong id="active-dj-name" class="command-dj-name">No active DJ</strong>
+                    <span id="active-dj-health" class="command-dj-health">Sync idle</span>
+                </div>
                 <div class="service-status">
                     <div class="service-indicator" id="svc-python">
                         <span class="svc-dot"></span>
@@ -98,12 +103,12 @@
 
         <!-- Main Content -->
         <div id="main-content" class="control-shell">
-            <nav class="workspace-rail" aria-label="VJ workspaces">
-                <button data-workspace-nav data-workspace="live" aria-controls="workspace-live" aria-selected="true"><span class="workspace-key">1</span><span>Live</span></button>
-                <button data-workspace-nav data-workspace="visuals" aria-controls="workspace-visuals" aria-selected="false" tabindex="-1"><span class="workspace-key">2</span><span>Visuals</span></button>
-                <button data-workspace-nav data-workspace="zones" aria-controls="workspace-zones" aria-selected="false" tabindex="-1"><span class="workspace-key">3</span><span>Zones</span></button>
-                <button data-workspace-nav data-workspace="djs" aria-controls="workspace-djs" aria-selected="false" tabindex="-1"><span class="workspace-key">4</span><span>DJs</span></button>
-                <button data-workspace-nav data-workspace="system" aria-controls="workspace-system" aria-selected="false" tabindex="-1"><span class="workspace-key">5</span><span>System</span></button>
+            <nav class="workspace-rail" aria-label="VJ workspaces" role="tablist" aria-orientation="vertical" data-workspace-tablist>
+                <button id="workspace-tab-live" role="tab" data-workspace-nav data-workspace="live" aria-controls="workspace-live" aria-selected="true"><span class="workspace-key">1</span><span>Live</span></button>
+                <button id="workspace-tab-visuals" role="tab" data-workspace-nav data-workspace="visuals" aria-controls="workspace-visuals" aria-selected="false" tabindex="-1"><span class="workspace-key">2</span><span>Visuals</span></button>
+                <button id="workspace-tab-zones" role="tab" data-workspace-nav data-workspace="zones" aria-controls="workspace-zones" aria-selected="false" tabindex="-1"><span class="workspace-key">3</span><span>Zones</span></button>
+                <button id="workspace-tab-djs" role="tab" data-workspace-nav data-workspace="djs" aria-controls="workspace-djs" aria-selected="false" tabindex="-1"><span class="workspace-key">4</span><span>DJs</span></button>
+                <button id="workspace-tab-system" role="tab" data-workspace-nav data-workspace="system" aria-controls="workspace-system" aria-selected="false" tabindex="-1"><span class="workspace-key">5</span><span>System</span></button>
             </nav>
             <!-- Left Sidebar: Zone Overview -->
             <aside id="zone-overview" class="workspace-inventory">
@@ -260,7 +265,7 @@
                 </div>
 
                 <!-- Workspace Content -->
-                    <section id="workspace-live" class="workspace-panel" data-workspace-panel data-workspace="live" aria-label="Live workspace">
+                    <section id="workspace-live" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-live" data-workspace-panel data-workspace="live">
                         <!-- Pattern Quick-Switch -->
                         <section class="mixer-section">
                             <h3 class="section-title">Patterns</h3>
@@ -725,7 +730,7 @@
                         </section>
                     </section>
 
-                    <section id="workspace-visuals" class="workspace-panel" data-workspace-panel data-workspace="visuals" aria-label="Visuals workspace" hidden>
+                    <section id="workspace-visuals" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-visuals" data-workspace-panel data-workspace="visuals" hidden>
                         <header class="workspace-heading">
                             <p class="workspace-kicker">Presentation</p>
                             <h2>Visuals</h2>
@@ -733,7 +738,7 @@
                     </section>
 
                     <!-- Zone Settings Panel -->
-                    <section id="workspace-zones" class="workspace-panel" data-workspace-panel data-workspace="zones" aria-label="Zones workspace" hidden>
+                    <section id="workspace-zones" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-zones" data-workspace-panel data-workspace="zones" hidden>
                         <!-- Stages & Zones -->
                         <section class="mixer-section">
                             <div class="section-header">
@@ -1090,7 +1095,7 @@
                     <!-- LED Wall panel removed — controls moved into Live Mixer tab -->
 
                     <!-- DJ Banner Panel -->
-                    <section id="workspace-djs" class="workspace-panel" data-workspace-panel data-workspace="djs" aria-label="DJs workspace" hidden>
+                    <section id="workspace-djs" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-djs" data-workspace-panel data-workspace="djs" hidden>
                         <!-- DJ Selector -->
                         <section class="mixer-section">
                             <h3 class="section-title">DJ Banner Profile</h3>
@@ -1222,7 +1227,7 @@
                         </section>
                     </section>
 
-                    <section id="workspace-system" class="workspace-panel" data-workspace-panel data-workspace="system" aria-label="System workspace" hidden>
+                    <section id="workspace-system" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-system" data-workspace-panel data-workspace="system" hidden>
                         <header class="workspace-heading">
                             <p class="workspace-kicker">Signal path</p>
                             <h2>System</h2>

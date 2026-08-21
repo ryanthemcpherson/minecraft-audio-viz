@@ -87,6 +87,9 @@ export function cacheElements(elements) {
 
     // DJ Queue
     elements.djQueue = document.getElementById('dj-queue');
+    elements.activeDjSummary = document.getElementById('active-dj-summary');
+    elements.activeDjName = document.getElementById('active-dj-name');
+    elements.activeDjHealth = document.getElementById('active-dj-health');
 
     // Connect Code elements
     elements.btnGenerateCode = document.getElementById('btn-generate-code');

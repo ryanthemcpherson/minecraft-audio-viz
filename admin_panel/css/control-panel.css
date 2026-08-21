@@ -58,6 +58,58 @@
   white-space: nowrap;
 }
 
+.command-dj-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "label name"
+    "label health";
+  column-gap: var(--mcav-space-2);
+  min-width: 10.5rem;
+  max-width: 13rem;
+  padding-right: var(--mcav-space-3);
+  border-right: 1px solid var(--mcav-border-subtle);
+  line-height: 1.05;
+}
+
+.command-dj-label {
+  grid-area: label;
+  align-self: center;
+  color: var(--mcav-text-secondary);
+  font: 600 0.56rem/1 var(--mcav-font-data);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.command-dj-name,
+.command-dj-health {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-dj-name {
+  grid-area: name;
+  color: var(--mcav-text-primary);
+  font: 600 0.7rem/1.1 var(--mcav-font-body);
+}
+
+.command-dj-health {
+  grid-area: health;
+  margin-top: 0.18rem;
+  color: var(--mcav-text-secondary);
+  font: 500 0.58rem/1.1 var(--mcav-font-data);
+}
+
+.command-dj-summary[data-health="locked"] .command-dj-health {
+  color: var(--mcav-success);
+}
+
+.command-dj-summary[data-health="degraded"] .command-dj-health {
+  color: var(--mcav-warning);
+}
+
 .command-emergency .btn-perf {
   display: grid;
   grid-template-columns: auto auto auto;
