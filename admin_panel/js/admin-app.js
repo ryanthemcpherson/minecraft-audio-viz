@@ -4,7 +4,23 @@
  */
 
 import { WebSocketService } from './services/WebSocketService.js';
-import { debounce, throttle, rafThrottle } from './utils/debounce.js';
+import { createInitialState } from './modules/InitialState.js';
+import { cacheElements } from './modules/ElementCache.js';
+import { setupEventListeners } from './modules/EventWiring.js';
+import { MessageRouter } from './modules/MessageRouter.js';
+import { UIHelpers } from './modules/UIHelpers.js';
+import { AudioManager } from './modules/AudioManager.js';
+import { PatternManager } from './modules/PatternManager.js';
+import { ActionsManager } from './modules/ActionsManager.js';
+import { ParticleEffectsManager } from './modules/ParticleEffectsManager.js';
+import { SceneManager } from './modules/SceneManager.js';
+import { ZoneManager } from './modules/ZoneManager.js';
+import { ConnectCodeManager } from './modules/ConnectCodeManager.js';
+import { VoiceChatManager } from './modules/VoiceChatManager.js';
+import { DJManager } from './modules/DJManager.js';
+import { BannerManager } from './modules/BannerManager.js';
+import { BitmapManager } from './managers/BitmapManager.js';
+import { PreviewManager } from './managers/PreviewManager.js';
 
 class AdminApp {
     constructor() {
@@ -25,7 +41,14 @@ class AdminApp {
             vjPassword: vjPassword,
         });
 
-        // Application state
+        /*
+         * Legacy inline state and preview construction is retained below until
+         * cleanup-task-7 removes duplicated monolith implementation. The active
+         * state and preview now come from the extracted composition graph.
+         */
+        this.state = createInitialState();
+
+        /*
         this.state = {
             connected: false,
             patterns: [],
@@ -131,6 +154,7 @@ class AdminApp {
             scenes: [],
             currentScene: null
         };
+        */
 
         // Zone pattern change tracking (debounce chip re-rendering)
         this._lastZonePatternsJson = '';
@@ -139,68 +163,34 @@ class AdminApp {
         this.tapTimes = [];
         this.tapTimeout = null;
 
-        // DOM elements cache
         this.elements = {};
+        cacheElements(this.elements);
 
-        // 3D Preview components (eagerly init on connect, lives in preview strip)
-        this._previewInitialized = false;
-        this._previewStripCollapsed = localStorage.getItem('mcav-preview-collapsed') === 'true';
-        this._previewScene = null;
-        this._previewCamera = null;
-        this._previewRenderer = null;
-        this._previewBlocks = [];
-        this._previewParticleSystem = null;
-        this._previewBlockIndicators = null;
-        this._previewFailed = false;
-        this._previewAutoRotate = false;
-        this._previewShowGrid = false;
-        this._previewAnimationId = null;
-        this._previewLastFrameTime = 0;
-        this._previewFps = 60;
-        this._previewFrameCount = 0;
-        this._previewLastFpsUpdate = 0;
-        this._previewLastBeatTime = 0;
-        this._previewParticleEffects = {
-            enabled: true,
-            bassFlame: true,
-            soulFire: true,
-            beatRing: true,
-            notes: false,
-            dust: false
-        };
-        this._threeLoadInFlight = false;
+        this.ui = new UIHelpers(this);
+        this.audio = new AudioManager(this);
+        this.patterns = new PatternManager(this);
+        this.actions = new ActionsManager(this);
+        this.particles = new ParticleEffectsManager(this);
+        this.scenes = new SceneManager(this);
+        this.connectCodes = new ConnectCodeManager(this);
+        this.dj = new DJManager(this);
+        this.voice = new VoiceChatManager(this);
+        this.banner = new BannerManager(this);
+        this.bitmap = new BitmapManager(this);
+        this.preview = new PreviewManager(this);
+        this.zones = new ZoneManager(this);
+        this.router = new MessageRouter(this);
 
-        // Multi-zone preview state
-        this._previewZoneGroups = {};       // zone_name → { group, blocks[], wireframe, sizeX/Y/Z }
-        this._previewStageCenter = { x: 0, y: 0, z: 0 };
-        this._previewStageBounds = null;    // { minX, minY, minZ, maxX, maxY, maxZ }
-        this._previewStageMode = false;
-
-        // Preview config
-        this._previewConfig = {
-            blockSize: 0.8,
-            zoneSize: 10,
-            centerOffset: 5,
-            colors: [
-                0xff9100,  // bass - orange
-                0xffea00,  // low - yellow
-                0x00e676,  // mid - green
-                0x00b0ff,  // high - blue
-                0xd500f9   // air - magenta
-            ]
-        };
-
-        // Initialize
-        this._cacheElements();
-        this._setupEventListeners();
+        setupEventListeners(this);
         this._setupWebSocket();
-        this._setupDJQueueDelegation();
-        this._setupDJPendingDelegation();
-        this._initBitmapControls();
-        this._setupDjLogoListeners();
-        this._initPreviewStrip();
-        this._updateTabIndicator();
-        this._boundUpdateTabIndicator = () => this._updateTabIndicator();
+        this.dj.setupQueueDelegation();
+        this.dj.setupPendingDelegation();
+        this.banner.setupBannerListeners();
+        this.bitmap.initControls();
+        this.bitmap.setupDjLogoListeners();
+        this.preview.initPreviewStrip();
+        this.ui.updateTabIndicator();
+        this._boundUpdateTabIndicator = () => this.ui.updateTabIndicator();
         window.addEventListener('resize', this._boundUpdateTabIndicator);
 
         // Start connection
@@ -1020,13 +1010,13 @@ class AdminApp {
     _setupWebSocket() {
         this.ws.addEventListener('connecting', (e) => {
             const detail = e.detail || {};
-            this._setConnectionStatus('connecting', detail.attempt, detail.maxAttempts);
+            this.ui.setConnectionStatus('connecting', detail.attempt, detail.maxAttempts);
         });
 
         this.ws.addEventListener('connected', () => {
             this.state.connected = true;
-            this._setConnectionStatus('connected');
-            this._showToast('Connected to server', 'success');
+            this.ui.setConnectionStatus('connected');
+            this.ui.showToast('Connected to server', 'success');
 
             // Connection celebration glow
             const app = document.getElementById('app');
@@ -1043,13 +1033,13 @@ class AdminApp {
             this.ws.send({ type: 'list_scenes' });
 
             // Fetch bitmap data on connect (LED Wall is now inline in Mixer)
-            this._fetchBitmapData();
+            this.bitmap.fetchBitmapData();
 
             // Eagerly init 3D preview (lives in always-visible strip now)
-            if (!this._previewInitialized && !this._previewFailed) {
-                this._initPreview().then(() => {
-                    if (this._previewInitialized && !this._previewStripCollapsed) {
-                        this._startPreviewAnimation();
+            if (!this.preview.previewInitialized && !this.preview.previewFailed) {
+                this.preview.initPreview().then(() => {
+                    if (this.preview.previewInitialized && !this.preview.previewStripCollapsed) {
+                        this.preview.startAnimation();
                     }
                 });
             }
@@ -1059,15 +1049,15 @@ class AdminApp {
             this.state.connected = false;
             this.state.minecraftConnected = false;
             this.state.bitmap.dataFetched = false;
-            this._setConnectionStatus('disconnected');
-            this._updateServiceIndicators();
-            this._resetGenerateButton();
+            this.ui.setConnectionStatus('disconnected');
+            this.ui.updateServiceIndicators();
+            this.connectCodes.resetGenerateButton();
         });
 
         this.ws.addEventListener('auth_failed', (e) => {
             const detail = e.detail || {};
             const msg = detail.error || 'Authentication failed';
-            this._setConnectionStatus('disconnected');
+            this.ui.setConnectionStatus('disconnected');
             // Prompt user for VJ password and retry
             const newPassword = prompt(`VJ Auth Failed: ${msg}\nEnter VJ password:`);
             if (newPassword) {
@@ -1078,17 +1068,17 @@ class AdminApp {
         });
 
         this.ws.addEventListener('error', () => {
-            this._setConnectionStatus('error');
+            this.ui.setConnectionStatus('error');
         });
 
         this.ws.addEventListener('reconnect_failed', () => {
-            this._setConnectionStatus('failed');
-            this._showToast('Connection failed. Click Reconnect to retry.', 'error', 0);
+            this.ui.setConnectionStatus('failed');
+            this.ui.showToast('Connection failed. Click Reconnect to retry.', 'error', 0);
         });
 
         // Handle incoming messages
-        this.ws.addEventListener('message', (e) => {
-            this._handleMessage(e.detail);
+        this.ws.addEventListener('message', (event) => {
+            this.router.handleMessage(event.detail);
         });
     }
 
