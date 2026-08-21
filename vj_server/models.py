@@ -676,6 +676,12 @@ class _StaticRequestHandlerMixin:
     _static_path_rejected = False
     _static_path_override: str | None = None
 
+    def end_headers(self) -> None:
+        # The control panel is a set of native ES modules. Reusing one module
+        # across deployments can combine incompatible manager/router versions.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def _reject_static_path(
         self,
         directory_map: dict,
