@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import ssl
 import subprocess  # nosec B404 - fixed OpenSSL argument vectors; shell execution is never used
@@ -81,6 +83,7 @@ class BootstrapResult:
 
 
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+PublicIPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
 def _run_command(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -90,6 +93,54 @@ def _run_command(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def parse_public_ip(value: str) -> PublicIPAddress:
+    """Parse a globally routable public IP for a Pterodactyl identity."""
+    try:
+        address = ipaddress.ip_address(value.strip())
+    except (AttributeError, ValueError) as exc:
+        raise BootstrapError("MCAV_PUBLIC_HOST must be a public IPv4 or IPv6 address") from exc
+
+    has_scope = isinstance(address, ipaddress.IPv6Address) and address.scope_id is not None
+    if (
+        not address.is_global
+        or address.is_unspecified
+        or address.is_loopback
+        or address.is_multicast
+        or address.is_link_local
+        or address.is_private
+        or has_scope
+    ):
+        raise BootstrapError("MCAV_PUBLIC_HOST must be a public IPv4 or IPv6 address")
+    return address
+
+
+def certificate_covers_ip(
+    certificate: Path,
+    public_ip: PublicIPAddress,
+    *,
+    command_runner: CommandRunner = _run_command,
+) -> bool:
+    """Return whether OpenSSL verifies the certificate's SAN for ``public_ip``."""
+    try:
+        result = command_runner(
+            [
+                "openssl",
+                "x509",
+                "-checkip",
+                str(public_ip),
+                "-noout",
+                "-in",
+                str(certificate),
+            ]
+        )
+    except subprocess.CalledProcessError:
+        return False
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BootstrapError("TLS certificate inspection failed") from exc
+    expected_output = f"IP {public_ip} does match certificate"
+    return result.returncode == 0 and result.stdout.strip() == expected_output
 
 
 def _sha256(path: Path) -> str:
@@ -174,33 +225,18 @@ def _validate_existing_identity(paths: BootstrapPaths) -> str:
         raise BootstrapError(f"Invalid deployment identity at {paths.state_dir}: {exc}") from exc
 
 
-def _create_identity(
+def _normalize_fingerprint(output: str) -> str:
+    fingerprint = re.sub(r"[:\s]", "", output.split("=", 1)[-1]).lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise BootstrapError("OpenSSL returned an invalid TLS SHA-256 fingerprint")
+    return fingerprint
+
+
+def _generate_tls_material(
     paths: BootstrapPaths,
-    release_version: str,
+    public_ip: PublicIPAddress,
     command_runner: CommandRunner,
-) -> str:
-    shared_secret = secrets.token_urlsafe(32)
-    admin_username = f"mcav-admin-{secrets.token_hex(3)}"
-    admin_password = secrets.token_urlsafe(24)
-    dj_username = f"mcav-dj-{secrets.token_hex(3)}"
-    dj_password = secrets.token_urlsafe(24)
-
-    auth_data = {
-        "djs": {
-            dj_username: {
-                "name": "MCAV DJ",
-                "key_hash": hash_password(dj_password, "bcrypt"),
-                "priority": 10,
-            }
-        },
-        "vj_operators": {
-            admin_username: {
-                "name": "MCAV Administrator",
-                "key_hash": hash_password(admin_password, "bcrypt"),
-            }
-        },
-    }
-
+) -> tuple[bytes, bytes, str]:
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(paths.state_dir, 0o700)
     with tempfile.TemporaryDirectory(prefix=".bootstrap-", dir=paths.state_dir) as temporary:
@@ -224,7 +260,7 @@ def _create_identity(
                     "-subj",
                     "/CN=MCAV Control Center",
                     "-addext",
-                    "subjectAltName=DNS:localhost,IP:127.0.0.1",
+                    f"subjectAltName=IP:{public_ip},DNS:localhost,IP:127.0.0.1",
                     "-keyout",
                     str(staged_key),
                     "-out",
@@ -233,6 +269,12 @@ def _create_identity(
             )
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(staged_cert, staged_key)
+            if not certificate_covers_ip(
+                staged_cert,
+                public_ip,
+                command_runner=command_runner,
+            ):
+                raise BootstrapError("Generated TLS certificate does not cover MCAV_PUBLIC_HOST")
             fingerprint_output = command_runner(
                 [
                     "openssl",
@@ -243,36 +285,188 @@ def _create_identity(
                     "-in",
                     str(staged_cert),
                 ]
-            ).stdout.strip()
+            ).stdout
+            fingerprint = _normalize_fingerprint(fingerprint_output)
+            certificate = staged_cert.read_bytes()
+            private_key = staged_key.read_bytes()
+        except BootstrapError:
+            raise
         except (OSError, subprocess.SubprocessError, ssl.SSLError) as exc:
-            raise BootstrapError(
-                f"TLS identity generation failed in {paths.state_dir}: {exc}"
-            ) from exc
+            raise BootstrapError(f"TLS identity generation failed in {paths.state_dir}") from exc
+    return certificate, private_key, fingerprint
 
-        fingerprint = fingerprint_output.split("=", 1)[-1]
-        first_login = (
-            "MCAV FIRST LOGIN - KEEP THIS FILE PRIVATE\n"
-            f"RELEASE={release_version}\n"
-            f"ADMIN_USERNAME={admin_username}\n"
-            f"ADMIN_PASSWORD={admin_password}\n"
-            f"DJ_USERNAME={dj_username}\n"
-            f"DJ_PASSWORD={dj_password}\n"
-            f"TLS_SHA256_FINGERPRINT={fingerprint}\n"
-            "ADMIN_URL=https://YOUR_SERVER_ADDRESS:8080/\n"
-            "PREVIEW_URL=https://YOUR_SERVER_ADDRESS:8080/preview/\n"
-        ).encode("utf-8")
 
+def _endpoint_values(public_ip: PublicIPAddress, fingerprint: str) -> dict[str, str]:
+    endpoint_host = (
+        f"[{public_ip}]" if isinstance(public_ip, ipaddress.IPv6Address) else str(public_ip)
+    )
+    return {
+        "TLS_SHA256_FINGERPRINT": fingerprint,
+        "ADMIN_URL": f"https://{endpoint_host}:8080/",
+        "PREVIEW_URL": f"https://{endpoint_host}:8080/preview/",
+        "DJ_ENDPOINT": f"wss://{endpoint_host}:25808",
+    }
+
+
+def _create_first_login(
+    release_version: str,
+    admin_username: str,
+    admin_password: str,
+    dj_username: str,
+    dj_password: str,
+    public_ip: PublicIPAddress,
+    fingerprint: str,
+) -> bytes:
+    endpoint_values = _endpoint_values(public_ip, fingerprint)
+    return (
+        "MCAV FIRST LOGIN - KEEP THIS FILE PRIVATE\n"
+        f"RELEASE={release_version}\n"
+        f"ADMIN_USERNAME={admin_username}\n"
+        f"ADMIN_PASSWORD={admin_password}\n"
+        f"DJ_USERNAME={dj_username}\n"
+        f"DJ_PASSWORD={dj_password}\n"
+        f"TLS_SHA256_FINGERPRINT={endpoint_values['TLS_SHA256_FINGERPRINT']}\n"
+        f"ADMIN_URL={endpoint_values['ADMIN_URL']}\n"
+        f"PREVIEW_URL={endpoint_values['PREVIEW_URL']}\n"
+        f"DJ_ENDPOINT={endpoint_values['DJ_ENDPOINT']}\n"
+    ).encode("utf-8")
+
+
+def _update_first_login(
+    content: str,
+    public_ip: PublicIPAddress,
+    fingerprint: str,
+) -> bytes:
+    endpoint_values = _endpoint_values(public_ip, fingerprint)
+    output: list[str] = []
+    updated_fields: set[str] = set()
+    for line in content.splitlines():
+        field = line.split("=", 1)[0]
+        if field in endpoint_values:
+            output.append(f"{field}={endpoint_values[field]}")
+            updated_fields.add(field)
+        else:
+            output.append(line)
+    for field, value in endpoint_values.items():
+        if field not in updated_fields:
+            output.append(f"{field}={value}")
+    return ("\n".join(output) + "\n").encode("utf-8")
+
+
+def _create_identity(
+    paths: BootstrapPaths,
+    release_version: str,
+    public_ip: PublicIPAddress,
+    command_runner: CommandRunner,
+) -> str:
+    certificate, private_key, fingerprint = _generate_tls_material(
+        paths,
+        public_ip,
+        command_runner,
+    )
+    shared_secret = secrets.token_urlsafe(32)
+    admin_username = f"mcav-admin-{secrets.token_hex(3)}"
+    admin_password = secrets.token_urlsafe(24)
+    dj_username = f"mcav-dj-{secrets.token_hex(3)}"
+    dj_password = secrets.token_urlsafe(24)
+
+    auth_data = {
+        "djs": {
+            dj_username: {
+                "name": "MCAV DJ",
+                "key_hash": hash_password(dj_password, "bcrypt"),
+                "priority": 10,
+            }
+        },
+        "vj_operators": {
+            admin_username: {
+                "name": "MCAV Administrator",
+                "key_hash": hash_password(admin_password, "bcrypt"),
+            }
+        },
+    }
+    first_login = _create_first_login(
+        release_version,
+        admin_username,
+        admin_password,
+        dj_username,
+        dj_password,
+        public_ip,
+        fingerprint,
+    )
+    identity_paths = (
+        paths.runtime_env,
+        paths.auth_file,
+        paths.tls_cert,
+        paths.tls_key,
+        paths.first_login,
+    )
+    try:
         _atomic_write(paths.runtime_env, f"MINECRAFT_WS_SECRET={shared_secret}\n".encode(), 0o600)
         _atomic_write(paths.auth_file, (json.dumps(auth_data, indent=2) + "\n").encode(), 0o600)
-        _atomic_copy(staged_cert, paths.tls_cert, 0o644)
-        _atomic_copy(staged_key, paths.tls_key, 0o600)
+        _atomic_write(paths.tls_cert, certificate, 0o644)
+        _atomic_write(paths.tls_key, private_key, 0o600)
         _atomic_write(paths.first_login, first_login, 0o600)
+    except OSError as exc:
+        for identity_path in identity_paths:
+            identity_path.unlink(missing_ok=True)
+        raise BootstrapError("Failed to persist the new deployment identity") from exc
     return shared_secret
+
+
+def _rotation_command(paths: BootstrapPaths, public_ip: PublicIPAddress) -> str:
+    return shlex.join(
+        [
+            "audioviz-vj",
+            "--bootstrap-pterodactyl",
+            "--project-root",
+            str(paths.project_root),
+            "--plugins-dir",
+            str(paths.plugins_dir),
+            "--public-host",
+            str(public_ip),
+            "--rotate-tls-identity",
+        ]
+    )
+
+
+def _rotate_tls_identity(
+    paths: BootstrapPaths,
+    public_ip: PublicIPAddress,
+    command_runner: CommandRunner,
+) -> None:
+    certificate, private_key, fingerprint = _generate_tls_material(
+        paths,
+        public_ip,
+        command_runner,
+    )
+    login_content = paths.first_login.read_text(encoding="utf-8")
+    updated_login = _update_first_login(login_content, public_ip, fingerprint)
+    original_files = {
+        paths.tls_key: (paths.tls_key.read_bytes(), 0o600),
+        paths.tls_cert: (paths.tls_cert.read_bytes(), 0o644),
+        paths.first_login: (paths.first_login.read_bytes(), 0o600),
+    }
+    try:
+        _atomic_write(paths.tls_key, private_key, 0o600)
+        _atomic_write(paths.tls_cert, certificate, 0o644)
+        _atomic_write(paths.first_login, updated_login, 0o600)
+    except OSError as exc:
+        try:
+            for path, (content, mode) in original_files.items():
+                _atomic_write(path, content, mode)
+        except OSError as rollback_error:
+            raise BootstrapError("TLS identity rotation and recovery failed") from rollback_error
+        raise BootstrapError(
+            "TLS identity rotation failed; the original identity was restored"
+        ) from exc
 
 
 def _ensure_identity(
     paths: BootstrapPaths,
     release_version: str,
+    public_ip: PublicIPAddress,
+    rotate_tls_identity: bool,
     command_runner: CommandRunner,
 ) -> tuple[str, bool]:
     identity_paths = (
@@ -284,11 +478,28 @@ def _ensure_identity(
     )
     existing_count = sum(path.exists() for path in identity_paths)
     if existing_count == 0:
-        return _create_identity(paths, release_version, command_runner), True
+        if rotate_tls_identity:
+            raise BootstrapError(
+                "--rotate-tls-identity requires an existing complete deployment identity"
+            )
+        return _create_identity(paths, release_version, public_ip, command_runner), True
     if existing_count != len(identity_paths):
         present = ", ".join(str(path) for path in identity_paths if path.exists())
         raise BootstrapError(f"Refusing partial deployment identity; present files: {present}")
-    return _validate_existing_identity(paths), False
+
+    shared_secret = _validate_existing_identity(paths)
+    if rotate_tls_identity:
+        _rotate_tls_identity(paths, public_ip, command_runner)
+    elif not certificate_covers_ip(
+        paths.tls_cert,
+        public_ip,
+        command_runner=command_runner,
+    ):
+        raise BootstrapError(
+            "Existing TLS certificate does not cover MCAV_PUBLIC_HOST. "
+            f"Rotate it explicitly with: {_rotation_command(paths, public_ip)}"
+        )
+    return shared_secret, False
 
 
 def _new_backup_dir(paths: BootstrapPaths) -> Path:
@@ -399,15 +610,35 @@ def bootstrap_pterodactyl(
     paths: BootstrapPaths,
     release_version: str,
     *,
+    public_host: str | None = None,
+    rotate_tls_identity: bool = False,
     command_runner: CommandRunner = _run_command,
 ) -> BootstrapResult:
     """Bootstrap persistent identity, plugin, and loopback renderer configuration."""
     paths = BootstrapPaths(paths.project_root.resolve(), paths.plugins_dir.resolve())
+    if public_host is None:
+        raise BootstrapError("MCAV_PUBLIC_HOST must be a public IPv4 or IPv6 address")
+    public_ip = parse_public_ip(public_host)
     _validate_release(paths)
     paths.backups_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(paths.backups_dir, 0o700)
 
-    shared_secret, credentials_created = _ensure_identity(paths, release_version, command_runner)
+    shared_secret, credentials_created = _ensure_identity(
+        paths,
+        release_version,
+        public_ip,
+        rotate_tls_identity,
+        command_runner,
+    )
+    if rotate_tls_identity:
+        return BootstrapResult(
+            credentials_created=credentials_created,
+            plugin_installed=False,
+            config_updated=False,
+            first_login=paths.first_login,
+            auth_file=paths.auth_file,
+            tls_cert=paths.tls_cert,
+        )
     plugin_installed, backup_dir = _install_plugin(paths)
     config_updated, _ = _configure_plugin(paths, shared_secret, backup_dir)
 

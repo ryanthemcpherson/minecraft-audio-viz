@@ -133,6 +133,16 @@ Examples:
         help="Install persistent Pterodactyl identity, plugin, and renderer configuration, then exit",
     )
     parser.add_argument(
+        "--public-host",
+        default=os.environ.get("MCAV_PUBLIC_HOST"),
+        help="Public IPv4 or IPv6 address used by Pterodactyl TLS bootstrap",
+    )
+    parser.add_argument(
+        "--rotate-tls-identity",
+        action="store_true",
+        help="Explicitly rotate only the Pterodactyl TLS certificate and private key",
+    )
+    parser.add_argument(
         "--plugins-dir",
         type=Path,
         default=None,
@@ -214,6 +224,16 @@ Examples:
 
     args = parser.parse_args()
 
+    if args.rotate_tls_identity and not (args.bootstrap_pterodactyl and args.public_host):
+        print("ERROR: --rotate-tls-identity requires --bootstrap-pterodactyl and --public-host")
+        return 2
+    if args.bootstrap_pterodactyl and not args.public_host:
+        print("ERROR: --public-host is required with --bootstrap-pterodactyl")
+        return 2
+    if args.unified_web and args.http_port == args.port:
+        print("ERROR: HTTP and DJ listener ports must differ in unified mode")
+        return 2
+
     if args.bootstrap_pterodactyl:
         from vj_server.pterodactyl import BootstrapError, BootstrapPaths, bootstrap_pterodactyl
 
@@ -233,6 +253,8 @@ Examples:
             result = bootstrap_pterodactyl(
                 BootstrapPaths(args.project_root, plugins_dir),
                 release_version,
+                public_host=args.public_host,
+                rotate_tls_identity=args.rotate_tls_identity,
             )
         except BootstrapError as exc:
             print(f"ERROR: Pterodactyl bootstrap failed: {exc}")
