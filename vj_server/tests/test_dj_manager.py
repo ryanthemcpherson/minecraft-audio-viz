@@ -4,12 +4,20 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from websockets.exceptions import ConnectionClosed
 
 from vj_server.models import ConnectCode, DJConnection
 
 # ============================================================================
 # DJManagerMixin helpers that can be tested without a full server
 # ============================================================================
+
+
+def test_connection_closed_exception_is_available_at_runtime() -> None:
+    """Abrupt DJ disconnects must resolve the runtime exception handler."""
+    from vj_server import dj_manager
+
+    assert dj_manager.ConnectionClosed is ConnectionClosed
 
 
 class FakeDJManager:
