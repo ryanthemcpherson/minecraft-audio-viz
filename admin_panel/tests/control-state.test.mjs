@@ -339,6 +339,79 @@ test('capability loading, unavailable, and error states stay visible with explan
     });
 });
 
+test('authoritative unavailable voice status replaces reconnect loading presentation', () => {
+    withControlHarness(({
+        app,
+        socket,
+        voiceCapabilityReason,
+        voiceSection,
+    }) => {
+        const voiceDot = new FakeElement('voice-dot');
+        const voiceStatusText = new FakeElement('voice-status-text');
+        const voicePlayersStat = new FakeElement('voice-players-stat');
+        const voiceUnavailableMsg = new FakeElement('voice-unavailable-msg');
+        voiceUnavailableMsg.classList.add('hidden');
+        const voiceControls = new FakeElement('voice-controls');
+        const voiceStreamToggle = new FakeElement('voice-stream-toggle');
+        const voiceChannelType = new FakeElement('voice-channel-type');
+        const voiceDistance = new FakeElement('voice-distance');
+        const voiceDistanceRow = new FakeElement('voice-distance-row');
+
+        Object.assign(app.elements, {
+            voiceDot,
+            voiceStatusText,
+            voicePlayersStat,
+            voiceUnavailableMsg,
+            voiceControls,
+            voiceStreamToggle,
+            voiceChannelType,
+            voiceDistance,
+            voiceDistanceRow,
+        });
+        app.state.voiceChat = {
+            statusReceived: false,
+            available: false,
+            streaming: false,
+            enabled: false,
+            channelType: 'static',
+            distance: 100,
+            connectedPlayers: 0,
+        };
+        app.voice = new VoiceChatManager(app);
+        app.router = new MessageRouter(app);
+
+        setupConnectionLifecycle(app);
+        socket.emit('connected');
+
+        assert.equal(voiceSection.dataset.uiState, 'loading');
+        assert.equal(voiceSection.getAttribute('aria-busy'), 'true');
+        assert.match(voiceCapabilityReason.textContent, /Checking/i);
+        assert.match(voiceStatusText.textContent, /Checking/i);
+        assert.equal(voiceUnavailableMsg.classList.contains('hidden'), true);
+
+        app.router.handleMessage({
+            type: 'voice_status',
+            available: false,
+            streaming: false,
+            channel_type: 'static',
+            connected_players: 0,
+        });
+
+        assert.equal(app.state.voiceChat.statusReceived, true);
+        assert.equal(voiceSection.dataset.uiState, 'unavailable');
+        assert.equal(voiceSection.getAttribute('aria-busy'), 'false');
+        assert.match(voiceCapabilityReason.textContent, /not available/i);
+        assert.equal(voiceStatusText.textContent, 'Unavailable');
+        assert.equal(voiceUnavailableMsg.classList.contains('hidden'), false);
+
+        socket.emit('disconnected');
+        socket.emit('connected');
+        assert.equal(voiceSection.dataset.uiState, 'loading');
+        assert.match(voiceStatusText.textContent, /Checking/i);
+        assert.equal(voiceUnavailableMsg.classList.contains('hidden'), true);
+    });
+});
+
 test('emergency state remains authoritative while a non-queued command is pending', () => {
     const originalDocument = globalThis.document;
     const originalSetTimeout = globalThis.setTimeout;
