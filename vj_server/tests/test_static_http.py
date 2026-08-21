@@ -467,6 +467,74 @@ def test_preview_server_disables_admin_asset_caching_on_every_response(
         assert body == b""
 
 
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize(
+    "request_path",
+    [
+        "/admin/../outside-secret.txt",
+        "/admin/nested/../../outside-secret.txt",
+        "/admin/%2e%2e/outside-secret.txt",
+        "/admin/%2E%2E/outside-secret.txt",
+        "/admin/nested/%2e%2e/%2e%2e/outside-secret.txt",
+        "/admin/%2e%2e%5coutside-secret.txt",
+    ],
+)
+def test_preview_server_rejects_admin_path_traversal_over_http(
+    tmp_path: Path,
+    method: str,
+    request_path: str,
+) -> None:
+    admin_root = tmp_path / "admin"
+    preview_root = tmp_path / "preview"
+    admin_root.mkdir()
+    preview_root.mkdir()
+    (tmp_path / "outside-secret.txt").write_text("secret", encoding="utf-8")
+
+    class _PreviewHandler(PreviewMultiDirectoryHandler):
+        pass
+
+    _PreviewHandler.directory_map = {
+        "/admin": str(admin_root),
+        "/": str(preview_root),
+    }
+
+    with _running_http_server(_PreviewHandler) as address:
+        status, body, headers = _http_response(address, method, request_path)
+
+    assert status == HTTPStatus.NOT_FOUND
+    assert body == b"" if method == "HEAD" else b"secret" not in body
+    assert [value for name, value in headers if name.lower() == "cache-control"] == ["no-store"]
+
+
+def test_preview_server_matches_only_complete_url_prefixes(tmp_path: Path) -> None:
+    admin_root = tmp_path / "admin"
+    preview_root = tmp_path / "preview"
+    (admin_root / "istrator").mkdir(parents=True)
+    preview_root.mkdir()
+    (admin_root / "istrator" / "admin-only.txt").write_text(
+        "must not cross route boundaries",
+        encoding="utf-8",
+    )
+
+    class _PreviewHandler(PreviewMultiDirectoryHandler):
+        pass
+
+    _PreviewHandler.directory_map = {
+        "/admin": str(admin_root),
+        "/": str(preview_root),
+    }
+
+    with _running_http_server(_PreviewHandler) as address:
+        status, body, _ = _http_response(
+            address,
+            "GET",
+            "/administrator/admin-only.txt",
+        )
+
+    assert status == HTTPStatus.NOT_FOUND
+    assert b"route boundaries" not in body
+
+
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])
 def test_http_handlers_redirect_and_serve_safe_directory_index(
     tmp_path: Path,

@@ -14,6 +14,8 @@ import socketserver
 import sys
 import threading
 import time
+import urllib.parse
+from http import HTTPStatus
 from pathlib import Path
 from typing import Set
 
@@ -177,23 +179,64 @@ class MultiDirectoryHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
+    def _reject_path(self, root: str) -> str:
+        self._static_path_rejected = True
+        return str(Path(root).resolve())
+
+    def _resolve_path(self, root: str, relative_path: str) -> str:
+        root_path = Path(root).resolve()
+        normalized_relative_path = relative_path.replace("\\", "/").lstrip("/")
+        try:
+            candidate = (root_path / normalized_relative_path).resolve()
+            candidate.relative_to(root_path)
+        except (OSError, RuntimeError, ValueError):
+            return self._reject_path(root)
+        return str(candidate)
+
     def translate_path(self, path):
         """Translate URL path to file system path."""
-        # Remove query string and fragment
-        path = path.split("?")[0].split("#")[0]
+        translated_path = getattr(self, "_translated_path_override", None)
+        if translated_path is not None:
+            self._translated_path_override = None
+            return translated_path
 
-        # Check each directory mapping
+        self._static_path_rejected = False
+        try:
+            parsed_path = urllib.parse.urlsplit(path)
+            if parsed_path.scheme or parsed_path.netloc:
+                raise ValueError("absolute URL is not a static asset path")
+            request_path = urllib.parse.unquote(parsed_path.path, errors="strict")
+            if "\x00" in request_path:
+                raise ValueError("null byte in static asset path")
+        except (UnicodeDecodeError, ValueError):
+            default_root = self.directory_map.get("/", getattr(self, "directory", "."))
+            return self._reject_path(default_root)
+
         for url_prefix, fs_directory in self.directory_map.items():
-            if path.startswith(url_prefix):
-                # Remove the URL prefix and join with the filesystem directory
-                relative_path = path[len(url_prefix) :].lstrip("/")
-                return os.path.join(fs_directory, relative_path)
+            if url_prefix == "/":
+                continue
+            if request_path == url_prefix or request_path.startswith(f"{url_prefix}/"):
+                relative_path = request_path[len(url_prefix) :]
+                return self._resolve_path(fs_directory, relative_path)
 
-        # Default to the first directory for root
         if "/" in self.directory_map:
-            return os.path.join(self.directory_map["/"], path.lstrip("/"))
+            return self._resolve_path(self.directory_map["/"], request_path)
 
         return super().translate_path(path)
+
+    def send_head(self):
+        """Reject unsafe paths before the stdlib handler can open them."""
+        self._static_path_rejected = False
+        translated_path = self.translate_path(self.path)
+        if self._static_path_rejected:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
+
+        self._translated_path_override = translated_path
+        try:
+            return super().send_head()
+        finally:
+            self._translated_path_override = None
 
     def log_message(self, format, *args):
         """Suppress HTTP request logging."""
