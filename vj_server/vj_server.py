@@ -143,6 +143,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self._auth_rate_limit_max: int = 5  # max attempts per window
         self._auth_rate_limit_window: float = 60.0  # seconds
         self._auth_last_cleanup: float = time.time()  # For time-based periodic cleanup
+        self._browser_auth_attempts: dict[str, list[float]] = {}
+        self._browser_auth_rate_limit_max: int = 5
+        self._browser_auth_rate_limit_window: float = 60.0
 
         # Coordinator integration (for centralized connect codes)
         self._coordinator: Optional["CoordinatorClient"] = None
