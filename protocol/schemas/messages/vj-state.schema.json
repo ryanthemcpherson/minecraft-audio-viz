@@ -56,6 +56,11 @@
       "type": "integer",
       "minimum": 0
     },
+    "emergency_epoch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
     "pending_djs": {
       "type": "array",
       "description": "DJs waiting for approval."

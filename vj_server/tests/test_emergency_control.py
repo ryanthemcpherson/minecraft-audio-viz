@@ -8,6 +8,7 @@ import pytest
 
 from vj_server.models import _json_str
 from vj_server.relay import RelayMixin
+from vj_server.vj_server import VJServer
 
 
 class BrowserSocket:
@@ -98,6 +99,7 @@ class EmergencyRelay(RelayMixin):
         self._pattern_name = "spectrum"
         self._blackout = False
         self._freeze = False
+        self._emergency_epoch = "test-emergency-epoch"
         self._emergency_revision = 0
         self._active_effects = {}
         self._band_materials = []
@@ -153,6 +155,10 @@ async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlate
     assert all(snapshot["blackout"] is False for snapshot in snapshots)
     assert all(snapshot["freeze"] is False for snapshot in snapshots)
     assert [snapshot["emergency_revision"] for snapshot in snapshots] == [0, 0]
+    assert [snapshot["emergency_epoch"] for snapshot in snapshots] == [
+        "test-emergency-epoch",
+        "test-emergency-epoch",
+    ]
     assert {message["type"] for message in websocket.sent} >= {
         "effect_triggered",
         "emergency_state",
@@ -160,12 +166,21 @@ async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlate
     assert {
         key: value
         for key, value in websocket.sent[-1].items()
-        if key in {"type", "blackout", "freeze", "request_id", "emergency_revision"}
+        if key
+        in {
+            "type",
+            "blackout",
+            "freeze",
+            "request_id",
+            "emergency_epoch",
+            "emergency_revision",
+        }
     } == {
         "type": "emergency_state",
         "blackout": True,
         "freeze": False,
         "request_id": "emergency-blackout-1",
+        "emergency_epoch": "test-emergency-epoch",
         "emergency_revision": 1,
     }
 
@@ -184,6 +199,7 @@ async def test_direct_freeze_broadcasts_current_emergency_state():
         "blackout": False,
         "freeze": True,
         "request_id": "emergency-freeze-1",
+        "emergency_epoch": "test-emergency-epoch",
         "emergency_revision": 1,
     }
 
@@ -264,6 +280,7 @@ async def test_concurrent_clients_receive_monotonic_revisions_despite_inverse_de
             "type": "emergency_state",
             "blackout": False,
             "freeze": False,
+            "emergency_epoch": "test-emergency-epoch",
             "emergency_revision": 2,
         }
         assert first_states[1]["request_id"] == "shared-emergency-id"
@@ -276,3 +293,12 @@ async def test_concurrent_clients_receive_monotonic_revisions_despite_inverse_de
         await first.close_input()
         await second.close_input()
         await asyncio.gather(first_task, second_task)
+
+
+def test_server_processes_receive_distinct_stable_emergency_epochs():
+    first = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    second = VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+
+    assert isinstance(first._emergency_epoch, str)
+    assert len(first._emergency_epoch) >= 16
+    assert first._emergency_epoch != second._emergency_epoch

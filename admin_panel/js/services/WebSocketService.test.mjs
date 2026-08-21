@@ -215,3 +215,61 @@ test('immediate safety send reports synchronous socket delivery failure', () => 
     assert.equal(service.sendImmediate({ type: 'set_freeze', enabled: true }), false);
     assert.deepEqual(service.messageQueue, []);
 });
+
+test('superseded socket message close and error callbacks cannot mutate the new session', () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const sockets = [];
+    const events = [];
+    let reconnectSchedules = 0;
+
+    class FakeWebSocket {
+        static OPEN = 1;
+
+        constructor() {
+            this.readyState = 0;
+            this.sent = [];
+            sockets.push(this);
+        }
+
+        send(message) {
+            this.sent.push(JSON.parse(message));
+        }
+
+        close() {}
+    }
+
+    globalThis.WebSocket = FakeWebSocket;
+    try {
+        const service = serviceWithoutTimers();
+        service._scheduleReconnect = () => { reconnectSchedules += 1; };
+        service.addEventListener('connected', () => events.push('connected'));
+        service.addEventListener('disconnected', () => events.push('disconnected'));
+        service.addEventListener('error', () => events.push('error'));
+        service.addEventListener('message', (event) => events.push(event.detail.type));
+
+        service.connect();
+        const superseded = sockets[0];
+        superseded.readyState = 3;
+        service.isConnecting = false;
+        service.connect();
+        const current = sockets[1];
+
+        superseded.onmessage({ data: JSON.stringify({ type: 'auth_success' }) });
+        superseded.onmessage({ data: JSON.stringify({ type: 'vj_state' }) });
+        superseded.onerror(new Error('late error'));
+        superseded.onclose({ code: 1006, reason: 'late close' });
+
+        assert.deepEqual(events, []);
+        assert.equal(reconnectSchedules, 0);
+        assert.equal(service.ws, current);
+        assert.equal(service.isConnecting, true);
+
+        current.readyState = FakeWebSocket.OPEN;
+        current.onopen();
+        current.onmessage({ data: JSON.stringify({ type: 'auth_success' }) });
+        assert.deepEqual(events, ['connected']);
+        assert.equal(service.isAuthenticated, true);
+    } finally {
+        globalThis.WebSocket = originalWebSocket;
+    }
+});

@@ -27,6 +27,7 @@ export class WebSocketService extends EventTarget {
         this._sessionEstablished = false;
         this._awaitingAuth = false;
         this._negotiatingAuth = false;
+        this._socketGeneration = 0;
 
         // Message queue for when disconnected (with max size to prevent memory bloat)
         this.messageQueue = [];
@@ -86,12 +87,14 @@ export class WebSocketService extends EventTarget {
         });
 
         try {
-            this.ws = new WebSocket(url);
+            const generation = ++this._socketGeneration;
+            const socket = new WebSocket(url);
+            this.ws = socket;
 
-            this.ws.onopen = () => this._onOpen();
-            this.ws.onclose = (e) => this._onClose(e);
-            this.ws.onerror = (e) => this._onError(e);
-            this.ws.onmessage = (e) => this._onMessage(e);
+            socket.onopen = () => this._onOpen(socket, generation);
+            socket.onclose = (event) => this._onClose(event, socket, generation);
+            socket.onerror = (error) => this._onError(error, socket, generation);
+            socket.onmessage = (event) => this._onMessage(event, socket, generation);
 
         } catch (error) {
             console.error('[WS] Connection error:', error);
@@ -174,7 +177,8 @@ export class WebSocketService extends EventTarget {
 
     // === Private Methods ===
 
-    _onOpen() {
+    _onOpen(socket = this.ws, generation = this._socketGeneration) {
+        if (!this._isCurrentSocket(socket, generation)) return;
         console.log('[WS] Connected');
         this.isConnecting = false;
         this.reconnectAttempts = 0;
@@ -184,7 +188,7 @@ export class WebSocketService extends EventTarget {
         // Send credentials immediately for compatibility with older secured
         // servers while still accepting the explicit server negotiation.
         if (this.username && this.password) {
-            this.ws.send(JSON.stringify({
+            socket.send(JSON.stringify({
                 type: 'vj_auth',
                 username: this.username,
                 password: this.password,
@@ -219,7 +223,8 @@ export class WebSocketService extends EventTarget {
         }
     }
 
-    _onClose(event) {
+    _onClose(event, socket = this.ws, generation = this._socketGeneration) {
+        if (!this._isCurrentSocket(socket, generation)) return;
         console.log(`[WS] Disconnected (code: ${event.code})`);
         this.isConnecting = false;
         this.isAuthenticated = false;
@@ -234,18 +239,20 @@ export class WebSocketService extends EventTarget {
         }
     }
 
-    _onError(error) {
+    _onError(error, socket = this.ws, generation = this._socketGeneration) {
+        if (!this._isCurrentSocket(socket, generation)) return;
         console.error('[WS] Error:', error);
         this._emit('error', { error });
     }
 
-    _onMessage(event) {
+    _onMessage(event, socket = this.ws, generation = this._socketGeneration) {
+        if (!this._isCurrentSocket(socket, generation)) return;
         try {
             const data = JSON.parse(event.data);
 
             if (data.type === 'auth_required') {
                 if (!this._awaitingAuth && this.username && this.password) {
-                    this.ws.send(JSON.stringify({
+                    socket.send(JSON.stringify({
                         type: 'vj_auth',
                         username: this.username,
                         password: this.password,
@@ -255,7 +262,7 @@ export class WebSocketService extends EventTarget {
                     this.shouldReconnect = false;
                     this._endSession();
                     this._emit('auth_required');
-                    this.ws.close(1000, 'Credentials required');
+                    socket.close(1000, 'Credentials required');
                 }
                 return;
             }
@@ -313,6 +320,10 @@ export class WebSocketService extends EventTarget {
 
     _emit(eventName, detail = null) {
         this.dispatchEvent(new CustomEvent(eventName, { detail }));
+    }
+
+    _isCurrentSocket(socket, generation) {
+        return socket === this.ws && generation === this._socketGeneration;
     }
 
     _clearPendingCommands() {

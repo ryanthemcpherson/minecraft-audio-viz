@@ -14,6 +14,7 @@ export class ActionsManager {
         this.tapTimeout = null;
         this._emergencySequence = 0;
         this._pendingEmergency = new Map();
+        this._lastEmergencyEpoch = null;
         this._lastEmergencyRevision = null;
         this.emergencyTimeoutMs = 5000;
 
@@ -40,33 +41,47 @@ export class ActionsManager {
     }
 
     applyEmergencyState(data) {
+        const hasEpoch = data.emergency_epoch !== undefined;
         const hasRevision = data.emergency_revision !== undefined;
+        const isVersioned = hasEpoch && hasRevision;
+        const isSnapshot = data.type === 'vj_state';
         const pendingName = data.request_id
             ? this._findPendingByRequestId(data.request_id)
             : null;
-        if (hasRevision
-            && (!Number.isInteger(data.emergency_revision) || data.emergency_revision < 0)) {
+        if (hasEpoch !== hasRevision) {
             return false;
         }
-        if (!hasRevision && this._lastEmergencyRevision !== null) {
+        if (isVersioned
+            && (typeof data.emergency_epoch !== 'string'
+                || data.emergency_epoch.length === 0
+                || !Number.isInteger(data.emergency_revision)
+                || data.emergency_revision < 0)) {
             return false;
         }
-        if (hasRevision
-            && this._lastEmergencyRevision !== null
-            && data.emergency_revision < this._lastEmergencyRevision) {
+        if (!isVersioned && this._lastEmergencyEpoch !== null) {
             return false;
         }
-        if (hasRevision
-            && data.emergency_revision === this._lastEmergencyRevision
-            && data.type !== 'vj_state'
-            && !pendingName) {
-            return false;
-        }
-        if (hasRevision) {
+        if (isVersioned) {
+            const sameEpoch = data.emergency_epoch === this._lastEmergencyEpoch;
+            if (!isSnapshot && !sameEpoch) {
+                return false;
+            }
+            if (sameEpoch
+                && this._lastEmergencyRevision !== null
+                && data.emergency_revision < this._lastEmergencyRevision) {
+                return false;
+            }
+            if (sameEpoch
+                && data.emergency_revision === this._lastEmergencyRevision
+                && !isSnapshot
+                && !pendingName) {
+                return false;
+            }
+            this._lastEmergencyEpoch = data.emergency_epoch;
             this._lastEmergencyRevision = data.emergency_revision;
         }
 
-        const reconciledPending = data.type === 'vj_state'
+        const reconciledPending = isSnapshot
             ? this._clearAllEmergencyPending()
             : false;
         if (typeof data.blackout === 'boolean') {
@@ -98,7 +113,6 @@ export class ActionsManager {
     }
 
     handleConnectionLost() {
-        this._lastEmergencyRevision = null;
         if (!this._clearAllEmergencyPending()) return false;
         this._setEmergencyStatus('Emergency request cancelled: connection lost');
         return true;

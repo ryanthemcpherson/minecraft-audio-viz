@@ -371,6 +371,13 @@ test('emergency state remains authoritative while a non-queued command is pendin
     const actions = new ActionsManager(app);
 
     try {
+        actions.applyEmergencyState({
+            type: 'vj_state',
+            blackout: false,
+            freeze: false,
+            emergency_epoch: 'authority-server',
+            emergency_revision: 0,
+        });
         assert.equal(actions.toggleBlackout(), true);
         assert.equal(app.state.blackout, false);
         assert.equal(blackout.getAttribute('aria-pressed'), 'false');
@@ -386,6 +393,7 @@ test('emergency state remains authoritative while a non-queued command is pendin
             blackout: true,
             freeze: false,
             request_id: immediate[0].request_id,
+            emergency_epoch: 'authority-server',
             emergency_revision: 1,
         });
         assert.equal(app.state.blackout, true);
@@ -437,7 +445,7 @@ test('correlated protocol errors clear emergency pending state without changing 
     }
 });
 
-test('older correlated ack after reconnect cannot overwrite a newer snapshot or clear fresh pending', () => {
+test('reconnect trusts only a vj_state epoch switch and rejects late old authority', () => {
     const originalDocument = globalThis.document;
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
@@ -463,18 +471,49 @@ test('older correlated ack after reconnect cannot overwrite a newer snapshot or 
     const actions = new ActionsManager(app);
 
     try {
+        actions.applyEmergencyState({
+            type: 'vj_state',
+            blackout: false,
+            freeze: false,
+            emergency_epoch: 'server-before-restart',
+            emergency_revision: 8,
+        });
         actions.toggleBlackout();
         const endedRequestId = sent[0].request_id;
         actions.handleConnectionLost();
         assert.equal(blackout.getAttribute('aria-busy'), 'false');
         assert.match(status.textContent, /connection lost/i);
 
-        actions.applyEmergencyState({
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: true,
+        }), false);
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: true,
+            emergency_epoch: 'server-before-restart',
+            emergency_revision: 7,
+            request_id: endedRequestId,
+        }), false);
+        assert.equal(actions.applyEmergencyState({
+            type: 'emergency_state',
+            blackout: true,
+            freeze: true,
+            emergency_epoch: 'server-after-restart',
+            emergency_revision: 1,
+        }), false);
+        assert.equal(app.state.blackout, false);
+        assert.equal(app.state.freeze, false);
+
+        assert.equal(actions.applyEmergencyState({
             type: 'vj_state',
             blackout: false,
             freeze: true,
-            emergency_revision: 8,
-        });
+            emergency_epoch: 'server-after-restart',
+            emergency_revision: 1,
+        }), true);
         actions.toggleBlackout();
         const freshRequestId = sent[1].request_id;
         assert.notEqual(freshRequestId, endedRequestId);
@@ -485,7 +524,8 @@ test('older correlated ack after reconnect cannot overwrite a newer snapshot or 
             blackout: true,
             freeze: false,
             request_id: endedRequestId,
-            emergency_revision: 7,
+            emergency_epoch: 'server-before-restart',
+            emergency_revision: 9,
         });
         assert.equal(app.state.blackout, false);
         assert.equal(app.state.freeze, true);
@@ -496,7 +536,8 @@ test('older correlated ack after reconnect cannot overwrite a newer snapshot or 
             type: 'vj_state',
             blackout: true,
             freeze: true,
-            emergency_revision: 9,
+            emergency_epoch: 'server-after-restart',
+            emergency_revision: 2,
         });
         assert.equal(app.state.blackout, true);
         assert.equal(app.state.freeze, true);
@@ -539,8 +580,10 @@ test('legacy emergency state is accepted only until revisioned authority is obse
             type: 'vj_state',
             blackout: false,
             freeze: false,
+            emergency_epoch: 'revisioned-server',
             emergency_revision: 4,
         }), true);
+        actions.handleConnectionLost();
         assert.equal(actions.applyEmergencyState({
             type: 'emergency_state',
             blackout: true,
@@ -575,6 +618,7 @@ test('equal revision affects only the matching in-flight request', () => {
             type: 'vj_state',
             blackout: false,
             freeze: false,
+            emergency_epoch: 'equal-revision-server',
             emergency_revision: 5,
         });
         actions.toggleBlackout();
@@ -583,6 +627,7 @@ test('equal revision affects only the matching in-flight request', () => {
             type: 'emergency_state',
             blackout: true,
             freeze: false,
+            emergency_epoch: 'equal-revision-server',
             emergency_revision: 5,
         }), false);
         assert.equal(app.state.blackout, false);
@@ -592,6 +637,7 @@ test('equal revision affects only the matching in-flight request', () => {
             type: 'emergency_state',
             blackout: false,
             freeze: false,
+            emergency_epoch: 'equal-revision-server',
             emergency_revision: 5,
             request_id: sent[0].request_id,
         }), true);
