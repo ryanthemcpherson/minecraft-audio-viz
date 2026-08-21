@@ -203,6 +203,8 @@ class RelayMixin:
                     "active_dj": self._active_dj_id,
                     "health_stats": self.get_health_stats(),
                     "minecraft_connected": mc_connected,
+                    "blackout": self._blackout,
+                    "freeze": self._freeze,
                     "minecraft_server_type": (
                         getattr(self.viz_client, "server_type", None) if self.viz_client else None
                     ),
@@ -248,6 +250,11 @@ class RelayMixin:
                                     {
                                         "type": "error",
                                         "message": "Rate limited — too many commands",
+                                        **(
+                                            {"request_id": data["request_id"]}
+                                            if data.get("request_id")
+                                            else {}
+                                        ),
                                     }
                                 )
                             )
@@ -284,6 +291,8 @@ class RelayMixin:
                                     "active_dj": self._active_dj_id,
                                     "health_stats": self.get_health_stats(),
                                     "minecraft_connected": mc_status,
+                                    "blackout": self._blackout,
+                                    "freeze": self._freeze,
                                     "minecraft_server_type": (
                                         getattr(self.viz_client, "server_type", None)
                                         if self.viz_client
@@ -768,6 +777,8 @@ class RelayMixin:
                             )
 
                         await self._broadcast_effect_trigger(effect)
+                        if effect in ("blackout", "freeze"):
+                            await self._broadcast_emergency_state(data.get("request_id"))
 
                     elif msg_type in ("blackout", "set_blackout"):
                         self._blackout = data.get("enabled", not self._blackout)
@@ -791,6 +802,7 @@ class RelayMixin:
                                 except Exception:
                                     pass
                         logger.info(f"Blackout: {self._blackout}")
+                        await self._broadcast_emergency_state(data.get("request_id"))
 
                     elif msg_type in ("freeze", "set_freeze"):
                         self._freeze = data.get("enabled", not self._freeze)
@@ -804,6 +816,7 @@ class RelayMixin:
                         else:
                             self._active_effects.pop("freeze", None)
                         logger.info(f"Freeze: {self._freeze}")
+                        await self._broadcast_emergency_state(data.get("request_id"))
 
                     # ========== Banner Profile Management ==========
 
@@ -1471,6 +1484,17 @@ class RelayMixin:
                 await dj.websocket.send(message)
             except Exception:
                 pass
+
+    async def _broadcast_emergency_state(self, request_id: str | None = None):
+        """Broadcast the current server-authoritative emergency state."""
+        payload = {
+            "type": "emergency_state",
+            "blackout": self._blackout,
+            "freeze": self._freeze,
+        }
+        if request_id:
+            payload["request_id"] = request_id
+        await self._broadcast_to_browsers(_json_str(payload))
 
     async def _broadcast_to_djs(self, msg: dict):
         """Broadcast a message dict to all connected DJs."""

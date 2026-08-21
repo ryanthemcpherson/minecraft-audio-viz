@@ -1035,7 +1035,7 @@ html[data-workspace="system"] .context-preview {
   }
 
   #header.command-bar {
-    grid-template-columns: minmax(12rem, auto) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(15.5rem, auto) minmax(0, 1fr) auto;
     grid-template-rows: 3rem 3rem;
   }
 
@@ -1110,6 +1110,12 @@ html[data-workspace="system"] .context-preview {
   }
 }
 
+@media (min-width: 900px) and (max-width: 1099px) {
+  #status-bar.command-telemetry {
+    display: none;
+  }
+}
+
 @media (max-width: 899px) {
   :root {
     --mcav-command-height: 13rem;
@@ -1118,8 +1124,10 @@ html[data-workspace="system"] .context-preview {
 
   #header.command-bar {
     position: relative;
+    height: auto;
     grid-template-columns: 1fr auto;
-    grid-template-rows: repeat(4, 3rem);
+    grid-template-rows: repeat(4, minmax(3rem, auto));
+    padding-block: var(--mcav-space-2);
   }
 
   #main-content.control-shell {

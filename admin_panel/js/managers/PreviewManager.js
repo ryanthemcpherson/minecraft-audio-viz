@@ -1185,8 +1185,9 @@ export class PreviewManager {
         for (let i = 0; i < 5; i++) {
             const stripBar = document.getElementById(`strip-band-${i}`);
             if (stripBar) {
-                const pct = Math.round(this.state.bands[i] * 100);
+                const pct = Math.round(Math.min(1, Math.max(0, this.state.bands[i])) * 100);
                 stripBar.style.width = pct + '%';
+                stripBar.parentElement?.setAttribute('aria-valuenow', String(pct));
             }
         }
     }

@@ -13,24 +13,30 @@ export class SceneManager {
     }
 
     async saveScene() {
+        if (!this.state.connected) return false;
         const name = this.elements.sceneNameInput.value.trim();
         if (!name) {
             await ModalDialog.alert('Save Scene', 'Please enter a scene name');
-            return;
+            return false;
         }
 
-        this.ws.send({ type: 'save_scene', name });
+        const delivered = this.ws.send({ type: 'save_scene', name }) !== false;
+        if (!delivered) return false;
         this.elements.sceneNameInput.value = '';
+        return true;
     }
 
     loadScene(name) {
-        this.ws.send({ type: 'load_scene', name });
+        if (!this.state.connected) return false;
+        return this.ws.send({ type: 'load_scene', name }) !== false;
     }
 
     async deleteScene(name) {
+        if (!this.state.connected) return false;
         if (await ModalDialog.confirm('Delete Scene', `Delete scene "${name}"?`, { destructive: true })) {
-            this.ws.send({ type: 'delete_scene', name });
+            return this.ws.send({ type: 'delete_scene', name }) !== false;
         }
+        return false;
     }
 
     renderScenes() {

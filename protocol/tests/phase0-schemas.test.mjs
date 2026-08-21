@@ -168,3 +168,28 @@ test("ws-auth-ok schema accepts only the versioned or unversioned acknowledgemen
   assertInvalid(schema, { type: "auth_ok", v: 1 });
   assertInvalid(schema, { type: "auth_ok", accepted: true });
 });
+
+test("emergency state is inventoried and requires authoritative toggle values", () => {
+  const inventory = readJson(schemaIndexPath);
+  assert.equal(inventory.messages.emergency_state, "messages/emergency-state.schema.json");
+  const schema = readJson(resolve(repositoryRoot, "protocol", "schemas", inventory.messages.emergency_state));
+
+  assertValid(schema, { type: "emergency_state", blackout: true, freeze: false });
+  assertValid(schema, {
+    type: "emergency_state",
+    blackout: false,
+    freeze: true,
+    request_id: "emergency-123",
+  });
+  assertInvalid(schema, { type: "emergency_state", blackout: true });
+  assertInvalid(schema, { type: "emergency_state", blackout: "true", freeze: false });
+});
+
+test("emergency command and error schemas accept request correlation", () => {
+  for (const file of ["trigger-effect.schema.json", "blackout.schema.json", "freeze.schema.json"]) {
+    const schema = readJson(resolve(repositoryRoot, "protocol", "schemas", "messages", file));
+    assert.deepEqual(schema.properties.request_id, { type: "string", minLength: 1, maxLength: 128 });
+  }
+  const errorSchema = readJson(resolve(repositoryRoot, "protocol", "schemas", "messages", "error.schema.json"));
+  assert.deepEqual(errorSchema.properties.request_id, { type: "string", minLength: 1, maxLength: 128 });
+});

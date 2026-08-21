@@ -155,3 +155,44 @@ test('returns an authentication challenge to the login gate', () => {
 
   assert.deepEqual(calls, ['auth-required']);
 });
+
+test('each authenticated connection resets and requeries voice capability until fresh status', () => {
+  const originalDocument = globalThis.document;
+  const root = { classList: { add() {}, remove() {} } };
+  globalThis.document = { getElementById: () => root };
+  const sent = [];
+  const resets = [];
+  const app = {
+    ws: new FakeWebSocket(),
+    state: {
+      connected: false,
+      zone: { name: 'main' },
+      bitmap: { dataFetched: true },
+      voiceChat: { available: true, statusReceived: true },
+    },
+    ui: {
+      setConnectionStatus() {},
+      showToast() {},
+      updateServiceIndicators() {},
+      applyControlState() {},
+    },
+    connectCodes: { resetGenerateButton() {} },
+    voice: { resetCapabilityStatus: () => resets.push('reset') },
+    bitmap: { fetchBitmapData() {} },
+    preview: { previewInitialized: true, previewFailed: false },
+    onAuthenticated() {},
+  };
+  app.ws.send = (message) => sent.push(message);
+
+  try {
+    setupConnectionLifecycle(app);
+    app.ws.emit('connected');
+    app.ws.emit('disconnected');
+    app.ws.emit('connected');
+
+    assert.deepEqual(resets, ['reset', 'reset']);
+    assert.equal(sent.filter(({ type }) => type === 'get_voice_status').length, 2);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});

@@ -47,6 +47,7 @@ test('scene launchers are labeled native buttons and remain distinct from delete
     globalThis.document = { createElement: (tagName) => fakeElement(tagName) };
     const app = {
         state: {
+            connected: true,
             scenes: [{ name: 'My Set', pattern: 'aurora', preset: 'edm', entity_count: 32 }],
             currentScene: null,
         },
@@ -71,4 +72,20 @@ test('scene launchers are labeled native buttons and remain distinct from delete
     } finally {
         globalThis.document = originalDocument;
     }
+});
+
+test('manager boundary blocks disconnected scene save and load alternate paths', async () => {
+    const sent = [];
+    const sceneNameInput = { value: 'Closing Set' };
+    const manager = new SceneManager({
+        state: { connected: false },
+        elements: { sceneNameInput },
+        ws: { send: (message) => sent.push(message) },
+    });
+
+    assert.equal(await manager.saveScene(), false);
+    assert.equal(manager.loadScene('Opening Set'), false);
+    assert.equal(await manager.deleteScene('Opening Set'), false);
+    assert.deepEqual(sent, []);
+    assert.equal(sceneNameInput.value, 'Closing Set');
 });

@@ -19,6 +19,7 @@ export function setupConnectionLifecycle(app) {
         root?.classList.add('just-connected');
         setTimeout(() => root?.classList.remove('just-connected'), 900);
 
+        app.voice?.resetCapabilityStatus?.();
         app.ws.send({ type: 'get_particle_effects' });
         app.ws.send({ type: 'get_stages' });
         app.ws.send({ type: 'get_zones' });

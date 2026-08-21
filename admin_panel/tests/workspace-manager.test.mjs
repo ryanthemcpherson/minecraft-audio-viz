@@ -144,6 +144,44 @@ test('workspace tabs expose semantics and activate with rail navigation keys', (
   assert.equal(manager.activeWorkspace, 'system');
 });
 
+test('tab orientation follows mobile layout and skip link targets the active workspace', () => {
+  const tablist = fakeNode('');
+  const skipLink = fakeNode('');
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  let mediaListener;
+  const media = {
+    matches: false,
+    addEventListener(type, listener) { if (type === 'change') mediaListener = listener; },
+  };
+  const root = {
+    defaultView: { matchMedia: () => media },
+    documentElement: { dataset: {} },
+    querySelector(selector) {
+      if (selector === '[data-workspace-tablist]') return tablist;
+      if (selector === '.skip-link') return skipLink;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      return [];
+    },
+  };
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  assert.equal(tablist.getAttribute('aria-orientation'), 'vertical');
+  assert.equal(skipLink.getAttribute('href'), '#workspace-live');
+  media.matches = true;
+  mediaListener({ matches: true });
+  assert.equal(tablist.getAttribute('aria-orientation'), 'horizontal');
+
+  manager.activate('zones');
+  assert.equal(skipLink.getAttribute('href'), '#workspace-zones');
+  assert.equal(skipLink.textContent, 'Skip to Zones controls');
+});
+
 test('maps Alt+1 through Alt+5 while ignoring editable targets', () => {
   const target = { tagName: 'DIV', isContentEditable: false };
   assert.equal(workspaceFromShortcutEvent({ altKey: true, key: '1', target }), 'live');

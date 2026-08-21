@@ -103,20 +103,22 @@ export class ParticleEffectsManager {
     }
 
     _toggleParticleEffect(effectId) {
+        if (!this.state.connected) return false;
         const isEnabled = this.state.enabledParticleEffects.has(effectId);
-        this.ws.send({
+        return this.ws.send({
             type: 'set_particle_effect',
             zone: this.state.zone.name || 'main',
             effect: effectId,
             enabled: !isEnabled
-        });
+        }) !== false;
     }
 
     sendParticleConfig(config) {
-        this.ws.send({
+        if (!this.state.connected) return false;
+        return this.ws.send({
             type: 'set_particle_config',
             zone: this.state.zone.name || 'main',
             ...config
-        });
+        }) !== false;
     }
 }
