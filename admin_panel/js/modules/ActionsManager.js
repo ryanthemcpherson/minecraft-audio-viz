@@ -12,30 +12,57 @@ export class ActionsManager {
         // Tap tempo tracking
         this.tapTimes = [];
         this.tapTimeout = null;
+
+        this._renderEmergencyState('blackout');
+        this._renderEmergencyState('freeze');
     }
 
     toggleBlackout() {
-        this.state.blackout = !this.state.blackout;
-        this.elements.btnBlackout.classList.toggle('active', this.state.blackout);
-        document.getElementById('app').classList.toggle('mode-blackout', this.state.blackout);
-
-        this.ws.send({
+        const enabled = !this.state.blackout;
+        const delivered = this.ws.send({
             type: 'trigger_effect',
             effect: 'blackout',
-            intensity: this.state.blackout ? 1.0 : 0.0
+            intensity: enabled ? 1.0 : 0.0
         });
+        if (delivered === false) {
+            this._renderEmergencyState('blackout');
+            return false;
+        }
+        this.setBlackoutState(enabled);
+        return true;
     }
 
     toggleFreeze() {
-        this.state.freeze = !this.state.freeze;
-        this.elements.btnFreeze.classList.toggle('active', this.state.freeze);
-        document.getElementById('app').classList.toggle('mode-freeze', this.state.freeze);
-
-        this.ws.send({
+        const enabled = !this.state.freeze;
+        const delivered = this.ws.send({
             type: 'trigger_effect',
             effect: 'freeze',
-            intensity: this.state.freeze ? 1.0 : 0.0
+            intensity: enabled ? 1.0 : 0.0
         });
+        if (delivered === false) {
+            this._renderEmergencyState('freeze');
+            return false;
+        }
+        this.setFreezeState(enabled);
+        return true;
+    }
+
+    setBlackoutState(enabled) {
+        this.state.blackout = Boolean(enabled);
+        this._renderEmergencyState('blackout');
+    }
+
+    setFreezeState(enabled) {
+        this.state.freeze = Boolean(enabled);
+        this._renderEmergencyState('freeze');
+    }
+
+    _renderEmergencyState(name) {
+        const enabled = Boolean(this.state[name]);
+        const button = name === 'blackout' ? this.elements.btnBlackout : this.elements.btnFreeze;
+        button?.classList.toggle('active', enabled);
+        button?.setAttribute('aria-pressed', String(enabled));
+        document.getElementById('app')?.classList.toggle(`mode-${name}`, enabled);
     }
 
     tapTempo() {
@@ -94,11 +121,18 @@ export class ActionsManager {
             setTimeout(() => btn.classList.remove('firing'), 200);
         }
 
-        this.ws.send({
+        const delivered = this.ws.send({
             type: 'trigger_effect',
             effect: effect,
             intensity: 1.0,
             duration: 2000
         });
+        const status = document.getElementById('effect-result-status');
+        if (status) {
+            const label = effect.replaceAll('_', ' ');
+            status.textContent = delivered === false
+                ? `${label} could not be delivered`
+                : `${label} triggered`;
+        }
     }
 }

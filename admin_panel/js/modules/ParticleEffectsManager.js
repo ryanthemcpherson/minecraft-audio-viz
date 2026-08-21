@@ -68,6 +68,7 @@ export class ParticleEffectsManager {
                 ambientContainer.appendChild(toggle);
             }
         });
+        this.app.ui?.applyControlState?.();
     }
 
     _createParticleToggle(effect) {
@@ -80,6 +81,7 @@ export class ParticleEffectsManager {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = isEnabled;
+        checkbox.dataset.requiresConnection = '';
 
         const indicator = document.createElement('span');
         indicator.className = 'toggle-indicator';

@@ -2001,10 +2001,26 @@ body {
     background: var(--bg-tertiary);
     border: 2px solid var(--border-color);
     border-radius: var(--border-radius-lg);
-    padding: 14px;
-    cursor: pointer;
+    padding: 0;
     transition: all 0.2s ease;
     position: relative;
+}
+
+.scene-card-launch {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.scene-card-launch:focus-visible {
+    outline: none;
+    box-shadow: var(--mcav-focus-ring, 0 0 0 3px rgba(0, 204, 255, 0.35));
 }
 
 .scene-card:hover {

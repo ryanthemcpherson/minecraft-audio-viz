@@ -108,13 +108,16 @@ export class ConnectCodeManager {
             const revokeBtn = document.createElement('button');
             revokeBtn.className = 'btn-revoke';
             revokeBtn.dataset.code = codeObj.code;
+            revokeBtn.dataset.requiresConnection = '';
             revokeBtn.textContent = 'X';
             revokeBtn.title = 'Revoke code';
+            revokeBtn.setAttribute('aria-label', `Revoke connect code ${codeObj.code}`);
 
             item.appendChild(codeSpan);
             item.appendChild(expiresSpan);
             item.appendChild(revokeBtn);
             container.appendChild(item);
         });
+        this.app.ui?.applyControlState?.();
     }
 }

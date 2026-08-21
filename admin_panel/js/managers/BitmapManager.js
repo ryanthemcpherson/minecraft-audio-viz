@@ -395,6 +395,7 @@ export class BitmapManager {
         this.ws.send({ type: 'get_bitmap_transitions' });
         this.ws.send({ type: 'get_bitmap_palettes' });
         this.state.bitmap.dataFetched = true;
+        this.app.ui.applyControlState();
     }
 
     // === Rendering ===
@@ -408,6 +409,7 @@ export class BitmapManager {
         this.state.bitmap.patterns.forEach(pattern => {
             const btn = document.createElement('button');
             btn.className = 'pattern-btn';
+            btn.dataset.requiresMinecraft = '';
             btn.dataset.pattern = pattern.id || pattern;
             btn.textContent = pattern.name || pattern;
             btn.title = pattern.description || '';
@@ -421,6 +423,7 @@ export class BitmapManager {
         });
 
         this._populateSelectFromList(this.elements.bitmapLayerPattern, this.state.bitmap.patterns, '-- None --');
+        this.app.ui?.applyControlState?.();
     }
 
     renderTransitions() {
@@ -453,6 +456,7 @@ export class BitmapManager {
 
         const noneBtn = document.createElement('button');
         noneBtn.className = 'pattern-btn';
+        noneBtn.dataset.requiresMinecraft = '';
         noneBtn.dataset.palette = '';
         noneBtn.dataset.type = 'palette';
         noneBtn.textContent = 'None';
@@ -463,6 +467,7 @@ export class BitmapManager {
         this.state.bitmap.palettes.forEach(palette => {
             const btn = document.createElement('button');
             btn.className = 'pattern-btn';
+            btn.dataset.requiresMinecraft = '';
             btn.dataset.palette = palette.id || palette;
             btn.dataset.type = 'palette';
             btn.textContent = palette.name || palette;
@@ -474,6 +479,7 @@ export class BitmapManager {
             btn.addEventListener('click', () => this.setPalette(palette.id || palette));
             grid.appendChild(btn);
         });
+        this.app.ui?.applyControlState?.();
 
         this._populateSelectFromList(this.elements.bitmapSharedPalette, this.state.bitmap.palettes, '-- None --');
     }

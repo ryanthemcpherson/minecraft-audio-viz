@@ -36,3 +36,27 @@ test('routes representative valid protocol messages to their domain manager', ()
 
   assert.deepEqual(calls, routes.map(({ expected }) => expected));
 });
+
+test('authoritative VJ snapshots replace blackout and freeze presentation state', () => {
+  const calls = [];
+  const app = {
+    state: { bitmap: {} },
+    elements: {},
+    ui: { showToast() {} },
+    patterns: { handlePatterns() {} },
+    dj: { handleDJRoster() {} },
+    audio: { updateBandMaterialsSourceHint() {} },
+    actions: {
+      setBlackoutState: (enabled) => calls.push(['blackout', enabled]),
+      setFreezeState: (enabled) => calls.push(['freeze', enabled]),
+    },
+  };
+
+  new MessageRouter(app).handleMessage({
+    type: 'vj_state',
+    blackout: true,
+    freeze: false,
+  });
+
+  assert.deepEqual(calls, [['blackout', true], ['freeze', false]]);
+});

@@ -292,6 +292,7 @@ export class PreviewManager {
 
             this._initialized = true;
             this._lastFrameTime = performance.now();
+            this.app.ui.applyControlState();
 
             if ((this.state.allZones || []).length > 0) {
                 this.rebuildZoneLayout();
@@ -303,6 +304,7 @@ export class PreviewManager {
             this._scene = null;
             this._camera = null;
             console.error('[Preview] Initialization failed', error);
+            this.app.ui.applyControlState();
             this.app.ui.showToast('3D Preview initialization failed; disabled for this session', 'warning');
         }
     }
@@ -1047,6 +1049,7 @@ export class PreviewManager {
             console.error('[Preview] Render loop failed', error);
             this._failed = true;
             this.stopAnimation();
+            this.app.ui.applyControlState();
             this.app.ui.showToast('3D Preview render error; disabled for this session', 'warning');
         }
     }

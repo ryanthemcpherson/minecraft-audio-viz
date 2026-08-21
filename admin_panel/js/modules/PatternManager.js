@@ -241,6 +241,7 @@ export class PatternManager {
                 const btn = document.createElement('button');
                 btn.className = 'pattern-btn';
                 btn.dataset.pattern = pattern.id;
+                btn.dataset.requiresConnection = '';
                 btn.title = [pattern.description, pattern.category].filter(Boolean).join(' · ');
                 btn.setAttribute('aria-label', `Launch ${pattern.name}`);
 
@@ -281,6 +282,7 @@ export class PatternManager {
         });
 
         grid.appendChild(groupGrid);
+        this.app.ui?.applyControlState?.();
     }
 
     highlightCurrentPattern(patternId = this.state.currentPattern) {

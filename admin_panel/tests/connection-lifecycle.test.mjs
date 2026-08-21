@@ -48,6 +48,21 @@ test('delegates representative WebSocket lifecycle events to managers', () => {
   ]);
 });
 
+test('does not present server command errors as a dropped WebSocket', () => {
+  const calls = [];
+  const app = {
+    ws: new FakeWebSocket(),
+    state: { connected: true },
+    ui: { setConnectionStatus: (status) => calls.push(status) },
+  };
+
+  setupConnectionLifecycle(app);
+  app.ws.emit('error', { type: 'error', message: 'Minecraft is not connected' });
+  app.ws.emit('error', { error: new Error('transport failure') });
+
+  assert.deepEqual(calls, ['error']);
+});
+
 test('notifies the login gate when authenticated without storing credentials', () => {
   const originalDocument = globalThis.document;
   const originalLocalStorage = globalThis.localStorage;
