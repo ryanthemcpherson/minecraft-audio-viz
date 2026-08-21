@@ -79,50 +79,60 @@ class RelayMixin:
         close_code = 4008 if rate_limited else 4004
         await websocket.close(close_code, "Authentication failed")
 
+    async def _negotiate_browser_auth(self, websocket) -> bool:
+        """Negotiate browser authentication before any control state is exposed."""
+        if not self.require_auth:
+            await websocket.send(_json_str({"type": "auth_success"}))
+            return True
+
+        await websocket.send(_json_str({"type": "auth_required"}))
+        try:
+            raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+            auth_data = mjson.decode(raw)
+            if auth_data.get("type") != "vj_auth":
+                await websocket.close(4003, "Expected vj_auth message")
+                return False
+            username = auth_data.get("username")
+            password = auth_data.get("password", "")
+            remote_ip = self._browser_remote_ip(websocket)
+            if self._browser_auth_is_rate_limited(remote_ip):
+                logger.warning(
+                    "Browser VJ auth rate limited from %s",
+                    websocket.remote_address,
+                )
+                await self._reject_browser_auth(websocket, rate_limited=True)
+                return False
+            authenticated = (
+                isinstance(username, str)
+                and bool(username)
+                and isinstance(password, str)
+                and bool(password)
+                and self.auth_config.verify_vj(username, password) is not None
+            )
+            if not authenticated:
+                self._record_browser_auth_failure(remote_ip)
+                logger.warning("Browser VJ auth failed from %s", websocket.remote_address)
+                await self._reject_browser_auth(websocket)
+                return False
+            self._browser_auth_attempts.pop(remote_ip, None)
+            await websocket.send(_json_str({"type": "auth_success"}))
+            logger.info("Browser VJ auth succeeded from %s", websocket.remote_address)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("Browser auth timeout from %s", websocket.remote_address)
+            await websocket.close(4003, "Auth timeout")
+            return False
+        except (msgspec.DecodeError, Exception) as exc:
+            logger.warning("Browser auth error: %s", exc)
+            await websocket.close(4003, "Auth error")
+            return False
+
     async def _handle_browser_client(self, websocket):
         """Handle browser preview/admin panel connection."""
 
         # --- VJ Authentication Gate ---
-        if self.require_auth:
-            try:
-                raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-                auth_data = mjson.decode(raw)
-                if auth_data.get("type") != "vj_auth":
-                    await websocket.close(4003, "Expected vj_auth message")
-                    return
-                username = auth_data.get("username")
-                password = auth_data.get("password", "")
-                remote_ip = self._browser_remote_ip(websocket)
-                if self._browser_auth_is_rate_limited(remote_ip):
-                    logger.warning(
-                        "Browser VJ auth rate limited from %s",
-                        websocket.remote_address,
-                    )
-                    await self._reject_browser_auth(websocket, rate_limited=True)
-                    return
-                authenticated = (
-                    isinstance(username, str)
-                    and bool(username)
-                    and isinstance(password, str)
-                    and bool(password)
-                    and self.auth_config.verify_vj(username, password) is not None
-                )
-                if not authenticated:
-                    self._record_browser_auth_failure(remote_ip)
-                    logger.warning(f"Browser VJ auth failed from {websocket.remote_address}")
-                    await self._reject_browser_auth(websocket)
-                    return
-                self._browser_auth_attempts.pop(remote_ip, None)
-                await websocket.send(_json_str({"type": "auth_success"}))
-                logger.info(f"Browser VJ auth succeeded from {websocket.remote_address}")
-            except asyncio.TimeoutError:
-                logger.warning(f"Browser auth timeout from {websocket.remote_address}")
-                await websocket.close(4003, "Auth timeout")
-                return
-            except (msgspec.DecodeError, Exception) as exc:
-                logger.warning(f"Browser auth error: {exc}")
-                await websocket.close(4003, "Auth error")
-                return
+        if not await self._negotiate_browser_auth(websocket):
+            return
 
         # --- Rate limiter for state-mutating browser commands ---
         _RATE_LIMITED_COMMANDS = {

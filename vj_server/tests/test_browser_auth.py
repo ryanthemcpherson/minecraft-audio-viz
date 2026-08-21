@@ -30,8 +30,8 @@ class AuthWebSocket:
 
 
 class AuthRelay(RelayMixin):
-    def __init__(self):
-        self.require_auth = True
+    def __init__(self, *, require_auth: bool = True):
+        self.require_auth = require_auth
         self.auth_config = DJAuthConfig(
             vj_operators={
                 "lighting": {"key_hash": hash_password("lighting-secret")},
@@ -54,11 +54,13 @@ async def test_username_must_match_password_owner():
         }
     )
 
-    await relay._handle_browser_client(websocket)
+    authenticated = await relay._negotiate_browser_auth(websocket)
 
     assert [mjson.decode(message) for message in websocket.sent] == [
-        {"type": "auth_error", "error": "Invalid username or password"}
+        {"type": "auth_required"},
+        {"type": "auth_error", "error": "Invalid username or password"},
     ]
+    assert authenticated is False
     assert websocket.close_code == 4004
 
 
@@ -72,11 +74,13 @@ async def test_username_is_required():
         }
     )
 
-    await relay._handle_browser_client(websocket)
+    authenticated = await relay._negotiate_browser_auth(websocket)
 
     assert [mjson.decode(message) for message in websocket.sent] == [
-        {"type": "auth_error", "error": "Invalid username or password"}
+        {"type": "auth_required"},
+        {"type": "auth_error", "error": "Invalid username or password"},
     ]
+    assert authenticated is False
     assert websocket.close_code == 4004
 
 
@@ -96,11 +100,43 @@ async def test_sixth_failed_login_from_ip_is_rate_limited():
     ]
 
     for websocket in sockets:
-        await relay._handle_browser_client(websocket)
+        await relay._negotiate_browser_auth(websocket)
 
     assert [websocket.close_code for websocket in sockets[:5]] == [4004] * 5
     assert sockets[5].close_code == 4008
-    assert mjson.decode(sockets[5].sent[0]) == {
+    assert mjson.decode(sockets[5].sent[1]) == {
         "type": "auth_error",
         "error": "Invalid username or password",
     }
+
+
+@pytest.mark.asyncio
+async def test_authenticated_browser_receives_challenge_then_success():
+    relay = AuthRelay()
+    websocket = AuthWebSocket(
+        {
+            "type": "vj_auth",
+            "username": "lighting",
+            "password": "lighting-secret",
+        }
+    )
+
+    authenticated = await relay._negotiate_browser_auth(websocket)
+
+    assert authenticated is True
+    assert [mjson.decode(message) for message in websocket.sent] == [
+        {"type": "auth_required"},
+        {"type": "auth_success"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_no_auth_browser_receives_success_without_sending_credentials():
+    relay = AuthRelay(require_auth=False)
+    websocket = AuthWebSocket({"type": "unused"})
+
+    authenticated = await relay._negotiate_browser_auth(websocket)
+
+    assert authenticated is True
+    assert websocket._auth_received is False
+    assert [mjson.decode(message) for message in websocket.sent] == [{"type": "auth_success"}]

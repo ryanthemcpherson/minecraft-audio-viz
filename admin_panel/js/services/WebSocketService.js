@@ -23,6 +23,10 @@ export class WebSocketService extends EventTarget {
         this.lastPong = Date.now();
         this.lastSuccessfulMessage = 0;
         this.isFailed = false;
+        this.isAuthenticated = false;
+        this._sessionEstablished = false;
+        this._awaitingAuth = false;
+        this._negotiatingAuth = false;
 
         // Message queue for when disconnected (with max size to prevent memory bloat)
         this.messageQueue = [];
@@ -36,8 +40,13 @@ export class WebSocketService extends EventTarget {
      * Replace the in-memory operator credentials used for the next connection.
      */
     setCredentials(username, password) {
-        this.username = username;
-        this.password = password;
+        const nextUsername = username || '';
+        const nextPassword = password || '';
+        if (nextUsername !== this.username || nextPassword !== this.password) {
+            this._endSession();
+        }
+        this.username = nextUsername;
+        this.password = nextPassword;
     }
 
     /**
@@ -97,6 +106,7 @@ export class WebSocketService extends EventTarget {
     disconnect() {
         this.shouldReconnect = false;
         this._stopPingInterval();
+        this._endSession({ clearCredentials: true });
 
         if (this.ws) {
             this.ws.close(1000, 'Client disconnect');
@@ -109,11 +119,14 @@ export class WebSocketService extends EventTarget {
      * @param {Object} message - Message object to send
      */
     send(message) {
-        if (this.ws?.readyState === WebSocket.OPEN) {
+        if (this.isAuthenticated && this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(message));
             return true;
-        } else {
-            // Queue message for when reconnected (with FIFO eviction)
+        }
+
+        // Only a previously authenticated session may carry controls through
+        // a transient reconnect. Pre-auth and signed-out commands are dropped.
+        if (this._sessionEstablished && this.shouldReconnect) {
             if (this.messageQueue.length >= this.maxQueueSize) {
                 // Remove oldest messages to make room
                 this.messageQueue.shift();
@@ -131,6 +144,7 @@ export class WebSocketService extends EventTarget {
             }
             return false;
         }
+        return false;
     }
 
     /**
@@ -146,8 +160,11 @@ export class WebSocketService extends EventTarget {
         console.log('[WS] Connected');
         this.isConnecting = false;
         this.reconnectAttempts = 0;
+        this.isAuthenticated = false;
+        this._negotiatingAuth = true;
 
-        // Authentication is mandatory for browser control surfaces.
+        // Send credentials immediately for compatibility with older secured
+        // servers while still accepting the explicit server negotiation.
         if (this.username && this.password) {
             this.ws.send(JSON.stringify({
                 type: 'vj_auth',
@@ -156,18 +173,21 @@ export class WebSocketService extends EventTarget {
             }));
             // Wait for auth_success or auth_error before proceeding
             this._awaitingAuth = true;
-            return;
         }
-
-        this.shouldReconnect = false;
-        this._emit('auth_required');
-        this.ws.close(1000, 'Credentials required');
     }
 
     /**
      * Complete connection setup after auth succeeds (or is skipped)
      */
     _completeConnection() {
+        const reconnectingSameSession = this._sessionEstablished;
+        if (!reconnectingSameSession) {
+            this._clearPendingCommands();
+        }
+        this.isAuthenticated = true;
+        this._sessionEstablished = true;
+        this._awaitingAuth = false;
+        this._negotiatingAuth = false;
         this._emit('connected');
         this._startPingInterval();
 
@@ -184,6 +204,9 @@ export class WebSocketService extends EventTarget {
     _onClose(event) {
         console.log(`[WS] Disconnected (code: ${event.code})`);
         this.isConnecting = false;
+        this.isAuthenticated = false;
+        this._awaitingAuth = false;
+        this._negotiatingAuth = false;
         this._stopPingInterval();
 
         this._emit('disconnected', { code: event.code, reason: event.reason });
@@ -202,20 +225,43 @@ export class WebSocketService extends EventTarget {
         try {
             const data = JSON.parse(event.data);
 
-            // Handle VJ auth response
-            if (this._awaitingAuth) {
-                if (data.type === 'auth_success') {
-                    console.log('[WS] VJ auth succeeded');
-                    this._awaitingAuth = false;
-                    this._completeConnection();
-                    return;
-                } else if (data.type === 'auth_error') {
-                    console.error('[WS] VJ auth failed:', data.error);
-                    this._awaitingAuth = false;
+            if (data.type === 'auth_required') {
+                if (!this._awaitingAuth && this.username && this.password) {
+                    this.ws.send(JSON.stringify({
+                        type: 'vj_auth',
+                        username: this.username,
+                        password: this.password,
+                    }));
+                    this._awaitingAuth = true;
+                } else if (!this._awaitingAuth) {
                     this.shouldReconnect = false;
-                    this._emit('auth_failed', data);
-                    return;
+                    this._endSession();
+                    this._emit('auth_required');
+                    this.ws.close(1000, 'Credentials required');
                 }
+                return;
+            }
+
+            if (data.type === 'auth_success') {
+                console.log('[WS] VJ auth succeeded');
+                this._completeConnection();
+                return;
+            }
+
+            if (data.type === 'auth_error') {
+                console.error('[WS] VJ auth failed:', data.error);
+                this.shouldReconnect = false;
+                this._endSession({ clearCredentials: true });
+                this._emit('auth_failed', data);
+                return;
+            }
+
+            // Older no-auth servers begin with state instead of an auth
+            // result. Accept that only when this client sent no credentials.
+            if (this._negotiatingAuth && !this._awaitingAuth && !this.username && !this.password) {
+                this._completeConnection();
+            } else if (!this.isAuthenticated) {
+                return;
             }
 
             // Track successful message exchange and reset backoff
@@ -249,6 +295,23 @@ export class WebSocketService extends EventTarget {
 
     _emit(eventName, detail = null) {
         this.dispatchEvent(new CustomEvent(eventName, { detail }));
+    }
+
+    _clearPendingCommands() {
+        this.messageQueue.length = 0;
+        this._queuedDrops = 0;
+    }
+
+    _endSession({ clearCredentials = false } = {}) {
+        this.isAuthenticated = false;
+        this._sessionEstablished = false;
+        this._awaitingAuth = false;
+        this._negotiatingAuth = false;
+        this._clearPendingCommands();
+        if (clearCredentials) {
+            this.username = '';
+            this.password = '';
+        }
     }
 
     _scheduleReconnect() {

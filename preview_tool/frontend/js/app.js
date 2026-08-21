@@ -3,6 +3,8 @@
  * Professional Three.js visualization with particles and block indicators
  */
 
+import { PreviewAuthSession, websocketScheme } from './PreviewAuthSession.js';
+
 // Configuration — port can be overridden via ?port=XXXX URL parameter
 const _urlParams = new URLSearchParams(window.location.search);
 const CONFIG = {
@@ -87,7 +89,6 @@ let availablePatterns = [];
 
 // WebSocket
 let ws = null;
-let vjCredentials = null;
 let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -103,12 +104,28 @@ let lastFrameTime = 0;
 // Debounce helper for slider WebSocket messages
 const WS_DEBOUNCE_MS = 50;
 const _debounceTimers = {};
+const previewAuthSession = new PreviewAuthSession({
+    clearPending: clearPendingPreviewCommands,
+});
+
+function clearPendingPreviewCommands() {
+    for (const key of Object.keys(_debounceTimers)) {
+        clearTimeout(_debounceTimers[key]);
+        delete _debounceTimers[key];
+    }
+}
+
+function sendPreviewMessage(payload) {
+    if (!previewAuthSession.canSendControls()) return false;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+}
+
 function debouncedWsSend(key, payload) {
     if (_debounceTimers[key]) clearTimeout(_debounceTimers[key]);
     _debounceTimers[key] = setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(payload));
-        }
+        sendPreviewMessage(payload);
     }, WS_DEBOUNCE_MS);
 }
 
@@ -653,48 +670,56 @@ function connectWebSocket() {
     const statusEl = document.getElementById('connection-status');
     const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
 
-    if (!vjCredentials) {
-        showPreviewLogin();
-        return;
-    }
-
     try {
         const wsHost = window.location.hostname || 'localhost';
-        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsScheme = websocketScheme(window.location.protocol);
         ws = new WebSocket(`${wsScheme}://${wsHost}:${CONFIG.wsPort}`);
 
+        const completeAuthentication = () => {
+            if (statusEl) statusEl.classList.add('connected');
+            if (statusEl) statusEl.classList.remove('error');
+            if (statusText) statusText.textContent = 'Connected';
+            reconnectAttempts = 0;
+            stageScanRequested = false;
+            hidePreviewLogin();
+            sendPreviewMessage({ type: 'get_zones' });
+            sendPreviewMessage({ type: 'get_stages' });
+        };
+
         ws.onopen = () => {
-            if (statusText) statusText.textContent = 'Authenticating…';
-            ws.send(JSON.stringify({
-                type: 'vj_auth',
-                username: vjCredentials.username,
-                password: vjCredentials.password,
-            }));
+            if (statusText) statusText.textContent = 'Negotiating access…';
+            previewAuthSession.onOpen((message) => ws.send(JSON.stringify(message)));
         };
 
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                if (data.type === 'auth_error') {
-                    console.error('[WS] VJ auth failed:', data.error);
-                    if (statusText) statusText.textContent = 'Auth Failed';
-                    if (statusEl) statusEl.classList.add('error');
-                    vjCredentials = null;
-                    showPreviewLogin('Invalid username or password.');
-                    ws.close(4003, 'Authentication failed');
-                    return;
-                } else if (data.type === 'auth_success') {
-                    console.log('[WS] VJ auth succeeded');
-                    if (statusEl) statusEl.classList.add('connected');
-                    if (statusEl) statusEl.classList.remove('error');
-                    if (statusText) statusText.textContent = 'Connected';
-                    reconnectAttempts = 0;
-                    stageScanRequested = false;
-                    hidePreviewLogin();
-                    ws.send(JSON.stringify({ type: 'get_zones' }));
-                    ws.send(JSON.stringify({ type: 'get_stages' }));
+                const protocolHandled = previewAuthSession.handleProtocolMessage(data, {
+                    send: (message) => ws.send(JSON.stringify(message)),
+                    onAuthenticated: completeAuthentication,
+                    onAuthRequired: () => {
+                        showPreviewLogin();
+                        ws.close(1000, 'Credentials required');
+                    },
+                    onAuthFailed: () => {
+                        console.error('[WS] VJ authentication failed');
+                        if (statusText) statusText.textContent = 'Auth Failed';
+                        if (statusEl) statusEl.classList.add('error');
+                        showPreviewLogin('Invalid username or password.');
+                        ws.close(4003, 'Authentication failed');
+                    },
+                });
+                if (protocolHandled) {
                     return;
                 }
+
+                if (!previewAuthSession.canSendControls()) {
+                    const legacyNoAuth = previewAuthSession.acceptLegacyNoAuth({
+                        onAuthenticated: completeAuthentication,
+                    });
+                    if (!legacyNoAuth) return;
+                }
+
                 if (data.type === 'audio' || data.type === 'state') {
                     updateAudioState(data);
                 } else if (data.type === 'patterns' || data.type === 'pattern_changed') {
@@ -746,7 +771,7 @@ function connectWebSocket() {
         ws.onclose = () => {
             if (statusEl) statusEl.classList.remove('connected');
             if (statusText) statusText.textContent = 'Disconnected';
-            if (vjCredentials) scheduleReconnect();
+            if (previewAuthSession.shouldReconnect()) scheduleReconnect();
         };
 
         ws.onerror = () => {
@@ -761,7 +786,7 @@ function connectWebSocket() {
 }
 
 function scheduleReconnect() {
-    if (!vjCredentials) return;
+    if (!previewAuthSession.shouldReconnect()) return;
     if (reconnectTimeout) clearTimeout(reconnectTimeout);
 
     reconnectAttempts++;
@@ -849,7 +874,7 @@ function setupPreviewLogin() {
             return;
         }
 
-        vjCredentials = { username: nextUsername, password: nextPassword };
+        previewAuthSession.setCredentials(nextUsername, nextPassword);
         error.textContent = '';
         submit.disabled = true;
         submit.textContent = 'Authenticating…';
@@ -860,7 +885,7 @@ function setupPreviewLogin() {
     });
 
     logout.addEventListener('click', () => {
-        vjCredentials = null;
+        previewAuthSession.logout();
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
         if (ws) ws.close(1000, 'Operator signed out');
         username.value = '';
@@ -1391,9 +1416,7 @@ function updatePatternList(patterns, currentPattern) {
 }
 
 function setPattern(patternId) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_pattern', pattern: patternId }));
-    }
+    sendPreviewMessage({ type: 'set_pattern', pattern: patternId });
 }
 
 function setBlockCount(count) {
@@ -1409,9 +1432,7 @@ function setBandSensitivity(bandIndex, sensitivity) {
 }
 
 function setPreset(presetName) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_preset', preset: presetName }));
-    }
+    sendPreviewMessage({ type: 'set_preset', preset: presetName });
 
     document.querySelectorAll('.preset-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.preset === presetName);
@@ -1613,21 +1634,19 @@ function handleStageBlocksResponse(data) {
 }
 
 function rescanStage() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!previewAuthSession.canSendControls()) return;
     stageScanRequested = false;
     disposeStageBlocks();
     disposeZoneGroups();
     zoneData = null;
     zoneEntitiesData = null;
-    ws.send(JSON.stringify({ type: 'get_zones' }));
-    ws.send(JSON.stringify({ type: 'get_stages' }));
+    sendPreviewMessage({ type: 'get_zones' });
+    sendPreviewMessage({ type: 'get_stages' });
     console.log('[Stage] Rescan requested');
 }
 
 function requestStageBlocks(stageName) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'scan_stage_blocks', stage: stageName }));
-    }
+    sendPreviewMessage({ type: 'scan_stage_blocks', stage: stageName });
 }
 
 function computeStageCenter(zones) {

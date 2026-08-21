@@ -55,6 +55,10 @@ export function setupConnectionLifecycle(app) {
         app.onAuthFailed(message);
     });
 
+    app.ws.addEventListener('auth_required', () => {
+        app.onAuthRequired();
+    });
+
     app.ws.addEventListener('error', () => {
         app.ui.setConnectionStatus('error');
     });
