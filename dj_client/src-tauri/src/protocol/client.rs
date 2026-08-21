@@ -8,8 +8,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use thiserror::Error;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{tungstenite::Message, tungstenite::protocol::WebSocketConfig};
+#[cfg(test)]
+use tokio::sync::oneshot;
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream, tungstenite::Message, tungstenite::protocol::WebSocketConfig,
+};
 
 /// Client errors
 #[derive(Error, Debug)]
@@ -192,6 +197,25 @@ pub struct DjClient {
     mc_connected: Arc<AtomicBool>,
 }
 
+/// A verified WebSocket transport that has completed the HTTP Upgrade but has
+/// not serialized or sent DJ credentials yet.
+pub(crate) struct PendingDjConnection {
+    websocket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    #[cfg(test)]
+    authentication_send_barrier: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+}
+
+#[cfg(test)]
+impl PendingDjConnection {
+    pub(crate) fn stall_authentication_send(
+        &mut self,
+        send_stalled_tx: oneshot::Sender<()>,
+        release_send_rx: oneshot::Receiver<()>,
+    ) {
+        self.authentication_send_barrier = Some((send_stalled_tx, release_send_rx));
+    }
+}
+
 impl DjClient {
     /// Create a new DJ client
     pub fn new(config: DjClientConfig) -> Self {
@@ -216,6 +240,13 @@ impl DjClient {
 
     /// Connect to the VJ server
     pub async fn connect(&mut self) -> Result<(), ClientError> {
+        let mut pending_connection = self.establish_transport().await?;
+        self.send_authentication(&mut pending_connection).await?;
+        self.finish_connection(pending_connection).await
+    }
+
+    /// Establish TLS and complete the WebSocket Upgrade without sending DJ credentials.
+    pub(crate) async fn establish_transport(&mut self) -> Result<PendingDjConnection, ClientError> {
         if self.state.lock().connected {
             return Err(ClientError::AlreadyConnected);
         }
@@ -243,16 +274,18 @@ impl DjClient {
         )
         .await
         .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))??;
-        let (mut write, mut read) = ws_stream.split();
+        Ok(PendingDjConnection {
+            websocket: ws_stream,
+            #[cfg(test)]
+            authentication_send_barrier: None,
+        })
+    }
 
-        // Create message channel
-        let (tx, mut rx) = mpsc::channel::<Message>(100);
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-
-        self.tx = Some(tx.clone());
-        self.shutdown_tx = Some(shutdown_tx);
-
-        // Send authentication
+    /// Serialize and send authentication over an already verified transport.
+    pub(crate) async fn send_authentication(
+        &self,
+        pending_connection: &mut PendingDjConnection,
+    ) -> Result<(), ClientError> {
         let auth_msg = if let Some(ref code) = self.config.connect_code {
             // Code-based authentication
             serde_json::to_string(&CodeAuthMessage::new(
@@ -279,11 +312,29 @@ impl DjClient {
             ));
         };
 
-        write
+        #[cfg(test)]
+        if let Some((send_stalled_tx, release_send_rx)) =
+            pending_connection.authentication_send_barrier.take()
+        {
+            let _ = send_stalled_tx.send(());
+            release_send_rx
+                .await
+                .expect("authentication send test barrier should be released");
+        }
+
+        pending_connection
+            .websocket
             .send(Message::Text(auth_msg.into()))
             .await
             .map_err(|e| ClientError::SendError(e.to_string()))?;
+        Ok(())
+    }
 
+    /// Complete the server authentication handshake and start connection tasks.
+    pub(crate) async fn finish_connection(
+        &mut self,
+        mut pending_connection: PendingDjConnection,
+    ) -> Result<(), ClientError> {
         // Handle auth handshake + clock sync inline before spawning background tasks.
         // The server sends: auth_success, then clock_sync_request immediately after.
         // We must respond to both before the heartbeat task starts, otherwise the
@@ -298,7 +349,7 @@ impl DjClient {
                 break;
             }
 
-            match tokio::time::timeout(remaining, read.next()).await {
+            match tokio::time::timeout(remaining, pending_connection.websocket.next()).await {
                 Ok(Some(Ok(Message::Text(ref text)))) => {
                     if let Ok(msg) = serde_json::from_str::<serde_json::Value>(text) {
                         let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -341,7 +392,8 @@ impl DjClient {
                                         e
                                     ))
                                 })?;
-                                write
+                                pending_connection
+                                    .websocket
                                     .send(Message::Text(json.into()))
                                     .await
                                     .map_err(|e| ClientError::SendError(e.to_string()))?;
@@ -377,6 +429,12 @@ impl DjClient {
                 }
             }
         }
+
+        let (mut write, mut read) = pending_connection.websocket.split();
+        let (tx, mut rx) = mpsc::channel::<Message>(100);
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+        self.tx = Some(tx.clone());
+        self.shutdown_tx = Some(shutdown_tx);
 
         // Mark as connected
         self.state.lock().connected = true;

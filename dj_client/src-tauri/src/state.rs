@@ -5,7 +5,7 @@ use crate::protocol::DjClient;
 use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 /// Connection status
@@ -66,12 +66,19 @@ pub struct AppState {
     /// Monotonically increasing identity for connection replacements.
     pub connection_generation: u64,
 
-    /// Cancels the connection attempt owned by `connection_generation`.
-    pub connection_attempt_cancel_tx: Option<oneshot::Sender<()>>,
+    /// Cancels connection work owned by `connection_generation`, including reconnects.
+    pub connection_attempt_cancel_tx: Option<watch::Sender<bool>>,
+
+    /// Serializes replacement preparation so every newer command can cancel
+    /// the generation immediately before it.
+    pub connection_replacement_lock: Arc<tokio::sync::Mutex<()>>,
 
     /// Serializes teardown/publication while still allowing a newer command
     /// to cancel the connection future currently holding the lock.
     pub connection_operation_lock: Arc<tokio::sync::Mutex<()>>,
+
+    /// Linearizes credential sends against replacement generation/config publication.
+    pub connection_auth_commit_lock: Arc<tokio::sync::Mutex<()>>,
 
     /// Selected audio source ID
     pub audio_source_id: Option<String>,
@@ -113,7 +120,9 @@ impl Default for AppState {
             tls_fingerprint: None,
             connection_generation: 0,
             connection_attempt_cancel_tx: None,
+            connection_replacement_lock: Arc::new(tokio::sync::Mutex::new(())),
             connection_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            connection_auth_commit_lock: Arc::new(tokio::sync::Mutex::new(())),
             audio_source_id: None,
             bridge_shutdown_tx: None,
             bridge_task_handle: None,
@@ -160,7 +169,9 @@ mod tests {
         assert!(state.tls_fingerprint.is_none());
         assert_eq!(state.connection_generation, 0);
         assert!(state.connection_attempt_cancel_tx.is_none());
+        assert!(state.connection_replacement_lock.try_lock().is_ok());
         assert!(state.connection_operation_lock.try_lock().is_ok());
+        assert!(state.connection_auth_commit_lock.try_lock().is_ok());
         assert!(state.bridge_shutdown_tx.is_none());
         assert!(state.bridge_task_handle.is_none());
         assert!(state.voice_streamer.is_none());

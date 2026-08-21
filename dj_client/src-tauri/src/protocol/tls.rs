@@ -152,7 +152,7 @@ fn format_fingerprint(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::super::client::{DjClient, DjClientConfig};
     use super::*;
-    use futures_util::StreamExt;
+    use futures_util::{SinkExt, StreamExt};
     use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
     use sha2::{Digest, Sha256};
     use std::pin::Pin;
@@ -173,13 +173,22 @@ mod tests {
     const LOWERCASE_FINGERPRINT: &str =
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum FixtureTerminalOutcome {
+        UpgradeObserved,
+        EofWithoutUpgrade,
+        TlsFailed,
+        NoConnection,
+    }
+
     struct ApplicationFrameRecorder {
         received: Arc<Mutex<Vec<Message>>>,
         received_application_bytes: Arc<StdMutex<Vec<u8>>>,
         shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
-        server_task: Mutex<Option<JoinHandle<()>>>,
-        read_ready_rx: watch::Receiver<bool>,
-        read_complete_rx: watch::Receiver<bool>,
+        server_task: Mutex<Option<JoinHandle<FixtureTerminalOutcome>>>,
+        terminal_outcome: Mutex<Option<FixtureTerminalOutcome>>,
+        transport_ready_rx: watch::Receiver<bool>,
+        upgrade_observed_rx: watch::Receiver<bool>,
     }
 
     impl ApplicationFrameRecorder {
@@ -187,17 +196,18 @@ mod tests {
             received: Arc<Mutex<Vec<Message>>>,
             received_application_bytes: Arc<StdMutex<Vec<u8>>>,
             shutdown_tx: oneshot::Sender<()>,
-            server_task: JoinHandle<()>,
-            read_ready_rx: watch::Receiver<bool>,
-            read_complete_rx: watch::Receiver<bool>,
+            server_task: JoinHandle<FixtureTerminalOutcome>,
+            transport_ready_rx: watch::Receiver<bool>,
+            upgrade_observed_rx: watch::Receiver<bool>,
         ) -> Self {
             Self {
                 received,
                 received_application_bytes,
                 shutdown_tx: Mutex::new(Some(shutdown_tx)),
                 server_task: Mutex::new(Some(server_task)),
-                read_ready_rx,
-                read_complete_rx,
+                terminal_outcome: Mutex::new(None),
+                transport_ready_rx,
+                upgrade_observed_rx,
             }
         }
 
@@ -214,56 +224,77 @@ mod tests {
                 .clone()
         }
 
-        async fn stop(&self) {
-            let read_ready =
-                Self::wait_for_signal(self.read_ready_rx.clone(), Duration::from_secs(1)).await;
-            if read_ready {
-                assert!(
-                    Self::wait_for_signal(self.read_complete_rx.clone(), Duration::from_secs(1),)
-                        .await,
-                    "test server must finish reading the HTTP upgrade or post-TLS EOF"
-                );
+        async fn stop(&self) -> FixtureTerminalOutcome {
+            if let Some(outcome) = *self.terminal_outcome.lock().await {
+                return outcome;
             }
-
             if let Some(shutdown_tx) = self.shutdown_tx.lock().await.take() {
                 let _ = shutdown_tx.send(());
             }
-            if let Some(mut server_task) = self.server_task.lock().await.take() {
-                match tokio::time::timeout(Duration::from_secs(1), &mut server_task).await {
-                    Ok(join_result) => {
-                        join_result.expect("test WebSocket server task should not panic")
-                    }
-                    Err(_) => {
-                        server_task.abort();
-                        let join_error = server_task
-                            .await
-                            .expect_err("aborted test WebSocket server task should be cancelled");
-                        assert!(join_error.is_cancelled());
-                    }
+            let mut server_task = self
+                .server_task
+                .lock()
+                .await
+                .take()
+                .expect("test server task should have a terminal outcome");
+            let outcome = match tokio::time::timeout(Duration::from_secs(1), &mut server_task).await
+            {
+                Ok(join_result) => {
+                    join_result.expect("test WebSocket server task should not panic")
                 }
-            }
+                Err(_) => {
+                    server_task.abort();
+                    let join_error = server_task
+                        .await
+                        .expect_err("aborted test WebSocket server task should be cancelled");
+                    assert!(join_error.is_cancelled());
+                    panic!("test server did not reach a terminal TLS/application outcome");
+                }
+            };
+            *self.terminal_outcome.lock().await = Some(outcome);
+            outcome
         }
 
-        async fn wait_for_read_ready(&self) -> bool {
-            Self::wait_for_signal(self.read_ready_rx.clone(), Duration::from_secs(1)).await
+        async fn terminal_outcome(&self) -> FixtureTerminalOutcome {
+            self.stop().await
+        }
+
+        async fn wait_for_transport_ready(&self) {
+            Self::wait_for_signal(
+                self.transport_ready_rx.clone(),
+                Duration::from_secs(1),
+                "test server should reach the application-read boundary",
+            )
+            .await;
+        }
+
+        async fn wait_for_upgrade_observed(&self) {
+            Self::wait_for_signal(
+                self.upgrade_observed_rx.clone(),
+                Duration::from_secs(1),
+                "test server should observe the WebSocket Upgrade",
+            )
+            .await;
         }
 
         async fn wait_for_signal(
             mut signal_rx: watch::Receiver<bool>,
             timeout_duration: Duration,
-        ) -> bool {
+            failure_message: &str,
+        ) {
             tokio::time::timeout(timeout_duration, async move {
                 loop {
                     if *signal_rx.borrow() {
-                        return true;
+                        return;
                     }
-                    if signal_rx.changed().await.is_err() {
-                        return false;
-                    }
+                    signal_rx
+                        .changed()
+                        .await
+                        .expect("test server signal sender closed before readiness");
                 }
             })
             .await
-            .unwrap_or(false)
+            .expect(failure_message)
         }
     }
 
@@ -353,11 +384,15 @@ mod tests {
             subject_alt_name: &str,
             common_name: Option<&str>,
         ) -> Self {
-            Self::start_configured(url_host, subject_alt_name, common_name, false).await
+            Self::start_configured(url_host, subject_alt_name, common_name, false, false).await
+        }
+
+        async fn start_with_auth_response() -> Self {
+            Self::start_configured("127.0.0.1", "127.0.0.1", None, false, true).await
         }
 
         async fn start_with_delayed_tls() -> Self {
-            Self::start_configured("127.0.0.1", "127.0.0.1", None, true).await
+            Self::start_configured("127.0.0.1", "127.0.0.1", None, true, false).await
         }
 
         async fn start_configured(
@@ -365,6 +400,7 @@ mod tests {
             subject_alt_name: &str,
             common_name: Option<&str>,
             delay_tls_handshake: bool,
+            respond_to_authentication: bool,
         ) -> Self {
             let key_pair = KeyPair::generate().expect("test key should generate");
             let mut certificate_params = CertificateParams::new(vec![subject_alt_name.to_string()])
@@ -403,45 +439,52 @@ mod tests {
             let received_application_bytes_by_server = Arc::clone(&received_application_bytes);
             let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
             let (tcp_accepted_tx, tcp_accepted_rx) = oneshot::channel();
-            let (release_tls_tx, mut release_tls_rx) = oneshot::channel();
+            let (release_tls_tx, release_tls_rx) = oneshot::channel();
             let release_tls_tx = if delay_tls_handshake {
                 Some(release_tls_tx)
             } else {
                 None
             };
-            let (read_ready_tx, read_ready_rx) = watch::channel(false);
-            let (read_complete_tx, read_complete_rx) = watch::channel(false);
+            let (server_started_tx, server_started_rx) = oneshot::channel();
+            let (transport_ready_tx, transport_ready_rx) = watch::channel(false);
+            let (upgrade_observed_tx, upgrade_observed_rx) = watch::channel(false);
 
             let server_task = tokio::spawn(async move {
+                let _ = server_started_tx.send(());
                 let accepted = tokio::select! {
+                    biased;
                     accepted = listener.accept() => accepted,
-                    _ = &mut shutdown_rx => return,
+                    _ = &mut shutdown_rx => return FixtureTerminalOutcome::NoConnection,
                 };
                 let Ok((tcp_stream, _)) = accepted else {
-                    return;
+                    return FixtureTerminalOutcome::NoConnection;
                 };
                 let _ = tcp_accepted_tx.send(());
                 if delay_tls_handshake {
-                    tokio::select! {
-                        _ = &mut release_tls_rx => {}
-                        _ = &mut shutdown_rx => return,
-                    }
+                    let _ = release_tls_rx.await;
                 }
-                let tls_stream = tokio::select! {
-                    tls_stream = tls_acceptor.accept(tcp_stream) => tls_stream,
-                    _ = &mut shutdown_rx => return,
-                };
+                let tls_stream = tls_acceptor.accept(tcp_stream).await;
                 let Ok(tls_stream) = tls_stream else {
-                    return;
+                    return FixtureTerminalOutcome::TlsFailed;
                 };
-                let _ = read_ready_tx.send(true);
-                let recording_stream =
-                    RecordingStream::new(tls_stream, received_application_bytes_by_server);
+                let _ = transport_ready_tx.send(true);
+                let recording_stream = RecordingStream::new(
+                    tls_stream,
+                    Arc::clone(&received_application_bytes_by_server),
+                );
                 let websocket = accept_async(recording_stream).await;
-                let _ = read_complete_tx.send(true);
                 let Ok(mut websocket) = websocket else {
-                    return;
+                    assert!(
+                        received_application_bytes_by_server
+                            .lock()
+                            .expect("test byte recorder mutex should not be poisoned")
+                            .is_empty(),
+                        "rejected connection must reach EOF without partial Upgrade bytes"
+                    );
+                    return FixtureTerminalOutcome::EofWithoutUpgrade;
                 };
+                let _ = upgrade_observed_tx.send(true);
+                let mut authentication_response_sent = false;
 
                 loop {
                     tokio::select! {
@@ -452,7 +495,46 @@ mod tests {
                         message = websocket.next() => {
                             match message {
                                 Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                                    let should_respond = respond_to_authentication
+                                        && !authentication_response_sent
+                                        && matches!(
+                                            &message,
+                                            Message::Text(text)
+                                                if serde_json::from_str::<serde_json::Value>(text.as_ref())
+                                                    .ok()
+                                                    .and_then(|value| value["type"].as_str().map(str::to_owned))
+                                                    .is_some_and(|message_type| {
+                                                        message_type == "code_auth" || message_type == "dj_auth"
+                                                    })
+                                        );
                                     received_by_server.lock().await.push(message);
+                                    if should_respond {
+                                        authentication_response_sent = true;
+                                        websocket
+                                            .send(Message::Text(
+                                                serde_json::json!({
+                                                    "type": "auth_success",
+                                                    "dj_id": "fixture-dj",
+                                                    "dj_name": "Fixture DJ",
+                                                    "is_active": true
+                                                })
+                                                .to_string()
+                                                .into(),
+                                            ))
+                                            .await
+                                            .expect("fixture should send authentication success");
+                                        websocket
+                                            .send(Message::Text(
+                                                serde_json::json!({
+                                                    "type": "clock_sync_request",
+                                                    "server_time": 123.0
+                                                })
+                                                .to_string()
+                                                .into(),
+                                            ))
+                                            .await
+                                            .expect("fixture should send clock sync request");
+                                    }
                                 }
                                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                                 Some(Ok(_)) => {}
@@ -460,7 +542,13 @@ mod tests {
                         }
                     }
                 }
+                FixtureTerminalOutcome::UpgradeObserved
             });
+
+            tokio::time::timeout(Duration::from_secs(1), server_started_rx)
+                .await
+                .expect("test server task should start")
+                .expect("test server should signal task start");
 
             Self {
                 url: format!("wss://{url_host}:{port}"),
@@ -471,8 +559,8 @@ mod tests {
                     received_application_bytes,
                     shutdown_tx,
                     server_task,
-                    read_ready_rx,
-                    read_complete_rx,
+                    transport_ready_rx,
+                    upgrade_observed_rx,
                 ),
                 tcp_accepted_rx: Mutex::new(Some(tcp_accepted_rx)),
                 release_tls_tx: Mutex::new(release_tls_tx),
@@ -497,10 +585,15 @@ mod tests {
         }
 
         async fn wait_for_post_tls_ready(&self) {
-            assert!(
-                self.recorder.wait_for_read_ready().await,
-                "test server should complete TLS before the client rejects the certificate"
-            );
+            self.recorder.wait_for_transport_ready().await;
+        }
+
+        async fn wait_for_upgrade_observed(&self) {
+            self.recorder.wait_for_upgrade_observed().await;
+        }
+
+        async fn terminal_outcome(&self) -> FixtureTerminalOutcome {
+            self.recorder.terminal_outcome().await
         }
 
         async fn wait_for_tcp_accept(&self) {
@@ -542,25 +635,37 @@ mod tests {
             let received_application_bytes = Arc::new(StdMutex::new(Vec::new()));
             let received_application_bytes_by_server = Arc::clone(&received_application_bytes);
             let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-            let (read_ready_tx, read_ready_rx) = watch::channel(false);
-            let (read_complete_tx, read_complete_rx) = watch::channel(false);
+            let (server_started_tx, server_started_rx) = oneshot::channel();
+            let (transport_ready_tx, transport_ready_rx) = watch::channel(false);
+            let (upgrade_observed_tx, upgrade_observed_rx) = watch::channel(false);
 
             let server_task = tokio::spawn(async move {
+                let _ = server_started_tx.send(());
                 let accepted = tokio::select! {
+                    biased;
                     accepted = listener.accept() => accepted,
-                    _ = &mut shutdown_rx => return,
+                    _ = &mut shutdown_rx => return FixtureTerminalOutcome::NoConnection,
                 };
                 let Ok((tcp_stream, _)) = accepted else {
-                    return;
+                    return FixtureTerminalOutcome::NoConnection;
                 };
-                let _ = read_ready_tx.send(true);
-                let recording_stream =
-                    RecordingStream::new(tcp_stream, received_application_bytes_by_server);
+                let _ = transport_ready_tx.send(true);
+                let recording_stream = RecordingStream::new(
+                    tcp_stream,
+                    Arc::clone(&received_application_bytes_by_server),
+                );
                 let websocket = accept_async(recording_stream).await;
-                let _ = read_complete_tx.send(true);
                 let Ok(mut websocket) = websocket else {
-                    return;
+                    assert!(
+                        received_application_bytes_by_server
+                            .lock()
+                            .expect("test byte recorder mutex should not be poisoned")
+                            .is_empty(),
+                        "rejected connection must reach EOF without partial Upgrade bytes"
+                    );
+                    return FixtureTerminalOutcome::EofWithoutUpgrade;
                 };
+                let _ = upgrade_observed_tx.send(true);
 
                 loop {
                     tokio::select! {
@@ -579,7 +684,13 @@ mod tests {
                         }
                     }
                 }
+                FixtureTerminalOutcome::UpgradeObserved
             });
+
+            tokio::time::timeout(Duration::from_secs(1), server_started_rx)
+                .await
+                .expect("test server task should start")
+                .expect("test server should signal task start");
 
             Self {
                 url: format!("ws://127.0.0.1:{port}"),
@@ -588,8 +699,8 @@ mod tests {
                     received_application_bytes,
                     shutdown_tx,
                     server_task,
-                    read_ready_rx,
-                    read_complete_rx,
+                    transport_ready_rx,
+                    upgrade_observed_rx,
                 ),
             }
         }
@@ -711,6 +822,10 @@ mod tests {
             .expect("test WebSocket should close");
         let application_bytes = fixture.received_application_bytes().await;
         assert_websocket_upgrade_observed(&application_bytes);
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::UpgradeObserved
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -731,6 +846,12 @@ mod tests {
             .close(None)
             .await
             .expect("test WebSocket should close");
+        let application_bytes = fixture.received_application_bytes().await;
+        assert_websocket_upgrade_observed(&application_bytes);
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::UpgradeObserved
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -751,6 +872,10 @@ mod tests {
         ));
         fixture.wait_for_post_tls_ready().await;
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::EofWithoutUpgrade
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -767,13 +892,21 @@ mod tests {
             ..Default::default()
         };
         let old_attempt =
-            crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()));
+            crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()))
+                .await;
         let old_generation = old_attempt.generation;
-        let old_task = tokio::spawn(crate::connect_client_until_cancelled(
-            DjClient::new(old_config.clone()),
-            None,
-            old_attempt.cancellation_rx,
-        ));
+        let old_state = Arc::clone(&state);
+        let old_client_config = old_config.clone();
+        let old_task = tokio::spawn(async move {
+            crate::connect_client_until_cancelled(
+                &old_state,
+                old_generation,
+                DjClient::new(old_client_config),
+                None,
+                old_attempt.cancellation_rx,
+            )
+            .await
+        });
 
         fixture.wait_for_tcp_accept().await;
 
@@ -789,12 +922,8 @@ mod tests {
             &state,
             &replacement_config,
             Some("replacement-code".into()),
-        );
-        replacement_attempt
-            .previous_cancellation_tx
-            .expect("replacement should cancel the old connection attempt")
-            .send(())
-            .expect("old attempt should still be awaiting TLS");
+        )
+        .await;
 
         let replacement_generation = replacement_attempt.generation;
         let (replacement_shutdown_tx, _replacement_shutdown_rx) = mpsc::channel(1);
@@ -845,6 +974,275 @@ mod tests {
             );
         }
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::TlsFailed
+        );
+        assert!(fixture.received_messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn replacement_after_upgrade_sends_no_old_auth_and_new_auth_succeeds() {
+        let old_fixture = TlsWebSocketFixture::start_with_auth_response().await;
+        let new_fixture = TlsWebSocketFixture::start_with_auth_response().await;
+        let state = Arc::new(parking_lot::Mutex::new(crate::state::AppState::default()));
+        let old_config = DjClientConfig {
+            server_host: "127.0.0.1".to_string(),
+            server_port: old_fixture.port,
+            dj_name: "Old DJ".to_string(),
+            connect_code: Some("old-secret-code".to_string()),
+            tls_fingerprint: Some(old_fixture.fingerprint.clone()),
+            ..Default::default()
+        };
+        let old_attempt =
+            crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()))
+                .await;
+        let old_generation = old_attempt.generation;
+        let (transport_ready_tx, transport_ready_rx) = oneshot::channel();
+        let (release_auth_tx, release_auth_rx) = oneshot::channel();
+        let old_state = Arc::clone(&state);
+        let old_task = tokio::spawn(async move {
+            let mut old_cancellation_rx = old_attempt.cancellation_rx;
+            let mut old_client = DjClient::new(old_config);
+            let transport = old_client
+                .establish_transport()
+                .await
+                .map_err(|error| error.to_string())?;
+            transport_ready_tx
+                .send(())
+                .map_err(|_| "transport barrier receiver closed".to_string())?;
+            release_auth_rx
+                .await
+                .map_err(|_| "auth barrier sender closed".to_string())?;
+            let client = crate::connect_established_client_for_generation(
+                &old_state,
+                old_generation,
+                old_client,
+                transport,
+                &mut old_cancellation_rx,
+            )
+            .await?;
+            let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+            if let Some(stale_client) = crate::publish_connected_client_if_current(
+                &old_state,
+                old_generation,
+                client,
+                shutdown_tx,
+            ) {
+                let _ = stale_client.disconnect().await;
+                return Err("old client publication was superseded".to_string());
+            }
+            Ok(())
+        });
+
+        tokio::time::timeout(Duration::from_secs(1), transport_ready_rx)
+            .await
+            .expect("old transport should reach the pre-auth barrier")
+            .expect("old transport should signal the pre-auth barrier");
+        old_fixture.wait_for_upgrade_observed().await;
+
+        let new_config = DjClientConfig {
+            server_host: "127.0.0.1".to_string(),
+            server_port: new_fixture.port,
+            dj_name: "New DJ".to_string(),
+            connect_code: Some("new-secret-code".to_string()),
+            tls_fingerprint: Some(new_fixture.fingerprint.clone()),
+            ..Default::default()
+        };
+        let mut new_attempt =
+            crate::prepare_connection_replacement(&state, &new_config, Some("new-code".into()))
+                .await;
+        release_auth_tx
+            .send(())
+            .expect("old auth barrier should still be waiting");
+
+        let old_error = tokio::time::timeout(Duration::from_secs(1), old_task)
+            .await
+            .expect("superseded old auth task must terminate")
+            .expect("old auth task must be awaited")
+            .expect_err("old auth must not commit after replacement");
+        assert!(old_error.contains("superseded"));
+
+        let new_generation = new_attempt.generation;
+        let new_client = crate::connect_client_for_generation(
+            &state,
+            new_generation,
+            DjClient::new(new_config.clone()),
+            &mut new_attempt.cancellation_rx,
+        )
+        .await
+        .expect("new endpoint authentication should succeed");
+        assert!(new_client.get_state().authenticated);
+        let (new_shutdown_tx, _new_shutdown_rx) = mpsc::channel(1);
+        assert!(
+            crate::publish_connected_client_if_current(
+                &state,
+                new_generation,
+                new_client,
+                new_shutdown_tx,
+            )
+            .is_none(),
+            "new authenticated client should publish"
+        );
+        let published_client = state
+            .lock()
+            .client
+            .take()
+            .expect("new client should remain published");
+        assert_eq!(published_client.configured_server_host(), "127.0.0.1");
+        published_client
+            .disconnect()
+            .await
+            .expect("new client should disconnect");
+
+        assert!(old_fixture.received_messages().await.is_empty());
+        let new_messages = new_fixture.received_messages().await;
+        let first_message = new_messages
+            .first()
+            .expect("new endpoint should receive authentication");
+        let Message::Text(first_text) = first_message else {
+            panic!("new endpoint authentication should be text");
+        };
+        let first_json: serde_json::Value =
+            serde_json::from_str(first_text.as_ref()).expect("new auth should be valid JSON");
+        assert_eq!(first_json["type"], "code_auth");
+        assert_eq!(state.lock().server_port, new_fixture.port);
+    }
+
+    #[tokio::test]
+    async fn replacement_cancels_auth_send_before_waiting_for_commit_lock() {
+        let fixture = TlsWebSocketFixture::start_with_auth_response().await;
+        let state = Arc::new(parking_lot::Mutex::new(crate::state::AppState::default()));
+        let old_config = DjClientConfig {
+            server_host: "127.0.0.1".to_string(),
+            server_port: fixture.port,
+            dj_name: "Old DJ".to_string(),
+            connect_code: Some("old-secret-code".to_string()),
+            tls_fingerprint: Some(fixture.fingerprint.clone()),
+            ..Default::default()
+        };
+        let mut old_attempt =
+            crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()))
+                .await;
+        let old_generation = old_attempt.generation;
+        let mut old_client = DjClient::new(old_config);
+        let mut old_transport = old_client
+            .establish_transport()
+            .await
+            .expect("old transport should complete Upgrade");
+        let (send_stalled_tx, send_stalled_rx) = oneshot::channel();
+        let (release_send_tx, release_send_rx) = oneshot::channel();
+        old_transport.stall_authentication_send(send_stalled_tx, release_send_rx);
+        let old_state = Arc::clone(&state);
+        let old_task = tokio::spawn(async move {
+            crate::connect_established_client_for_generation(
+                &old_state,
+                old_generation,
+                old_client,
+                old_transport,
+                &mut old_attempt.cancellation_rx,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), send_stalled_rx)
+            .await
+            .expect("old authentication send should reach the backpressure barrier")
+            .expect("old authentication send should signal the barrier");
+
+        let replacement_config = DjClientConfig {
+            server_host: "replacement.example".to_string(),
+            server_port: 9443,
+            dj_name: "Replacement DJ".to_string(),
+            connect_code: Some("replacement-code".to_string()),
+            tls_fingerprint: Some("ab".repeat(32)),
+            ..Default::default()
+        };
+        let replacement_state = Arc::clone(&state);
+        let replacement_task = tokio::spawn(async move {
+            crate::prepare_connection_replacement(
+                &replacement_state,
+                &replacement_config,
+                Some("replacement-code".into()),
+            )
+            .await
+        });
+
+        let old_result = tokio::time::timeout(Duration::from_secs(1), old_task)
+            .await
+            .expect("replacement cancellation must unblock the stalled auth send")
+            .expect("old auth task must be awaited");
+        let old_error = match old_result {
+            Err(error) => error,
+            Ok(_) => panic!("cancelled old auth must not complete"),
+        };
+        assert!(old_error.contains("superseded"));
+        let replacement = tokio::time::timeout(Duration::from_secs(1), replacement_task)
+            .await
+            .expect("replacement must not deadlock behind the old auth commit lock")
+            .expect("replacement preparation task must be awaited");
+        assert_eq!(state.lock().connection_generation, replacement.generation);
+        assert!(
+            release_send_tx.send(()).is_err(),
+            "cancelled authentication future must drop its stalled send"
+        );
+        assert!(fixture.received_messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconnect_rechecks_generation_after_upgrade_before_authentication() {
+        let fixture = TlsWebSocketFixture::start_with_auth_response().await;
+        let state = Arc::new(parking_lot::Mutex::new(crate::state::AppState::default()));
+        let reconnect_config = DjClientConfig {
+            server_host: "127.0.0.1".to_string(),
+            server_port: fixture.port,
+            dj_name: "Reconnect DJ".to_string(),
+            connect_code: Some("reconnect-secret-code".to_string()),
+            tls_fingerprint: Some(fixture.fingerprint.clone()),
+            ..Default::default()
+        };
+        let mut reconnect_attempt = crate::prepare_connection_replacement(
+            &state,
+            &reconnect_config,
+            Some("reconnect-code".into()),
+        )
+        .await;
+        let reconnect_generation = reconnect_attempt.generation;
+        let mut reconnect_client = DjClient::new(reconnect_config);
+        let reconnect_transport = reconnect_client
+            .establish_transport()
+            .await
+            .expect("reconnect transport should complete Upgrade");
+        fixture.wait_for_upgrade_observed().await;
+
+        let replacement_config = DjClientConfig {
+            server_host: "replacement.example".to_string(),
+            server_port: 9443,
+            dj_name: "Replacement DJ".to_string(),
+            connect_code: Some("replacement-code".to_string()),
+            tls_fingerprint: Some("ab".repeat(32)),
+            ..Default::default()
+        };
+        let _replacement = crate::prepare_connection_replacement(
+            &state,
+            &replacement_config,
+            Some("replacement-code".into()),
+        )
+        .await;
+
+        let result = crate::connect_established_client_for_generation(
+            &state,
+            reconnect_generation,
+            reconnect_client,
+            reconnect_transport,
+            &mut reconnect_attempt.cancellation_rx,
+        )
+        .await;
+
+        let reconnect_error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("stale reconnect must not authenticate"),
+        };
+        assert!(reconnect_error.contains("superseded"));
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -867,6 +1265,10 @@ mod tests {
             Err(ClientError::TlsFingerprintMismatch { .. })
         ));
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::EofWithoutUpgrade
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -895,6 +1297,10 @@ mod tests {
                 .await
                 .is_empty()
         );
+        assert_eq!(
+            rotated_fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::EofWithoutUpgrade
+        );
         assert!(rotated_fixture.received_messages().await.is_empty());
     }
 
@@ -911,6 +1317,10 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::InvalidTlsFingerprint)));
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::NoConnection
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -927,6 +1337,10 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::MissingPeerCertificate)));
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.recorder.terminal_outcome().await,
+            FixtureTerminalOutcome::NoConnection
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -950,6 +1364,10 @@ mod tests {
             "{outcome}"
         );
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::EofWithoutUpgrade
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -971,6 +1389,10 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::TlsHandshake(_))));
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::EofWithoutUpgrade
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -982,6 +1404,10 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::TlsHandshake(_))));
         assert!(fixture.received_application_bytes().await.is_empty());
+        assert_eq!(
+            fixture.terminal_outcome().await,
+            FixtureTerminalOutcome::EofWithoutUpgrade
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 
@@ -996,6 +1422,12 @@ mod tests {
             .close(None)
             .await
             .expect("test WebSocket should close");
+        let application_bytes = fixture.received_application_bytes().await;
+        assert_websocket_upgrade_observed(&application_bytes);
+        assert_eq!(
+            fixture.recorder.terminal_outcome().await,
+            FixtureTerminalOutcome::UpgradeObserved
+        );
         assert!(fixture.received_messages().await.is_empty());
     }
 }
