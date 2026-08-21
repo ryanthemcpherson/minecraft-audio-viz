@@ -204,6 +204,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self._freeze = False
         self._emergency_epoch = uuid.uuid4().hex
         self._emergency_revision = 0
+        self._emergency_mutation_lock = asyncio.Lock()
         self._active_effects = {}  # Active effects with end times
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
         self._band_materials: List[Optional[str]] = [
