@@ -1,6 +1,7 @@
 //! WebSocket client for VJ server communication
 
 use super::messages::*;
+use super::tls::{connect_verified, normalize_sha256_fingerprint};
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -8,9 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::Message, tungstenite::protocol::WebSocketConfig,
-};
+use tokio_tungstenite::{tungstenite::Message, tungstenite::protocol::WebSocketConfig};
 
 /// Client errors
 #[derive(Error, Debug)]
@@ -32,6 +31,18 @@ pub enum ClientError {
 
     #[error("Not connected")]
     NotConnected,
+
+    #[error("Invalid TLS certificate fingerprint; expected 64 hexadecimal SHA-256 characters")]
+    InvalidTlsFingerprint,
+
+    #[error("TLS peer did not provide a certificate")]
+    MissingPeerCertificate,
+
+    #[error("TLS certificate fingerprint mismatch (expected {expected}, observed {observed})")]
+    TlsFingerprintMismatch { expected: String, observed: String },
+
+    #[error("TLS handshake failed: {0}")]
+    TlsHandshake(String),
 }
 
 /// Client configuration
@@ -58,6 +69,9 @@ pub struct DjClientConfig {
     /// DJ session ID from coordinator (passed to VJ server in code_auth message for profile lookup)
     pub dj_session_id: Option<String>,
 
+    /// Expected SHA-256 fingerprint for a self-signed TLS server certificate
+    pub tls_fingerprint: Option<String>,
+
     /// Reconnection attempts
     pub max_reconnect_attempts: u32,
 
@@ -78,10 +92,30 @@ impl Default for DjClientConfig {
             dj_id: None,
             dj_key: None,
             dj_session_id: None,
+            tls_fingerprint: None,
             max_reconnect_attempts: 10,
             reconnect_delay: 2.0,
             heartbeat_interval: 2.0,
         }
+    }
+}
+
+impl DjClientConfig {
+    /// Validate connection settings and canonicalize the optional TLS fingerprint.
+    pub(crate) fn validate(&mut self) -> Result<(), ClientError> {
+        let normalized_fingerprint = self
+            .tls_fingerprint
+            .as_deref()
+            .map(normalize_sha256_fingerprint)
+            .transpose()?
+            .map(|bytes| {
+                bytes
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            });
+        self.tls_fingerprint = normalized_fingerprint;
+        Ok(())
     }
 }
 
@@ -180,8 +214,11 @@ impl DjClient {
         if self.state.lock().connected {
             return Err(ClientError::AlreadyConnected);
         }
+        self.config.validate()?;
 
-        let scheme = if crate::is_local_host(&self.config.server_host) {
+        let scheme = if self.config.tls_fingerprint.is_none()
+            && crate::is_local_host(&self.config.server_host)
+        {
             "ws"
         } else {
             "wss"
@@ -199,13 +236,10 @@ impl DjClient {
         ws_config.max_frame_size = Some(1_048_576); // 1 MB
         let ws_stream = tokio::time::timeout(
             Duration::from_secs(10),
-            connect_async_with_config(&url, Some(ws_config), false),
+            connect_verified(&url, ws_config, self.config.tls_fingerprint.as_deref()),
         )
         .await
-        .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))?
-        .map_err(|e| ClientError::ConnectionFailed(e.to_string()))?;
-
-        let (ws_stream, _) = ws_stream;
+        .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))??;
         let (mut write, mut read) = ws_stream.split();
 
         // Create message channel
@@ -742,6 +776,39 @@ mod tests {
         assert!(config.connect_code.is_none());
         assert!(config.dj_id.is_none());
         assert!(config.dj_key.is_none());
+        assert!(config.tls_fingerprint.is_none());
+    }
+
+    #[test]
+    fn config_validation_canonicalizes_a_valid_tls_fingerprint() {
+        let mut config = DjClientConfig {
+            tls_fingerprint: Some(
+                "AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:\n\
+                 AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        config
+            .validate()
+            .expect("valid TLS fingerprint should pass configuration validation");
+
+        assert_eq!(config.tls_fingerprint, Some("aa".repeat(32)));
+    }
+
+    #[test]
+    fn config_validation_rejects_an_invalid_tls_fingerprint_without_mutating_it() {
+        let invalid_fingerprint = "not-a-fingerprint".to_string();
+        let mut config = DjClientConfig {
+            tls_fingerprint: Some(invalid_fingerprint.clone()),
+            ..Default::default()
+        };
+
+        let result = config.validate();
+
+        assert!(matches!(result, Err(ClientError::InvalidTlsFingerprint)));
+        assert_eq!(config.tls_fingerprint, Some(invalid_fingerprint));
     }
 
     #[test]
