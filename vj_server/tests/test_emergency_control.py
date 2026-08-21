@@ -103,6 +103,7 @@ class EmergencyRelay(RelayMixin):
         self._freeze = False
         self._emergency_epoch = "test-emergency-epoch"
         self._emergency_revision = 0
+        self._emergency_mutation_lock = asyncio.Lock()
         self._active_effects = {}
         self._band_materials = []
         self._band_materials_source = "default"
@@ -147,6 +148,47 @@ class VoiceStatusRendererClient:
         if self.error:
             raise self.error
         return self.response
+
+
+class InterleavedVisibilityRendererClient:
+    connected = True
+
+    def __init__(self):
+        self.visible = True
+        self.calls: list[bool] = []
+        self.first_started = asyncio.Event()
+
+    async def set_visible(self, zone: str, visible: bool):
+        assert zone == "main"
+        self.calls.append(visible)
+        if len(self.calls) == 1:
+            self.first_started.set()
+            await asyncio.sleep(0.05)
+        self.visible = visible
+        return True
+
+
+class BlockingVisibilityRendererClient:
+    connected = True
+
+    def __init__(self):
+        self.visible = True
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def set_visible(self, zone: str, visible: bool):
+        assert zone == "main"
+        self.started.set()
+        await self.release.wait()
+        self.visible = visible
+        return True
+
+
+class FailingVisibilityRendererClient:
+    connected = True
+
+    async def set_visible(self, zone: str, visible: bool):
+        raise RuntimeError("renderer-token=do-not-leak")
 
 
 VOICE_STATUS_SCHEMA = json.loads(
@@ -412,6 +454,137 @@ async def test_concurrent_clients_receive_monotonic_revisions_despite_inverse_de
         await first.close_input()
         await second.close_input()
         await asyncio.gather(first_task, second_task)
+
+
+@pytest.mark.asyncio
+async def test_interleaved_blackout_renderer_calls_finish_at_authoritative_visibility():
+    relay = EmergencyRelay()
+    renderer = InterleavedVisibilityRendererClient()
+    relay.viz_client = renderer
+    unused_block = asyncio.Event()
+    unused_release = asyncio.Event()
+    first = ConcurrentBrowserSocket(50011, -1, unused_block, unused_release)
+    second = ConcurrentBrowserSocket(50012, -1, unused_block, unused_release)
+    first_task = asyncio.create_task(relay._handle_browser_client(first))
+    second_task = asyncio.create_task(relay._handle_browser_client(second))
+
+    try:
+        await first.wait_for_message(lambda message: message["type"] == "vj_state")
+        await second.wait_for_message(lambda message: message["type"] == "vj_state")
+        await first.send_from_browser(
+            {
+                "type": "trigger_effect",
+                "effect": "blackout",
+                "intensity": 1.0,
+                "request_id": "interleaved-blackout-on",
+            }
+        )
+        await asyncio.wait_for(renderer.first_started.wait(), timeout=1)
+        await second.send_from_browser(
+            {
+                "type": "set_blackout",
+                "enabled": False,
+                "request_id": "interleaved-blackout-off",
+            }
+        )
+
+        await first.wait_for_message(lambda message: message.get("emergency_revision") == 2)
+        await second.wait_for_message(lambda message: message.get("emergency_revision") == 2)
+    finally:
+        await first.close_input()
+        await second.close_input()
+        await asyncio.gather(first_task, second_task)
+
+    assert renderer.calls == [False, True]
+    assert renderer.visible is True
+    assert relay._blackout is False
+    assert relay._emergency_revision == 2
+    assert any(message.get("effect") == "blackout" for message in first.sent)
+
+
+@pytest.mark.asyncio
+async def test_pending_blackout_keeps_snapshot_and_freeze_at_visible_renderer_state():
+    relay = EmergencyRelay()
+    renderer = BlockingVisibilityRendererClient()
+    relay.viz_client = renderer
+    unused_block = asyncio.Event()
+    unused_release = asyncio.Event()
+    first = ConcurrentBrowserSocket(50021, -1, unused_block, unused_release)
+    second = ConcurrentBrowserSocket(50022, -1, unused_block, unused_release)
+    first_task = asyncio.create_task(relay._handle_browser_client(first))
+    second_task = asyncio.create_task(relay._handle_browser_client(second))
+
+    try:
+        await first.wait_for_message(lambda message: message["type"] == "vj_state")
+        await second.wait_for_message(lambda message: message["type"] == "vj_state")
+        await first.send_from_browser(
+            {
+                "type": "set_blackout",
+                "enabled": True,
+                "request_id": "blocking-blackout",
+            }
+        )
+        await asyncio.wait_for(renderer.started.wait(), timeout=1)
+        await second.send_from_browser(
+            {
+                "type": "set_freeze",
+                "enabled": True,
+                "request_id": "blocked-freeze",
+            }
+        )
+        await asyncio.sleep(0)
+
+        observer = BrowserSocket([{"type": "get_state"}])
+        await relay._handle_browser_client(observer)
+        snapshots = [message for message in observer.sent if message["type"] == "vj_state"]
+        assert snapshots[-1]["blackout"] is False
+        assert snapshots[-1]["freeze"] is False
+        assert snapshots[-1]["emergency_revision"] == 0
+        assert renderer.visible is True
+
+        renderer.release.set()
+        await first.wait_for_message(lambda message: message.get("emergency_revision") == 2)
+        await second.wait_for_message(lambda message: message.get("emergency_revision") == 2)
+    finally:
+        renderer.release.set()
+        await first.close_input()
+        await second.close_input()
+        await asyncio.gather(first_task, second_task)
+
+    assert renderer.visible is False
+    assert relay._blackout is True
+    assert relay._freeze is True
+    assert relay._emergency_revision == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_renderer_blackout_does_not_publish_or_commit_authority():
+    relay = EmergencyRelay()
+    relay.viz_client = FailingVisibilityRendererClient()
+    websocket = BrowserSocket(
+        [
+            {
+                "type": "trigger_effect",
+                "effect": "blackout",
+                "intensity": 1.0,
+                "request_id": "failed-blackout",
+            }
+        ]
+    )
+
+    await relay._handle_browser_client(websocket)
+
+    assert relay._blackout is False
+    assert relay._emergency_revision == 0
+    assert "blackout" not in relay._active_effects
+    assert not any(message["type"] == "emergency_state" for message in websocket.sent)
+    assert not any(message["type"] == "effect_triggered" for message in websocket.sent)
+    assert websocket.sent[-1] == {
+        "type": "error",
+        "message": "Minecraft did not apply the emergency control change.",
+        "request_id": "failed-blackout",
+    }
+    assert "renderer-token" not in json.dumps(websocket.sent[-1])
 
 
 def test_server_processes_receive_distinct_stable_emergency_epochs():

@@ -775,47 +775,20 @@ class RelayMixin:
                         duration = data.get("duration", 500)
 
                         if effect in ("blackout", "freeze"):
-                            # Toggle effects
-                            if intensity <= 0:
-                                # Turn off
-                                if effect == "blackout":
-                                    self._blackout = False
-                                    emergency_state = self._record_emergency_mutation()
-                                    if effect in self._active_effects:
-                                        del self._active_effects[effect]
-                                    # Re-show entities
-                                    if self.viz_client and self.viz_client.connected:
-                                        try:
-                                            await self.viz_client.set_visible(self.zone, True)
-                                        except Exception:
-                                            pass
-                                elif effect == "freeze":
-                                    self._freeze = False
-                                    emergency_state = self._record_emergency_mutation()
-                                    if effect in self._active_effects:
-                                        del self._active_effects[effect]
-                                logger.info(f"{effect.capitalize()} OFF")
-                            else:
-                                # Turn on
-                                if effect == "blackout":
-                                    self._blackout = True
-                                    emergency_state = self._record_emergency_mutation()
-                                    # Hide entities in MC
-                                    if self.viz_client and self.viz_client.connected:
-                                        try:
-                                            await self.viz_client.set_visible(self.zone, False)
-                                        except Exception:
-                                            pass
-                                elif effect == "freeze":
-                                    self._freeze = True
-                                    emergency_state = self._record_emergency_mutation()
-                                self._active_effects[effect] = {
-                                    "intensity": intensity,
-                                    "end_time": time.time() + 999999,
-                                    "duration": 999999999,
-                                    "start_time": time.time(),
-                                }
-                                logger.info(f"{effect.capitalize()} ON")
+                            enabled = intensity > 0
+                            emergency_state = await self._apply_emergency_mutation(
+                                effect, enabled, intensity=intensity
+                            )
+                            if emergency_state is None:
+                                await self._send_emergency_control_error(
+                                    websocket, data.get("request_id")
+                                )
+                                continue
+                            logger.info(
+                                "%s %s",
+                                effect.capitalize(),
+                                "ON" if enabled else "OFF",
+                            )
                         else:
                             # Timed effects (flash, strobe, pulse, wave, spiral, explode)
                             self._active_effects[effect] = {
@@ -835,44 +808,28 @@ class RelayMixin:
                             )
 
                     elif msg_type in ("blackout", "set_blackout"):
-                        self._blackout = data.get("enabled", not self._blackout)
-                        emergency_state = self._record_emergency_mutation()
-                        if self._blackout:
-                            self._active_effects["blackout"] = {
-                                "intensity": 1.0,
-                                "end_time": time.time() + 999999,
-                                "duration": 999999999,
-                                "start_time": time.time(),
-                            }
-                            if self.viz_client and self.viz_client.connected:
-                                try:
-                                    await self.viz_client.set_visible(self.zone, False)
-                                except Exception:
-                                    pass
-                        else:
-                            self._active_effects.pop("blackout", None)
-                            if self.viz_client and self.viz_client.connected:
-                                try:
-                                    await self.viz_client.set_visible(self.zone, True)
-                                except Exception:
-                                    pass
+                        emergency_state = await self._apply_emergency_mutation(
+                            "blackout", data.get("enabled")
+                        )
+                        if emergency_state is None:
+                            await self._send_emergency_control_error(
+                                websocket, data.get("request_id")
+                            )
+                            continue
                         logger.info(f"Blackout: {self._blackout}")
                         await self._broadcast_emergency_state(
                             websocket, data.get("request_id"), emergency_state
                         )
 
                     elif msg_type in ("freeze", "set_freeze"):
-                        self._freeze = data.get("enabled", not self._freeze)
-                        emergency_state = self._record_emergency_mutation()
-                        if self._freeze:
-                            self._active_effects["freeze"] = {
-                                "intensity": 1.0,
-                                "end_time": time.time() + 999999,
-                                "duration": 999999999,
-                                "start_time": time.time(),
-                            }
-                        else:
-                            self._active_effects.pop("freeze", None)
+                        emergency_state = await self._apply_emergency_mutation(
+                            "freeze", data.get("enabled")
+                        )
+                        if emergency_state is None:
+                            await self._send_emergency_control_error(
+                                websocket, data.get("request_id")
+                            )
+                            continue
                         logger.info(f"Freeze: {self._freeze}")
                         await self._broadcast_emergency_state(
                             websocket, data.get("request_id"), emergency_state
@@ -1561,6 +1518,50 @@ class RelayMixin:
             "emergency_epoch": self._emergency_epoch,
             "emergency_revision": self._emergency_revision,
         }
+
+    async def _apply_emergency_mutation(
+        self, effect: str, enabled: bool | None, *, intensity: float = 1.0
+    ) -> dict | None:
+        """Commit one renderer-backed emergency change in request order."""
+        async with self._emergency_mutation_lock:
+            current_enabled = self._blackout if effect == "blackout" else self._freeze
+            target_enabled = not current_enabled if enabled is None else bool(enabled)
+
+            if effect == "blackout" and self.viz_client and self.viz_client.connected:
+                try:
+                    applied = await self.viz_client.set_visible(self.zone, not target_enabled)
+                except Exception:
+                    logger.warning("Minecraft emergency visibility request failed")
+                    return None
+                if applied is not True:
+                    logger.warning("Minecraft did not acknowledge emergency visibility")
+                    return None
+
+            if effect == "blackout":
+                self._blackout = target_enabled
+            else:
+                self._freeze = target_enabled
+
+            if target_enabled:
+                self._active_effects[effect] = {
+                    "intensity": intensity,
+                    "end_time": time.time() + 999999,
+                    "duration": 999999999,
+                    "start_time": time.time(),
+                }
+            else:
+                self._active_effects.pop(effect, None)
+
+            return self._record_emergency_mutation()
+
+    async def _send_emergency_control_error(self, requester, request_id: str | None) -> None:
+        error = {
+            "type": "error",
+            "message": "Minecraft did not apply the emergency control change.",
+        }
+        if request_id:
+            error["request_id"] = request_id
+        await requester.send(_json_str(error))
 
     async def _broadcast_emergency_state(
         self, requester, request_id: str | None, emergency_state: dict
