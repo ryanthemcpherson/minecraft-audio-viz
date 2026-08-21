@@ -62,7 +62,7 @@ from vj_server.models import (
     ZonePatternState,
     _sanitize_audio_frame,
     build_server_ssl_context,
-    run_http_server,
+    create_http_server,
 )
 from vj_server.patterns import (
     AudioState,
@@ -1064,23 +1064,91 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 else:
                     await asyncio.sleep(frame_interval)
 
-    def _start_legacy_http_thread(self) -> None:
-        """Start the split-port static server used by legacy deployments."""
-        if self.http_port > 0:
-            http_thread = threading.Thread(
-                target=run_http_server,
-                args=(
-                    self.http_port,
-                    str(self.project_root),
-                    self.http_host,
-                    self.server_ssl_context,
-                ),
-                daemon=True,
+    def _start_legacy_http_thread(self) -> tuple[Any | None, Any | None]:
+        """Start and return the split-port static server and its serve thread."""
+        if self.http_port <= 0:
+            return None, None
+
+        try:
+            http_server = create_http_server(
+                self.http_port,
+                str(self.project_root),
+                self.http_host,
+                self.server_ssl_context,
             )
+        except OSError as exc:
+            logger.error(f"HTTP server failed to start on port {self.http_port}: {exc}")
+            logger.error("Another instance may be running. Kill it or use a different port.")
+            return None, None
+
+        http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+        try:
             http_thread.start()
-            http_scheme = "https" if self.server_ssl_context is not None else "http"
-            logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
-            logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
+        except BaseException:
+            http_server.server_close()
+            raise
+
+        http_scheme = "https" if self.server_ssl_context is not None else "http"
+        logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
+        logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
+        return http_server, http_thread
+
+    async def _run_bounded_legacy_http_action(
+        self,
+        step_name: str,
+        action: Any,
+        *,
+        timeout: float,
+    ) -> None:
+        """Run one cleanup action off-loop without retaining a stuck executor worker."""
+        completed = threading.Event()
+        failures: list[Exception] = []
+
+        def run_action() -> None:
+            try:
+                action()
+            except Exception as exc:
+                failures.append(exc)
+            finally:
+                completed.set()
+
+        action_thread = threading.Thread(target=run_action, daemon=True)
+        try:
+            action_thread.start()
+        except Exception as exc:
+            logger.warning("Legacy HTTP %s could not start: %s", step_name, exc)
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while not completed.is_set():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                logger.warning("Legacy HTTP %s timed out after %.1fs", step_name, timeout)
+                return
+            await asyncio.sleep(min(0.01, remaining))
+
+        action_thread.join(timeout=0.0)
+        if failures:
+            logger.warning("Legacy HTTP %s failed: %s", step_name, failures[0])
+
+    async def _stop_legacy_http_thread(self, http_server: Any, http_thread: Any) -> None:
+        """Stop the legacy HTTP listener and bound its daemon-thread teardown."""
+        timeout = 5.0
+        cleanup_steps = (
+            ("shutdown", http_server.shutdown, timeout),
+            ("server close", http_server.server_close, timeout),
+            ("thread join", lambda: http_thread.join(timeout=timeout), timeout + 0.5),
+        )
+        for step_name, action, step_timeout in cleanup_steps:
+            await self._run_bounded_legacy_http_action(
+                step_name,
+                action,
+                timeout=step_timeout,
+            )
+
+        if http_thread.is_alive():
+            logger.warning("Legacy HTTP thread did not stop within %.1fs", timeout)
 
     async def run(self):
         """Start the VJ server."""
@@ -1093,6 +1161,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         dj_server = None
         broadcast_server = None
         metrics_server = None
+        legacy_http_server = None
+        legacy_http_thread = None
 
         try:
             if self.unified_web:
@@ -1110,7 +1180,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     self.public_origin.replace("https://", "wss://", 1),
                 )
             else:
-                self._start_legacy_http_thread()
+                legacy_http_server, legacy_http_thread = self._start_legacy_http_thread()
 
             # Start DJ listener (64KB max message — valid audio frames are ~200 bytes)
             dj_server = await ws_serve(
@@ -1190,6 +1260,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
             await self._main_loop()
         finally:
+            if legacy_http_server is not None and legacy_http_thread is not None:
+                await self._stop_legacy_http_thread(legacy_http_server, legacy_http_thread)
+
             # Notify all connected clients of shutdown
             logger.info("Shutting down VJ server...")
             shutdown_msg = json.dumps({"type": "server_shutdown"})

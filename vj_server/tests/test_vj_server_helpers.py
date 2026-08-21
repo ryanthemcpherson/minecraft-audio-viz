@@ -2,8 +2,10 @@
 
 import asyncio
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import msgspec.json as mjson
@@ -217,6 +219,199 @@ async def test_unified_gateway_is_cleaned_up_when_dj_listener_fails(
         await server.run()
 
     assert cleanup_calls == 1
+
+
+@pytest.mark.parametrize(
+    "exit_scenario",
+    ["normal", "cancellation", "dj_bind_failure", "broadcast_bind_failure"],
+)
+@pytest.mark.asyncio
+async def test_legacy_http_listener_and_thread_stop_on_every_exit_path(
+    monkeypatch: pytest.MonkeyPatch,
+    exit_scenario: str,
+) -> None:
+    class ControlledHTTPServer:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+            self.serve_started = threading.Event()
+            self.stop_requested = threading.Event()
+
+        def serve_forever(self) -> None:
+            self.serve_started.set()
+            self.stop_requested.wait()
+
+        def shutdown(self) -> None:
+            self.events.append("shutdown")
+            self.stop_requested.set()
+
+        def server_close(self) -> None:
+            self.events.append("server_close")
+
+    class CapturingThread:
+        def __init__(self, *, target, args=(), daemon=None) -> None:
+            self.target = target
+            self._thread = threading.Thread(target=target, args=args, daemon=daemon)
+            self.join_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            self._thread.start()
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeouts.append(timeout)
+            self._thread.join(timeout)
+
+        def is_alive(self) -> bool:
+            return self._thread.is_alive()
+
+    class FakeWebSocketListener:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    http_server = ControlledHTTPServer()
+    threads: list[CapturingThread] = []
+    websocket_starts = 0
+    main_loop_entered = asyncio.Event()
+
+    def make_thread(**kwargs) -> CapturingThread:
+        thread = CapturingThread(**kwargs)
+        threads.append(thread)
+        return thread
+
+    def fake_create_http_server(*_args):
+        return http_server
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        nonlocal websocket_starts
+        websocket_starts += 1
+        if exit_scenario == "dj_bind_failure" and websocket_starts == 1:
+            raise OSError("DJ listener bind failed")
+        if exit_scenario == "broadcast_bind_failure" and websocket_starts == 2:
+            raise OSError("Browser listener bind failed")
+        return FakeWebSocketListener()
+
+    async def no_op() -> None:
+        return None
+
+    async def main_loop() -> None:
+        main_loop_entered.set()
+        if exit_scenario == "cancellation":
+            await asyncio.Future()
+
+    monkeypatch.setattr(vj_mod, "create_http_server", fake_create_http_server)
+    monkeypatch.setattr(
+        vj_mod,
+        "threading",
+        SimpleNamespace(Event=threading.Event, Thread=make_thread),
+    )
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    server = vj_mod.VJServer(
+        http_port=18080,
+        metrics_port=None,
+        show_spectrograph=False,
+    )
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = main_loop
+
+    try:
+        if exit_scenario == "cancellation":
+            task = asyncio.create_task(server.run())
+            await asyncio.wait_for(main_loop_entered.wait(), timeout=1.0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        elif exit_scenario == "normal":
+            await server.run()
+        else:
+            with pytest.raises(OSError, match="listener bind failed"):
+                await server.run()
+
+        assert http_server.serve_started.wait(timeout=1.0)
+        assert http_server.events == ["shutdown", "server_close"]
+        serve_threads = [thread for thread in threads if thread.target == http_server.serve_forever]
+        assert len(serve_threads) == 1
+        assert serve_threads[0].join_timeouts == [5.0]
+        assert serve_threads[0].is_alive() is False
+        assert all(thread.is_alive() is False for thread in threads)
+    finally:
+        http_server.stop_requested.set()
+        for thread in threads:
+            thread.join(timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_legacy_http_bind_failure_does_not_prevent_websocket_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket_starts = 0
+
+    class FakeWebSocketListener:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    def failing_create_http_server(*_args):
+        raise OSError("HTTP listener bind failed")
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        nonlocal websocket_starts
+        websocket_starts += 1
+        return FakeWebSocketListener()
+
+    async def no_op() -> None:
+        return None
+
+    monkeypatch.setattr(vj_mod, "create_http_server", failing_create_http_server)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    server = vj_mod.VJServer(
+        http_port=18080,
+        metrics_port=None,
+        show_spectrograph=False,
+    )
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+
+    await server.run()
+
+    assert websocket_starts == 2
+
+
+@pytest.mark.asyncio
+async def test_legacy_http_cleanup_action_timeout_does_not_block_event_loop() -> None:
+    action_started = threading.Event()
+    release_action = threading.Event()
+
+    def blocking_action() -> None:
+        action_started.set()
+        release_action.wait()
+
+    server = vj_mod.VJServer(metrics_port=None, show_spectrograph=False)
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+
+    try:
+        await asyncio.wait_for(
+            server._run_bounded_legacy_http_action(
+                "blocking test action",
+                blocking_action,
+                timeout=0.01,
+            ),
+            timeout=0.2,
+        )
+        assert action_started.is_set()
+        assert loop.time() - started_at < 0.2
+    finally:
+        release_action.set()
 
 
 # ============================================================================

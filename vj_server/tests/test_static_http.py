@@ -670,6 +670,33 @@ def test_http_server_wraps_listener_with_supplied_ssl_context(
     assert wrap_calls == [(original_socket, True)]
 
 
+def test_http_server_factory_returns_controllable_unstarted_listener(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    serve_calls = 0
+
+    class CapturingTCPServer:
+        def __init__(self, server_address, handler_class):
+            self.server_address = server_address
+            self.handler_class = handler_class
+
+        def serve_forever(self):
+            nonlocal serve_calls
+            serve_calls += 1
+
+    monkeypatch.setattr(
+        models,
+        "_make_threaded_http_server_class",
+        lambda: CapturingTCPServer,
+    )
+
+    server = models.create_http_server(4321, str(tmp_path), "127.0.0.1")
+
+    assert server.server_address == ("127.0.0.1", 4321)
+    assert serve_calls == 0
+
+
 @pytest.mark.parametrize(
     ("tls_cert", "tls_key"),
     [("cert.pem", None), (None, "key.pem")],
