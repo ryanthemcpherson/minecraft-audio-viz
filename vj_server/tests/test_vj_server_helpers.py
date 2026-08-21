@@ -1,8 +1,14 @@
 """Tests for VJ server helper functions — phase assist and audio frame sanitization edge cases."""
 
 import time
+from unittest.mock import AsyncMock
+
+import msgspec.json as mjson
+import pytest
 
 import vj_server.vj_server as vj_mod
+from vj_server.beat_predictor import BeatPredictor
+from vj_server.models import DJConnection
 
 from .conftest import FakeDJConnection, make_audio_frame
 
@@ -190,3 +196,37 @@ class TestAudioFrameSanitization:
         assert len(result["bands"]) == 5
         assert isinstance(result["bpm"], float)
         assert isinstance(result["seq"], int)
+
+
+@pytest.mark.asyncio
+async def test_broadcast_viz_state_serializes_predictor_generated_confidence() -> None:
+    """The real browser broadcast must accept confidence produced by NumPy math."""
+    server = vj_mod.VJServer(require_auth=False, show_spectrograph=False, metrics_port=None)
+    predictor = BeatPredictor(min_bpm=60.0, max_bpm=200.0)
+    predictor._tempo_histogram[:] = 1.0
+    predictor._tempo_histogram[60] = 10.0
+    predictor._ioi_history.extend([0.5] * 16)
+    predictor._extract_tempo_from_histogram()
+    assert 0.5 < predictor.tempo_confidence < 1.0
+
+    server._beat_predictor = predictor
+    dj = DJConnection(dj_id="broadcast-dj", dj_name="Broadcast DJ", websocket=None)
+    dj._jitter_ms = 1.0
+    server._djs[dj.dj_id] = dj
+    server._active_dj_id = dj.dj_id
+    browser = AsyncMock()
+    server._broadcast_clients = {browser}
+
+    await server._broadcast_viz_state(
+        entities=[],
+        bands=[0.8, 0.6, 0.4, 0.2, 0.1],
+        peak=0.9,
+        is_beat=True,
+        beat_intensity=0.95,
+        tempo_confidence=predictor.tempo_confidence,
+    )
+
+    browser.send.assert_awaited_once()
+    payload = mjson.decode(browser.send.await_args.args[0])
+    assert payload["zone_status"]["tempo_confidence"] == round(predictor.tempo_confidence, 3)
+    assert payload["sync_confidence"] == round(server._calculate_sync_confidence(dj), 0)
