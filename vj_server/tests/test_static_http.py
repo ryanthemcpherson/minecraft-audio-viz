@@ -369,6 +369,33 @@ def test_http_handlers_serve_safe_file(
 
 
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])
+def test_http_handlers_disable_static_asset_caching(
+    tmp_path: Path,
+    implementation: str,
+) -> None:
+    """Admin modules must not be combined from different deployment revisions."""
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    (static_root / "app.js").write_text("safe asset", encoding="utf-8")
+    handler_class = _build_handler_class(
+        implementation,
+        {"/preview": str(static_root)},
+    )
+
+    with _running_http_server(handler_class) as address:
+        connection = http.client.HTTPConnection(*address, timeout=5)
+        try:
+            connection.request("GET", "/preview/app.js")
+            response = connection.getresponse()
+            response.read()
+            cache_control = response.getheader("Cache-Control")
+        finally:
+            connection.close()
+
+    assert cache_control == "no-store"
+
+
+@pytest.mark.parametrize("implementation", ["factory", "legacy"])
 def test_http_handlers_redirect_and_serve_safe_directory_index(
     tmp_path: Path,
     implementation: str,
