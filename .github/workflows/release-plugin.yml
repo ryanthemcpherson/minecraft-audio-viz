@@ -148,9 +148,70 @@ jobs:
           require_successful_push_run ci.yml
           require_successful_push_run security.yml
 
+  build-pterodactyl:
+    name: Build Pterodactyl bundle
+    needs: [verify-candidate]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore portable runtime cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: deploy/pterodactyl/.cache
+          key: pterodactyl-runtimes-${{ runner.os }}-${{ hashFiles('deploy/pterodactyl/runtime-lock.json') }}
+
+      - name: Download approved candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: paper-plugin-candidate-1.1.0
+          path: candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Reverify candidate JAR
+        env:
+          EXPECTED_SHA256: ${{ inputs.sha256 }}
+        run: |
+          test "$(sha256sum candidate/mcav-paper-1.1.0.jar | cut -d ' ' -f 1)" = \
+            "$EXPECTED_SHA256"
+
+      - name: Test Pterodactyl packager
+        run: bash deploy/pterodactyl/test-build-release.sh
+
+      - name: Build and verify Pterodactyl bundle
+        run: |
+          set -euo pipefail
+          python -m venv vj_server/.venv
+          bash deploy/pterodactyl/build-release.sh \
+            --version "${{ inputs.version }}" \
+            --plugin-jar "candidate/mcav-paper-1.1.0.jar" \
+            --output-dir dist
+
+      - name: Upload Pterodactyl bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pterodactyl-bundle
+          path: |
+            dist/mcav-pterodactyl-*.zip
+            dist/mcav-pterodactyl-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Create immutable Paper plugin release
-    needs: [verify-candidate]
+    needs: [verify-candidate, build-pterodactyl]
     runs-on: ubuntu-latest
     environment: plugin-release
     permissions:
@@ -171,6 +232,12 @@ jobs:
           path: candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
+
+      - name: Download Pterodactyl bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: pterodactyl-bundle
+          path: pterodactyl
 
       - name: Reverify approved bytes
         env:
@@ -241,3 +308,5 @@ jobs:
             candidate/SHA256SUMS.txt
             candidate/candidate-manifest.json
             candidate/LICENSE
+            pterodactyl/*.zip
+            pterodactyl/*.zip.sha256
