@@ -89,6 +89,7 @@ let availablePatterns = [];
 
 // WebSocket
 let ws = null;
+let wsGeneration = 0;
 let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -669,13 +670,25 @@ function updateParticleEntities() {
 function connectWebSocket() {
     const statusEl = document.getElementById('connection-status');
     const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
+    const previousSocket = ws;
+    ws = null;
+    const connectionGeneration = ++wsGeneration;
+
+    if (previousSocket && previousSocket.readyState !== WebSocket.CLOSED) {
+        previousSocket.close(1000, 'Connection replaced');
+    }
 
     try {
         const wsHost = window.location.hostname || 'localhost';
         const wsScheme = websocketScheme(window.location.protocol);
-        ws = new WebSocket(`${wsScheme}://${wsHost}:${CONFIG.wsPort}`);
+        const socket = new WebSocket(`${wsScheme}://${wsHost}:${CONFIG.wsPort}`);
+        ws = socket;
+        const isCurrentSocket = () => (
+            ws === socket && wsGeneration === connectionGeneration
+        );
 
         const completeAuthentication = () => {
+            if (!isCurrentSocket()) return;
             if (statusEl) statusEl.classList.add('connected');
             if (statusEl) statusEl.classList.remove('error');
             if (statusText) statusText.textContent = 'Connected';
@@ -686,27 +699,29 @@ function connectWebSocket() {
             sendPreviewMessage({ type: 'get_stages' });
         };
 
-        ws.onopen = () => {
+        socket.onopen = () => {
+            if (!isCurrentSocket()) return;
             if (statusText) statusText.textContent = 'Negotiating access…';
-            previewAuthSession.onOpen((message) => ws.send(JSON.stringify(message)));
+            previewAuthSession.onOpen((message) => socket.send(JSON.stringify(message)));
         };
 
-        ws.onmessage = (event) => {
+        socket.onmessage = (event) => {
+            if (!isCurrentSocket()) return;
             try {
                 const data = JSON.parse(event.data);
                 const protocolHandled = previewAuthSession.handleProtocolMessage(data, {
-                    send: (message) => ws.send(JSON.stringify(message)),
+                    send: (message) => socket.send(JSON.stringify(message)),
                     onAuthenticated: completeAuthentication,
                     onAuthRequired: () => {
                         showPreviewLogin();
-                        ws.close(1000, 'Credentials required');
+                        socket.close(1000, 'Credentials required');
                     },
                     onAuthFailed: () => {
                         console.error('[WS] VJ authentication failed');
                         if (statusText) statusText.textContent = 'Auth Failed';
                         if (statusEl) statusEl.classList.add('error');
                         showPreviewLogin('Invalid username or password.');
-                        ws.close(4003, 'Authentication failed');
+                        socket.close(4003, 'Authentication failed');
                     },
                 });
                 if (protocolHandled) {
@@ -768,13 +783,17 @@ function connectWebSocket() {
             }
         };
 
-        ws.onclose = () => {
+        socket.onclose = () => {
+            if (!isCurrentSocket()) return;
+            ws = null;
+            wsGeneration++;
             if (statusEl) statusEl.classList.remove('connected');
             if (statusText) statusText.textContent = 'Disconnected';
             if (previewAuthSession.shouldReconnect()) scheduleReconnect();
         };
 
-        ws.onerror = () => {
+        socket.onerror = () => {
+            if (!isCurrentSocket()) return;
             if (statusEl) statusEl.classList.add('error');
             if (statusText) statusText.textContent = 'Error';
         };
@@ -880,14 +899,23 @@ function setupPreviewLogin() {
         submit.textContent = 'Authenticating…';
         reconnectAttempts = 0;
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
         connectWebSocket();
     });
 
     logout.addEventListener('click', () => {
         previewAuthSession.logout();
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        if (ws) ws.close(1000, 'Operator signed out');
+        const signedOutSocket = ws;
+        ws = null;
+        wsGeneration++;
+        if (signedOutSocket) signedOutSocket.close(1000, 'Operator signed out');
+        const statusEl = document.getElementById('connection-status');
+        const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
+        if (statusEl) {
+            statusEl.classList.remove('connected');
+            statusEl.classList.remove('error');
+        }
+        if (statusText) statusText.textContent = 'Signed out';
         username.value = '';
         showPreviewLogin('Signed out.');
     });
