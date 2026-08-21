@@ -14,6 +14,7 @@ export interface ConnectionStatus {
   total_djs: number;
   active_dj_name: string | null;
   error: string | null;
+  error_code?: import('./lib/connectionProfile').ConnectionErrorCode | null;
 }
 
 export interface AudioLevels {
@@ -70,6 +71,7 @@ export const DEFAULT_CONNECTION_STATUS: ConnectionStatus = {
   total_djs: 0,
   active_dj_name: null,
   error: null,
+  error_code: null,
 };
 
 export const DEFAULT_VOICE_STATUS: VoiceStatus = {

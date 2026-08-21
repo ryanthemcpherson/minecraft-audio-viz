@@ -16,7 +16,8 @@ pub mod voice;
 use audio::{AudioCaptureHandle, AudioPreset, AudioSource, CaptureMode};
 use futures_util::Sink;
 use protocol::{
-    AUTHENTICATION_SEND_TIMEOUT, AudioFrameMessage, DjClient, DjClientConfig, PendingDjConnection,
+    AUTHENTICATION_SEND_TIMEOUT, AudioFrameMessage, ClientError, DjClient, DjClientConfig,
+    PendingDjConnection,
 };
 use state::{AppState, ConnectionCancellation};
 use voice::{VoiceStatus, VoiceStreamer};
@@ -74,6 +75,25 @@ pub(crate) fn format_websocket_url(scheme: &str, host: &str, port: u16) -> Strin
 }
 
 const CONNECTION_SUPERSEDED_ERROR: &str = "Connection attempt superseded by newer server settings";
+
+#[derive(Debug, thiserror::Error)]
+enum ReconnectError {
+    #[error("{CONNECTION_SUPERSEDED_ERROR}")]
+    Superseded,
+    #[error(transparent)]
+    Client(#[from] ClientError),
+    #[error("Reconnect authentication failed.")]
+    Authentication,
+}
+
+impl ReconnectError {
+    fn client_error(&self) -> Option<&ClientError> {
+        match self {
+            Self::Client(error) => Some(error),
+            Self::Superseded | Self::Authentication => None,
+        }
+    }
+}
 
 struct PreparedConnectionReplacement {
     generation: u64,
@@ -219,14 +239,14 @@ async fn connect_client_for_generation(
     mut client: DjClient,
     cancellation: &ConnectionCancellation,
     cancellation_rx: &mut watch::Receiver<bool>,
-) -> Result<DjClient, String> {
+) -> Result<DjClient, ReconnectError> {
     let pending_connection = tokio::select! {
         biased;
         _ = wait_for_connection_cancellation(cancellation_rx) => {
-            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+            return Err(ReconnectError::Superseded);
         }
         result = client.establish_transport() => {
-            result.map_err(|error| error.to_string())?
+            result?
         }
     };
     connect_established_client_for_generation(
@@ -238,6 +258,13 @@ async fn connect_client_for_generation(
         cancellation_rx,
     )
     .await
+    .map_err(|error| {
+        if error == CONNECTION_SUPERSEDED_ERROR {
+            ReconnectError::Superseded
+        } else {
+            ReconnectError::Authentication
+        }
+    })
 }
 
 async fn connect_established_client_for_generation(
@@ -317,10 +344,10 @@ where
     };
     match readiness {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => {
+        Ok(Err(_)) => {
             drop(sink);
             drop(auth_commit_guard);
-            return Err(format!("Authentication send failed: {error}"));
+            return Err("Authentication send failed".to_string());
         }
         Err(_) => {
             drop(sink);
@@ -337,10 +364,10 @@ where
             drop(auth_commit_guard);
             return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
         }
-        Ok(Err(error)) => {
+        Ok(Err(_)) => {
             drop(sink);
             drop(auth_commit_guard);
-            return Err(format!("Authentication send failed: {error}"));
+            return Err("Authentication send failed".to_string());
         }
         Ok(Ok(())) => {}
     }
@@ -355,10 +382,10 @@ where
     .await
     {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => {
+        Ok(Err(_)) => {
             drop(sink);
             drop(auth_commit_guard);
-            return Err(format!("Authentication send failed: {error}"));
+            return Err("Authentication send failed".to_string());
         }
         Err(_) => {
             drop(sink);
@@ -392,6 +419,7 @@ fn publish_connected_client_if_current(
     app_state.bridge_shutdown_tx = Some(shutdown_tx);
     app_state.status.connected = true;
     app_state.status.error = None;
+    app_state.status.error_code = None;
     None
 }
 
@@ -420,7 +448,46 @@ fn publish_reconnected_client_if_current(
     app_state.client = Some(client);
     app_state.status.connected = true;
     app_state.status.error = None;
+    app_state.status.error_code = None;
     None
+}
+
+fn reconnect_failure_log(error: &ClientError) -> String {
+    format!("Reconnect failed [{}]: {error}", error.code().as_str())
+}
+
+fn reconnect_error_status_if_current(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    error: &ClientError,
+) -> Option<state::ConnectionStatus> {
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return None;
+    }
+    app_state.status.connected = false;
+    app_state.status.error = Some(error.to_string());
+    app_state.status.error_code = Some(error.code());
+    Some(app_state.status.clone())
+}
+
+fn reconnect_backoff_status_if_current(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    delay_secs: u64,
+    reconnect_count: u32,
+) -> Option<state::ConnectionStatus> {
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return None;
+    }
+    if app_state.status.error_code.is_none() {
+        app_state.status.error = Some(format!(
+            "Reconnecting in {}s ({}/{})",
+            delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
+        ));
+    }
+    Some(app_state.status.clone())
 }
 
 /// List available audio sources
@@ -679,6 +746,7 @@ async fn run_bridge(
                             let mut app_state = state_arc.lock();
                             app_state.status.connected = false;
                             app_state.status.error = Some("Connection lost".to_string());
+                            app_state.status.error_code = None;
                             break;
                         }
                     };
@@ -688,6 +756,7 @@ async fn run_bridge(
                             let mut app_state = state_arc.lock();
                             app_state.status.connected = false;
                             app_state.status.error = Some("Connection lost".to_string());
+                            app_state.status.error_code = None;
                             break;
                         }
                     };
@@ -753,6 +822,7 @@ async fn run_bridge(
                                     let mut app_state = state_arc.lock();
                                     app_state.status.connected = false;
                                     app_state.status.error = Some("Connection lost".to_string());
+                                    app_state.status.error_code = None;
                                     break;
                                 }
                             }
@@ -824,6 +894,7 @@ async fn run_bridge(
                             if !latest.connected {
                                 app_state.status.connected = false;
                                 app_state.status.error = Some("Server disconnected".to_string());
+                                app_state.status.error_code = None;
                             }
 
                             // Sync voice status from server messages
@@ -952,6 +1023,7 @@ async fn run_bridge(
                 app_state.bridge_shutdown_tx = None;
                 app_state.bridge_task_handle = None;
                 app_state.status.error = Some("Connection lost (max retries reached)".to_string());
+                app_state.status.error_code = None;
                 let _ = app_handle.emit("dj-status", &app_state.status);
             }
             log::error!(
@@ -968,23 +1040,16 @@ async fn run_bridge(
             reconnect_count,
             MAX_RECONNECT_ATTEMPTS
         );
-        let still_current = {
-            let mut app_state = state_arc.lock();
-            if app_state.connection_generation == generation {
-                app_state.status.error = Some(format!(
-                    "Reconnecting in {}s ({}/{})",
-                    delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
-                ));
-                let _ = app_handle.emit("dj-status", &app_state.status);
-                true
-            } else {
-                false
-            }
-        };
-        if !still_current {
+        let Some(backoff_status) = reconnect_backoff_status_if_current(
+            &state_arc,
+            generation,
+            delay_secs,
+            reconnect_count,
+        ) else {
             log::info!("Reconnect backoff skipped because its connection was superseded");
             break 'reconnect;
-        }
+        };
+        let _ = app_handle.emit("dj-status", &backoff_status);
 
         // Wait for backoff delay or shutdown signal
         tokio::select! {
@@ -1057,7 +1122,16 @@ async fn run_bridge(
                 continue 'reconnect;
             }
             Err(e) => {
-                log::warn!("Reconnect failed: {}", e);
+                if let Some(client_error) = e.client_error() {
+                    if let Some(status) =
+                        reconnect_error_status_if_current(&state_arc, generation, client_error)
+                    {
+                        let _ = app_handle.emit("dj-status", &status);
+                    }
+                    log::warn!("{}", reconnect_failure_log(client_error));
+                } else {
+                    log::warn!("Reconnect failed: {e}");
+                }
                 continue 'reconnect;
             }
         }
@@ -1284,6 +1358,7 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
             app_state.status.route_mode = String::new();
             app_state.status.mc_connected = false;
             app_state.status.error = None;
+            app_state.status.error_code = None;
             app_state.voice_config.enabled = false;
             app_state.voice_status = VoiceStatus::default();
         }
@@ -1666,5 +1741,78 @@ mod tests {
         assert_eq!(config.server_port, state.server_port);
         assert_eq!(config.dj_name, state.dj_name);
         assert_eq!(config.connect_code, state.connect_code);
+    }
+
+    #[test]
+    fn reconnect_tls_failure_emits_typed_safe_status_and_log_without_resetting_profile() {
+        const EXPECTED_DIGEST: &str =
+            "EXPECTED_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const OBSERVED_DIGEST: &str =
+            "OBSERVED_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+        let state = Arc::new(Mutex::new(AppState {
+            connection_generation: 7,
+            tls_fingerprint: Some(EXPECTED_DIGEST.to_string()),
+            status: state::ConnectionStatus {
+                queue_position: 4,
+                total_djs: 9,
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+        let error =
+            protocol::ClientError::tls_fingerprint_mismatch(EXPECTED_DIGEST, OBSERVED_DIGEST);
+
+        let event = reconnect_error_status_if_current(&state, 7, &error)
+            .expect("current reconnect generation should publish an error");
+        let event_json = serde_json::to_string(&event).expect("status event should serialize");
+        let log_line = reconnect_failure_log(&error);
+
+        assert_eq!(
+            event.error_code,
+            Some(protocol::ConnectionErrorCode::TlsFingerprintMismatch)
+        );
+        assert!(
+            event
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("update the configured fingerprint"))
+        );
+        assert_eq!(event.queue_position, 4);
+        assert_eq!(event.total_djs, 9);
+        assert!(!event.connected);
+        assert_eq!(state.lock().connection_generation, 7);
+        assert_eq!(
+            state.lock().tls_fingerprint.as_deref(),
+            Some(EXPECTED_DIGEST)
+        );
+        for sentinel in [EXPECTED_DIGEST, OBSERVED_DIGEST] {
+            assert!(!event_json.contains(sentinel), "event leaked {sentinel}");
+            assert!(!log_line.contains(sentinel), "log leaked {sentinel}");
+        }
+    }
+
+    #[test]
+    fn reconnect_backoff_does_not_replace_actionable_typed_tls_failure() {
+        let state = Arc::new(Mutex::new(AppState {
+            connection_generation: 11,
+            ..Default::default()
+        }));
+        let error = protocol::ClientError::TlsFingerprintMismatch;
+        reconnect_error_status_if_current(&state, 11, &error)
+            .expect("current reconnect generation should publish an error");
+
+        let backoff_status = reconnect_backoff_status_if_current(&state, 11, 4, 3)
+            .expect("current reconnect generation should publish backoff state");
+
+        assert_eq!(
+            backoff_status.error_code,
+            Some(protocol::ConnectionErrorCode::TlsFingerprintMismatch)
+        );
+        assert!(
+            backoff_status
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("update the configured fingerprint"))
+        );
     }
 }

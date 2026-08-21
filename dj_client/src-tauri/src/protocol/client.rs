@@ -4,6 +4,7 @@ use super::messages::*;
 use super::tls::{connect_verified, normalize_sha256_fingerprint};
 use futures_util::{Sink, SinkExt, StreamExt};
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -17,19 +18,55 @@ use tokio_tungstenite::{
 };
 
 /// Client errors
-#[derive(Error, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionErrorCode {
+    ConnectionFailed,
+    AuthenticationFailed,
+    WebSocketError,
+    SendError,
+    AlreadyConnected,
+    NotConnected,
+    InvalidTlsFingerprint,
+    MissingPeerCertificate,
+    TlsFingerprintMismatch,
+    TlsCertificateHostMismatch,
+    TlsHandshake,
+}
+
+impl ConnectionErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ConnectionFailed => "connection_failed",
+            Self::AuthenticationFailed => "authentication_failed",
+            Self::WebSocketError => "websocket_error",
+            Self::SendError => "send_error",
+            Self::AlreadyConnected => "already_connected",
+            Self::NotConnected => "not_connected",
+            Self::InvalidTlsFingerprint => "invalid_tls_fingerprint",
+            Self::MissingPeerCertificate => "missing_peer_certificate",
+            Self::TlsFingerprintMismatch => "tls_fingerprint_mismatch",
+            Self::TlsCertificateHostMismatch => "tls_certificate_host_mismatch",
+            Self::TlsHandshake => "tls_handshake",
+        }
+    }
+}
+
+/// Errors carry no provider payloads so Display, Debug, logs, and serialized
+/// status can never expose certificates, fingerprints, or credentials.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientError {
-    #[error("Connection failed: {0}")]
-    ConnectionFailed(String),
+    #[error("Can't reach the server. Check the address and try again.")]
+    ConnectionFailed,
 
-    #[error("Authentication failed: {0}")]
-    AuthenticationFailed(String),
+    #[error("Authentication failed. Ask your VJ operator for new connection details.")]
+    AuthenticationFailed,
 
-    #[error("WebSocket error: {0}")]
-    WebSocketError(String),
+    #[error("The server connection closed unexpectedly.")]
+    WebSocketError,
 
-    #[error("Send error: {0}")]
-    SendError(String),
+    #[error("Data could not be sent to the server.")]
+    SendError,
 
     #[error("Already connected")]
     AlreadyConnected,
@@ -37,17 +74,56 @@ pub enum ClientError {
     #[error("Not connected")]
     NotConnected,
 
-    #[error("Invalid TLS certificate fingerprint; expected 64 hexadecimal SHA-256 characters")]
+    #[error("Server certificate fingerprint must contain exactly 64 hexadecimal characters.")]
     InvalidTlsFingerprint,
 
-    #[error("TLS peer did not provide a certificate")]
+    #[error("The server did not provide a TLS certificate. Check the secure server address.")]
     MissingPeerCertificate,
 
-    #[error("TLS certificate fingerprint mismatch (expected {expected}, observed {observed})")]
-    TlsFingerprintMismatch { expected: String, observed: String },
+    #[error(
+        "The server certificate changed or does not match the configured fingerprint. Ask your VJ operator to verify the certificate, then update the configured fingerprint."
+    )]
+    TlsFingerprintMismatch,
 
-    #[error("TLS handshake failed: {0}")]
-    TlsHandshake(String),
+    #[error(
+        "The server certificate is for a different host. Use the hostname or IP address listed in the certificate."
+    )]
+    TlsCertificateHostMismatch,
+
+    #[error(
+        "Secure connection failed during the TLS handshake. Check the server address and certificate configuration."
+    )]
+    TlsHandshake,
+}
+
+impl ClientError {
+    pub fn authentication_failed<T>(_detail: T) -> Self {
+        Self::AuthenticationFailed
+    }
+
+    pub fn tls_fingerprint_mismatch<T, U>(_expected: T, _observed: U) -> Self {
+        Self::TlsFingerprintMismatch
+    }
+
+    pub fn tls_handshake<T>(_detail: T) -> Self {
+        Self::TlsHandshake
+    }
+
+    pub fn code(&self) -> ConnectionErrorCode {
+        match self {
+            Self::ConnectionFailed => ConnectionErrorCode::ConnectionFailed,
+            Self::AuthenticationFailed => ConnectionErrorCode::AuthenticationFailed,
+            Self::WebSocketError => ConnectionErrorCode::WebSocketError,
+            Self::SendError => ConnectionErrorCode::SendError,
+            Self::AlreadyConnected => ConnectionErrorCode::AlreadyConnected,
+            Self::NotConnected => ConnectionErrorCode::NotConnected,
+            Self::InvalidTlsFingerprint => ConnectionErrorCode::InvalidTlsFingerprint,
+            Self::MissingPeerCertificate => ConnectionErrorCode::MissingPeerCertificate,
+            Self::TlsFingerprintMismatch => ConnectionErrorCode::TlsFingerprintMismatch,
+            Self::TlsCertificateHostMismatch => ConnectionErrorCode::TlsCertificateHostMismatch,
+            Self::TlsHandshake => ConnectionErrorCode::TlsHandshake,
+        }
+    }
 }
 
 /// Client configuration
@@ -272,7 +348,7 @@ impl DjClient {
             connect_verified(&url, ws_config, self.config.tls_fingerprint.as_deref()),
         )
         .await
-        .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))??;
+        .map_err(|_| ClientError::ConnectionFailed)??;
         Ok(PendingDjConnection {
             websocket: ws_stream,
         })
@@ -287,9 +363,7 @@ impl DjClient {
                 self.config.dj_name.clone(),
                 self.config.dj_session_id.clone(),
             ))
-            .map_err(|e| {
-                ClientError::SendError(format!("Failed to serialize auth message: {}", e))
-            })?
+            .map_err(|_| ClientError::SendError)?
         } else if let (Some(id), Some(key)) = (&self.config.dj_id, &self.config.dj_key) {
             // Credential-based authentication
             serde_json::to_string(&DjAuthMessage::new(
@@ -297,13 +371,9 @@ impl DjClient {
                 key.clone(),
                 self.config.dj_name.clone(),
             ))
-            .map_err(|e| {
-                ClientError::SendError(format!("Failed to serialize auth message: {}", e))
-            })?
+            .map_err(|_| ClientError::SendError)?
         } else {
-            return Err(ClientError::AuthenticationFailed(
-                "No credentials provided. Set a connect code or DJ ID/key in settings.".to_string(),
-            ));
+            return Err(ClientError::AuthenticationFailed);
         };
         Ok(Message::Text(auth_msg.into()))
     }
@@ -322,20 +392,20 @@ impl DjClient {
             poll_fn(|context| Pin::new(&mut pending_connection.websocket).poll_ready(context)),
         )
         .await
-        .map_err(|_| ClientError::SendError("Authentication send timed out".to_string()))?
-        .map_err(|error| ClientError::SendError(error.to_string()))?;
+        .map_err(|_| ClientError::SendError)?
+        .map_err(|_| ClientError::SendError)?;
 
         Pin::new(&mut pending_connection.websocket)
             .start_send(authentication_message)
-            .map_err(|error| ClientError::SendError(error.to_string()))?;
+            .map_err(|_| ClientError::SendError)?;
 
         tokio::time::timeout_at(
             deadline,
             poll_fn(|context| Pin::new(&mut pending_connection.websocket).poll_flush(context)),
         )
         .await
-        .map_err(|_| ClientError::SendError("Authentication send timed out".to_string()))?
-        .map_err(|error| ClientError::SendError(error.to_string()))?;
+        .map_err(|_| ClientError::SendError)?
+        .map_err(|_| ClientError::SendError)?;
         Ok(())
     }
 
@@ -385,8 +455,8 @@ impl DjClient {
                                 }
                             }
                             "auth_error" => {
-                                if let Ok(err) = serde_json::from_value::<AuthErrorMessage>(msg) {
-                                    return Err(ClientError::AuthenticationFailed(err.error));
+                                if let Ok(error) = serde_json::from_value::<AuthErrorMessage>(msg) {
+                                    return Err(ClientError::authentication_failed(error.error));
                                 }
                             }
                             "clock_sync_request" => {
@@ -395,17 +465,13 @@ impl DjClient {
                                     .unwrap_or_default()
                                     .as_secs_f64();
                                 let response = ClockSyncResponse::new(now);
-                                let json = serde_json::to_string(&response).map_err(|e| {
-                                    ClientError::SendError(format!(
-                                        "Failed to serialize clock sync: {}",
-                                        e
-                                    ))
-                                })?;
+                                let json = serde_json::to_string(&response)
+                                    .map_err(|_| ClientError::SendError)?;
                                 pending_connection
                                     .websocket
                                     .send(Message::Text(json.into()))
                                     .await
-                                    .map_err(|e| ClientError::SendError(e.to_string()))?;
+                                    .map_err(|_| ClientError::SendError)?;
                                 log::info!("Clock sync completed");
                                 // Clock sync is the last handshake message, we're done
                                 break;
@@ -425,9 +491,7 @@ impl DjClient {
                     }
                 }
                 Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_))) | Ok(None) => {
-                    return Err(ClientError::ConnectionFailed(
-                        "Connection closed during handshake".to_string(),
-                    ));
+                    return Err(ClientError::ConnectionFailed);
                 }
                 Ok(Some(Ok(_))) => {
                     // Binary/ping/pong - ignore
@@ -560,11 +624,10 @@ impl DjClient {
             "type": "set_my_palette",
             "band_materials": materials
         });
-        let json =
-            serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
+        let json = serde_json::to_string(&msg).map_err(|_| ClientError::SendError)?;
         tx.send(Message::Text(json.into()))
             .await
-            .map_err(|e| ClientError::SendError(e.to_string()))?;
+            .map_err(|_| ClientError::SendError)?;
         Ok(())
     }
 
@@ -575,11 +638,10 @@ impl DjClient {
             "type": "set_my_preset",
             "preset": preset_name
         });
-        let json =
-            serde_json::to_string(&msg).map_err(|e| ClientError::SendError(e.to_string()))?;
+        let json = serde_json::to_string(&msg).map_err(|_| ClientError::SendError)?;
         tx.send(Message::Text(json.into()))
             .await
-            .map_err(|e| ClientError::SendError(e.to_string()))?;
+            .map_err(|_| ClientError::SendError)?;
         Ok(())
     }
 
@@ -832,6 +894,72 @@ async fn handle_server_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_error_display_and_debug_never_expose_sensitive_details() {
+        const EXPECTED_DIGEST: &str =
+            "EXPECTED_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const OBSERVED_DIGEST: &str =
+            "OBSERVED_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+        const CREDENTIAL: &str = "password=SUPER_SECRET_CREDENTIAL";
+        const CERTIFICATE_DETAIL: &str = "certificate=PRIVATE_CERTIFICATE_DETAIL";
+
+        let errors = [
+            ClientError::tls_fingerprint_mismatch(EXPECTED_DIGEST, OBSERVED_DIGEST),
+            ClientError::authentication_failed(CREDENTIAL),
+            ClientError::tls_handshake(CERTIFICATE_DETAIL),
+        ];
+
+        for error in errors {
+            let display = error.to_string();
+            let debug = format!("{error:?}");
+            for sentinel in [
+                EXPECTED_DIGEST,
+                OBSERVED_DIGEST,
+                CREDENTIAL,
+                CERTIFICATE_DETAIL,
+            ] {
+                assert!(!display.contains(sentinel), "Display leaked {sentinel}");
+                assert!(!debug.contains(sentinel), "Debug leaked {sentinel}");
+            }
+        }
+    }
+
+    #[test]
+    fn tls_errors_have_distinct_safe_codes_and_actionable_messages() {
+        let cases = [
+            (
+                ClientError::InvalidTlsFingerprint,
+                ConnectionErrorCode::InvalidTlsFingerprint,
+                "64 hexadecimal",
+            ),
+            (
+                ClientError::MissingPeerCertificate,
+                ConnectionErrorCode::MissingPeerCertificate,
+                "did not provide",
+            ),
+            (
+                ClientError::TlsFingerprintMismatch,
+                ConnectionErrorCode::TlsFingerprintMismatch,
+                "certificate changed",
+            ),
+            (
+                ClientError::TlsCertificateHostMismatch,
+                ConnectionErrorCode::TlsCertificateHostMismatch,
+                "different host",
+            ),
+            (
+                ClientError::TlsHandshake,
+                ConnectionErrorCode::TlsHandshake,
+                "Secure connection failed",
+            ),
+        ];
+
+        for (error, expected_code, expected_guidance) in cases {
+            assert_eq!(error.code(), expected_code);
+            assert!(error.to_string().contains(expected_guidance));
+        }
+    }
 
     #[test]
     fn default_config_uses_expected_connection_settings() {

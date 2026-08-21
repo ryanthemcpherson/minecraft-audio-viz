@@ -1,5 +1,6 @@
 import ConnectCode from './ConnectCode';
 import AudioSourceSelect from './AudioSourceSelect';
+import { getTlsFingerprintFieldState } from '../lib/connectionProfile';
 
 interface AudioSource {
   id: string;
@@ -50,6 +51,8 @@ export default function ConnectForm({
   djName,
   onConnect,
 }: ConnectFormProps) {
+  const tlsFingerprintFieldState = getTlsFingerprintFieldState(tlsFingerprint);
+
   return (
     <div className="connect-form">
       <div className="connect-row">
@@ -109,11 +112,9 @@ export default function ConnectForm({
           autoCapitalize="characters"
           spellCheck={false}
           aria-describedby={
-            isTlsFingerprintValid
-              ? 'tls-fingerprint-help'
-              : 'tls-fingerprint-help tls-fingerprint-error'
+            tlsFingerprintFieldState.describedBy
           }
-          aria-invalid={!isTlsFingerprintValid}
+          aria-invalid={tlsFingerprintFieldState.ariaInvalid}
         />
         <div id="tls-fingerprint-help" className="capture-mode-info">
           Safe to save; never share the server password. Required for a self-signed public endpoint
@@ -121,7 +122,7 @@ export default function ConnectForm({
         </div>
         {!isTlsFingerprintValid && (
           <div id="tls-fingerprint-error" className="capture-mode-warning" role="alert">
-            Enter exactly 64 hexadecimal characters, or leave this field blank.
+            {tlsFingerprintFieldState.validationMessage}
           </div>
         )}
       </div>

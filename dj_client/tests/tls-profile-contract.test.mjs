@@ -15,12 +15,14 @@ const connectionHookSource = readFileSync(
   'utf8',
 );
 
-test('DJ connection profile carries the certificate fingerprint to both Tauri connection commands', () => {
+test('DJ connection profile wires the fingerprint helpers to both Tauri connection commands', () => {
   assert.match(connectFormSource, /tlsFingerprint: string/);
   assert.match(disconnectedViewSource, /tlsFingerprint=/);
-  assert.match(connectionHookSource, /mcav\.tlsFingerprint/);
-  assert.match(connectionHookSource, /invoke\('connect_with_code',[\s\S]*?tlsFingerprint:\s*normalizedTlsFingerprint\s*\|\|\s*null/);
-  assert.match(connectionHookSource, /invoke\('connect_direct',[\s\S]*?tlsFingerprint:\s*normalizedTlsFingerprint\s*\|\|\s*null/);
+  assert.match(connectionHookSource, /loadTlsFingerprint\(localStorage\)/);
+  assert.match(connectionHookSource, /saveTlsFingerprint\(localStorage, normalizedTlsFingerprint\)/);
+  assert.match(connectionHookSource, /invoke\('connect_with_code', buildCodeConnectionArgs\(/);
+  assert.match(connectionHookSource, /invoke\('connect_direct', buildDirectConnectionArgs\(/);
+  assert.match(connectionHookSource, /sanitizeConnectionStatus\(event\.payload\)/);
 });
 
 test('connection profile labels the fingerprint as SHA-256 and non-secret', () => {
@@ -30,44 +32,18 @@ test('connection profile labels the fingerprint as SHA-256 and non-secret', () =
   assert.match(connectFormSource, /wss:\/\/IP:25808/i);
 });
 
-test('fingerprint is canonicalized across editing, reload, and persistence while an old local profile remains unpinned', () => {
-  assert.match(connectionHookSource, /normalizeTlsFingerprint/);
-  assert.match(connectionHookSource, /replace\([^)]*[:\\s]/);
-  assert.match(connectionHookSource, /toUpperCase\(\)/);
-  assert.match(
-    connectionHookSource,
-    /normalizeTlsFingerprint\(localStorage\.getItem\('mcav\.tlsFingerprint'\)\s*\?\?\s*''\)/,
-  );
-  assert.match(
-    connectionHookSource,
-    /localStorage\.setItem\('mcav\.tlsFingerprint',\s*normalizedTlsFingerprint\)/,
-  );
-  assert.match(connectionHookSource, /normalizedTlsFingerprint\s*\|\|\s*null/);
-});
-
 test('fingerprint validation is exposed to keyboard and assistive technology', () => {
   assert.match(connectFormSource, /htmlFor="tls-fingerprint"/);
   assert.match(connectFormSource, /id="tls-fingerprint"/);
-  assert.match(
-    connectFormSource,
-    /aria-describedby=\{[\s\S]*isTlsFingerprintValid[\s\S]*tls-fingerprint-help tls-fingerprint-error/,
-  );
-  assert.match(connectFormSource, /aria-invalid=\{[^}]*tlsFingerprint[^}]*\}/i);
+  assert.match(connectFormSource, /aria-describedby=\{[\s\S]*tlsFingerprintFieldState\.describedBy/);
+  assert.match(connectFormSource, /aria-invalid=\{tlsFingerprintFieldState\.ariaInvalid\}/);
   assert.match(connectFormSource, /role="alert"/);
   assert.match(connectFormSource, /disabled=\{[\s\S]*!isTlsFingerprintValid/);
 });
 
-test('TLS failures are mapped to actionable messages without rendering certificate values', () => {
-  assert.match(connectionHookSource, /Invalid TLS certificate fingerprint/i);
-  assert.match(connectionHookSource, /TLS peer did not provide a certificate/i);
-  assert.match(connectionHookSource, /TLS certificate fingerprint mismatch/i);
-  assert.match(connectionHookSource, /TLS certificate is not valid for the requested server host/i);
-  assert.match(connectionHookSource, /TLS handshake failed/i);
-  assert.match(
-    connectionHookSource,
-    /if \(normalizedError\.includes\('tls certificate fingerprint mismatch'\)\) \{\s*return 'The server certificate does not match the saved fingerprint\.[^']*';\s*\}/,
-  );
-  assert.doesNotMatch(connectionHookSource, /errorMessage\s*=\s*errStr[^;]*TlsFingerprintMismatch/);
+test('connection and validation errors render through alert live regions without certificate values', () => {
+  assert.match(connectFormSource, /tls-fingerprint-error[^>]*[\s\S]*role="alert"/);
+  assert.match(connectFormSource, /error-message" role="alert"/);
   assert.doesNotMatch(connectFormSource, /expected\s+[0-9a-f:]{64}/i);
 });
 

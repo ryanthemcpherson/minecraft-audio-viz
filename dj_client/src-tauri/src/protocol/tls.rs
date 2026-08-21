@@ -56,14 +56,12 @@ pub async fn connect_verified(
     let expected_bytes = normalize_sha256_fingerprint(expected_fingerprint)?;
     let request = url
         .into_client_request()
-        .map_err(|_| ClientError::ConnectionFailed("Invalid WebSocket server URL".to_string()))?;
+        .map_err(|_| ClientError::ConnectionFailed)?;
     if request.uri().scheme_str() != Some("wss") {
         return Err(ClientError::MissingPeerCertificate);
     }
 
-    let uri_host = request.uri().host().ok_or_else(|| {
-        ClientError::ConnectionFailed("WebSocket server URL has no hostname".to_string())
-    })?;
+    let uri_host = request.uri().host().ok_or(ClientError::ConnectionFailed)?;
     let tls_host = uri_host
         .strip_prefix('[')
         .and_then(|host| host.strip_suffix(']'))
@@ -81,31 +79,29 @@ pub async fn connect_verified(
         .danger_accept_invalid_hostnames(false);
     let connector = connector_builder
         .build()
-        .map_err(|error| ClientError::TlsHandshake(error.to_string()))?;
+        .map_err(ClientError::tls_handshake)?;
 
     let tcp_stream = TcpStream::connect(socket_address)
         .await
-        .map_err(|error| ClientError::ConnectionFailed(error.to_string()))?;
+        .map_err(|_| ClientError::ConnectionFailed)?;
     let tls_stream = TokioTlsConnector::from(connector)
         .connect(tls_host, tcp_stream)
         .await
-        .map_err(|error| ClientError::TlsHandshake(error.to_string()))?;
+        .map_err(ClientError::tls_handshake)?;
 
     let certificate = tls_stream
         .get_ref()
         .peer_certificate()
-        .map_err(|error| ClientError::TlsHandshake(error.to_string()))?
+        .map_err(ClientError::tls_handshake)?
         .ok_or(ClientError::MissingPeerCertificate)?;
-    let certificate_der = certificate
-        .to_der()
-        .map_err(|error| ClientError::TlsHandshake(error.to_string()))?;
+    let certificate_der = certificate.to_der().map_err(ClientError::tls_handshake)?;
     verify_certificate_host(&certificate_der, tls_host)?;
     let observed_bytes: [u8; 32] = Sha256::digest(&certificate_der).into();
     if !fingerprints_match(&expected_bytes, &observed_bytes) {
-        return Err(ClientError::TlsFingerprintMismatch {
-            expected: format_fingerprint(&expected_bytes),
-            observed: format_fingerprint(&observed_bytes),
-        });
+        return Err(ClientError::tls_fingerprint_mismatch(
+            expected_bytes,
+            observed_bytes,
+        ));
     }
 
     let tls_stream = MaybeTlsStream::NativeTls(tls_stream);
@@ -121,31 +117,20 @@ fn fingerprints_match(expected: &[u8; 32], observed: &[u8; 32]) -> bool {
 
 fn map_websocket_connection_error(error: tokio_tungstenite::tungstenite::Error) -> ClientError {
     if matches!(&error, tokio_tungstenite::tungstenite::Error::Tls(_)) {
-        ClientError::TlsHandshake(error.to_string())
+        ClientError::tls_handshake(error)
     } else {
-        ClientError::ConnectionFailed(error.to_string())
+        ClientError::ConnectionFailed
     }
 }
 
 fn verify_certificate_host(certificate_der: &[u8], host: &str) -> Result<(), ClientError> {
     let certificate_der = PkiCertificateDer::from(certificate_der);
-    let certificate = EndEntityCert::try_from(&certificate_der).map_err(|_| {
-        ClientError::TlsHandshake("TLS peer certificate is not valid X.509 DER".to_string())
-    })?;
-    let server_name = ServerName::try_from(host).map_err(|_| {
-        ClientError::ConnectionFailed("WebSocket server hostname is invalid".to_string())
-    })?;
+    let certificate =
+        EndEntityCert::try_from(&certificate_der).map_err(ClientError::tls_handshake)?;
+    let server_name = ServerName::try_from(host).map_err(|_| ClientError::ConnectionFailed)?;
     certificate
         .verify_is_valid_for_subject_name(&server_name)
-        .map_err(|_| {
-            ClientError::TlsHandshake(
-                "TLS certificate is not valid for the requested server host".to_string(),
-            )
-        })
-}
-
-fn format_fingerprint(bytes: &[u8; 32]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+        .map_err(|_| ClientError::TlsCertificateHostMismatch)
 }
 
 #[cfg(test)]
@@ -930,10 +915,7 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(
-            result,
-            Err(ClientError::TlsFingerprintMismatch { .. })
-        ));
+        assert!(matches!(result, Err(ClientError::TlsFingerprintMismatch)));
         fixture.wait_for_post_tls_ready().await;
         assert!(fixture.received_application_bytes().await.is_empty());
         assert_eq!(
@@ -1414,16 +1396,58 @@ mod tests {
 
         let result = client.connect().await;
 
-        assert!(matches!(
-            result,
-            Err(ClientError::TlsFingerprintMismatch { .. })
-        ));
+        assert!(matches!(result, Err(ClientError::TlsFingerprintMismatch)));
         assert!(fixture.received_application_bytes().await.is_empty());
         assert_eq!(
             fixture.terminal_outcome().await,
             FixtureTerminalOutcome::EofWithoutUpgrade
         );
         assert!(fixture.received_messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconnect_path_preserves_typed_safe_tls_mismatch() {
+        let fixture = TlsWebSocketFixture::start().await;
+        let expected_fingerprint = fixture.different_fingerprint();
+        let observed_fingerprint = fixture.fingerprint.clone();
+        let state = Arc::new(parking_lot::Mutex::new(crate::state::AppState::default()));
+        let config = DjClientConfig {
+            server_host: "127.0.0.1".to_string(),
+            server_port: fixture.port,
+            dj_name: "Reconnect DJ".to_string(),
+            connect_code: Some("reconnect-secret-code".to_string()),
+            tls_fingerprint: Some(expected_fingerprint.clone()),
+            ..Default::default()
+        };
+        let mut replacement = crate::prepare_connection_replacement(
+            &state,
+            &config,
+            Some("reconnect-secret-code".to_string()),
+        )
+        .await;
+        let generation = replacement.generation;
+
+        let result = crate::connect_client_for_generation(
+            &state,
+            generation,
+            DjClient::new(config),
+            &replacement.cancellation,
+            &mut replacement.cancellation_rx,
+        )
+        .await;
+
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("rotated certificate must reject reconnect"),
+        };
+        assert!(matches!(
+            error,
+            crate::ReconnectError::Client(ClientError::TlsFingerprintMismatch)
+        ));
+        let formatted = format!("{error:?} {error}");
+        assert!(!formatted.contains(&expected_fingerprint));
+        assert!(!formatted.contains(&observed_fingerprint));
+        assert!(fixture.received_application_bytes().await.is_empty());
     }
 
     #[tokio::test]
@@ -1441,10 +1465,7 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(
-            result,
-            Err(ClientError::TlsFingerprintMismatch { .. })
-        ));
+        assert!(matches!(result, Err(ClientError::TlsFingerprintMismatch)));
         assert!(
             rotated_fixture
                 .received_application_bytes()
@@ -1514,7 +1535,7 @@ mod tests {
             Err(error) => format!("connection returned {error:?}"),
         };
         assert!(
-            matches!(result, Err(ClientError::TlsHandshake(_))),
+            matches!(result, Err(ClientError::TlsCertificateHostMismatch)),
             "{outcome}"
         );
         assert!(fixture.received_application_bytes().await.is_empty());
@@ -1541,7 +1562,10 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Err(ClientError::TlsHandshake(_))));
+        assert!(matches!(
+            result,
+            Err(ClientError::TlsCertificateHostMismatch)
+        ));
         assert!(fixture.received_application_bytes().await.is_empty());
         assert_eq!(
             fixture.terminal_outcome().await,
@@ -1556,7 +1580,7 @@ mod tests {
 
         let result = connect_verified(&fixture.url, WebSocketConfig::default(), None).await;
 
-        assert!(matches!(result, Err(ClientError::TlsHandshake(_))));
+        assert!(matches!(result, Err(ClientError::TlsHandshake)));
         assert!(fixture.received_application_bytes().await.is_empty());
         assert!(
             matches!(

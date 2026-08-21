@@ -1,6 +1,7 @@
 //! Application state management
 
 use crate::audio::AudioCaptureHandle;
+use crate::protocol::ConnectionErrorCode;
 use crate::protocol::DjClient;
 use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,7 @@ pub struct ConnectionStatus {
     pub total_djs: usize,
     pub active_dj_name: Option<String>,
     pub error: Option<String>,
+    pub error_code: Option<ConnectionErrorCode>,
 }
 
 /// Application state
@@ -187,6 +189,7 @@ mod tests {
         assert_eq!(status.total_djs, 0);
         assert!(status.active_dj_name.is_none());
         assert!(status.error.is_none());
+        assert!(status.error_code.is_none());
     }
 
     #[test]
