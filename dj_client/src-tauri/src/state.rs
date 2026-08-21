@@ -8,6 +8,42 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+/// Per-generation cancellation state with an atomic synchronous boundary for
+/// credential `start_send` versus replacement cancellation.
+pub(crate) struct ConnectionCancellation {
+    cancelled: parking_lot::Mutex<bool>,
+    cancellation_tx: watch::Sender<bool>,
+}
+
+impl ConnectionCancellation {
+    pub(crate) fn new() -> Self {
+        let (cancellation_tx, _cancellation_rx) = watch::channel(false);
+        Self {
+            cancelled: parking_lot::Mutex::new(false),
+            cancellation_tx,
+        }
+    }
+
+    pub(crate) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.cancellation_tx.subscribe()
+    }
+
+    pub(crate) fn cancel(&self) {
+        *self.cancelled.lock() = true;
+        let _ = self.cancellation_tx.send(true);
+    }
+
+    pub(crate) fn start_authentication<T>(&self, start_send: impl FnOnce() -> T) -> Result<T, ()> {
+        let cancelled = self.cancelled.lock();
+        if *cancelled {
+            return Err(());
+        }
+        let result = start_send();
+        drop(cancelled);
+        Ok(result)
+    }
+}
+
 /// Connection status
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConnectionStatus {
@@ -67,7 +103,7 @@ pub struct AppState {
     pub connection_generation: u64,
 
     /// Cancels connection work owned by `connection_generation`, including reconnects.
-    pub connection_attempt_cancel_tx: Option<watch::Sender<bool>>,
+    pub(crate) connection_cancellation: Option<Arc<ConnectionCancellation>>,
 
     /// Serializes replacement preparation so every newer command can cancel
     /// the generation immediately before it.
@@ -119,7 +155,7 @@ impl Default for AppState {
             server_port: 9000,
             tls_fingerprint: None,
             connection_generation: 0,
-            connection_attempt_cancel_tx: None,
+            connection_cancellation: None,
             connection_replacement_lock: Arc::new(tokio::sync::Mutex::new(())),
             connection_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
             connection_auth_commit_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -168,7 +204,7 @@ mod tests {
         assert_eq!(state.server_port, 9000);
         assert!(state.tls_fingerprint.is_none());
         assert_eq!(state.connection_generation, 0);
-        assert!(state.connection_attempt_cancel_tx.is_none());
+        assert!(state.connection_cancellation.is_none());
         assert!(state.connection_replacement_lock.try_lock().is_ok());
         assert!(state.connection_operation_lock.try_lock().is_ok());
         assert!(state.connection_auth_commit_lock.try_lock().is_ok());

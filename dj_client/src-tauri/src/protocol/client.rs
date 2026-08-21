@@ -2,16 +2,16 @@
 
 use super::messages::*;
 use super::tls::{connect_verified, normalize_sha256_fingerprint};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use parking_lot::Mutex;
+use std::future::poll_fn;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-#[cfg(test)]
-use tokio::sync::oneshot;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, tungstenite::Message, tungstenite::protocol::WebSocketConfig,
 };
@@ -201,20 +201,19 @@ pub struct DjClient {
 /// not serialized or sent DJ credentials yet.
 pub(crate) struct PendingDjConnection {
     websocket: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    #[cfg(test)]
-    authentication_send_barrier: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
 }
 
-#[cfg(test)]
 impl PendingDjConnection {
-    pub(crate) fn stall_authentication_send(
-        &mut self,
-        send_stalled_tx: oneshot::Sender<()>,
-        release_send_rx: oneshot::Receiver<()>,
-    ) {
-        self.authentication_send_barrier = Some((send_stalled_tx, release_send_rx));
+    pub(crate) fn into_websocket(self) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+        self.websocket
+    }
+
+    pub(crate) fn from_websocket(websocket: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
+        Self { websocket }
     }
 }
+
+pub(crate) const AUTHENTICATION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl DjClient {
     /// Create a new DJ client
@@ -276,16 +275,11 @@ impl DjClient {
         .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))??;
         Ok(PendingDjConnection {
             websocket: ws_stream,
-            #[cfg(test)]
-            authentication_send_barrier: None,
         })
     }
 
-    /// Serialize and send authentication over an already verified transport.
-    pub(crate) async fn send_authentication(
-        &self,
-        pending_connection: &mut PendingDjConnection,
-    ) -> Result<(), ClientError> {
+    /// Serialize authentication without touching the verified transport.
+    pub(crate) fn authentication_message(&self) -> Result<Message, ClientError> {
         let auth_msg = if let Some(ref code) = self.config.connect_code {
             // Code-based authentication
             serde_json::to_string(&CodeAuthMessage::new(
@@ -311,22 +305,37 @@ impl DjClient {
                 "No credentials provided. Set a connect code or DJ ID/key in settings.".to_string(),
             ));
         };
+        Ok(Message::Text(auth_msg.into()))
+    }
 
-        #[cfg(test)]
-        if let Some((send_stalled_tx, release_send_rx)) =
-            pending_connection.authentication_send_barrier.take()
-        {
-            let _ = send_stalled_tx.send(());
-            release_send_rx
-                .await
-                .expect("authentication send test barrier should be released");
-        }
+    /// Send authentication with an explicit `start_send` commit point and a
+    /// finite readiness/flush deadline.
+    async fn send_authentication(
+        &self,
+        pending_connection: &mut PendingDjConnection,
+    ) -> Result<(), ClientError> {
+        let authentication_message = self.authentication_message()?;
+        let deadline = tokio::time::Instant::now() + AUTHENTICATION_SEND_TIMEOUT;
 
-        pending_connection
-            .websocket
-            .send(Message::Text(auth_msg.into()))
-            .await
-            .map_err(|e| ClientError::SendError(e.to_string()))?;
+        tokio::time::timeout_at(
+            deadline,
+            poll_fn(|context| Pin::new(&mut pending_connection.websocket).poll_ready(context)),
+        )
+        .await
+        .map_err(|_| ClientError::SendError("Authentication send timed out".to_string()))?
+        .map_err(|error| ClientError::SendError(error.to_string()))?;
+
+        Pin::new(&mut pending_connection.websocket)
+            .start_send(authentication_message)
+            .map_err(|error| ClientError::SendError(error.to_string()))?;
+
+        tokio::time::timeout_at(
+            deadline,
+            poll_fn(|context| Pin::new(&mut pending_connection.websocket).poll_flush(context)),
+        )
+        .await
+        .map_err(|_| ClientError::SendError("Authentication send timed out".to_string()))?
+        .map_err(|error| ClientError::SendError(error.to_string()))?;
         Ok(())
     }
 

@@ -4,7 +4,7 @@ mod client;
 mod messages;
 mod tls;
 
-pub(crate) use client::PendingDjConnection;
+pub(crate) use client::{AUTHENTICATION_SEND_TIMEOUT, PendingDjConnection};
 pub use client::{ClientError, ConnectionState, DjClient, DjClientConfig};
 pub use messages::*;
 pub use tls::{connect_verified, normalize_sha256_fingerprint};
