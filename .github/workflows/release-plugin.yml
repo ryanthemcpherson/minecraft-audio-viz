@@ -59,7 +59,6 @@ jobs:
         run: |
           git fetch --no-tags origin main
           test "$COMMIT_SHA" = "$GITHUB_SHA"
-          test "$COMMIT_SHA" = "$(git rev-parse origin/main)"
           set +e
           git ls-remote --exit-code --tags origin refs/tags/plugin-v1.1.0 >/dev/null
           tag_status=$?
@@ -70,7 +69,10 @@ jobs:
             existing_tag_target="$(git rev-parse 'refs/tags/plugin-v1.1.0^{}')"
             test "$existing_tag_target" = "$COMMIT_SHA"
             echo "Existing immutable tag already targets approved commit $COMMIT_SHA"
-          elif [[ "$tag_status" -ne 2 ]]; then
+          elif [[ "$tag_status" -eq 2 ]]; then
+            test "$COMMIT_SHA" = "$(git rev-parse origin/main)"
+            echo "Tag is absent and approved commit is current main: $COMMIT_SHA"
+          else
             echo "Unable to verify release-tag state"
             exit "$tag_status"
           fi
@@ -262,7 +264,6 @@ jobs:
           RELEASE_DEPLOY_KEY: ${{ secrets.MCAV_PLUGIN_RELEASE_DEPLOY_KEY }}
         run: |
           git fetch --no-tags origin main
-          test "$COMMIT_SHA" = "$(git rev-parse origin/main)"
           set +e
           git ls-remote --exit-code --tags origin refs/tags/plugin-v1.1.0 >/dev/null
           tag_status=$?
@@ -272,13 +273,9 @@ jobs:
               'refs/tags/plugin-v1.1.0:refs/tags/plugin-v1.1.0'
             existing_tag_target="$(git rev-parse 'refs/tags/plugin-v1.1.0^{}')"
             test "$existing_tag_target" = "$COMMIT_SHA"
-          elif [[ "$tag_status" -ne 2 ]]; then
-            echo "Unable to verify release-tag state"
-            exit "$tag_status"
-          fi
-          if git show-ref --verify --quiet refs/tags/plugin-v1.1.0; then
             echo "Existing immutable tag already targets approved commit $COMMIT_SHA"
-          else
+          elif [[ "$tag_status" -eq 2 ]]; then
+            test "$COMMIT_SHA" = "$(git rev-parse origin/main)"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             ssh_directory="$RUNNER_TEMP/mcav-plugin-release-ssh"
@@ -292,6 +289,9 @@ jobs:
             git tag -a plugin-v1.1.0 "$COMMIT_SHA" -m "MCAV Paper Plugin 1.1.0"
             GIT_SSH_COMMAND="ssh -i $ssh_directory/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_directory/known_hosts" \
               git push origin refs/tags/plugin-v1.1.0
+          else
+            echo "Unable to verify release-tag state"
+            exit "$tag_status"
           fi
 
       - name: Publish byte-identical candidate files
