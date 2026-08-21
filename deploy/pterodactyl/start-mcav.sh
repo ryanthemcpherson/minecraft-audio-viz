@@ -45,8 +45,16 @@ dj_port="${VJ_SERVER_PORT:-25808}"
 metrics_port="${METRICS_PORT:-9001}"
 entity_count="${ENTITY_COUNT:-160}"
 
-if [[ "$http_port" == "$dj_port" ]]; then
-  log "HTTP_PORT and VJ_SERVER_PORT must differ (both are $http_port); VJ is disabled for this start." >&2
+case "${UNIFIED_WEB:-true}" in
+  1|true|TRUE|yes|YES)
+    unified_web_enabled=true
+    ;;
+  *)
+    unified_web_enabled=false
+    ;;
+esac
+if [[ "$http_port" != '8080' || "$dj_port" != '25808' || "$unified_web_enabled" != 'true' || -n "${BROADCAST_PORT+x}" ]]; then
+  log 'Pterodactyl requires HTTP_PORT=8080, VJ_SERVER_PORT=25808, unified web, and no BROADCAST_PORT; VJ is disabled for this start.' >&2
   launch_paper
 fi
 
@@ -54,22 +62,8 @@ endpoint_host="$public_host"
 if [[ "$public_host" == *:* ]]; then
   endpoint_host="[$public_host]"
 fi
-public_origin="https://${endpoint_host}:${http_port}"
-
-web_arguments=()
-case "${UNIFIED_WEB:-true}" in
-  1|true|TRUE|yes|YES)
-    web_arguments=(--unified-web --public-origin "$public_origin")
-    ;;
-  0|false|FALSE|no|NO)
-    broadcast_port="${BROADCAST_PORT:-8766}"
-    web_arguments=(--broadcast-port "$broadcast_port")
-    ;;
-  *)
-    log 'UNIFIED_WEB must be true or false; VJ is disabled for this start.' >&2
-    launch_paper
-    ;;
-esac
+public_origin="https://${endpoint_host}:8080"
+web_arguments=(--unified-web --public-origin "$public_origin")
 
 architecture="${MCAV_ARCH_OVERRIDE:-$(uname -m)}"
 case "$architecture" in
@@ -107,7 +101,27 @@ if ! "$runtime" \
   launch_paper
 fi
 
-runtime_env="$MCAV_ROOT/state/runtime.env"
+if ! identity_dir="$(readlink -e "$MCAV_ROOT/state/current-identity" 2>/dev/null)"; then
+  log 'Committed deployment identity is missing; VJ is disabled for this start.' >&2
+  launch_paper
+fi
+state_root="$(cd "$MCAV_ROOT/state" && pwd -P)"
+case "$identity_dir" in
+  "$state_root"/identity-generations/*)
+    ;;
+  *)
+    log 'Committed deployment identity points outside identity-generations; VJ is disabled for this start.' >&2
+    launch_paper
+    ;;
+esac
+for identity_file in runtime.env dj_auth.json tls.crt tls.key FIRST_LOGIN.txt identity.json; do
+  if [[ ! -f "$identity_dir/$identity_file" || -L "$identity_dir/$identity_file" ]]; then
+    log "Committed deployment identity is incomplete at $identity_dir; VJ is disabled for this start." >&2
+    launch_paper
+  fi
+done
+
+runtime_env="$identity_dir/runtime.env"
 shared_secret=''
 while IFS='=' read -r key value; do
   if [[ "$key" == 'MINECRAFT_WS_SECRET' ]]; then
@@ -125,14 +139,14 @@ MINECRAFT_WS_SECRET="$shared_secret" "$runtime" \
   --project-root "$MCAV_ROOT" \
   --minecraft-host 127.0.0.1 \
   --minecraft-port 8765 \
-  --auth-file "$MCAV_ROOT/state/dj_auth.json" \
+  --auth-file "$identity_dir/dj_auth.json" \
   --http-host 0.0.0.0 \
   --http-port "$http_port" \
   --port "$dj_port" \
   "${web_arguments[@]}" \
   --metrics-port "$metrics_port" \
-  --tls-cert "$MCAV_ROOT/state/tls.crt" \
-  --tls-key "$MCAV_ROOT/state/tls.key" \
+  --tls-cert "$identity_dir/tls.crt" \
+  --tls-key "$identity_dir/tls.key" \
   --entities "$entity_count" \
   --no-spectrograph &
 vj_pid=$!
