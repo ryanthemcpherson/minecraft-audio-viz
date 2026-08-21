@@ -28,8 +28,10 @@ if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
   mkdir -p "$identity_dir"
   printf 'MINECRAFT_WS_SECRET=test-secret-not-logged\n' > "$identity_dir/runtime.env"
   : > "$identity_dir/dj_auth.json"
-  : > "$identity_dir/tls.crt"
-  : > "$identity_dir/tls.key"
+  if [[ "${FAKE_BOOTSTRAP_OMIT_TLS:-0}" != "1" ]]; then
+    : > "$identity_dir/tls.crt"
+    : > "$identity_dir/tls.key"
+  fi
   canonical_host="${FAKE_CANONICAL_HOST:-8.8.8.8}"
   endpoint_host="$canonical_host"
   if [[ "$canonical_host" == *:* ]]; then endpoint_host="[$canonical_host]"; fi
@@ -69,6 +71,7 @@ run_wrapper() {
   SECRET_CAPTURE="$fixture/secret.env" \
   MCAV_PUBLIC_HOST="${TEST_MCAV_PUBLIC_HOST-8.8.8.8}" \
   FAKE_CANONICAL_HOST="${FAKE_CANONICAL_HOST-${TEST_MCAV_PUBLIC_HOST-8.8.8.8}}" \
+  FAKE_BOOTSTRAP_OMIT_TLS="${FAKE_BOOTSTRAP_OMIT_TLS:-0}" \
   "$fixture/mcav-vj/start-mcav.sh" -- "$@"
 }
 
@@ -240,6 +243,14 @@ test_post_identity_bootstrap_failure_starts_only_paper() {
   [[ ! -f "$fixture/vj.args" ]] || fail 'VJ started after identity recovery failure'
 }
 
+test_missing_tls_identity_starts_only_paper() {
+  local fixture="$TEST_ROOT/missing-tls-identity"
+  make_fixture "$fixture"
+  FAKE_BOOTSTRAP_OMIT_TLS=1 run_wrapper "$fixture" "$fixture/paper" --nogui
+  [[ -f "$fixture/paper.args" ]] || fail 'Paper did not start with incomplete TLS identity'
+  [[ ! -f "$fixture/vj.args" ]] || fail 'VJ started without its committed TLS identity'
+}
+
 test_vj_bind_failure_still_starts_paper() {
   local fixture="$TEST_ROOT/vj-failure"
   make_fixture "$fixture"
@@ -266,6 +277,7 @@ test_example_environment_uses_two_public_ports
 test_arm64_runtime_selection
 test_bootstrap_failure_still_starts_paper
 test_post_identity_bootstrap_failure_starts_only_paper
+test_missing_tls_identity_starts_only_paper
 test_vj_bind_failure_still_starts_paper
 test_missing_paper_command_is_rejected
 printf 'start-mcav.sh integration tests passed\n'

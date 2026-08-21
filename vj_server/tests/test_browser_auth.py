@@ -10,7 +10,10 @@ import msgspec.json as mjson
 import pytest
 from aiohttp import ClientSession, TCPConnector, WSMsgType
 from aiohttp.client_exceptions import WSServerHandshakeError
+from websockets.asyncio.client import connect as ws_connect
+from websockets.exceptions import InvalidHandshake
 
+import vj_server.vj_server as vj_server_module
 from vj_server.auth import hash_password
 from vj_server.models import DJAuthConfig, _json_str
 from vj_server.relay import RelayMixin
@@ -66,15 +69,8 @@ WfAdyX7ANnJz4xm0ag==
 """
 
 
-@dataclass
-class LiveGateway:
-    server: VJServer
-    client: ClientSession
-    websocket_url: str
-
-
 @pytest.fixture
-async def live_gateway(tmp_path: Path) -> AsyncIterator[LiveGateway]:
+def tls_context(tmp_path: Path) -> ssl.SSLContext:
     cert_file = tmp_path / "tls.crt"
     key_file = tmp_path / "tls.key"
     private_key_label = "PRIVATE KEY"
@@ -85,12 +81,27 @@ async def live_gateway(tmp_path: Path) -> AsyncIterator[LiveGateway]:
         f"-----END {private_key_label}-----\n",
         encoding="ascii",
     )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert_file, key_file)
+    return context
+
+
+@dataclass
+class LiveGateway:
+    server: VJServer
+    client: ClientSession
+    websocket_url: str
+
+
+@pytest.fixture
+async def live_gateway(
+    tmp_path: Path,
+    tls_context: ssl.SSLContext,
+) -> AsyncIterator[LiveGateway]:
     (tmp_path / "admin_panel").mkdir()
     (tmp_path / "preview_tool" / "frontend").mkdir(parents=True)
     server = VJServer(
         project_root=tmp_path,
-        tls_cert=cert_file,
-        tls_key=key_file,
         auth_config=DJAuthConfig(
             vj_operators={
                 "lighting": {"key_hash": hash_password("lighting-secret")},
@@ -99,6 +110,7 @@ async def live_gateway(tmp_path: Path) -> AsyncIterator[LiveGateway]:
         metrics_port=None,
         show_spectrograph=False,
     )
+    server.server_ssl_context = tls_context
     runner = await start_unified_web_gateway(
         server._handle_browser_client,
         "127.0.0.1",
@@ -118,6 +130,172 @@ async def live_gateway(tmp_path: Path) -> AsyncIterator[LiveGateway]:
     finally:
         await client.close()
         await runner.cleanup()
+
+
+@dataclass
+class LiveDJListener:
+    server: VJServer
+    secure_url: str
+    plaintext_url: str
+    client_ssl_context: ssl.SSLContext
+
+
+@pytest.fixture
+async def live_dj_listener(
+    monkeypatch: pytest.MonkeyPatch,
+    tls_context: ssl.SSLContext,
+) -> AsyncIterator[LiveDJListener]:
+    server = VJServer(
+        dj_port=0,
+        broadcast_port=0,
+        http_port=0,
+        auth_config=DJAuthConfig(
+            djs={
+                "tls-dj": {
+                    "key_hash": hash_password("tls-secret"),
+                    "name": "TLS DJ",
+                    "priority": 7,
+                }
+            }
+        ),
+        metrics_port=None,
+        show_spectrograph=False,
+    )
+    server.server_ssl_context = tls_context
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+
+    real_ws_serve = vj_server_module.ws_serve
+    dj_listener_started = asyncio.Event()
+    dj_listener = None
+
+    async def capture_listener(handler, host, port, **kwargs):
+        nonlocal dj_listener
+        listener = await real_ws_serve(handler, host, port, **kwargs)
+        if handler == server._handle_dj_connection:
+            dj_listener = listener
+            dj_listener_started.set()
+        return listener
+
+    async def no_op() -> None:
+        return None
+
+    async def wait_for_cancellation() -> None:
+        await asyncio.Future()
+
+    monkeypatch.setattr(vj_server_module, "ws_serve", capture_listener)
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = wait_for_cancellation
+
+    run_task = asyncio.create_task(server.run())
+    try:
+        await asyncio.wait_for(dj_listener_started.wait(), timeout=1.0)
+        assert dj_listener is not None
+        sockets = dj_listener.sockets
+        port = sockets[0].getsockname()[1]
+        client_ssl_context = ssl.create_default_context()
+        client_ssl_context.check_hostname = False
+        client_ssl_context.verify_mode = ssl.CERT_NONE
+        yield LiveDJListener(
+            server=server,
+            secure_url=f"wss://127.0.0.1:{port}",
+            plaintext_url=f"ws://127.0.0.1:{port}",
+            client_ssl_context=client_ssl_context,
+        )
+    finally:
+        run_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(run_task, timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_dj_listener_uses_server_tls_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tls_context: ssl.SSLContext,
+) -> None:
+    calls = []
+    main_loop_entered = asyncio.Event()
+
+    class FakeClosableServer:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def fake_serve(handler, host, port, **kwargs):
+        calls.append((handler, host, port, kwargs))
+        return FakeClosableServer()
+
+    async def no_op() -> None:
+        return None
+
+    async def wait_for_cancellation() -> None:
+        main_loop_entered.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(vj_server_module, "ws_serve", fake_serve)
+    server = VJServer(
+        dj_port=25808,
+        http_port=0,
+        metrics_port=None,
+        show_spectrograph=False,
+    )
+    server.server_ssl_context = tls_context
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = wait_for_cancellation
+
+    task = asyncio.create_task(server.run())
+    await asyncio.wait_for(main_loop_entered.wait(), timeout=1.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    dj_call = next(call for call in calls if call[2] == 25808)
+    assert dj_call[3]["ssl"] is tls_context
+
+
+@pytest.mark.asyncio
+async def test_tls_dj_listener_logs_wss(
+    monkeypatch: pytest.MonkeyPatch,
+    tls_context: ssl.SSLContext,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FakeClosableServer:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def fake_serve(*_args, **_kwargs):
+        return FakeClosableServer()
+
+    async def no_op() -> None:
+        return None
+
+    monkeypatch.setattr(vj_server_module, "ws_serve", fake_serve)
+    server = VJServer(
+        dj_port=25808,
+        http_port=0,
+        metrics_port=None,
+        show_spectrograph=False,
+    )
+    server.server_ssl_context = tls_context
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+
+    with caplog.at_level("INFO", logger="vj_server"):
+        await server.run()
+
+    assert "DJ WebSocket server: wss://localhost:25808" in caplog.messages
 
 
 class AuthWebSocket:
@@ -288,6 +466,58 @@ async def test_real_tls_browser_authenticates_and_receives_initial_state(
         await asyncio.sleep(0)
     assert live_gateway.server._broadcast_clients == set()
     assert live_gateway.server._browser_disconnects == 1
+
+
+async def test_real_tls_dj_listener_completes_credential_authentication(
+    live_dj_listener: LiveDJListener,
+) -> None:
+    async with ws_connect(
+        live_dj_listener.secure_url,
+        ssl=live_dj_listener.client_ssl_context,
+        open_timeout=1.0,
+        close_timeout=1.0,
+    ) as socket:
+        await socket.send(
+            mjson.encode(
+                {
+                    "type": "dj_auth",
+                    "dj_id": "tls-dj",
+                    "dj_key": "tls-secret",
+                    "dj_name": "TLS DJ",
+                }
+            )
+        )
+        auth_success = mjson.decode(await asyncio.wait_for(socket.recv(), timeout=1.0))
+        clock_sync_request = mjson.decode(await asyncio.wait_for(socket.recv(), timeout=1.0))
+        server_time = clock_sync_request["server_time"]
+        await socket.send(
+            mjson.encode(
+                {
+                    "type": "clock_sync_response",
+                    "dj_recv_time": server_time,
+                    "dj_send_time": server_time,
+                }
+            )
+        )
+        stream_route = mjson.decode(await asyncio.wait_for(socket.recv(), timeout=1.0))
+
+        assert auth_success["type"] == "auth_success"
+        assert auth_success["dj_id"] == "tls-dj"
+        assert clock_sync_request["type"] == "clock_sync_request"
+        assert stream_route["type"] == "stream_route"
+        assert live_dj_listener.server._dj_connects == 1
+
+
+async def test_real_tls_dj_listener_rejects_plaintext_websocket(
+    live_dj_listener: LiveDJListener,
+) -> None:
+    with pytest.raises(InvalidHandshake):
+        async with ws_connect(
+            live_dj_listener.plaintext_url,
+            open_timeout=1.0,
+            close_timeout=1.0,
+        ):
+            pass
 
 
 @pytest.mark.parametrize("origin", [None, "https://203.0.113.10:18080"])

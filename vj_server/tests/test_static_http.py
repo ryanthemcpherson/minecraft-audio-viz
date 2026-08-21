@@ -763,7 +763,7 @@ def test_modern_cli_propagates_secure_listener_options(
 
 
 @pytest.mark.asyncio
-async def test_vj_server_passes_tls_context_to_browser_listener(
+async def test_vj_server_passes_tls_context_to_websocket_listeners(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ssl_context = object()
@@ -794,8 +794,7 @@ async def test_vj_server_passes_tls_context_to_browser_listener(
 
     await server.run()
 
-    assert listener_calls[0].get("ssl") is None
-    assert listener_calls[1]["ssl"] is ssl_context
+    assert [call["ssl"] for call in listener_calls] == [ssl_context, ssl_context]
 
 
 def test_http_server_does_not_serve_project_files_when_ui_assets_are_missing(

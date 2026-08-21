@@ -62,6 +62,53 @@ def test_unified_mode_requires_tls() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_unified_mode_run_refuses_missing_tls_before_opening_listeners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    starts: list[str] = []
+
+    class FakeListener:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    class FakeGatewayRunner:
+        async def cleanup(self) -> None:
+            return None
+
+    async def fake_gateway(*_args, **_kwargs):
+        starts.append("gateway")
+        return FakeGatewayRunner()
+
+    async def fake_ws_serve(*_args, **_kwargs):
+        starts.append("websocket")
+        return FakeListener()
+
+    async def no_op() -> None:
+        return None
+
+    monkeypatch.setattr(vj_mod, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_mod, "ws_serve", fake_ws_serve)
+    server = _make_unified_server(monkeypatch)
+    server.server_ssl_context = None
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+
+    with pytest.raises(
+        RuntimeError,
+        match="Unified web mode requires TLS for all public listeners",
+    ):
+        await server.run()
+
+    assert starts == []
+
+
 @pytest.mark.parametrize(
     "public_origin",
     [

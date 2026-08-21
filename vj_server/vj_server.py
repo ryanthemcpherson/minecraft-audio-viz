@@ -1265,6 +1265,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         if not HAS_WEBSOCKETS:
             logger.error("websockets not installed. Run: pip install websockets")
             return
+        if self.unified_web and self.server_ssl_context is None:
+            raise RuntimeError("Unified web mode requires TLS for all public listeners")
 
         self._running = True
         gateway_runner = None
@@ -1299,8 +1301,10 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 "0.0.0.0",
                 self.dj_port,
                 max_size=65_536,
+                ssl=self.server_ssl_context,
             )
-            logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
+            dj_scheme = "wss" if self.server_ssl_context is not None else "ws"
+            logger.info(f"DJ WebSocket server: {dj_scheme}://localhost:{self.dj_port}")
 
             if not self.unified_web:
                 # Start split-port browser listener for legacy deployments.
