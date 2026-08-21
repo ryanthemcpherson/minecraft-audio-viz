@@ -65,6 +65,13 @@ function validationErrors(schema, value) {
         errors.push(`${propertyName} is less than ${propertySchema.minimum}`);
       }
       if (
+        typeof propertyValue === "number" &&
+        propertySchema.maximum !== undefined &&
+        propertyValue > propertySchema.maximum
+      ) {
+        errors.push(`${propertyName} is greater than ${propertySchema.maximum}`);
+      }
+      if (
         typeof propertyValue === "string" &&
         propertySchema.minLength !== undefined &&
         propertyValue.length < propertySchema.minLength
@@ -252,5 +259,22 @@ test("voice status schema carries a bounded explicit capability error", () => {
     type: "voice_status",
     available: false,
     error: "x".repeat(513),
+  });
+  assertValid(schema, {
+    type: "voice_status",
+    available: true,
+    streaming: false,
+    channel_type: "locational",
+    connected_players: 12,
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: true,
+    channel_type: "renderer-private-mode",
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: true,
+    connected_players: 1_000_001,
   });
 });

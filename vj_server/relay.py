@@ -35,6 +35,50 @@ except ImportError:
 logger = logging.getLogger("vj_server")
 
 
+def _voice_status_error(message: str) -> dict:
+    return {
+        "type": "voice_status",
+        "available": False,
+        "streaming": False,
+        "channel_type": "static",
+        "connected_players": 0,
+        "error": message,
+    }
+
+
+def _normalize_renderer_voice_status(response: object) -> dict:
+    """Rebuild renderer voice status without crossing its trust boundary."""
+    if response is None:
+        return _voice_status_error("Minecraft voice status timed out.")
+    if not isinstance(response, dict):
+        return _voice_status_error("Minecraft returned an invalid voice status.")
+    if response.get("type") == "error":
+        return _voice_status_error("Minecraft rejected the voice status request.")
+    if response.get("type") != "voice_status" or "error" in response:
+        return _voice_status_error("Minecraft returned an invalid voice status.")
+
+    available = response.get("available")
+    streaming = response.get("streaming", False)
+    channel_type = response.get("channel_type", "static")
+    connected_players = response.get("connected_players", 0)
+    if (
+        type(available) is not bool
+        or type(streaming) is not bool
+        or channel_type not in {"static", "locational"}
+        or type(connected_players) is not int
+        or not 0 <= connected_players <= 1_000_000
+    ):
+        return _voice_status_error("Minecraft returned an invalid voice status.")
+
+    return {
+        "type": "voice_status",
+        "available": available,
+        "streaming": streaming,
+        "channel_type": channel_type,
+        "connected_players": connected_players,
+    }
+
+
 class RelayMixin:
     """Mixin providing browser/MC/DJ WebSocket handling and broadcasting.
 
@@ -933,22 +977,15 @@ class RelayMixin:
                     elif msg_type == "get_voice_status":
                         # Forward get_voice_status to Minecraft and relay response
                         if self.viz_client and self.viz_client.connected:
-                            response = await self.viz_client.send({"type": "get_voice_status"})
-                            if response:
-                                await websocket.send(_json_str(response))
-                            else:
-                                await websocket.send(
-                                    _json_str(
-                                        {
-                                            "type": "voice_status",
-                                            "available": False,
-                                            "streaming": False,
-                                            "channel_type": "static",
-                                            "connected_players": 0,
-                                            "error": "Minecraft voice status timed out.",
-                                        }
-                                    )
+                            try:
+                                response = await self.viz_client.send({"type": "get_voice_status"})
+                                browser_status = _normalize_renderer_voice_status(response)
+                            except Exception:
+                                logger.warning("Minecraft voice status request failed")
+                                browser_status = _voice_status_error(
+                                    "Minecraft voice status request failed."
                                 )
+                            await websocket.send(_json_str(browser_status))
                         else:
                             await websocket.send(
                                 _json_str(

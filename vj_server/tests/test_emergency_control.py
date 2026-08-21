@@ -1,6 +1,8 @@
 """Real browser relay behavior for server-authoritative emergency controls."""
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import msgspec.json as mjson
@@ -133,12 +135,45 @@ class EmergencyRelay(RelayMixin):
         return {}
 
 
-class VoiceStatusTimeoutClient:
+class VoiceStatusRendererClient:
     connected = True
+
+    def __init__(self, response=None, error: Exception | None = None):
+        self.response = response
+        self.error = error
 
     async def send(self, message: dict):
         assert message == {"type": "get_voice_status"}
-        return None
+        if self.error:
+            raise self.error
+        return self.response
+
+
+VOICE_STATUS_SCHEMA = json.loads(
+    (Path(__file__).parents[2] / "protocol/schemas/messages/voice-status.schema.json").read_text()
+)
+
+
+def assert_voice_status_schema(message: dict) -> None:
+    properties = VOICE_STATUS_SCHEMA["properties"]
+    assert set(message) <= set(properties)
+    assert set(VOICE_STATUS_SCHEMA["required"]) <= set(message)
+    for name, value in message.items():
+        rules = properties[name]
+        if "const" in rules:
+            assert value == rules["const"]
+        if rules.get("type") == "string":
+            assert isinstance(value, str)
+            assert len(value) >= rules.get("minLength", 0)
+            assert len(value) <= rules.get("maxLength", float("inf"))
+        elif rules.get("type") == "boolean":
+            assert type(value) is bool
+        elif rules.get("type") == "integer":
+            assert type(value) is int
+            assert value >= rules.get("minimum", float("-inf"))
+            assert value <= rules.get("maximum", float("inf"))
+        if "enum" in rules:
+            assert value in rules["enum"]
 
 
 @pytest.mark.asyncio
@@ -194,21 +229,79 @@ async def test_initial_get_state_and_trigger_ack_are_authoritative_and_correlate
 
 
 @pytest.mark.asyncio
-async def test_voice_status_timeout_returns_an_explicit_browser_error_state():
+async def test_voice_status_is_rebuilt_from_allowed_renderer_fields():
     relay = EmergencyRelay()
-    relay.viz_client = VoiceStatusTimeoutClient()
+    relay.viz_client = VoiceStatusRendererClient(
+        {
+            "type": "voice_status",
+            "available": True,
+            "streaming": False,
+            "channel_type": "locational",
+            "connected_players": 12,
+            "buffer_size": 4,
+            "distance": 96.0,
+            "zone": "main",
+            "_seq": 77,
+            "renderer_secret": "must-not-cross-boundary",
+        }
+    )
     websocket = BrowserSocket([{"type": "get_voice_status"}])
 
     await relay._handle_browser_client(websocket)
 
     assert websocket.sent[-1] == {
         "type": "voice_status",
+        "available": True,
+        "streaming": False,
+        "channel_type": "locational",
+        "connected_players": 12,
+    }
+    assert_voice_status_schema(websocket.sent[-1])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "exception", "expected_error"),
+    [
+        (
+            {"type": "error", "message": "renderer-token=do-not-leak", "_seq": 1},
+            None,
+            "Minecraft rejected the voice status request.",
+        ),
+        ({"type": "zone", "available": True}, None, "Minecraft returned an invalid voice status."),
+        (
+            {"type": "voice_status", "available": "yes", "streaming": False},
+            None,
+            "Minecraft returned an invalid voice status.",
+        ),
+        (None, None, "Minecraft voice status timed out."),
+        (
+            None,
+            RuntimeError("renderer-token=do-not-leak"),
+            "Minecraft voice status request failed.",
+        ),
+    ],
+)
+async def test_voice_status_failures_return_bounded_schema_valid_errors(
+    response, exception, expected_error
+):
+    relay = EmergencyRelay()
+    relay.viz_client = VoiceStatusRendererClient(response, exception)
+    websocket = BrowserSocket([{"type": "get_voice_status"}])
+
+    await relay._handle_browser_client(websocket)
+
+    result = websocket.sent[-1]
+    assert result == {
+        "type": "voice_status",
         "available": False,
         "streaming": False,
         "channel_type": "static",
         "connected_players": 0,
-        "error": "Minecraft voice status timed out.",
+        "error": expected_error,
     }
+    assert "renderer-token" not in json.dumps(result)
+    assert_voice_status_schema(result)
 
 
 @pytest.mark.asyncio
