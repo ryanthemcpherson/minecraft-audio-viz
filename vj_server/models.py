@@ -844,13 +844,13 @@ def _make_threaded_http_server_class():
     return ReusableThreadingHTTPServer
 
 
-def run_http_server(
+def create_http_server(
     port: int,
     directory: str,
     host: str = "127.0.0.1",
     ssl_context: ssl.SSLContext | None = None,
-) -> None:
-    """Run HTTP server for admin panel."""
+) -> socketserver.TCPServer:
+    """Create a controllable HTTP server without starting its serve loop."""
     host = validate_http_bind_host(host)
 
     # directory is the project root
@@ -864,12 +864,27 @@ def run_http_server(
         "/": str(admin_dir),
     }
     handler_cls = _make_directory_handler(dir_map)
+    server_class = _make_threaded_http_server_class()
+    httpd = server_class((host, port), handler_cls)
+    try:
+        if ssl_context is not None:
+            httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+    except BaseException:
+        httpd.server_close()
+        raise
+    return httpd
+
+
+def run_http_server(
+    port: int,
+    directory: str,
+    host: str = "127.0.0.1",
+    ssl_context: ssl.SSLContext | None = None,
+) -> None:
+    """Run HTTP server for admin panel."""
 
     try:
-        server_class = _make_threaded_http_server_class()
-        with server_class((host, port), handler_cls) as httpd:
-            if ssl_context is not None:
-                httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+        with create_http_server(port, directory, host, ssl_context) as httpd:
             httpd.serve_forever()
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")
