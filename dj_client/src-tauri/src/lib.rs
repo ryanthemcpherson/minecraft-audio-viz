@@ -14,11 +14,16 @@ pub mod state;
 pub mod voice;
 
 use audio::{AudioCaptureHandle, AudioPreset, AudioSource, CaptureMode};
-use protocol::{AudioFrameMessage, DjClient, DjClientConfig, PendingDjConnection};
-use state::AppState;
+use futures_util::Sink;
+use protocol::{
+    AUTHENTICATION_SEND_TIMEOUT, AudioFrameMessage, DjClient, DjClientConfig, PendingDjConnection,
+};
+use state::{AppState, ConnectionCancellation};
 use voice::{VoiceStatus, VoiceStreamer};
 
 use parking_lot::Mutex;
+use std::future::poll_fn;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -72,6 +77,7 @@ const CONNECTION_SUPERSEDED_ERROR: &str = "Connection attempt superseded by newe
 
 struct PreparedConnectionReplacement {
     generation: u64,
+    cancellation: Arc<ConnectionCancellation>,
     cancellation_rx: watch::Receiver<bool>,
     bridge_shutdown_tx: Option<mpsc::Sender<()>>,
     bridge_task_handle: Option<JoinHandle<()>>,
@@ -91,15 +97,16 @@ async fn prepare_connection_replacement(
     };
     let _replacement_guard = replacement_lock.lock().await;
 
-    // Cancellation must be visible to a possibly blocked credential send
-    // before replacement waits for that send's commit guard.
-    let previous_cancellation_tx = state_arc.lock().connection_attempt_cancel_tx.take();
-    if let Some(previous_cancellation_tx) = previous_cancellation_tx {
-        let _ = previous_cancellation_tx.send(true);
+    // Resolve cancellation against the old generation's synchronous
+    // `start_send` boundary before waiting for its bounded commit guard.
+    let previous_cancellation = state_arc.lock().connection_cancellation.take();
+    if let Some(previous_cancellation) = previous_cancellation {
+        previous_cancellation.cancel();
     }
 
     let _auth_commit_guard = auth_commit_lock.lock().await;
-    let (cancellation_tx, cancellation_rx) = watch::channel(false);
+    let cancellation = Arc::new(ConnectionCancellation::new());
+    let cancellation_rx = cancellation.subscribe();
     let (generation, bridge_shutdown_tx, bridge_task_handle) = {
         let mut app_state = state_arc.lock();
         app_state.connection_generation = app_state
@@ -107,7 +114,7 @@ async fn prepare_connection_replacement(
             .checked_add(1)
             .expect("connection generation should not overflow");
         let generation = app_state.connection_generation;
-        app_state.connection_attempt_cancel_tx = Some(cancellation_tx);
+        app_state.connection_cancellation = Some(Arc::clone(&cancellation));
         let bridge_shutdown_tx = app_state.bridge_shutdown_tx.take();
         let bridge_task_handle = app_state.bridge_task_handle.take();
 
@@ -121,6 +128,7 @@ async fn prepare_connection_replacement(
 
     PreparedConnectionReplacement {
         generation,
+        cancellation,
         cancellation_rx,
         bridge_shutdown_tx,
         bridge_task_handle,
@@ -164,6 +172,7 @@ async fn connect_client_until_cancelled(
     generation: u64,
     mut client: DjClient,
     block_palette: Option<Vec<Option<String>>>,
+    cancellation: &ConnectionCancellation,
     mut cancellation_rx: watch::Receiver<bool>,
 ) -> Result<DjClient, String> {
     let pending_connection = tokio::select! {
@@ -180,6 +189,7 @@ async fn connect_client_until_cancelled(
         generation,
         client,
         pending_connection,
+        cancellation,
         &mut cancellation_rx,
     )
     .await?;
@@ -207,6 +217,7 @@ async fn connect_client_for_generation(
     state_arc: &Arc<Mutex<AppState>>,
     generation: u64,
     mut client: DjClient,
+    cancellation: &ConnectionCancellation,
     cancellation_rx: &mut watch::Receiver<bool>,
 ) -> Result<DjClient, String> {
     let pending_connection = tokio::select! {
@@ -223,6 +234,7 @@ async fn connect_client_for_generation(
         generation,
         client,
         pending_connection,
+        cancellation,
         cancellation_rx,
     )
     .await
@@ -232,30 +244,24 @@ async fn connect_established_client_for_generation(
     state_arc: &Arc<Mutex<AppState>>,
     generation: u64,
     mut client: DjClient,
-    mut pending_connection: PendingDjConnection,
+    pending_connection: PendingDjConnection,
+    cancellation: &ConnectionCancellation,
     cancellation_rx: &mut watch::Receiver<bool>,
 ) -> Result<DjClient, String> {
-    let auth_commit_lock = state_arc.lock().connection_auth_commit_lock.clone();
-    let auth_commit_guard = tokio::select! {
-        biased;
-        _ = wait_for_connection_cancellation(cancellation_rx) => {
-            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
-        }
-        guard = auth_commit_lock.lock() => guard,
-    };
-    if state_arc.lock().connection_generation != generation {
-        return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
-    }
-    tokio::select! {
-        biased;
-        _ = wait_for_connection_cancellation(cancellation_rx) => {
-            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
-        }
-        result = client.send_authentication(&mut pending_connection) => {
-            result.map_err(|error| error.to_string())?;
-        }
-    }
-    drop(auth_commit_guard);
+    let authentication_message = client
+        .authentication_message()
+        .map_err(|error| error.to_string())?;
+    let websocket = commit_authentication_sink_for_generation(
+        state_arc,
+        generation,
+        cancellation,
+        cancellation_rx,
+        pending_connection.into_websocket(),
+        authentication_message,
+        AUTHENTICATION_SEND_TIMEOUT,
+    )
+    .await?;
+    let pending_connection = PendingDjConnection::from_websocket(websocket);
 
     tokio::select! {
         biased;
@@ -269,10 +275,105 @@ async fn connect_established_client_for_generation(
     Ok(client)
 }
 
+async fn commit_authentication_sink_for_generation<S>(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    cancellation: &ConnectionCancellation,
+    cancellation_rx: &mut watch::Receiver<bool>,
+    mut sink: S,
+    authentication_message: Message,
+    authentication_timeout: Duration,
+) -> Result<S, String>
+where
+    S: Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    let auth_commit_lock = state_arc.lock().connection_auth_commit_lock.clone();
+    let auth_commit_guard = tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(cancellation_rx) => {
+            drop(sink);
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        guard = auth_commit_lock.lock() => guard,
+    };
+    if state_arc.lock().connection_generation != generation {
+        drop(sink);
+        drop(auth_commit_guard);
+        return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+    }
+
+    let deadline = tokio::time::Instant::now() + authentication_timeout;
+    let readiness = tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(cancellation_rx) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        result = tokio::time::timeout_at(
+            deadline,
+            poll_fn(|context| Pin::new(&mut sink).poll_ready(context)),
+        ) => result,
+    };
+    match readiness {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(format!("Authentication send failed: {error}"));
+        }
+        Err(_) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send timed out".to_string());
+        }
+    }
+
+    let start_send = cancellation
+        .start_authentication(|| Pin::new(&mut sink).start_send(authentication_message));
+    match start_send {
+        Err(()) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        Ok(Err(error)) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(format!("Authentication send failed: {error}"));
+        }
+        Ok(Ok(())) => {}
+    }
+
+    // `start_send` is the commit point. Replacement cancellation may now be
+    // signalled, but config/generation publication waits on this guard until
+    // flush succeeds or the finite deadline aborts the old transport.
+    match tokio::time::timeout_at(
+        deadline,
+        poll_fn(|context| Pin::new(&mut sink).poll_flush(context)),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(format!("Authentication send failed: {error}"));
+        }
+        Err(_) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send timed out".to_string());
+        }
+    }
+    drop(auth_commit_guard);
+    Ok(sink)
+}
+
 fn clear_connection_attempt_if_current(state_arc: &Arc<Mutex<AppState>>, generation: u64) {
     let mut app_state = state_arc.lock();
     if app_state.connection_generation == generation {
-        app_state.connection_attempt_cancel_tx = None;
+        app_state.connection_cancellation = None;
     }
 }
 
@@ -377,6 +478,7 @@ async fn connect_common(
         generation,
         DjClient::new(config),
         block_palette,
+        &replacement.cancellation,
         replacement.cancellation_rx.clone(),
     )
     .await
@@ -400,11 +502,13 @@ async fn connect_common(
 
     // Spawn bridge task and store its handle
     let bridge_state = state_arc.clone();
+    let bridge_cancellation = Arc::clone(&replacement.cancellation);
     let bridge_cancellation_rx = replacement.cancellation_rx;
     let handle = tokio::spawn(async move {
         run_bridge(
             bridge_state,
             shutdown_rx,
+            bridge_cancellation,
             bridge_cancellation_rx,
             app_handle,
             generation,
@@ -508,6 +612,7 @@ fn build_reconnect_config(app_state: &AppState) -> DjClientConfig {
 async fn run_bridge(
     state_arc: Arc<Mutex<AppState>>,
     mut shutdown_rx: mpsc::Receiver<()>,
+    cancellation: Arc<ConnectionCancellation>,
     mut cancellation_rx: watch::Receiver<bool>,
     app_handle: AppHandle,
     generation: u64,
@@ -930,6 +1035,7 @@ async fn run_bridge(
                 &state_arc,
                 generation,
                 client,
+                &cancellation,
                 &mut cancellation_rx,
             ) => result,
         };
@@ -1121,9 +1227,9 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
         )
     };
     let replacement_guard = replacement_lock.lock().await;
-    let attempt_cancel_tx = state.0.lock().connection_attempt_cancel_tx.take();
-    if let Some(attempt_cancel_tx) = attempt_cancel_tx {
-        let _ = attempt_cancel_tx.send(true);
+    let connection_cancellation = state.0.lock().connection_cancellation.take();
+    if let Some(connection_cancellation) = connection_cancellation {
+        connection_cancellation.cancel();
     }
     let auth_commit_guard = auth_commit_lock.lock().await;
     let (generation, shutdown_tx, bridge_handle, capture, voice_streamer) = {

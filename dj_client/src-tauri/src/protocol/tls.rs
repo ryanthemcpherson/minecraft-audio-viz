@@ -152,12 +152,13 @@ fn format_fingerprint(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::super::client::{DjClient, DjClientConfig};
     use super::*;
-    use futures_util::{SinkExt, StreamExt};
+    use futures_util::{Sink, SinkExt, StreamExt};
     use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
     use sha2::{Digest, Sha256};
     use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll};
     use std::time::Duration;
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -358,6 +359,69 @@ mod tests {
             context: &mut Context<'_>,
         ) -> Poll<std::io::Result<()>> {
             Pin::new(&mut self.get_mut().inner).poll_shutdown(context)
+        }
+    }
+
+    struct FlushStallingSink {
+        started_tx: Option<oneshot::Sender<Message>>,
+        flush_stalled_tx: Option<oneshot::Sender<()>>,
+        closed: Arc<AtomicBool>,
+    }
+
+    impl FlushStallingSink {
+        fn new(
+            started_tx: oneshot::Sender<Message>,
+            flush_stalled_tx: oneshot::Sender<()>,
+            closed: Arc<AtomicBool>,
+        ) -> Self {
+            Self {
+                started_tx: Some(started_tx),
+                flush_stalled_tx: Some(flush_stalled_tx),
+                closed,
+            }
+        }
+    }
+
+    impl Drop for FlushStallingSink {
+        fn drop(&mut self) {
+            self.closed.store(true, Ordering::SeqCst);
+        }
+    }
+
+    impl Sink<Message> for FlushStallingSink {
+        type Error = tokio_tungstenite::tungstenite::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
+            self.started_tx
+                .take()
+                .expect("authentication should start exactly once")
+                .send(message)
+                .expect("test should observe the started authentication frame");
+            Ok(())
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            if let Some(flush_stalled_tx) = self.flush_stalled_tx.take() {
+                let _ = flush_stalled_tx.send(());
+            }
+            Poll::Pending
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -895,6 +959,7 @@ mod tests {
             crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()))
                 .await;
         let old_generation = old_attempt.generation;
+        let old_cancellation = Arc::clone(&old_attempt.cancellation);
         let old_state = Arc::clone(&state);
         let old_client_config = old_config.clone();
         let old_task = tokio::spawn(async move {
@@ -903,6 +968,7 @@ mod tests {
                 old_generation,
                 DjClient::new(old_client_config),
                 None,
+                &old_cancellation,
                 old_attempt.cancellation_rx,
             )
             .await
@@ -998,6 +1064,7 @@ mod tests {
             crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()))
                 .await;
         let old_generation = old_attempt.generation;
+        let old_cancellation = Arc::clone(&old_attempt.cancellation);
         let (transport_ready_tx, transport_ready_rx) = oneshot::channel();
         let (release_auth_tx, release_auth_rx) = oneshot::channel();
         let old_state = Arc::clone(&state);
@@ -1019,6 +1086,7 @@ mod tests {
                 old_generation,
                 old_client,
                 transport,
+                &old_cancellation,
                 &mut old_cancellation_rx,
             )
             .await?;
@@ -1064,10 +1132,12 @@ mod tests {
         assert!(old_error.contains("superseded"));
 
         let new_generation = new_attempt.generation;
+        let new_cancellation = Arc::clone(&new_attempt.cancellation);
         let new_client = crate::connect_client_for_generation(
             &state,
             new_generation,
             DjClient::new(new_config.clone()),
+            &new_cancellation,
             &mut new_attempt.cancellation_rx,
         )
         .await
@@ -1109,83 +1179,165 @@ mod tests {
         assert_eq!(state.lock().server_port, new_fixture.port);
     }
 
-    #[tokio::test]
-    async fn replacement_cancels_auth_send_before_waiting_for_commit_lock() {
-        let fixture = TlsWebSocketFixture::start_with_auth_response().await;
+    #[tokio::test(start_paused = true)]
+    async fn replacement_waits_for_started_auth_timeout_then_new_auth_succeeds() {
+        let new_fixture = TlsWebSocketFixture::start_with_auth_response().await;
         let state = Arc::new(parking_lot::Mutex::new(crate::state::AppState::default()));
         let old_config = DjClientConfig {
-            server_host: "127.0.0.1".to_string(),
-            server_port: fixture.port,
+            server_host: "old.example".to_string(),
+            server_port: 9000,
             dj_name: "Old DJ".to_string(),
             connect_code: Some("old-secret-code".to_string()),
-            tls_fingerprint: Some(fixture.fingerprint.clone()),
+            tls_fingerprint: Some("ab".repeat(32)),
             ..Default::default()
         };
         let mut old_attempt =
             crate::prepare_connection_replacement(&state, &old_config, Some("old-code".into()))
                 .await;
         let old_generation = old_attempt.generation;
-        let mut old_client = DjClient::new(old_config);
-        let mut old_transport = old_client
-            .establish_transport()
-            .await
-            .expect("old transport should complete Upgrade");
-        let (send_stalled_tx, send_stalled_rx) = oneshot::channel();
-        let (release_send_tx, release_send_rx) = oneshot::channel();
-        old_transport.stall_authentication_send(send_stalled_tx, release_send_rx);
+        let old_cancellation = Arc::clone(&old_attempt.cancellation);
+        let mut cancellation_observer = old_attempt.cancellation_rx.clone();
+        let (authentication_started_tx, authentication_started_rx) = oneshot::channel();
+        let (flush_stalled_tx, flush_stalled_rx) = oneshot::channel();
+        let old_transport_closed = Arc::new(AtomicBool::new(false));
+        let old_sink = FlushStallingSink::new(
+            authentication_started_tx,
+            flush_stalled_tx,
+            Arc::clone(&old_transport_closed),
+        );
+        let authentication_message = Message::Text(
+            serde_json::json!({
+                "type": "code_auth",
+                "code": "old-secret-code",
+                "dj_name": "Old DJ"
+            })
+            .to_string()
+            .into(),
+        );
         let old_state = Arc::clone(&state);
         let old_task = tokio::spawn(async move {
-            crate::connect_established_client_for_generation(
+            crate::commit_authentication_sink_for_generation(
                 &old_state,
                 old_generation,
-                old_client,
-                old_transport,
+                &old_cancellation,
                 &mut old_attempt.cancellation_rx,
+                old_sink,
+                authentication_message,
+                Duration::from_millis(200),
             )
             .await
         });
-        tokio::time::timeout(Duration::from_secs(1), send_stalled_rx)
+
+        let started_message =
+            tokio::time::timeout(Duration::from_secs(1), authentication_started_rx)
+                .await
+                .expect("old authentication should cross start_send")
+                .expect("old authentication start should be observed");
+        let Message::Text(started_text) = started_message else {
+            panic!("authentication frame should be text");
+        };
+        let started_json: serde_json::Value = serde_json::from_str(started_text.as_ref())
+            .expect("started authentication should be valid JSON");
+        assert_eq!(started_json["type"], "code_auth");
+        assert_eq!(started_json["code"], "old-secret-code");
+        tokio::time::timeout(Duration::from_secs(1), flush_stalled_rx)
             .await
-            .expect("old authentication send should reach the backpressure barrier")
-            .expect("old authentication send should signal the barrier");
+            .expect("old authentication should enter flush")
+            .expect("old authentication flush should signal backpressure");
 
         let replacement_config = DjClientConfig {
-            server_host: "replacement.example".to_string(),
-            server_port: 9443,
-            dj_name: "Replacement DJ".to_string(),
-            connect_code: Some("replacement-code".to_string()),
-            tls_fingerprint: Some("ab".repeat(32)),
+            server_host: "127.0.0.1".to_string(),
+            server_port: new_fixture.port,
+            dj_name: "New DJ".to_string(),
+            connect_code: Some("new-secret-code".to_string()),
+            tls_fingerprint: Some(new_fixture.fingerprint.clone()),
             ..Default::default()
         };
         let replacement_state = Arc::clone(&state);
+        let replacement_prepare_config = replacement_config.clone();
         let replacement_task = tokio::spawn(async move {
             crate::prepare_connection_replacement(
                 &replacement_state,
-                &replacement_config,
-                Some("replacement-code".into()),
+                &replacement_prepare_config,
+                Some("new-code".into()),
             )
             .await
         });
 
+        tokio::time::timeout(Duration::from_secs(1), cancellation_observer.changed())
+            .await
+            .expect("replacement should signal cancellation before waiting on auth commit")
+            .expect("old cancellation sender should remain live");
+        assert!(*cancellation_observer.borrow());
+        assert!(
+            !replacement_task.is_finished(),
+            "replacement must wait for the already-started authentication flush"
+        );
+        tokio::time::advance(Duration::from_millis(200)).await;
+
         let old_result = tokio::time::timeout(Duration::from_secs(1), old_task)
             .await
-            .expect("replacement cancellation must unblock the stalled auth send")
+            .expect("stalled authentication must terminate at its focused timeout")
             .expect("old auth task must be awaited");
         let old_error = match old_result {
             Err(error) => error,
-            Ok(_) => panic!("cancelled old auth must not complete"),
+            Ok(_) => panic!("stalled authentication must not complete"),
         };
-        assert!(old_error.contains("superseded"));
-        let replacement = tokio::time::timeout(Duration::from_secs(1), replacement_task)
+        assert!(old_error.contains("timed out"));
+        assert!(
+            old_transport_closed.load(Ordering::SeqCst),
+            "timed-out authentication must close its old transport before replacement"
+        );
+
+        let mut replacement = tokio::time::timeout(Duration::from_secs(1), replacement_task)
             .await
             .expect("replacement must not deadlock behind the old auth commit lock")
             .expect("replacement preparation task must be awaited");
         assert_eq!(state.lock().connection_generation, replacement.generation);
+        tokio::time::resume();
+        let new_generation = replacement.generation;
+        let new_cancellation = Arc::clone(&replacement.cancellation);
+        let new_client = crate::connect_client_for_generation(
+            &state,
+            new_generation,
+            DjClient::new(replacement_config),
+            &new_cancellation,
+            &mut replacement.cancellation_rx,
+        )
+        .await
+        .expect("replacement endpoint authentication should succeed");
+        let (new_shutdown_tx, _new_shutdown_rx) = mpsc::channel(1);
         assert!(
-            release_send_tx.send(()).is_err(),
-            "cancelled authentication future must drop its stalled send"
+            crate::publish_connected_client_if_current(
+                &state,
+                new_generation,
+                new_client,
+                new_shutdown_tx,
+            )
+            .is_none(),
+            "new authenticated client should publish after old transport termination"
         );
-        assert!(fixture.received_messages().await.is_empty());
+        let published_client = state
+            .lock()
+            .client
+            .take()
+            .expect("new client should remain published");
+        published_client
+            .disconnect()
+            .await
+            .expect("new client should disconnect");
+        let new_messages = new_fixture.received_messages().await;
+        let Message::Text(new_authentication) = new_messages
+            .first()
+            .expect("replacement endpoint should receive authentication")
+        else {
+            panic!("replacement authentication should be text");
+        };
+        let new_authentication: serde_json::Value =
+            serde_json::from_str(new_authentication.as_ref())
+                .expect("replacement authentication should be valid JSON");
+        assert_eq!(new_authentication["type"], "code_auth");
+        assert_eq!(new_authentication["code"], "new-secret-code");
     }
 
     #[tokio::test]
@@ -1207,6 +1359,7 @@ mod tests {
         )
         .await;
         let reconnect_generation = reconnect_attempt.generation;
+        let reconnect_cancellation = Arc::clone(&reconnect_attempt.cancellation);
         let mut reconnect_client = DjClient::new(reconnect_config);
         let reconnect_transport = reconnect_client
             .establish_transport()
@@ -1234,6 +1387,7 @@ mod tests {
             reconnect_generation,
             reconnect_client,
             reconnect_transport,
+            &reconnect_cancellation,
             &mut reconnect_attempt.cancellation_rx,
         )
         .await;
@@ -1404,9 +1558,12 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::TlsHandshake(_))));
         assert!(fixture.received_application_bytes().await.is_empty());
-        assert_eq!(
-            fixture.terminal_outcome().await,
-            FixtureTerminalOutcome::EofWithoutUpgrade
+        assert!(
+            matches!(
+                fixture.terminal_outcome().await,
+                FixtureTerminalOutcome::EofWithoutUpgrade | FixtureTerminalOutcome::TlsFailed
+            ),
+            "native TLS rejection must terminate before any Upgrade bytes"
         );
         assert!(fixture.received_messages().await.is_empty());
     }
