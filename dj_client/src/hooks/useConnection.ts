@@ -4,6 +4,16 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { UseAuthReturn } from './useAuth';
 import { PRESETS } from '../components/PresetBar';
 import * as api from '../lib/api';
+import {
+  buildCodeConnectionArgs,
+  buildDirectConnectionArgs,
+  formatConnectionError,
+  getTlsFingerprintFieldState,
+  loadTlsFingerprint,
+  normalizeTlsFingerprint,
+  sanitizeConnectionStatus,
+  saveTlsFingerprint,
+} from '../lib/connectionProfile';
 import type {
   ConnectionStatus,
   AudioLevels,
@@ -17,47 +27,6 @@ import {
   DEFAULT_VOICE_STATUS,
   DEFAULT_AUDIO_DATA,
 } from '../types';
-
-function normalizeTlsFingerprint(value: string): string {
-  return value.replace(/[:\s]/g, '').toUpperCase();
-}
-
-function formatConnectionError(error: unknown): string {
-  const errorText = String(error);
-  const normalizedError = errorText.toLowerCase();
-
-  if (normalizedError.includes('invalid tls certificate fingerprint')) {
-    return 'The server fingerprint must contain exactly 64 hexadecimal characters.';
-  }
-  if (normalizedError.includes('tls peer did not provide a certificate')) {
-    return 'The server did not provide a TLS certificate. Check the address and ask your VJ operator to verify TLS.';
-  }
-  if (normalizedError.includes('tls certificate fingerprint mismatch')) {
-    return 'The server certificate does not match the saved fingerprint. Stop and ask your VJ operator to verify the certificate.';
-  }
-  if (normalizedError.includes('tls certificate is not valid for the requested server host')) {
-    return 'The server certificate is for a different host. Use the hostname or IP address listed in the certificate.';
-  }
-  if (normalizedError.includes('tls handshake failed') || normalizedError.includes('certificate')) {
-    return 'Secure connection failed. Check the server address and certificate configuration.';
-  }
-  if (
-    normalizedError.includes('timeout') ||
-    normalizedError.includes('timed out') ||
-    normalizedError.includes('connection refused')
-  ) {
-    return "Can't reach server. Check that the VJ server is running.";
-  }
-  if (
-    normalizedError.includes('auth') ||
-    normalizedError.includes('invalid') ||
-    normalizedError.includes('unauthorized')
-  ) {
-    return 'Authentication failed. Ask your VJ operator for a new code.';
-  }
-
-  return errorText;
-}
 
 export interface UseConnectionReturn {
   // Connection state
@@ -119,11 +88,11 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     () => parseInt(localStorage.getItem('mcav.serverPort') || '9000', 10),
   );
   const [tlsFingerprint, setTlsFingerprintState] = useState(() =>
-    normalizeTlsFingerprint(localStorage.getItem('mcav.tlsFingerprint') ?? ''),
+    loadTlsFingerprint(localStorage),
   );
-  const normalizedTlsFingerprint = normalizeTlsFingerprint(tlsFingerprint);
-  const isTlsFingerprintValid =
-    normalizedTlsFingerprint.length === 0 || /^[0-9A-F]{64}$/.test(normalizedTlsFingerprint);
+  const tlsFingerprintFieldState = getTlsFingerprintFieldState(tlsFingerprint);
+  const normalizedTlsFingerprint = tlsFingerprintFieldState.normalizedValue;
+  const isTlsFingerprintValid = tlsFingerprintFieldState.isValid;
   const setTlsFingerprint = (fingerprint: string) => {
     setTlsFingerprintState(normalizeTlsFingerprint(fingerprint));
   };
@@ -182,7 +151,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     localStorage.setItem('mcav.serverPort', String(serverPort));
   }, [serverPort]);
   useEffect(() => {
-    localStorage.setItem('mcav.tlsFingerprint', normalizedTlsFingerprint);
+    saveTlsFingerprint(localStorage, normalizedTlsFingerprint);
   }, [normalizedTlsFingerprint]);
 
   // Persist preset selection
@@ -201,7 +170,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   // Always listen for dj-status so reconnection events reach the frontend.
   useEffect(() => {
     const unlisten = listen<ConnectionStatus>('dj-status', (event) => {
-      setStatus(event.payload);
+      setStatus(sanitizeConnectionStatus(event.payload));
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
@@ -266,7 +235,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     }
 
     setIsConnecting(true);
-    setStatus((prev) => ({ ...prev, error: null }));
+    setStatus((prev) => ({ ...prev, error: null, error_code: null }));
     try {
       // Stop test audio if running
       if (isTestingAudio) {
@@ -274,12 +243,12 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
       }
 
       if (directConnect) {
-        await invoke('connect_direct', {
+        await invoke('connect_direct', buildDirectConnectionArgs({
           djName: djName.trim(),
           serverHost,
           serverPort,
-          tlsFingerprint: normalizedTlsFingerprint || null,
-        });
+          tlsFingerprint: normalizedTlsFingerprint,
+        }));
       } else {
         // Format code as XXXX-XXXX
         const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
@@ -291,15 +260,15 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
         const wsUrl = new URL(resolved.websocket_url);
         const connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
         setShowName(resolved.show_name);
-        await invoke('connect_with_code', {
+        await invoke('connect_with_code', buildCodeConnectionArgs({
           code: formattedCode,
           djName: djName.trim(),
           serverHost: wsUrl.hostname,
           serverPort: connPort,
-          tlsFingerprint: normalizedTlsFingerprint || null,
+          tlsFingerprint: normalizedTlsFingerprint,
           blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
           djSessionId: resolved.dj_session_id ?? null,
-        });
+        }));
       }
 
       // Start audio capture
@@ -325,7 +294,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
         errorMessage = formatConnectionError(e);
       }
 
-      setStatus((prev) => ({ ...prev, error: errorMessage }));
+      setStatus((prev) => ({ ...prev, error: errorMessage, error_code: null }));
     } finally {
       setIsConnecting(false);
     }
