@@ -113,6 +113,7 @@ function withPatternHarness(storage, callback) {
 
   const app = {
     state: {
+      connected: true,
       patterns: structuredClone(patterns),
       currentPattern: 'spectrum',
       currentPreset: 'auto',
@@ -201,6 +202,25 @@ test('launching a pattern sends one action and records recency', () => {
 
     assert.deepEqual(sent, [{ type: 'set_pattern', pattern: 'helix' }]);
     assert.equal(values.get('mcav-pattern-recents'), '["helix"]');
+  });
+});
+
+test('manager boundary blocks disconnected pattern and preset mutations but keeps local library actions', () => {
+  const values = new Map();
+  withPatternHarness({
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+  }, ({ manager, sent }) => {
+    manager.state.connected = false;
+
+    assert.equal(manager.setPattern('helix'), false);
+    assert.equal(manager.setPreset('edm'), false);
+    manager.setSearchQuery('aurora');
+    manager.toggleFavorite('aurora');
+
+    assert.deepEqual(sent, []);
+    assert.equal(values.get('mcav-pattern-recents'), undefined);
+    assert.equal(values.get('mcav-pattern-favorites'), '["aurora"]');
   });
 });
 

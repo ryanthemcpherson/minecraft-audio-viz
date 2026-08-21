@@ -48,6 +48,16 @@ test('panel exposes exactly five semantic workspaces and stable emergency contro
   assert.equal(/\bid="(?:mixer|zone|banner)-panel"/.test(html), false);
 });
 
+test('responsive header reserves identity width and mobile context remains above the rail', async () => {
+  const css = await readPanelFile('css/control-panel.css');
+  const tablet = css.match(/@media \(max-width: 1279px\) \{([\s\S]*?)@media \(max-width: 899px\)/)?.[1] ?? '';
+  const mobile = css.match(/@media \(max-width: 899px\) \{([\s\S]*?)@media \(max-width: 599px\)/)?.[1] ?? '';
+
+  assert.match(tablet, /grid-template-columns:\s*minmax\(15\.5rem, auto\) minmax\(0, 1fr\) auto/);
+  assert.match(mobile, /#header\.command-bar\s*\{[\s\S]*?height:\s*auto/);
+  assert.match(mobile, /grid-template-rows:\s*repeat\(4, minmax\(3rem, auto\)\)/);
+});
+
 test('every secondary capability is in its approved destination workspace', async () => {
   const html = await readPanelFile('index.html');
   const expectedIds = {

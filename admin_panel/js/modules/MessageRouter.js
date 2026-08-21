@@ -20,11 +20,8 @@ export class MessageRouter {
             case 'vj_state':
                 app.patterns.handlePatterns(data);
                 app.dj.handleDJRoster(data);
-                if (data.blackout !== undefined) {
-                    app.actions.setBlackoutState(data.blackout);
-                }
-                if (data.freeze !== undefined) {
-                    app.actions.setFreezeState(data.freeze);
+                if (data.blackout !== undefined || data.freeze !== undefined) {
+                    app.actions.applyEmergencyState?.(data);
                 }
                 if (data.current_pattern) {
                     app.state.currentPattern = data.current_pattern;
@@ -128,6 +125,10 @@ export class MessageRouter {
                     app.state.visualDelayMode = data.visual_delay_mode;
                     app.audio.updateVisualDelayModeDisplay();
                 }
+                break;
+
+            case 'emergency_state':
+                app.actions.applyEmergencyState(data);
                 break;
 
             case 'config_update':
@@ -360,6 +361,9 @@ export class MessageRouter {
                 break;
 
             case 'error':
+                if (data.request_id) {
+                    app.actions?.handleEmergencyError?.(data.request_id, data.message);
+                }
                 app.ui.showToast(data.message || 'An error occurred', 'error');
                 break;
 

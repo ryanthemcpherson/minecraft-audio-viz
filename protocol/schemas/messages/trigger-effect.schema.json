@@ -27,6 +27,11 @@
       "type": "integer",
       "minimum": 0,
       "description": "Duration in milliseconds (ignored for toggle effects)"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     }
   },
   "required": ["type", "effect", "intensity"]

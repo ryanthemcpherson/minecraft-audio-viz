@@ -34,6 +34,7 @@ export class PatternManager {
     }
 
     setPattern(patternId) {
+        if (!this.state.connected) return false;
         this.recentIds = updateRecentIds(this.recentIds, patternId);
         this._writeStoredIds(RECENTS_STORAGE_KEY, this.recentIds);
         this.renderPatternGrid();
@@ -43,7 +44,7 @@ export class PatternManager {
         if (selected.length > 0) {
             msg.zones = selected;
         }
-        this.ws.send(msg);
+        return this.ws.send(msg) !== false;
     }
 
     setSearchQuery(query) {
@@ -90,7 +91,8 @@ export class PatternManager {
     }
 
     setPreset(preset) {
-        this.ws.send({ type: 'set_preset', preset: preset });
+        if (!this.state.connected) return false;
+        return this.ws.send({ type: 'set_preset', preset: preset }) !== false;
     }
 
     handlePatternChanged(data) {

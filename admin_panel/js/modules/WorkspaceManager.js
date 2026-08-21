@@ -28,6 +28,8 @@ export class WorkspaceManager {
         this.storageResolved = storage !== undefined;
         this.onChange = onChange;
         this.tablist = null;
+        this.skipLink = null;
+        this.orientationMediaQuery = null;
         this.buttons = [];
         this.panels = [];
         this.labels = [];
@@ -38,6 +40,7 @@ export class WorkspaceManager {
 
     setup() {
         this.tablist = this.root.querySelector?.('[data-workspace-tablist]') ?? null;
+        this.skipLink = this.root.querySelector?.('.skip-link') ?? null;
         this.buttons = [...this.root.querySelectorAll('[data-workspace-nav]')];
         this.panels = [...this.root.querySelectorAll('[data-workspace-panel]')];
         this.labels = [...this.root.querySelectorAll('[data-workspace-label]')];
@@ -138,7 +141,16 @@ export class WorkspaceManager {
 
     setupTabSemantics() {
         this.tablist?.setAttribute('role', 'tablist');
-        this.tablist?.setAttribute('aria-orientation', 'vertical');
+        const matchMedia = this.root.defaultView?.matchMedia
+            ?? globalThis.window?.matchMedia;
+        this.orientationMediaQuery = matchMedia?.call(
+            this.root.defaultView ?? globalThis.window,
+            '(max-width: 899px)',
+        ) ?? null;
+        this.syncTabOrientation();
+        const orientationListener = (event) => this.syncTabOrientation(event);
+        this.orientationMediaQuery?.addEventListener?.('change', orientationListener);
+        this.orientationMediaQuery?.addListener?.(orientationListener);
         for (const button of this.buttons) {
             const name = button.dataset.workspace;
             button.id ||= `workspace-tab-${name}`;
@@ -151,6 +163,13 @@ export class WorkspaceManager {
             panel.setAttribute('role', 'tabpanel');
             panel.setAttribute('aria-labelledby', `workspace-tab-${name}`);
         }
+    }
+
+    syncTabOrientation(event) {
+        const mobile = typeof event?.matches === 'boolean'
+            ? event.matches
+            : Boolean(this.orientationMediaQuery?.matches);
+        this.tablist?.setAttribute('aria-orientation', mobile ? 'horizontal' : 'vertical');
     }
 
     handleTabKeydown(event, button) {
@@ -212,6 +231,10 @@ export class WorkspaceManager {
         this.activeWorkspace = name;
         this.root.documentElement.dataset.workspace = name;
         const workspace = WORKSPACES.find(({ id }) => id === name);
+        if (this.skipLink) {
+            this.skipLink.setAttribute('href', `#workspace-${name}`);
+            this.skipLink.textContent = `Skip to ${workspace.label} controls`;
+        }
         for (const label of this.labels) {
             label.textContent = workspace.label;
         }

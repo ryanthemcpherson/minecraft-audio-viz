@@ -186,3 +186,32 @@ test('same-session reconnect flushes only controls queued during that reconnect'
         { type: 'set_pattern', pattern: 'rings' },
     ]);
 });
+
+test('immediate safety sends never enter the reconnect queue', () => {
+    const sentMessages = [];
+    const service = serviceWithoutTimers();
+    service.ws = openSocket(sentMessages);
+    service._sessionEstablished = true;
+    service.shouldReconnect = true;
+
+    assert.equal(service.sendImmediate({ type: 'set_blackout', enabled: true }), false);
+    assert.deepEqual(service.messageQueue, []);
+
+    service.isAuthenticated = true;
+    assert.equal(service.sendImmediate({ type: 'set_blackout', enabled: true }), true);
+    assert.deepEqual(sentMessages, [{ type: 'set_blackout', enabled: true }]);
+});
+
+test('immediate safety send reports synchronous socket delivery failure', () => {
+    const service = serviceWithoutTimers();
+    service.isAuthenticated = true;
+    service.ws = {
+        readyState: WebSocket.OPEN,
+        send() {
+            throw new Error('socket closed during send');
+        },
+    };
+
+    assert.equal(service.sendImmediate({ type: 'set_freeze', enabled: true }), false);
+    assert.deepEqual(service.messageQueue, []);
+});

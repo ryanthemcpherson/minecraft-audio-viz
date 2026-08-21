@@ -49,7 +49,7 @@
                 </div>
             </div>
             <div class="header-center command-context">
-                <select id="stage-select">
+                <select id="stage-select" aria-label="Stage">
                     <!-- Populated by JS, no "All Stages" option -->
                 </select>
                 <div id="zone-chip-bar" class="zone-chip-bar">
@@ -90,18 +90,21 @@
             </div>
             <div class="command-emergency" aria-label="Emergency show controls">
                 <button id="btn-blackout" class="btn btn-perf btn-perf-blackout" type="button"
-                        data-requires-connection aria-pressed="false" aria-describedby="emergency-control-reason">
+                        data-requires-connection aria-pressed="false" aria-busy="false"
+                        aria-describedby="emergency-control-reason emergency-control-status">
                     <span class="perf-icon" aria-hidden="true">&#x26AB;</span>
                     <span class="perf-label">Blackout</span>
                     <span class="perf-shortcut">B</span>
                 </button>
                 <button id="btn-freeze" class="btn btn-perf btn-perf-freeze" type="button"
-                        data-requires-connection aria-pressed="false" aria-describedby="emergency-control-reason">
+                        data-requires-connection aria-pressed="false" aria-busy="false"
+                        aria-describedby="emergency-control-reason emergency-control-status">
                     <span class="perf-icon" aria-hidden="true">&#x2744;</span>
                     <span class="perf-label">Freeze</span>
                     <span class="perf-shortcut">F</span>
                 </button>
                 <span id="emergency-control-reason" class="command-availability" aria-live="polite"></span>
+                <span id="emergency-control-status" class="visually-hidden" aria-live="assertive"></span>
             </div>
         </header>
 
@@ -145,33 +148,33 @@
                     <!-- Audio Meters - 5 bands for ultra-low-latency -->
                     <div id="audio-meters">
                         <h3 class="section-title">Frequency Bands</h3>
-                        <div class="meter" data-band="0">
+                        <div class="meter" data-band="0" role="meter" aria-label="Bass audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <span class="meter-label">Bass</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-0"></div></div>
                             <span class="meter-value" id="meter-val-0">0%</span>
                         </div>
-                        <div class="meter" data-band="1">
+                        <div class="meter" data-band="1" role="meter" aria-label="Low audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <span class="meter-label">Low</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-1"></div></div>
                             <span class="meter-value" id="meter-val-1">0%</span>
                         </div>
-                        <div class="meter" data-band="2">
+                        <div class="meter" data-band="2" role="meter" aria-label="Mid audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <span class="meter-label">Mid</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-2"></div></div>
                             <span class="meter-value" id="meter-val-2">0%</span>
                         </div>
-                        <div class="meter" data-band="3">
+                        <div class="meter" data-band="3" role="meter" aria-label="High audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <span class="meter-label">High</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-3"></div></div>
                             <span class="meter-value" id="meter-val-3">0%</span>
                         </div>
-                        <div class="meter" data-band="4">
+                        <div class="meter" data-band="4" role="meter" aria-label="Air audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <span class="meter-label">Air</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-4"></div></div>
                             <span class="meter-value" id="meter-val-4">0%</span>
                         </div>
                         <!-- Master Volume -->
-                        <div class="meter master">
+                        <div class="meter master" role="meter" aria-label="Master audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <span class="meter-label">Master</span>
                             <div class="meter-bar"><div class="meter-fill" id="meter-master"></div></div>
                             <span class="meter-value" id="meter-val-master">0%</span>
@@ -234,11 +237,11 @@
                             <canvas id="preview-canvas"></canvas>
                             <div class="preview-beat-flash" id="preview-beat-flash"></div>
                             <div class="preview-strip-meters" id="preview-strip-meters">
-                                <div class="strip-meter" data-band="0"><div class="strip-meter-fill" id="strip-band-0"></div></div>
-                                <div class="strip-meter" data-band="1"><div class="strip-meter-fill" id="strip-band-1"></div></div>
-                                <div class="strip-meter" data-band="2"><div class="strip-meter-fill" id="strip-band-2"></div></div>
-                                <div class="strip-meter" data-band="3"><div class="strip-meter-fill" id="strip-band-3"></div></div>
-                                <div class="strip-meter" data-band="4"><div class="strip-meter-fill" id="strip-band-4"></div></div>
+                                <div class="strip-meter" data-band="0" role="meter" aria-label="Preview bass level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="strip-meter-fill" id="strip-band-0"></div></div>
+                                <div class="strip-meter" data-band="1" role="meter" aria-label="Preview low level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="strip-meter-fill" id="strip-band-1"></div></div>
+                                <div class="strip-meter" data-band="2" role="meter" aria-label="Preview mid level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="strip-meter-fill" id="strip-band-2"></div></div>
+                                <div class="strip-meter" data-band="3" role="meter" aria-label="Preview high level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="strip-meter-fill" id="strip-band-3"></div></div>
+                                <div class="strip-meter" data-band="4" role="meter" aria-label="Preview air level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="strip-meter-fill" id="strip-band-4"></div></div>
                             </div>
                         </div>
                     </div>
@@ -310,42 +313,42 @@
                                 <div class="fader" data-band="0">
                                     <span class="fader-label">Bass</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" aria-label="Bass sensitivity" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="1">
                                     <span class="fader-label">Low</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" aria-label="Low sensitivity" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="2">
                                     <span class="fader-label">Mid</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" aria-label="Mid sensitivity" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="3">
                                     <span class="fader-label">High</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" aria-label="High sensitivity" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader" data-band="4">
                                     <span class="fader-label">Air</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" aria-label="Air sensitivity" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>
                                 <div class="fader fader-master" data-band="master">
                                     <span class="fader-label">Master</span>
                                     <div class="fader-track">
-                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" data-requires-connection>
+                                        <input type="range" class="fader-input" min="0" max="200" value="100" orient="vertical" aria-label="Master sensitivity" data-requires-connection>
                                     </div>
                                     <span class="fader-value">100%</span>
                                 </div>

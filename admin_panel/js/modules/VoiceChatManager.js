@@ -76,6 +76,14 @@ export class VoiceChatManager {
         });
     }
 
+    resetCapabilityStatus() {
+        this.state.voiceChat.statusReceived = false;
+        this.state.voiceChat.available = false;
+        this.state.voiceChat.streaming = false;
+        this.updateVoiceChatUI();
+        this.app.ui.applyControlState();
+    }
+
     handleVoiceStatus(data) {
         const wasStreaming = this.state.voiceChat.streaming;
 

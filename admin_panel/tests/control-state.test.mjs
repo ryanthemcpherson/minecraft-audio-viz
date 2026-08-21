@@ -339,34 +339,99 @@ test('capability loading, unavailable, and error states stay visible with explan
     });
 });
 
-test('emergency state changes only when its command can be delivered and updates pressed semantics', () => {
+test('emergency state remains authoritative while a non-queued command is pending', () => {
     const originalDocument = globalThis.document;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
     const appRoot = new FakeElement('app');
+    const status = new FakeElement('emergency-control-status');
     const blackout = new FakeElement('btn-blackout');
     const freeze = new FakeElement('btn-freeze');
-    let deliverable = false;
-    globalThis.document = { getElementById: () => appRoot };
+    const immediate = [];
+    let timeoutCallback;
+    globalThis.document = {
+        getElementById: (id) => id === 'app' ? appRoot : id === 'emergency-control-status' ? status : null,
+    };
+    globalThis.setTimeout = (callback) => {
+        timeoutCallback = callback;
+        return 42;
+    };
+    globalThis.clearTimeout = () => {};
 
     const app = {
         state: { blackout: false, freeze: false },
         elements: { btnBlackout: blackout, btnFreeze: freeze },
-        ws: { send: () => deliverable },
+        ws: {
+            sendImmediate(message) {
+                immediate.push(message);
+                return true;
+            },
+        },
     };
     const actions = new ActionsManager(app);
 
     try {
-        assert.equal(actions.toggleBlackout(), false);
+        assert.equal(actions.toggleBlackout(), true);
         assert.equal(app.state.blackout, false);
         assert.equal(blackout.getAttribute('aria-pressed'), 'false');
+        assert.equal(blackout.getAttribute('aria-busy'), 'true');
+        assert.match(status.textContent, /Blackout.*pending/i);
+        assert.equal(immediate.length, 1);
+        assert.equal(immediate[0].type, 'set_blackout');
+        assert.equal(immediate[0].enabled, true);
+        assert.match(immediate[0].request_id, /^emergency-/);
 
-        deliverable = true;
-        assert.equal(actions.toggleBlackout(), true);
+        actions.applyEmergencyState({
+            blackout: true,
+            freeze: false,
+            request_id: immediate[0].request_id,
+        });
         assert.equal(app.state.blackout, true);
         assert.equal(blackout.getAttribute('aria-pressed'), 'true');
+        assert.equal(blackout.getAttribute('aria-busy'), 'false');
+        assert.match(status.textContent, /Blackout on/i);
+
         assert.equal(actions.toggleFreeze(), true);
-        assert.equal(freeze.getAttribute('aria-pressed'), 'true');
+        assert.equal(app.state.freeze, false);
+        timeoutCallback();
+        assert.equal(freeze.getAttribute('aria-busy'), 'false');
+        assert.match(status.textContent, /not confirmed/i);
     } finally {
         globalThis.document = originalDocument;
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+    }
+});
+
+test('correlated protocol errors clear emergency pending state without changing pressed state', () => {
+    const originalDocument = globalThis.document;
+    const originalSetTimeout = globalThis.setTimeout;
+    const appRoot = new FakeElement('app');
+    const status = new FakeElement('emergency-control-status');
+    const blackout = new FakeElement('btn-blackout');
+    const sent = [];
+    globalThis.document = {
+        getElementById: (id) => id === 'app' ? appRoot : id === 'emergency-control-status' ? status : null,
+    };
+    globalThis.setTimeout = () => 12;
+    const app = {
+        state: { blackout: false, freeze: false },
+        elements: { btnBlackout: blackout, btnFreeze: new FakeElement('btn-freeze') },
+        ws: { sendImmediate: (message) => (sent.push(message), true) },
+    };
+    const actions = new ActionsManager(app);
+
+    try {
+        actions.toggleBlackout();
+        actions.handleEmergencyError(sent[0].request_id, 'Rate limited — too many commands');
+
+        assert.equal(app.state.blackout, false);
+        assert.equal(blackout.getAttribute('aria-pressed'), 'false');
+        assert.equal(blackout.getAttribute('aria-busy'), 'false');
+        assert.match(status.textContent, /Rate limited/i);
+    } finally {
+        globalThis.document = originalDocument;
+        globalThis.setTimeout = originalSetTimeout;
     }
 });
 
@@ -443,5 +508,39 @@ test('authoritative voice status resolves loading state without hiding the capab
 
         assert.equal(app.state.voiceChat.statusReceived, true);
         assert.equal(voiceSection.dataset.uiState, 'unavailable');
+    });
+});
+
+test('voice capability reset returns the visible section to loading without stale availability', () => {
+    withControlHarness(({ app, voiceSection }) => {
+        app.state.connected = true;
+        app.state.voiceChat = {
+            available: true,
+            streaming: true,
+            enabled: true,
+            channelType: 'static',
+            distance: 100,
+            connectedPlayers: 2,
+            statusReceived: true,
+        };
+        app.elements = {
+            ...app.elements,
+            voiceDot: new FakeElement(),
+            voiceStatusText: new FakeElement(),
+            voicePlayersStat: new FakeElement(),
+            voiceUnavailableMsg: new FakeElement(),
+            voiceControls: new FakeElement(),
+            voiceStreamToggle: new FakeElement(),
+            voiceChannelType: new FakeElement(),
+            voiceDistance: new FakeElement(),
+            voiceDistanceRow: new FakeElement(),
+        };
+        const voice = new VoiceChatManager(app);
+
+        voice.resetCapabilityStatus();
+
+        assert.equal(app.state.voiceChat.statusReceived, false);
+        assert.equal(app.state.voiceChat.available, false);
+        assert.equal(voiceSection.dataset.uiState, 'loading');
     });
 });

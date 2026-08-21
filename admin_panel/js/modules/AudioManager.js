@@ -120,15 +120,19 @@ export class AudioManager {
             const value = Math.min(100, Math.max(0, bands[i] * 100));
             if (this.elements.meters[i]) {
                 this.elements.meters[i].style.transform = `scaleX(${value / 100})`;
+                this.elements.meters[i].closest?.('[role="meter"]')
+                    ?.setAttribute('aria-valuenow', String(Math.round(value)));
             }
             if (this.elements.meterValues[i]) {
                 this.elements.meterValues[i].textContent = `${Math.round(value)}%`;
             }
         }
 
-        const masterValue = this.state.amplitude * 100;
+        const masterValue = Math.min(100, Math.max(0, this.state.amplitude * 100));
         if (this.elements.meterMaster) {
             this.elements.meterMaster.style.transform = `scaleX(${masterValue / 100})`;
+            this.elements.meterMaster.closest?.('[role="meter"]')
+                ?.setAttribute('aria-valuenow', String(Math.round(masterValue)));
         }
         if (this.elements.meterMasterValue) {
             this.elements.meterMasterValue.textContent = `${Math.round(masterValue)}%`;

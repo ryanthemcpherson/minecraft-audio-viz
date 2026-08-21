@@ -47,8 +47,9 @@ test('authoritative VJ snapshots replace blackout and freeze presentation state'
     dj: { handleDJRoster() {} },
     audio: { updateBandMaterialsSourceHint() {} },
     actions: {
-      setBlackoutState: (enabled) => calls.push(['blackout', enabled]),
-      setFreezeState: (enabled) => calls.push(['freeze', enabled]),
+      applyEmergencyState: ({ blackout, freeze }) => {
+        calls.push(['blackout', blackout], ['freeze', freeze]);
+      },
     },
   };
 
@@ -59,4 +60,32 @@ test('authoritative VJ snapshots replace blackout and freeze presentation state'
   });
 
   assert.deepEqual(calls, [['blackout', true], ['freeze', false]]);
+});
+
+test('routes emergency acknowledgements and correlated errors to the actions manager', () => {
+  const calls = [];
+  const app = {
+    ui: { showToast() {} },
+    actions: {
+      applyEmergencyState: (data) => calls.push(['state', data]),
+      handleEmergencyError: (requestId, message) => calls.push(['error', requestId, message]),
+    },
+  };
+  const router = new MessageRouter(app);
+  router.handleMessage({
+    type: 'emergency_state',
+    blackout: true,
+    freeze: false,
+    request_id: 'emergency-1',
+  });
+  router.handleMessage({
+    type: 'error',
+    request_id: 'emergency-2',
+    message: 'Rate limited — too many commands',
+  });
+
+  assert.deepEqual(calls, [
+    ['state', { type: 'emergency_state', blackout: true, freeze: false, request_id: 'emergency-1' }],
+    ['error', 'emergency-2', 'Rate limited — too many commands'],
+  ]);
 });

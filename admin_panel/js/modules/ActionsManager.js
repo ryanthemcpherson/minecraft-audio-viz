@@ -12,39 +12,20 @@ export class ActionsManager {
         // Tap tempo tracking
         this.tapTimes = [];
         this.tapTimeout = null;
+        this._emergencySequence = 0;
+        this._pendingEmergency = new Map();
+        this.emergencyTimeoutMs = 5000;
 
         this._renderEmergencyState('blackout');
         this._renderEmergencyState('freeze');
     }
 
     toggleBlackout() {
-        const enabled = !this.state.blackout;
-        const delivered = this.ws.send({
-            type: 'trigger_effect',
-            effect: 'blackout',
-            intensity: enabled ? 1.0 : 0.0
-        });
-        if (delivered === false) {
-            this._renderEmergencyState('blackout');
-            return false;
-        }
-        this.setBlackoutState(enabled);
-        return true;
+        return this._requestEmergencyState('blackout', !this.state.blackout);
     }
 
     toggleFreeze() {
-        const enabled = !this.state.freeze;
-        const delivered = this.ws.send({
-            type: 'trigger_effect',
-            effect: 'freeze',
-            intensity: enabled ? 1.0 : 0.0
-        });
-        if (delivered === false) {
-            this._renderEmergencyState('freeze');
-            return false;
-        }
-        this.setFreezeState(enabled);
-        return true;
+        return this._requestEmergencyState('freeze', !this.state.freeze);
     }
 
     setBlackoutState(enabled) {
@@ -57,11 +38,89 @@ export class ActionsManager {
         this._renderEmergencyState('freeze');
     }
 
+    applyEmergencyState(data) {
+        if (typeof data.blackout === 'boolean') {
+            this.setBlackoutState(data.blackout);
+        }
+        if (typeof data.freeze === 'boolean') {
+            this.setFreezeState(data.freeze);
+        }
+
+        if (data.request_id) {
+            const pendingName = this._findPendingByRequestId(data.request_id);
+            if (pendingName) {
+                this._clearEmergencyPending(pendingName);
+                const enabled = Boolean(this.state[pendingName]);
+                this._setEmergencyStatus(`${this._emergencyLabel(pendingName)} ${enabled ? 'on' : 'off'}`);
+            }
+        }
+    }
+
+    handleEmergencyError(requestId, message) {
+        const pendingName = this._findPendingByRequestId(requestId);
+        if (!pendingName) return false;
+        this._clearEmergencyPending(pendingName);
+        this._setEmergencyStatus(message || `${this._emergencyLabel(pendingName)} could not be delivered`);
+        return true;
+    }
+
+    _requestEmergencyState(name, enabled) {
+        if (this._pendingEmergency.has(name)) return false;
+
+        const requestId = `emergency-${Date.now()}-${++this._emergencySequence}`;
+        const delivered = this.ws.sendImmediate({
+            type: name === 'blackout' ? 'set_blackout' : 'set_freeze',
+            enabled,
+            request_id: requestId,
+        });
+        if (!delivered) {
+            this._setEmergencyStatus(`${this._emergencyLabel(name)} could not be delivered`);
+            this._renderEmergencyState(name);
+            return false;
+        }
+
+        const timeoutId = setTimeout(() => {
+            const pending = this._pendingEmergency.get(name);
+            if (pending?.requestId !== requestId) return;
+            this._clearEmergencyPending(name);
+            this._setEmergencyStatus(`${this._emergencyLabel(name)} change was not confirmed`);
+        }, this.emergencyTimeoutMs);
+        this._pendingEmergency.set(name, { requestId, enabled, timeoutId });
+        this._renderEmergencyState(name);
+        this._setEmergencyStatus(`${this._emergencyLabel(name)} change pending`);
+        return true;
+    }
+
+    _findPendingByRequestId(requestId) {
+        for (const [name, pending] of this._pendingEmergency) {
+            if (pending.requestId === requestId) return name;
+        }
+        return null;
+    }
+
+    _clearEmergencyPending(name) {
+        const pending = this._pendingEmergency.get(name);
+        if (pending) clearTimeout(pending.timeoutId);
+        this._pendingEmergency.delete(name);
+        this._renderEmergencyState(name);
+    }
+
+    _emergencyLabel(name) {
+        return name === 'blackout' ? 'Blackout' : 'Freeze';
+    }
+
+    _setEmergencyStatus(message) {
+        const status = document.getElementById('emergency-control-status');
+        if (status) status.textContent = message;
+    }
+
     _renderEmergencyState(name) {
         const enabled = Boolean(this.state[name]);
         const button = name === 'blackout' ? this.elements.btnBlackout : this.elements.btnFreeze;
         button?.classList.toggle('active', enabled);
         button?.setAttribute('aria-pressed', String(enabled));
+        button?.setAttribute('aria-busy', String(this._pendingEmergency.has(name)));
+        button?.classList.toggle('pending', this._pendingEmergency.has(name));
         document.getElementById('app')?.classList.toggle(`mode-${name}`, enabled);
     }
 

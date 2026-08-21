@@ -148,6 +148,24 @@ export class WebSocketService extends EventTarget {
     }
 
     /**
+     * Send a safety-critical command only on the currently authenticated socket.
+     * Unlike send(), this path never queues or replays commands after reconnect.
+     */
+    sendImmediate(message) {
+        if (!this.isAuthenticated || this.ws?.readyState !== WebSocket.OPEN) {
+            return false;
+        }
+
+        try {
+            this.ws.send(JSON.stringify(message));
+            return true;
+        } catch (error) {
+            console.error('[WS] Immediate send failed:', error);
+            return false;
+        }
+    }
+
+    /**
      * Check if connected
      */
     get isConnected() {
