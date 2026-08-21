@@ -30,8 +30,12 @@ if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
   : > "$identity_dir/dj_auth.json"
   : > "$identity_dir/tls.crt"
   : > "$identity_dir/tls.key"
-  : > "$identity_dir/FIRST_LOGIN.txt"
-  : > "$identity_dir/identity.json"
+  canonical_host="${FAKE_CANONICAL_HOST:-8.8.8.8}"
+  endpoint_host="$canonical_host"
+  if [[ "$canonical_host" == *:* ]]; then endpoint_host="[$canonical_host]"; fi
+  printf 'ADMIN_URL=https://%s:8080/\nPREVIEW_URL=https://%s:8080/preview/\nDJ_ENDPOINT=wss://%s:25808\n' \
+    "$endpoint_host" "$endpoint_host" "$endpoint_host" > "$identity_dir/FIRST_LOGIN.txt"
+  printf '{"public_host":"%s"}\n' "$canonical_host" > "$identity_dir/identity.json"
   ln -s 'identity-generations/test-generation' "$MCAV_ROOT/state/current-identity"
   exit 0
 fi
@@ -63,6 +67,7 @@ run_wrapper() {
   VJ_CAPTURE="$fixture/vj.args" \
   SECRET_CAPTURE="$fixture/secret.env" \
   MCAV_PUBLIC_HOST="${TEST_MCAV_PUBLIC_HOST-8.8.8.8}" \
+  FAKE_CANONICAL_HOST="${FAKE_CANONICAL_HOST-${TEST_MCAV_PUBLIC_HOST-8.8.8.8}}" \
   "$fixture/mcav-vj/start-mcav.sh" -- "$@"
 }
 
@@ -119,6 +124,24 @@ test_ipv6_public_origin_is_bracketed() {
   make_fixture "$fixture"
   TEST_MCAV_PUBLIC_HOST='2606:4700:4700::1111' run_wrapper "$fixture" "$fixture/paper"
 
+  assert_arg_value \
+    "$fixture/vj.args" \
+    '--public-origin' \
+    'https://[2606:4700:4700::1111]:8080'
+}
+
+test_runtime_origin_uses_canonical_generation_endpoints() {
+  local fixture="$TEST_ROOT/canonical-whitespace-ipv4"
+  make_fixture "$fixture"
+  TEST_MCAV_PUBLIC_HOST=' 8.8.8.8 ' FAKE_CANONICAL_HOST='8.8.8.8' \
+    run_wrapper "$fixture" "$fixture/paper"
+  assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:8080'
+
+  fixture="$TEST_ROOT/canonical-expanded-ipv6"
+  make_fixture "$fixture"
+  TEST_MCAV_PUBLIC_HOST='2606:4700:4700:0:0:0:0:1111' \
+    FAKE_CANONICAL_HOST='2606:4700:4700::1111' \
+    run_wrapper "$fixture" "$fixture/paper"
   assert_arg_value \
     "$fixture/vj.args" \
     '--public-origin' \
@@ -225,6 +248,7 @@ test_missing_paper_command_is_rejected() {
 
 test_exact_paper_arguments_and_secure_vj_flags
 test_ipv6_public_origin_is_bracketed
+test_runtime_origin_uses_canonical_generation_endpoints
 test_missing_public_host_still_starts_paper
 test_public_port_collision_still_starts_paper
 test_topology_overrides_fail_closed_and_still_start_paper
