@@ -14,7 +14,7 @@ import pytest
 import vj_server.cli as cli_module
 import vj_server.vj_server as vj_mod
 from vj_server.beat_predictor import BeatPredictor
-from vj_server.models import DJConnection
+from vj_server.models import DJConnection, create_http_server
 from vj_server.web_gateway import UnifiedWebConfig
 
 from .conftest import FakeDJConnection, make_audio_frame
@@ -232,7 +232,7 @@ async def test_legacy_http_listener_and_thread_stop_on_every_exit_path(
 ) -> None:
     class ControlledHTTPServer:
         def __init__(self) -> None:
-            self.events: list[str] = []
+            self.events: list[tuple[str, int]] = []
             self.serve_started = threading.Event()
             self.stop_requested = threading.Event()
 
@@ -241,27 +241,40 @@ async def test_legacy_http_listener_and_thread_stop_on_every_exit_path(
             self.stop_requested.wait()
 
         def shutdown(self) -> None:
-            self.events.append("shutdown")
+            self.events.append(("shutdown", threading.get_ident()))
             self.stop_requested.set()
 
         def server_close(self) -> None:
-            self.events.append("server_close")
+            self.events.append(("server_close", threading.get_ident()))
 
     class CapturingThread:
-        def __init__(self, *, target, args=(), daemon=None) -> None:
+        def __init__(self, *, target, args=(), daemon=None, name=None) -> None:
             self.target = target
-            self._thread = threading.Thread(target=target, args=args, daemon=daemon)
+            self.daemon = daemon
+            self.name = name
+            self._thread = threading.Thread(
+                target=target,
+                args=args,
+                daemon=daemon,
+                name=name,
+            )
+            self.join_callers: list[int] = []
             self.join_timeouts: list[float | None] = []
 
         def start(self) -> None:
             self._thread.start()
 
         def join(self, timeout: float | None = None) -> None:
+            self.join_callers.append(threading.get_ident())
             self.join_timeouts.append(timeout)
             self._thread.join(timeout)
 
         def is_alive(self) -> bool:
             return self._thread.is_alive()
+
+        @property
+        def ident(self) -> int | None:
+            return self._thread.ident
 
     class FakeWebSocketListener:
         def close(self) -> None:
@@ -332,11 +345,25 @@ async def test_legacy_http_listener_and_thread_stop_on_every_exit_path(
                 await server.run()
 
         assert http_server.serve_started.wait(timeout=1.0)
-        assert http_server.events == ["shutdown", "server_close"]
+        assert [event for event, _owner in http_server.events] == [
+            "shutdown",
+            "server_close",
+        ]
+        assert len(threads) == 2
         serve_threads = [thread for thread in threads if thread.target == http_server.serve_forever]
+        cleanup_threads = [thread for thread in threads if thread.name == "legacy-http-cleanup"]
         assert len(serve_threads) == 1
-        assert serve_threads[0].join_timeouts == [5.0]
+        assert len(cleanup_threads) == 1
+        cleanup_thread = cleanup_threads[0]
+        cleanup_owner = cleanup_thread.ident
+        assert cleanup_owner is not None
+        assert {owner for _event, owner in http_server.events} == {cleanup_owner}
+        assert serve_threads[0].join_callers == [cleanup_owner]
+        assert serve_threads[0].join_timeouts == [None]
+        assert cleanup_thread.daemon is False
+        assert cleanup_thread.join_timeouts == [None]
         assert serve_threads[0].is_alive() is False
+        assert cleanup_thread.is_alive() is False
         assert all(thread.is_alive() is False for thread in threads)
     finally:
         http_server.stop_requested.set()
@@ -387,31 +414,100 @@ async def test_legacy_http_bind_failure_does_not_prevent_websocket_startup(
 
 
 @pytest.mark.asyncio
-async def test_legacy_http_cleanup_action_timeout_does_not_block_event_loop() -> None:
-    action_started = threading.Event()
-    release_action = threading.Event()
+async def test_legacy_http_cleanup_finishes_before_propagating_cancellation() -> None:
+    shutdown_started = threading.Event()
+    release_shutdown = threading.Event()
+    stop_requested = threading.Event()
+    events: list[str] = []
 
-    def blocking_action() -> None:
-        action_started.set()
-        release_action.wait()
+    class DelayedHTTPServer:
+        def serve_forever(self) -> None:
+            stop_requested.wait()
 
+        def shutdown(self) -> None:
+            events.append("shutdown")
+            shutdown_started.set()
+            release_shutdown.wait()
+            stop_requested.set()
+
+        def server_close(self) -> None:
+            events.append("server_close")
+
+    http_server = DelayedHTTPServer()
+    http_thread = threading.Thread(
+        target=http_server.serve_forever,
+        daemon=True,
+        name="test-legacy-http-server",
+    )
+    http_thread.start()
     server = vj_mod.VJServer(metrics_port=None, show_spectrograph=False)
-    loop = asyncio.get_running_loop()
-    started_at = loop.time()
+    cleanup_task = asyncio.create_task(server._stop_legacy_http_thread(http_server, http_thread))
 
     try:
-        await asyncio.wait_for(
-            server._run_bounded_legacy_http_action(
-                "blocking test action",
-                blocking_action,
-                timeout=0.01,
-            ),
-            timeout=0.2,
+        while not shutdown_started.is_set():
+            await asyncio.sleep(0)
+        cleanup_task.cancel()
+        await asyncio.sleep(0.01)
+        assert cleanup_task.done() is False
+
+        release_shutdown.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(cleanup_task, timeout=1.0)
+
+        assert events == ["shutdown", "server_close"]
+        assert http_thread.is_alive() is False
+        assert not any(
+            thread.name == "legacy-http-cleanup" and thread.is_alive()
+            for thread in threading.enumerate()
         )
-        assert action_started.is_set()
-        assert loop.time() - started_at < 0.2
     finally:
-        release_action.set()
+        release_shutdown.set()
+        stop_requested.set()
+        http_thread.join(timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_real_legacy_http_cleanup_keeps_event_loop_responsive(tmp_path: Path) -> None:
+    http_server = create_http_server(0, str(tmp_path))
+    serve_started = threading.Event()
+
+    def serve_forever() -> None:
+        serve_started.set()
+        http_server.serve_forever()
+
+    http_thread = threading.Thread(
+        target=serve_forever,
+        daemon=True,
+        name="test-real-legacy-http-server",
+    )
+    http_thread.start()
+    assert serve_started.wait(timeout=1.0)
+    await asyncio.sleep(0.01)
+
+    server = vj_mod.VJServer(metrics_port=None, show_spectrograph=False)
+    cleanup_finished = False
+    loop_ticks = 0
+    ticker_started = asyncio.Event()
+
+    async def tick_until_cleanup_finishes() -> None:
+        nonlocal loop_ticks
+        ticker_started.set()
+        while not cleanup_finished:
+            await asyncio.sleep(0)
+            loop_ticks += 1
+
+    ticker = asyncio.create_task(tick_until_cleanup_finishes())
+    await ticker_started.wait()
+    try:
+        await server._stop_legacy_http_thread(http_server, http_thread)
+    finally:
+        cleanup_finished = True
+        await ticker
+        http_server.server_close()
+        http_thread.join(timeout=1.0)
+
+    assert loop_ticks > 0
+    assert http_thread.is_alive() is False
 
 
 # ============================================================================
