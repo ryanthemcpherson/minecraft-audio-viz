@@ -22,11 +22,13 @@
     },
     "channel_type": {
       "type": "string",
-      "description": "Voice channel type (e.g. proximity, global)."
+      "enum": ["static", "locational"],
+      "description": "Voice channel type used by the renderer."
     },
     "connected_players": {
       "type": "integer",
       "minimum": 0,
+      "maximum": 1000000,
       "description": "Number of players connected to voice chat."
     },
     "error": {
