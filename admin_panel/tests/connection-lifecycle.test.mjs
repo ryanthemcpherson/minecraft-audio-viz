@@ -11,6 +11,8 @@ class FakeWebSocket {
     this.listeners.set(type, listener);
   }
 
+  send() {}
+
   emit(type, detail) {
     this.listeners.get(type)?.({ detail });
   }
@@ -44,4 +46,84 @@ test('delegates representative WebSocket lifecycle events to managers', () => {
     ['reset-code'],
     ['message', { type: 'patterns' }],
   ]);
+});
+
+test('notifies the login gate when authenticated without storing credentials', () => {
+  const originalDocument = globalThis.document;
+  const originalLocalStorage = globalThis.localStorage;
+  const originalPrompt = globalThis.prompt;
+  const calls = [];
+  const root = { classList: { add() {}, remove() {} } };
+  globalThis.document = { getElementById: () => root };
+  globalThis.localStorage = {
+    getItem() { throw new Error('credential storage must not be read'); },
+    setItem() { throw new Error('credential storage must not be written'); },
+  };
+  globalThis.prompt = () => { throw new Error('native credential prompt must not open'); };
+
+  try {
+    const app = {
+      ws: new FakeWebSocket(),
+      state: {
+        connected: false,
+        zone: { name: 'main' },
+        bitmap: { dataFetched: false },
+      },
+      ui: {
+        setConnectionStatus: (...args) => calls.push(['status', ...args]),
+        showToast: () => {},
+      },
+      bitmap: { fetchBitmapData: () => {} },
+      preview: {
+        previewInitialized: true,
+        previewFailed: false,
+        previewStripCollapsed: false,
+      },
+      onAuthenticated: () => calls.push(['authenticated']),
+    };
+
+    setupConnectionLifecycle(app);
+    app.ws.emit('connected');
+
+    assert.equal(app.state.connected, true);
+    assert.deepEqual(calls.slice(0, 2), [
+      ['authenticated'],
+      ['status', 'connected'],
+    ]);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.localStorage = originalLocalStorage;
+    globalThis.prompt = originalPrompt;
+  }
+});
+
+test('returns authentication failures to the login gate without prompting or persistence', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  const originalPrompt = globalThis.prompt;
+  const calls = [];
+  globalThis.localStorage = {
+    getItem() { throw new Error('credential storage must not be read'); },
+    setItem() { throw new Error('credential storage must not be written'); },
+  };
+  globalThis.prompt = () => { throw new Error('native credential prompt must not open'); };
+
+  try {
+    const app = {
+      ws: new FakeWebSocket(),
+      ui: { setConnectionStatus: (...args) => calls.push(['status', ...args]) },
+      onAuthFailed: (message) => calls.push(['auth-failed', message]),
+    };
+
+    setupConnectionLifecycle(app);
+    assert.doesNotThrow(() => app.ws.emit('auth_failed', {
+      error: 'Invalid username or password',
+    }));
+    assert.deepEqual(calls, [
+      ['status', 'disconnected'],
+      ['auth-failed', 'Invalid username or password'],
+    ]);
+  } finally {
+    globalThis.localStorage = originalLocalStorage;
+    globalThis.prompt = originalPrompt;
+  }
 });

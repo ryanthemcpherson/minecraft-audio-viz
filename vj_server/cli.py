@@ -10,6 +10,7 @@ import asyncio
 import os
 import signal
 import sys
+from pathlib import Path
 
 from vj_server.config import validate_http_bind_host
 
@@ -106,6 +107,30 @@ Examples:
         help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
     )
     parser.add_argument(
+        "--http-port",
+        type=validate_port,
+        default=int(os.environ.get("HTTP_PORT", "8080")),
+        help="HTTPS/HTTP port for admin panel (default: 8080 or $HTTP_PORT)",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("MCAV_PROJECT_ROOT")) else None),
+        help="Project root containing admin, preview, patterns, and configs",
+    )
+    parser.add_argument(
+        "--tls-cert",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("TLS_CERT")) else None),
+        help="TLS certificate for admin HTTPS and browser WSS",
+    )
+    parser.add_argument(
+        "--tls-key",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("TLS_KEY")) else None),
+        help="TLS private key for admin HTTPS and browser WSS",
+    )
+    parser.add_argument(
         "--auth-file",
         type=str,
         default=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
@@ -171,7 +196,6 @@ Examples:
     # Handle --hash-passwords: hash plaintext entries in-place and exit
     if args.hash_passwords:
         import json
-        from pathlib import Path
 
         from vj_server.auth import hash_password
 
@@ -201,7 +225,6 @@ Examples:
     auth_config = None
     if not args.no_auth and args.auth_file:
         import json
-        from pathlib import Path
 
         auth_path = Path(args.auth_file)
         if auth_path.exists():
@@ -237,6 +260,10 @@ Examples:
         minecraft_ws_secret=args.minecraft_ws_secret,
         broadcast_port=args.broadcast_port,
         http_host=args.http_host,
+        http_port=args.http_port,
+        project_root=args.project_root,
+        tls_cert=args.tls_cert,
+        tls_key=args.tls_key,
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,

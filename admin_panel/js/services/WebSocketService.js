@@ -9,7 +9,9 @@ export class WebSocketService extends EventTarget {
 
         this.host = options.host || 'localhost';
         this.port = options.port || 8766;
-        this.vjPassword = options.vjPassword || '';
+        this.username = options.username || '';
+        this.password = options.password || '';
+        this.pageProtocol = options.pageProtocol || globalThis.location?.protocol || 'http:';
         this.reconnectInterval = options.reconnectInterval || 1000;
         this.maxReconnectAttempts = options.maxReconnectAttempts || 50;
 
@@ -28,6 +30,14 @@ export class WebSocketService extends EventTarget {
         this._lastQueueWarnAt = 0;
         this._queueWarnIntervalMs = 2000;
         this._queuedDrops = 0;
+    }
+
+    /**
+     * Replace the in-memory operator credentials used for the next connection.
+     */
+    setCredentials(username, password) {
+        this.username = username;
+        this.password = password;
     }
 
     /**
@@ -57,7 +67,8 @@ export class WebSocketService extends EventTarget {
         this.isConnecting = true;
         this.shouldReconnect = true;
 
-        const url = `ws://${this.host}:${this.port}`;
+        const scheme = this.pageProtocol === 'https:' ? 'wss' : 'ws';
+        const url = `${scheme}://${this.host}:${this.port}`;
         console.log(`[WS] Connecting to ${url}...`);
 
         this._emit('connecting', {
@@ -136,15 +147,21 @@ export class WebSocketService extends EventTarget {
         this.isConnecting = false;
         this.reconnectAttempts = 0;
 
-        // Send VJ auth if a password is configured
-        if (this.vjPassword) {
-            this.ws.send(JSON.stringify({ type: 'vj_auth', password: this.vjPassword }));
+        // Authentication is mandatory for browser control surfaces.
+        if (this.username && this.password) {
+            this.ws.send(JSON.stringify({
+                type: 'vj_auth',
+                username: this.username,
+                password: this.password,
+            }));
             // Wait for auth_success or auth_error before proceeding
             this._awaitingAuth = true;
             return;
         }
 
-        this._completeConnection();
+        this.shouldReconnect = false;
+        this._emit('auth_required');
+        this.ws.close(1000, 'Credentials required');
     }
 
     /**
