@@ -38,9 +38,6 @@ export class MessageRouter {
                     app.patterns.updatePatternHighlightForZones();
                     app.bitmap.updateZoneSelector();
                 }
-                if (data.stages) {
-                    app.zones.handleStagesList({ stages: data.stages });
-                }
                 if (data.stage !== undefined && data.stage) {
                     app.state.selectedStage = data.stage;
                     if (app.elements.stageSelect) {
@@ -65,16 +62,39 @@ export class MessageRouter {
                 if (data.banner_profiles) {
                     app.state.bannerProfiles = data.banner_profiles;
                 }
-                if (data.bitmap_zones) {
-                    for (const [zoneName, info] of Object.entries(data.bitmap_zones)) {
-                        if (info.initialized) {
-                            app.state.bitmap.initializedZones.add(zoneName);
-                            app.state.bitmap.initialized = true;
-                            app.state.bitmap.width = info.width;
-                            app.state.bitmap.height = info.height;
-                            app.bitmap.updateStatus(info);
-                        }
+                if (Object.prototype.hasOwnProperty.call(data, 'bitmap_zones')) {
+                    const snapshot = data.bitmap_zones && typeof data.bitmap_zones === 'object'
+                        ? data.bitmap_zones
+                        : {};
+                    const initializedZones = new Set();
+                    const bitmapZones = {};
+
+                    for (const [zoneName, info] of Object.entries(snapshot)) {
+                        if (!info || typeof info !== 'object' || !info.initialized) continue;
+                        const patternEntry = app.state.zonePatterns?.[zoneName];
+                        const pattern = patternEntry && typeof patternEntry === 'object'
+                            ? patternEntry.pattern
+                            : patternEntry;
+                        initializedZones.add(zoneName);
+                        bitmapZones[zoneName] = {
+                            initialized: true,
+                            width: info.width || 16,
+                            height: info.height || 12,
+                            pattern: pattern || app.state.bitmap.zones?.[zoneName]?.pattern
+                                || app.state.bitmap.activePattern || 'bmp_plasma',
+                        };
+                        app.state.bitmap.width = info.width || 16;
+                        app.state.bitmap.height = info.height || 12;
+                        app.bitmap.updateStatus({ ...info, zone: zoneName, pattern });
                     }
+
+                    app.state.bitmap.initializedZones = initializedZones;
+                    app.state.bitmap.zones = bitmapZones;
+                    app.state.bitmap.initialized = initializedZones.size > 0;
+                    app.preview?.syncBitmapZones();
+                }
+                if (data.stages) {
+                    app.zones.handleStagesList({ stages: data.stages });
                 }
                 if (data.bloom_enabled !== undefined && app.elements.bitmapBloom) {
                     app.elements.bitmapBloom.checked = data.bloom_enabled;
@@ -278,17 +298,17 @@ export class MessageRouter {
                 app.state.bitmap.height = data.height || 12;
                 const initZone = data.zone || app.state.bitmap.zone;
                 app.state.bitmap.initializedZones.add(initZone);
+                const pattern = data.pattern || app.state.bitmap.zones?.[initZone]?.pattern
+                    || app.state.bitmap.activePattern || 'bmp_plasma';
+                app.state.bitmap.zones[initZone] = {
+                    initialized: true,
+                    width: data.width || 16,
+                    height: data.height || 12,
+                    pattern,
+                };
                 app.bitmap.updateStatus(data);
                 app.ui.showToast(`Bitmap initialized: ${data.width || '?'}x${data.height || '?'}`, 'success');
-                // Show bitmap in 3D preview
-                if (app.preview?.bitmapPreview) {
-                    const zg = app.preview.previewZoneGroups[initZone];
-                    if (zg) {
-                        app.preview.bitmapPreview.activate(initZone, data.width || 16, data.height || 12,
-                            data.pattern || app.state.bitmap.activePattern || 'bmp_plasma', zg);
-                    }
-                    app.preview.bitmapPreview.setZoneVisible(initZone, true);
-                }
+                app.preview?.syncBitmapZones();
                 break;
             }
 
@@ -296,9 +316,15 @@ export class MessageRouter {
             case 'bitmap_transition_started':
                 app.state.bitmap.activePattern = data.pattern;
                 app.bitmap.highlightPattern(data.pattern);
-                if (app.preview?.bitmapPreview && data.zone) {
-                    app.preview.bitmapPreview.setPattern(data.zone, data.pattern);
+                if (data.zone) {
+                    const previous = app.state.bitmap.zones?.[data.zone] || {};
+                    app.state.bitmap.zones[data.zone] = { ...previous, pattern: data.pattern };
+                    app.preview?.bitmapPreview?.setPattern(data.zone, data.pattern);
                 }
+                break;
+
+            case 'bitmap_frame':
+                app.preview?.handleBitmapFrame(data);
                 break;
 
             case 'bitmap_palette_set':

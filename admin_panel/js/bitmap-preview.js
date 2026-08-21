@@ -9,6 +9,10 @@ class BitmapPreview {
     constructor() {
         /** @type {Object<string, BitmapZoneState>} */
         this.zones = {};
+        this.pendingPatterns = {};
+        this.exactFrames = {};
+        this.nextFrameId = 1;
+        this.frameFreshnessMs = 750;
         this.time = 0;
         this.effects = {
             brightness: 1.0,
@@ -27,7 +31,7 @@ class BitmapPreview {
 
         width = width || 16;
         height = height || 12;
-        pattern = pattern || 'bmp_plasma';
+        pattern = this.pendingPatterns[zoneName] || pattern || 'bmp_plasma';
 
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -59,6 +63,8 @@ class BitmapPreview {
         this.zones[zoneName] = {
             width, height, pattern,
             canvas, ctx, texture, mesh, zoneGroup,
+            frameImageData: null,
+            renderedFrameId: 0,
         };
     }
 
@@ -74,8 +80,24 @@ class BitmapPreview {
     isActive(zoneName) { return !!this.zones[zoneName]; }
 
     setPattern(zoneName, pattern) {
+        if (!zoneName || !pattern) return;
+        this.pendingPatterns[zoneName] = pattern;
         const s = this.zones[zoneName];
         if (s) s.pattern = pattern;
+    }
+
+    /**
+     * Store an exact frame received from the Minecraft renderer.
+     * Returns false for malformed frames without disturbing prior state.
+     */
+    ingestFrame(message) {
+        const frame = this._decodeFrame(message);
+        if (!frame) return false;
+
+        frame.id = this.nextFrameId++;
+        frame.receivedAt = performance.now();
+        this.exactFrames[frame.zone] = frame;
+        return true;
     }
 
     setVisible(visible) {
@@ -93,13 +115,110 @@ class BitmapPreview {
     update(dt, audioState) {
         if (this.effects.frozen) return;
         this.time += dt;
+        const now = performance.now();
 
-        for (const s of Object.values(this.zones)) {
+        for (const [zoneName, s] of Object.entries(this.zones)) {
             if (!s.mesh.visible) continue;
+
+            const exactFrame = this.exactFrames[zoneName];
+            if (exactFrame && now - exactFrame.receivedAt <= this.frameFreshnessMs) {
+                if (s.renderedFrameId !== exactFrame.id) {
+                    this._renderExactFrame(s, exactFrame);
+                    s.renderedFrameId = exactFrame.id;
+                    s.texture.needsUpdate = true;
+                }
+                continue;
+            }
+
             this._renderPattern(s, audioState);
             this._applyEffects(s);
             s.texture.needsUpdate = true;
         }
+    }
+
+    _decodeFrame(message) {
+        if (!message || typeof message !== 'object' || typeof message.zone !== 'string'
+            || message.zone.length === 0) {
+            return null;
+        }
+
+        const width = message.width;
+        const height = message.height;
+        if (!Number.isSafeInteger(width) || width < 1
+            || !Number.isSafeInteger(height) || height < 1) {
+            return null;
+        }
+
+        const pixelCount = width * height;
+        if (!Number.isSafeInteger(pixelCount) || pixelCount > 4_194_304) {
+            return null;
+        }
+
+        const hasPixelArray = Array.isArray(message.pixel_array);
+        const hasBase64 = typeof message.pixels === 'string';
+        if (hasPixelArray === hasBase64) return null;
+
+        const argbPixels = new Uint32Array(pixelCount);
+        if (hasPixelArray) {
+            if (message.pixel_array.length !== pixelCount) return null;
+            for (let index = 0; index < pixelCount; index++) {
+                const value = message.pixel_array[index];
+                if (!Number.isInteger(value) || value < -2_147_483_648 || value > 4_294_967_295) {
+                    return null;
+                }
+                argbPixels[index] = value >>> 0;
+            }
+        } else {
+            let bytes;
+            try {
+                const encoded = message.pixels;
+                if (encoded.length === 0 || encoded.length % 4 !== 0
+                    || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+                    return null;
+                }
+                const binary = atob(encoded);
+                if (binary.length !== pixelCount * 4) return null;
+                bytes = new Uint8Array(binary.length);
+                for (let index = 0; index < binary.length; index++) {
+                    bytes[index] = binary.charCodeAt(index);
+                }
+            } catch (_) {
+                return null;
+            }
+
+            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            for (let index = 0; index < pixelCount; index++) {
+                argbPixels[index] = view.getUint32(index * 4, true);
+            }
+        }
+
+        const rgba = new Uint8ClampedArray(pixelCount * 4);
+        for (let index = 0; index < pixelCount; index++) {
+            const argb = argbPixels[index];
+            const offset = index * 4;
+            rgba[offset] = (argb >>> 16) & 0xff;
+            rgba[offset + 1] = (argb >>> 8) & 0xff;
+            rgba[offset + 2] = argb & 0xff;
+            rgba[offset + 3] = (argb >>> 24) & 0xff;
+        }
+
+        return { zone: message.zone, width, height, rgba };
+    }
+
+    _renderExactFrame(zoneState, frame) {
+        if (zoneState.width !== frame.width || zoneState.height !== frame.height) {
+            zoneState.width = frame.width;
+            zoneState.height = frame.height;
+            zoneState.canvas.width = frame.width;
+            zoneState.canvas.height = frame.height;
+            zoneState.frameImageData = null;
+        }
+
+        if (!zoneState.frameImageData) {
+            zoneState.frameImageData = zoneState.ctx.createImageData(frame.width, frame.height);
+        }
+        zoneState.frameImageData.data.set(frame.rgba);
+        zoneState.ctx.putImageData(zoneState.frameImageData, 0, 0);
     }
 
     // ────────────────── Pattern Dispatch ──────────────────

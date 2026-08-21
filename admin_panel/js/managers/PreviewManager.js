@@ -67,6 +67,7 @@ export class PreviewManager {
 
         // Bitmap preview
         this._bitmapPreview = null;
+        this._pendingBitmapFrames = new Map();
 
         // Texture manager
         this._textureManager = null;
@@ -252,6 +253,10 @@ export class PreviewManager {
 
             if (typeof BitmapPreview !== 'undefined') {
                 this._bitmapPreview = new BitmapPreview();
+                for (const frame of this._pendingBitmapFrames.values()) {
+                    this._bitmapPreview.ingestFrame(frame);
+                }
+                this._pendingBitmapFrames.clear();
             }
 
             this._setupControls();
@@ -263,7 +268,7 @@ export class PreviewManager {
             this._initialized = true;
             this._lastFrameTime = performance.now();
 
-            if ((this.state.allZones || []).length > 1) {
+            if ((this.state.allZones || []).length > 0) {
                 this.rebuildZoneLayout();
             }
         } catch (error) {
@@ -512,20 +517,6 @@ export class PreviewManager {
             }
             zones.forEach(z => this._ensureZoneGroup(z.name));
 
-            if (this._bitmapPreview) {
-                const initZones = this.state.bitmap.initializedZones;
-                zones.forEach(z => {
-                    const zg = this._zoneGroups[z.name];
-                    if (zg && initZones.has(z.name)) {
-                        const bw = this.state.bitmap.width || 16;
-                        const bh = this.state.bitmap.height || 12;
-                        const bp = this.state.bitmap.activePattern || 'bmp_plasma';
-                        this._bitmapPreview.activate(z.name, bw, bh, bp, zg);
-                        this._bitmapPreview.setZoneVisible(z.name, true);
-                    }
-                });
-            }
-
             this._frameStage();
 
             if (scanBtn) scanBtn.style.display = '';
@@ -549,6 +540,60 @@ export class PreviewManager {
                 this._stageGround = null;
             }
         }
+
+        this.syncBitmapZones();
+    }
+
+    /** Synchronize bitmap planes from the latest server-authoritative zone state. */
+    syncBitmapZones() {
+        if (!this._initialized || !this._scene || !this._bitmapPreview) return;
+
+        const initializedZones = this.state.bitmap.initializedZones || new Set();
+        const knownZones = new Set((this.state.allZones || []).map(zone => zone.name));
+
+        for (const zoneName of Object.keys(this._bitmapPreview.zones)) {
+            if (!initializedZones.has(zoneName) || !knownZones.has(zoneName)) {
+                this._bitmapPreview.deactivate(zoneName);
+            }
+        }
+
+        for (const zoneName of initializedZones) {
+            const zoneGroup = this._zoneGroups[zoneName] || this._ensureZoneGroup(zoneName);
+            if (!zoneGroup) continue;
+
+            const zoneState = this.state.bitmap.zones?.[zoneName] || {};
+            const patternEntry = this.state.zonePatterns?.[zoneName];
+            const pattern = zoneState.pattern
+                || (patternEntry && typeof patternEntry === 'object' ? patternEntry.pattern : patternEntry)
+                || this.state.bitmap.activePattern
+                || 'bmp_plasma';
+            const width = zoneState.width || this.state.bitmap.width || 16;
+            const height = zoneState.height || this.state.bitmap.height || 12;
+            const activeZone = this._bitmapPreview.zones[zoneName];
+
+            if (!activeZone || activeZone.width !== width || activeZone.height !== height) {
+                this._bitmapPreview.activate(zoneName, width, height, pattern, zoneGroup);
+            } else {
+                this._bitmapPreview.setPattern(zoneName, pattern);
+            }
+            this._bitmapPreview.setZoneVisible(zoneName, true);
+        }
+
+        const zones = this.state.allZones || [];
+        if (zones.length <= 1 && initializedZones.size > 0) {
+            this._blocks.forEach(block => { block.visible = false; });
+        }
+    }
+
+    handleBitmapFrame(data) {
+        if (this._bitmapPreview) {
+            return this._bitmapPreview.ingestFrame(data);
+        }
+        if (data && typeof data.zone === 'string' && data.zone) {
+            if (!this._pendingBitmapFrames) this._pendingBitmapFrames = new Map();
+            this._pendingBitmapFrames.set(data.zone, data);
+        }
+        return false;
     }
 
     _frameStage() {
@@ -1041,6 +1086,13 @@ export class PreviewManager {
     }
 
     _updateSingleZone(bands) {
+        const zones = this.state.allZones || [];
+        const zoneName = zones.length === 1 ? zones[0].name : this.state.zone?.name;
+        if (zoneName && this.state.bitmap.initializedZones?.has(zoneName)) {
+            this._blocks.forEach(block => { block.visible = false; });
+            return;
+        }
+
         const entities = Array.isArray(this.state.entities) ? this.state.entities : [];
         if (entities.length === 0) return;
 
