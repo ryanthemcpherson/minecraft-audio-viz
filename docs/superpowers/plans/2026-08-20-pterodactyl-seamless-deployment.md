@@ -382,7 +382,7 @@ Create `runtime-lock.json` with these exact immutable inputs:
     }
   },
   "dependencies": [
-    "websockets==17.0.1",
+    "websockets==16.0",
     "numpy==2.5.2",
     "python-dotenv==1.2.3",
     "lupa==2.8",
