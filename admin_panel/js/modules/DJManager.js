@@ -22,6 +22,7 @@ export class DJManager {
     }
 
     renderDJQueue() {
+        this.renderCommandSummary();
         const container = this.elements.djQueue;
         if (!container) return;
 
@@ -205,6 +206,49 @@ export class DJManager {
             djEl.appendChild(queueControls);
             container.appendChild(djEl);
         });
+    }
+
+    renderCommandSummary() {
+        const summary = this.elements.activeDjSummary;
+        const nameElement = this.elements.activeDjName;
+        const healthElement = this.elements.activeDjHealth;
+        if (!summary || !nameElement || !healthElement) return;
+
+        const activeDJ = this.state.djRoster?.find(
+            (dj) => dj.dj_id === this.state.activeDJ,
+        );
+        if (!activeDJ) {
+            nameElement.textContent = 'No active DJ';
+            healthElement.textContent = 'Sync idle';
+            summary.dataset.health = 'idle';
+            return;
+        }
+
+        nameElement.textContent = activeDJ.dj_name || 'Unnamed DJ';
+        const clockAge = activeDJ.clock_sync_age_s;
+        const driftRate = activeDJ.clock_drift_rate;
+        const jitter = activeDJ.jitter_ms;
+        const hasClockAge = Number.isFinite(clockAge);
+        const hasDriftRate = Number.isFinite(driftRate);
+        const hasJitter = Number.isFinite(jitter);
+        const issues = [];
+        if (hasClockAge && clockAge >= 60) issues.push(`clock ${Math.round(clockAge)}s`);
+        if (hasDriftRate && driftRate > 5) issues.push(`drift ${driftRate.toFixed(1)}ms/m`);
+        if (hasJitter && jitter > 10) issues.push(`${jitter.toFixed(1)}ms jitter`);
+
+        if (issues.length > 0) {
+            healthElement.textContent = `Sync degraded · ${issues.join(' · ')}`;
+            summary.dataset.health = 'degraded';
+        } else if (hasClockAge) {
+            const detail = hasJitter
+                ? `${jitter.toFixed(1)}ms jitter`
+                : `clock ${Math.round(clockAge)}s`;
+            healthElement.textContent = `Sync locked · ${detail}`;
+            summary.dataset.health = 'locked';
+        } else {
+            healthElement.textContent = 'Sync data pending';
+            summary.dataset.health = 'pending';
+        }
     }
 
     setupQueueDelegation() {

@@ -6,6 +6,8 @@
 import { ModalDialog } from '../ui/ModalDialog.js';
 import { debounce } from '../utils/debounce.js';
 
+const editableTags = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
 export class UIHelpers {
     constructor(app) {
         this.app = app;
@@ -144,8 +146,15 @@ export class UIHelpers {
             return;
         }
 
-        // Ignore if typing in an input
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        // Shortcuts never override browser/system commands or editable controls.
+        const target = e.target;
+        if (
+            e.altKey
+            || e.ctrlKey
+            || e.metaKey
+            || target?.isContentEditable
+            || editableTags.has(target?.tagName)
+        ) {
             return;
         }
 
