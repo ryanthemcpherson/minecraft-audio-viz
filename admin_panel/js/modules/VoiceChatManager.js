@@ -112,6 +112,7 @@ export class VoiceChatManager {
 
     updateVoiceChatUI() {
         const vc = this.state.voiceChat;
+        const statusPending = !vc.statusReceived;
         const dot = this.elements.voiceDot;
         const statusText = this.elements.voiceStatusText;
         const playersStat = this.elements.voicePlayersStat;
@@ -124,17 +125,21 @@ export class VoiceChatManager {
 
         if (dot) {
             dot.classList.remove('voice-dot-streaming', 'voice-dot-available', 'voice-dot-unavailable');
-            if (!vc.available) {
-                dot.classList.add('voice-dot-unavailable');
-            } else if (vc.streaming) {
-                dot.classList.add('voice-dot-streaming');
-            } else {
-                dot.classList.add('voice-dot-available');
+            if (!statusPending) {
+                if (!vc.available) {
+                    dot.classList.add('voice-dot-unavailable');
+                } else if (vc.streaming) {
+                    dot.classList.add('voice-dot-streaming');
+                } else {
+                    dot.classList.add('voice-dot-available');
+                }
             }
         }
 
         if (statusText) {
-            if (!vc.available) {
+            if (statusPending) {
+                statusText.textContent = 'Checking…';
+            } else if (!vc.available) {
                 statusText.textContent = 'Unavailable';
             } else if (vc.streaming) {
                 statusText.textContent = 'Streaming';
@@ -153,26 +158,26 @@ export class VoiceChatManager {
         }
 
         if (unavailableMsg) {
-            unavailableMsg.classList.toggle('hidden', vc.available);
+            unavailableMsg.classList.toggle('hidden', statusPending || vc.available);
         }
 
         if (controls) {
-            controls.classList.toggle('voice-controls-disabled', !vc.available);
+            controls.classList.toggle('voice-controls-disabled', statusPending || !vc.available);
         }
 
         if (streamToggle) {
             streamToggle.checked = vc.enabled;
-            streamToggle.disabled = !vc.available;
+            streamToggle.disabled = statusPending || !vc.available;
         }
 
         if (channelType) {
             channelType.value = vc.channelType;
-            channelType.disabled = !vc.available;
+            channelType.disabled = statusPending || !vc.available;
         }
 
         if (distanceSlider) {
             distanceSlider.value = vc.distance;
-            distanceSlider.disabled = !vc.available;
+            distanceSlider.disabled = statusPending || !vc.available;
             const display = document.getElementById('val-voice-distance');
             if (display) display.textContent = `${vc.distance}`;
         }
