@@ -188,6 +188,7 @@ test("emergency state is inventoried and requires authoritative toggle values", 
     type: "emergency_state",
     blackout: true,
     freeze: false,
+    emergency_epoch: "server-epoch-a",
     emergency_revision: 0,
   });
   assertValid(schema, {
@@ -195,6 +196,7 @@ test("emergency state is inventoried and requires authoritative toggle values", 
     blackout: false,
     freeze: true,
     request_id: "emergency-123",
+    emergency_epoch: "server-epoch-a",
     emergency_revision: 12,
   });
   assertInvalid(schema, { type: "emergency_state", blackout: true, freeze: false });
@@ -204,6 +206,7 @@ test("emergency state is inventoried and requires authoritative toggle values", 
     type: "emergency_state",
     blackout: true,
     freeze: false,
+    emergency_epoch: "server-epoch-a",
     emergency_revision: -1,
   });
 
@@ -213,6 +216,11 @@ test("emergency state is inventoried and requires authoritative toggle values", 
   assert.deepEqual(vjStateSchema.properties.emergency_revision, {
     type: "integer",
     minimum: 0,
+  });
+  assert.deepEqual(vjStateSchema.properties.emergency_epoch, {
+    type: "string",
+    minLength: 1,
+    maxLength: 128,
   });
 });
 

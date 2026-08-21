@@ -205,6 +205,7 @@ class RelayMixin:
                     "minecraft_connected": mc_connected,
                     "blackout": self._blackout,
                     "freeze": self._freeze,
+                    "emergency_epoch": self._emergency_epoch,
                     "emergency_revision": self._emergency_revision,
                     "minecraft_server_type": (
                         getattr(self.viz_client, "server_type", None) if self.viz_client else None
@@ -294,6 +295,7 @@ class RelayMixin:
                                     "minecraft_connected": mc_status,
                                     "blackout": self._blackout,
                                     "freeze": self._freeze,
+                                    "emergency_epoch": self._emergency_epoch,
                                     "emergency_revision": self._emergency_revision,
                                     "minecraft_server_type": (
                                         getattr(self.viz_client, "server_type", None)
@@ -1506,6 +1508,7 @@ class RelayMixin:
             "type": "emergency_state",
             "blackout": self._blackout,
             "freeze": self._freeze,
+            "emergency_epoch": self._emergency_epoch,
             "emergency_revision": self._emergency_revision,
         }
 
