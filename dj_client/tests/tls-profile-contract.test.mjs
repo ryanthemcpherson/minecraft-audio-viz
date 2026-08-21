@@ -18,8 +18,7 @@ const connectionHookSource = readFileSync(
 test('DJ connection profile wires the fingerprint helpers to both Tauri connection commands', () => {
   assert.match(connectFormSource, /tlsFingerprint: string/);
   assert.match(disconnectedViewSource, /tlsFingerprint=/);
-  assert.match(connectionHookSource, /loadTlsFingerprint\(localStorage\)/);
-  assert.match(connectionHookSource, /saveTlsFingerprint\(localStorage, normalizedTlsFingerprint\)/);
+  assert.match(connectionHookSource, /useTlsFingerprintProfile\(\)/);
   assert.match(connectionHookSource, /invoke\('connect_with_code', buildCodeConnectionArgs\(/);
   assert.match(connectionHookSource, /invoke\('connect_direct', buildDirectConnectionArgs\(/);
   assert.match(connectionHookSource, /sanitizeConnectionStatus\(event\.payload\)/);
