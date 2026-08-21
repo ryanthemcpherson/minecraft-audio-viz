@@ -133,6 +133,29 @@ export class PreviewManager {
 
     // === Strip / Init ===
 
+    setPresentationMode(workspace) {
+        const supportsPreview = workspace === 'live' || workspace === 'visuals' || workspace === 'zones';
+        const slot = supportsPreview
+            ? document.querySelector(`[data-preview-slot="${workspace}"]`)
+            : null;
+        const visible = Boolean(slot);
+        this._presentationMode = workspace === 'live' && visible
+            ? 'live'
+            : (visible ? 'compact' : 'hidden');
+        const strip = this.elements.previewStrip;
+
+        if (slot && strip?.parentElement !== slot) {
+            slot.append(strip);
+        }
+
+        if (visible) {
+            this.startAnimation();
+            requestAnimationFrame(() => this._onResize());
+        } else {
+            this.stopAnimation();
+        }
+    }
+
     initPreviewStrip() {
         const strip = document.getElementById('preview-strip');
         const collapseBtn = document.getElementById('preview-strip-collapse');

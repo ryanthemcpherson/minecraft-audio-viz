@@ -25,6 +25,7 @@ export function cacheElements(elements) {
 
     // Pattern grid
     elements.patternGrid = document.getElementById('pattern-grid');
+    elements.patternSearch = document.getElementById('pattern-search');
 
     // Preset buttons
     elements.presetButtons = document.querySelectorAll('.preset-btn');
@@ -84,6 +85,7 @@ export function cacheElements(elements) {
     // Hot-path elements
     elements.header = document.getElementById('header');
     elements.previewStatFps = document.getElementById('preview-stat-fps');
+    elements.previewStrip = document.getElementById('preview-strip');
 
     // DJ Queue
     elements.djQueue = document.getElementById('dj-queue');
