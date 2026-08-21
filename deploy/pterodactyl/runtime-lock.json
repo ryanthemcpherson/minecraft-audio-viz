@@ -1,0 +1,25 @@
+{
+  "python": "3.12.14",
+  "release": "20260814",
+  "runtimes": {
+    "linux-amd64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.12.14%2B20260814-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "5acfa3e9ba26b51ae161c83aff278da915b590d22373a424b2ba55b8afe91fcc",
+      "pip_platforms": ["manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64"]
+    },
+    "linux-arm64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.12.14%2B20260814-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "2d8e17dfd732102cfeb18e0e1fa6769b24caa034e159981129590fe409c7157a",
+      "pip_platforms": ["manylinux_2_28_aarch64", "manylinux_2_17_aarch64", "manylinux2014_aarch64"]
+    }
+  },
+  "dependencies": [
+    "websockets==16.0",
+    "numpy==2.5.2",
+    "python-dotenv==1.2.3",
+    "lupa==2.8",
+    "better-profanity==0.7.0",
+    "bcrypt==5.0.0",
+    "msgspec==0.21.1"
+  ]
+}
