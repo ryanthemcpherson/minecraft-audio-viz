@@ -61,10 +61,13 @@ async fn list_audio_sources() -> Result<Vec<AudioSource>, String> {
 async fn connect_common(
     app_handle: AppHandle,
     state_arc: Arc<Mutex<AppState>>,
-    config: DjClientConfig,
+    mut config: DjClientConfig,
     connect_code: Option<String>,
     block_palette: Option<Vec<Option<String>>>,
 ) -> Result<(), String> {
+    // Validate before disconnecting the current client or storing reconnect settings.
+    config.validate().map_err(|error| error.to_string())?;
+
     // If a previous bridge task is still running (e.g. reconnecting after
     // server restart), shut it down and await completion before starting a new
     // connection to avoid two bridge tasks running concurrently.
@@ -101,6 +104,7 @@ async fn connect_common(
         app_state.dj_name = config.dj_name.clone();
         app_state.server_host = config.server_host.clone();
         app_state.server_port = config.server_port;
+        app_state.tls_fingerprint = config.tls_fingerprint.clone();
     }
 
     // Create and connect client (async, no mutex held)
@@ -147,6 +151,7 @@ async fn connect_with_code(
     dj_name: String,
     server_host: String,
     server_port: u16,
+    tls_fingerprint: Option<String>,
     block_palette: Option<Vec<Option<String>>>,
     dj_session_id: Option<String>,
 ) -> Result<(), String> {
@@ -158,6 +163,7 @@ async fn connect_with_code(
         dj_name: dj_name.clone(),
         connect_code: Some(code.clone()),
         dj_session_id,
+        tls_fingerprint,
         ..Default::default()
     };
 
@@ -179,6 +185,7 @@ async fn connect_direct(
     dj_name: String,
     server_host: String,
     server_port: u16,
+    tls_fingerprint: Option<String>,
 ) -> Result<(), String> {
     content_filter::validate_no_slurs(&dj_name, "DJ name")?;
 
@@ -188,6 +195,7 @@ async fn connect_direct(
         dj_name: dj_name.clone(),
         dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
         dj_key: Some(String::new()),
+        tls_fingerprint,
         ..Default::default()
     };
 
@@ -198,6 +206,23 @@ async fn connect_direct(
 const MAX_RECONNECT_ATTEMPTS: u32 = 10;
 /// Maximum backoff delay between reconnection attempts in seconds.
 const MAX_RECONNECT_DELAY_SECS: u64 = 30;
+
+fn build_reconnect_config(app_state: &AppState) -> DjClientConfig {
+    DjClientConfig {
+        server_host: app_state.server_host.clone(),
+        server_port: app_state.server_port,
+        dj_name: app_state.dj_name.clone(),
+        connect_code: app_state.connect_code.clone(),
+        dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
+        dj_key: if app_state.connect_code.is_none() {
+            Some(String::new())
+        } else {
+            None
+        },
+        tls_fingerprint: app_state.tls_fingerprint.clone(),
+        ..Default::default()
+    }
+}
 
 /// Bridge task: reads audio analysis and sends frames to VJ server at ~60fps.
 /// Automatically reconnects with exponential backoff when the connection drops.
@@ -545,20 +570,7 @@ async fn run_bridge(
         // Attempt to reconnect using stored config
         let reconnect_result = {
             let app_state = state_arc.lock();
-
-            DjClientConfig {
-                server_host: app_state.server_host.clone(),
-                server_port: app_state.server_port,
-                dj_name: app_state.dj_name.clone(),
-                connect_code: app_state.connect_code.clone(),
-                dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
-                dj_key: if app_state.connect_code.is_none() {
-                    Some(String::new())
-                } else {
-                    None
-                },
-                ..Default::default()
-            }
+            build_reconnect_config(&app_state)
         };
 
         let mut client = DjClient::new(reconnect_result);
@@ -1082,4 +1094,29 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_config_preserves_validated_tls_fingerprint() {
+        let state = AppState {
+            dj_name: "Reconnect DJ".to_string(),
+            connect_code: Some("test-code".to_string()),
+            server_host: "203.0.113.10".to_string(),
+            server_port: 9000,
+            tls_fingerprint: Some("ab".repeat(32)),
+            ..Default::default()
+        };
+
+        let config = build_reconnect_config(&state);
+
+        assert_eq!(config.tls_fingerprint, state.tls_fingerprint);
+        assert_eq!(config.server_host, state.server_host);
+        assert_eq!(config.server_port, state.server_port);
+        assert_eq!(config.dj_name, state.dj_name);
+        assert_eq!(config.connect_code, state.connect_code);
+    }
 }
