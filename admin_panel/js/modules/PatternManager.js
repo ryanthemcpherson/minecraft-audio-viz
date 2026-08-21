@@ -2,12 +2,21 @@
  * PatternManager - Pattern grid rendering, highlighting, preset management.
  */
 
+import { filterAndRankPatterns, updateRecentIds } from '../utils/pattern-library.js';
+
+const FAVORITES_STORAGE_KEY = 'mcav-pattern-favorites';
+const RECENTS_STORAGE_KEY = 'mcav-pattern-recents';
+
 export class PatternManager {
     constructor(app) {
         this.app = app;
         this.state = app.state;
         this.ws = app.ws;
         this.elements = app.elements;
+        this.searchQuery = '';
+        this.storage = this._resolveStorage();
+        this.favoriteIds = this._readStoredIds(FAVORITES_STORAGE_KEY);
+        this.recentIds = this._readStoredIds(RECENTS_STORAGE_KEY);
     }
 
     handlePatterns(data) {
@@ -25,12 +34,59 @@ export class PatternManager {
     }
 
     setPattern(patternId) {
+        this.recentIds = updateRecentIds(this.recentIds, patternId);
+        this._writeStoredIds(RECENTS_STORAGE_KEY, this.recentIds);
+        this.renderPatternGrid();
+
         const msg = { type: 'set_pattern', pattern: patternId };
         const selected = Array.from(this.state.selectedZones);
         if (selected.length > 0) {
             msg.zones = selected;
         }
         this.ws.send(msg);
+    }
+
+    setSearchQuery(query) {
+        this.searchQuery = String(query ?? '');
+        this.renderPatternGrid();
+    }
+
+    toggleFavorite(patternId) {
+        if (!patternId) return;
+        this.favoriteIds = this.favoriteIds.includes(patternId)
+            ? this.favoriteIds.filter((id) => id !== patternId)
+            : [...this.favoriteIds, patternId];
+        this._writeStoredIds(FAVORITES_STORAGE_KEY, this.favoriteIds);
+        this.renderPatternGrid();
+    }
+
+    _resolveStorage() {
+        try {
+            return globalThis.localStorage ?? null;
+        } catch (error) {
+            console.warn('[Patterns] Local storage unavailable', error);
+            return null;
+        }
+    }
+
+    _readStoredIds(key) {
+        try {
+            const value = JSON.parse(this.storage?.getItem(key) || '[]');
+            return Array.isArray(value)
+                ? [...new Set(value.filter((id) => typeof id === 'string'))]
+                : [];
+        } catch (error) {
+            console.warn(`[Patterns] Could not read ${key}`, error);
+            return [];
+        }
+    }
+
+    _writeStoredIds(key, ids) {
+        try {
+            this.storage?.setItem(key, JSON.stringify(ids));
+        } catch (error) {
+            console.warn(`[Patterns] Could not write ${key}`, error);
+        }
     }
 
     setPreset(preset) {
@@ -155,51 +211,76 @@ export class PatternManager {
 
     renderPatternGrid() {
         const grid = this.elements.patternGrid;
+        if (!grid) return;
 
         while (grid.firstChild) {
             grid.removeChild(grid.firstChild);
         }
 
-        // Group patterns by category
-        const groups = {};
-        this.state.patterns.forEach(pattern => {
-            const cat = pattern.category || 'Other';
-            if (!groups[cat]) groups[cat] = [];
-            groups[cat].push(pattern);
+        const rankedPatterns = filterAndRankPatterns(this.state.patterns, {
+            query: this.searchQuery,
+            favoriteIds: this.favoriteIds,
+            recentIds: this.recentIds,
         });
 
-        const sortedCategories = Object.keys(groups).sort((a, b) => {
-            if (a === 'Other') return 1;
-            if (b === 'Other') return -1;
-            return a.localeCompare(b);
-        });
+        if (rankedPatterns.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'pattern-library-empty';
+            empty.textContent = 'No patterns match this search.';
+            grid.appendChild(empty);
+            return;
+        }
 
-        sortedCategories.forEach(category => {
-            const label = document.createElement('div');
-            label.className = 'pattern-category-label';
-            label.textContent = category;
-            grid.appendChild(label);
+        const groupGrid = document.createElement('div');
+        groupGrid.className = 'pattern-category-grid pattern-library-grid';
 
-            const groupGrid = document.createElement('div');
-            groupGrid.className = 'pattern-category-grid';
+        rankedPatterns.forEach(pattern => {
+                const item = document.createElement('div');
+                item.className = 'pattern-library-item';
 
-            groups[category].forEach(pattern => {
                 const btn = document.createElement('button');
                 btn.className = 'pattern-btn';
                 btn.dataset.pattern = pattern.id;
-                btn.textContent = pattern.name;
-                btn.title = pattern.description || '';
+                btn.title = [pattern.description, pattern.category].filter(Boolean).join(' · ');
+                btn.setAttribute('aria-label', `Launch ${pattern.name}`);
+
+                const name = document.createElement('span');
+                name.className = 'pattern-name';
+                name.textContent = pattern.name;
+                btn.appendChild(name);
+
+                if (pattern.category) {
+                    const category = document.createElement('span');
+                    category.className = 'pattern-category';
+                    category.textContent = pattern.category;
+                    btn.appendChild(category);
+                }
 
                 if (pattern.id === this.state.currentPattern) {
                     btn.classList.add('active');
+                    btn.setAttribute('aria-current', 'true');
                 }
 
                 btn.addEventListener('click', () => this.setPattern(pattern.id));
-                groupGrid.appendChild(btn);
-            });
+                item.appendChild(btn);
 
-            grid.appendChild(groupGrid);
+                const favorite = document.createElement('button');
+                const isFavorite = this.favoriteIds.includes(pattern.id);
+                favorite.className = 'pattern-favorite';
+                favorite.dataset.patternFavorite = pattern.id;
+                favorite.setAttribute('aria-label', `${isFavorite ? 'Remove' : 'Add'} ${pattern.name} ${isFavorite ? 'from' : 'to'} favorites`);
+                favorite.setAttribute('aria-pressed', String(isFavorite));
+                favorite.title = isFavorite ? 'Remove favorite' : 'Add favorite';
+                favorite.textContent = isFavorite ? '★' : '☆';
+                favorite.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    this.toggleFavorite(pattern.id);
+                });
+                item.appendChild(favorite);
+                groupGrid.appendChild(item);
         });
+
+        grid.appendChild(groupGrid);
     }
 
     highlightActivePattern(patternId) {

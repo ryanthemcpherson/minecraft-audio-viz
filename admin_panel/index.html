@@ -216,8 +216,10 @@
 
             <!-- Main Work Area -->
             <main id="work-area" class="workspace-stage">
-                <!-- Live Preview Strip (always visible, collapsible) -->
-                <div id="preview-strip" class="preview-strip control-surface" data-workspace-destination="live">
+                <!-- Live performance workspace -->
+                <section id="workspace-live" class="workspace-panel live-workspace" role="tabpanel" aria-labelledby="workspace-tab-live" data-workspace-panel data-workspace="live">
+                <section class="live-output" data-live-region="output" data-preview-slot="live" aria-label="Stage output preview">
+                <div id="preview-strip" class="preview-strip control-surface">
                     <div class="preview-strip-header">
                         <span class="preview-strip-title">Live Preview</span>
                         <span id="preview-strip-stats" class="preview-strip-stats">
@@ -263,41 +265,68 @@
                         </div>
                     </div>
                 </div>
+                </section>
 
-                <!-- Workspace Content -->
-                    <section id="workspace-live" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-live" data-workspace-panel data-workspace="live">
-                        <!-- Pattern Quick-Switch -->
-                        <section class="mixer-section">
-                            <h3 class="section-title">Patterns</h3>
-                            <div id="pattern-grid" class="pattern-grid">
-                                <!-- Populated by JS -->
-                            </div>
-                            <!-- Transition Duration Control -->
-                            <div class="transition-control">
-                                <label for="transition-duration-slider" class="control-label">
-                                    <span>Transition:</span>
-                                    <span id="transition-duration-value" class="control-value">1.0s</span>
-                                </label>
-                                <input type="range" id="transition-duration-slider" class="slider"
-                                       min="0" max="3000" step="100" value="1000">
-                                <span id="transition-status" class="transition-status hidden">Crossfading...</span>
-                            </div>
-                        </section>
-
+                    <aside class="show-rack" data-live-region="show" aria-label="Show control">
+                        <div class="live-rack-heading">
+                            <span>Show control</span>
+                            <span id="transition-status" class="transition-status hidden">Crossfading...</span>
+                        </div>
                         <!-- Preset Buttons -->
-                        <section class="mixer-section">
-                            <h3 class="section-title">Presets</h3>
+                        <section class="mixer-section live-preset-bank">
+                            <h3 class="section-title">Audio profile</h3>
                             <div id="preset-buttons" class="preset-buttons">
                                 <button class="preset-btn active" data-preset="auto">Auto</button>
                                 <button class="preset-btn" data-preset="edm">EDM</button>
                                 <button class="preset-btn" data-preset="chill">Chill</button>
                                 <button class="preset-btn" data-preset="rock">Rock</button>
                             </div>
+                            <div class="transition-control">
+                                <label for="transition-duration-slider" class="control-label">
+                                    <span>Transition</span>
+                                    <span id="transition-duration-value" class="control-value">1.0s</span>
+                                </label>
+                                <input type="range" id="transition-duration-slider" class="slider"
+                                       min="0" max="3000" step="100" value="1000">
+                            </div>
                         </section>
+                    </aside>
 
+                    <section class="launch-deck" data-live-region="launch" aria-labelledby="launch-deck-title">
+                        <!-- Pattern Quick-Switch -->
+                        <section class="mixer-section launch-patterns">
+                            <div class="live-rack-heading">
+                                <h3 id="launch-deck-title" class="section-title">Pattern launch</h3>
+                                <label class="pattern-search-field" for="pattern-search">
+                                    <span class="visually-hidden">Search patterns</span>
+                                    <input id="pattern-search" type="search" placeholder="Find a pattern" autocomplete="off">
+                                </label>
+                            </div>
+                            <div id="pattern-grid" class="pattern-grid">
+                                <!-- Populated by JS -->
+                            </div>
+                        </section>
+                    </section>
+
+                    <section class="effects-deck" data-live-region="effects" aria-labelledby="effects-deck-title">
+                        <section class="mixer-section">
+                            <div class="live-rack-heading">
+                                <h3 id="effects-deck-title" class="section-title">Performance effects</h3>
+                            </div>
+                            <div id="effect-triggers" class="effect-grid">
+                                <button class="effect-btn" data-effect="bass_drop">Bass Drop</button>
+                                <button class="effect-btn" data-effect="strobe">Strobe</button>
+                                <button class="effect-btn" data-effect="flash">Flash</button>
+                                <button class="effect-btn" data-effect="spin_up">Spin Up</button>
+                                <button class="effect-btn" data-effect="spin_down">Spin Down</button>
+                            </div>
+                        </section>
+                    </section>
+
+                    <section class="audio-strip" data-live-region="audio" aria-labelledby="audio-strip-title">
                         <!-- Band Faders - 5 bands for ultra-low-latency -->
-                        <section class="mixer-section collapsible collapsed">
-                            <h3 class="section-title">Band Sensitivity</h3>
+                        <section class="mixer-section">
+                            <h3 id="audio-strip-title" class="section-title">Band sensitivity</h3>
                             <div id="band-faders" class="fader-bank">
                                 <div class="fader" data-band="0">
                                     <span class="fader-label">Bass</span>
@@ -345,7 +374,7 @@
                         </section>
 
                         <!-- Effect Controls -->
-                        <section class="mixer-section collapsible">
+                        <section class="mixer-section">
                             <h3 class="section-title">Audio Settings</h3>
                             <div id="effect-controls" class="controls-grid">
                                 <div class="control-row">
@@ -380,6 +409,7 @@
                                 </div>
                             </div>
                         </section>
+                    </section>
 
                         <!-- Visual Sync -->
                         <section class="mixer-section collapsible collapsed control-surface" data-workspace-destination="system">
@@ -424,18 +454,6 @@
                             <!-- Parity Check -->
                             <div class="sync-test-row">
                                 <button id="parity-check-btn" class="btn btn-secondary btn-sync-test">Parity Check</button>
-                            </div>
-                        </section>
-
-                        <!-- Effect Triggers -->
-                        <section class="mixer-section">
-                            <h3 class="section-title">Effects</h3>
-                            <div id="effect-triggers" class="effect-grid">
-                                <button class="effect-btn" data-effect="bass_drop">Bass Drop</button>
-                                <button class="effect-btn" data-effect="strobe">Strobe</button>
-                                <button class="effect-btn" data-effect="flash">Flash</button>
-                                <button class="effect-btn" data-effect="spin_up">Spin Up</button>
-                                <button class="effect-btn" data-effect="spin_down">Spin Down</button>
                             </div>
                         </section>
 
@@ -656,7 +674,7 @@
                         </section>
 
                         <!-- Scene Presets -->
-                        <section class="mixer-section collapsible collapsed">
+                        <section class="mixer-section collapsible collapsed" data-live-destination="launch">
                             <h3 class="section-title">Scenes</h3>
                             <div class="scene-save-controls">
                                 <input type="text" id="scene-name-input" placeholder="Scene name..." class="scene-name-input">

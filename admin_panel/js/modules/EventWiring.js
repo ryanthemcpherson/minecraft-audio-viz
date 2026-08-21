@@ -30,6 +30,12 @@ export function setupEventListeners(app) {
         btn.addEventListener('click', () => patterns.setPreset(btn.dataset.preset));
     });
 
+    if (elements.patternSearch) {
+        elements.patternSearch.addEventListener('input', () => {
+            patterns.setSearchQuery(elements.patternSearch.value);
+        });
+    }
+
     // Band faders
     elements.faders.forEach(fader => {
         const input = fader.querySelector('.fader-input');

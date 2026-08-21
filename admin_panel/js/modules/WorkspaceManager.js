@@ -127,7 +127,19 @@ export class WorkspaceManager {
         for (const control of controls) {
             const destination = control.dataset.workspaceDestination;
             if (!isWorkspaceName(destination)) continue;
-            panelsByName.get(destination)?.append(control);
+            const liveRack = destination === 'live'
+                ? this.root.querySelector?.('[data-live-region="show"]')
+                : null;
+            (liveRack ?? panelsByName.get(destination))?.append(control);
+        }
+
+        const liveRegions = new Map(
+            [...this.root.querySelectorAll('[data-live-region]')]
+                .filter((region) => region.dataset?.liveRegion)
+                .map((region) => [region.dataset.liveRegion, region]),
+        );
+        for (const control of this.root.querySelectorAll('[data-live-destination]')) {
+            liveRegions.get(control.dataset?.liveDestination)?.append?.(control);
         }
     }
 
