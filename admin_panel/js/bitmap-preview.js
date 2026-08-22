@@ -9,6 +9,11 @@ class BitmapPreview {
     constructor() {
         /** @type {Object<string, BitmapZoneState>} */
         this.zones = {};
+        this.pendingPatterns = {};
+        this.exactFrames = {};
+        this.frameBuffers = {};
+        this.nextFrameId = 1;
+        this.frameFreshnessMs = 750;
         this.time = 0;
         this.effects = {
             brightness: 1.0,
@@ -27,7 +32,7 @@ class BitmapPreview {
 
         width = width || 16;
         height = height || 12;
-        pattern = pattern || 'bmp_plasma';
+        pattern = this.pendingPatterns[zoneName] || pattern || 'bmp_plasma';
 
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -59,6 +64,8 @@ class BitmapPreview {
         this.zones[zoneName] = {
             width, height, pattern,
             canvas, ctx, texture, mesh, zoneGroup,
+            frameImageData: null,
+            renderedFrameId: 0,
         };
     }
 
@@ -71,11 +78,52 @@ class BitmapPreview {
         delete this.zones[zoneName];
     }
 
+    /** Permanently release all preview state retained for a bitmap zone. */
+    purgeZone(zoneName) {
+        this.deactivate(zoneName);
+        delete this.exactFrames[zoneName];
+        delete this.frameBuffers[zoneName];
+        delete this.pendingPatterns[zoneName];
+    }
+
     isActive(zoneName) { return !!this.zones[zoneName]; }
 
     setPattern(zoneName, pattern) {
+        if (!zoneName || !pattern) return;
+        this.pendingPatterns[zoneName] = pattern;
         const s = this.zones[zoneName];
         if (s) s.pattern = pattern;
+    }
+
+    /**
+     * Store an exact frame received from the Minecraft renderer.
+     * Returns false for malformed frames without disturbing prior state.
+     */
+    ingestFrame(message) {
+        const validated = this._validateFrame(message);
+        if (!validated) return false;
+
+        const { zone, width, height } = validated;
+        let storage = this.frameBuffers[zone];
+        if (!storage || storage.width !== width || storage.height !== height) {
+            storage = this._createFrameStorage(width, height);
+        }
+
+        if (!this._decodeIntoScratch(validated, storage)) return false;
+
+        // Publish only after the complete frame has decoded successfully. The
+        // currently rendered RGBA buffer is never partially mutated.
+        storage.rgba.set(storage.scratchRgba);
+        this.frameBuffers[zone] = storage;
+
+        let frame = this.exactFrames[zone];
+        if (!frame || frame.width !== width || frame.height !== height) {
+            frame = { zone, width, height, rgba: storage.rgba };
+            this.exactFrames[zone] = frame;
+        }
+        frame.id = this.nextFrameId++;
+        frame.receivedAt = performance.now();
+        return true;
     }
 
     setVisible(visible) {
@@ -93,13 +141,148 @@ class BitmapPreview {
     update(dt, audioState) {
         if (this.effects.frozen) return;
         this.time += dt;
+        const now = performance.now();
 
-        for (const s of Object.values(this.zones)) {
+        for (const [zoneName, s] of Object.entries(this.zones)) {
             if (!s.mesh.visible) continue;
+
+            const exactFrame = this.exactFrames[zoneName];
+            if (exactFrame && now - exactFrame.receivedAt <= this.frameFreshnessMs) {
+                if (s.renderedFrameId !== exactFrame.id) {
+                    this._renderExactFrame(s, exactFrame);
+                    s.renderedFrameId = exactFrame.id;
+                    s.texture.needsUpdate = true;
+                }
+                continue;
+            }
+
             this._renderPattern(s, audioState);
             this._applyEffects(s);
             s.texture.needsUpdate = true;
         }
+    }
+
+    _validateFrame(message) {
+        if (!message || typeof message !== 'object' || typeof message.zone !== 'string'
+            || message.zone.length === 0) {
+            return null;
+        }
+
+        const width = message.width;
+        const height = message.height;
+        if (!Number.isSafeInteger(width) || width < 1
+            || !Number.isSafeInteger(height) || height < 1) {
+            return null;
+        }
+
+        const pixelCount = width * height;
+        if (!Number.isSafeInteger(pixelCount) || pixelCount > 4_194_304) {
+            return null;
+        }
+
+        const hasPixelArray = Array.isArray(message.pixel_array);
+        const hasBase64 = typeof message.pixels === 'string';
+        if (hasPixelArray === hasBase64) return null;
+
+        if (hasPixelArray) {
+            if (message.pixel_array.length !== pixelCount) return null;
+            for (let index = 0; index < pixelCount; index++) {
+                const value = message.pixel_array[index];
+                if (!Number.isInteger(value) || value < -2_147_483_648 || value > 4_294_967_295) {
+                    return null;
+                }
+            }
+            return {
+                zone: message.zone,
+                width,
+                height,
+                pixelCount,
+                pixelArray: message.pixel_array,
+                binary: null,
+            };
+        }
+
+        try {
+            const encoded = message.pixels;
+            if (encoded.length === 0 || encoded.length % 4 !== 0
+                || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+                return null;
+            }
+            const binary = atob(encoded);
+            if (binary.length !== pixelCount * 4) return null;
+            return {
+                zone: message.zone,
+                width,
+                height,
+                pixelCount,
+                pixelArray: null,
+                binary,
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _createFrameStorage(width, height) {
+        const byteLength = width * height * 4;
+        const decodeBytes = new Uint8Array(byteLength);
+        return {
+            width,
+            height,
+            rgba: new Uint8ClampedArray(byteLength),
+            scratchRgba: new Uint8ClampedArray(byteLength),
+            decodeBytes,
+            decodeView: new DataView(decodeBytes.buffer),
+        };
+    }
+
+    _decodeIntoScratch(frame, storage) {
+        try {
+            if (frame.pixelArray) {
+                for (let index = 0; index < frame.pixelCount; index++) {
+                    this._writeArgb(storage.scratchRgba, index, frame.pixelArray[index] >>> 0);
+                }
+                return true;
+            }
+
+            for (let index = 0; index < frame.binary.length; index++) {
+                storage.decodeBytes[index] = frame.binary.charCodeAt(index);
+            }
+            for (let index = 0; index < frame.pixelCount; index++) {
+                this._writeArgb(
+                    storage.scratchRgba,
+                    index,
+                    storage.decodeView.getUint32(index * 4, true),
+                );
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    _writeArgb(rgba, index, argb) {
+        const offset = index * 4;
+        rgba[offset] = (argb >>> 16) & 0xff;
+        rgba[offset + 1] = (argb >>> 8) & 0xff;
+        rgba[offset + 2] = argb & 0xff;
+        rgba[offset + 3] = (argb >>> 24) & 0xff;
+    }
+
+    _renderExactFrame(zoneState, frame) {
+        if (zoneState.width !== frame.width || zoneState.height !== frame.height) {
+            zoneState.width = frame.width;
+            zoneState.height = frame.height;
+            zoneState.canvas.width = frame.width;
+            zoneState.canvas.height = frame.height;
+            zoneState.frameImageData = null;
+        }
+
+        if (!zoneState.frameImageData) {
+            zoneState.frameImageData = zoneState.ctx.createImageData(frame.width, frame.height);
+        }
+        zoneState.frameImageData.data.set(frame.rgba);
+        zoneState.ctx.putImageData(zoneState.frameImageData, 0, 0);
     }
 
     // ────────────────── Pattern Dispatch ──────────────────

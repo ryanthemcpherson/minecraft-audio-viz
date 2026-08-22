@@ -35,54 +35,148 @@ except ImportError:
 logger = logging.getLogger("vj_server")
 
 
+def _voice_status_error(message: str) -> dict:
+    return {
+        "type": "voice_status",
+        "available": False,
+        "streaming": False,
+        "channel_type": "static",
+        "connected_players": 0,
+        "error": message,
+    }
+
+
+def _normalize_renderer_voice_status(response: object) -> dict:
+    """Rebuild renderer voice status without crossing its trust boundary."""
+    if response is None:
+        return _voice_status_error("Minecraft voice status timed out.")
+    if not isinstance(response, dict):
+        return _voice_status_error("Minecraft returned an invalid voice status.")
+    if response.get("type") == "error":
+        return _voice_status_error("Minecraft rejected the voice status request.")
+    if response.get("type") != "voice_status" or "error" in response:
+        return _voice_status_error("Minecraft returned an invalid voice status.")
+
+    available = response.get("available")
+    streaming = response.get("streaming", False)
+    channel_type = response.get("channel_type", "static")
+    connected_players = response.get("connected_players", 0)
+    if (
+        type(available) is not bool
+        or type(streaming) is not bool
+        or channel_type not in {"static", "locational"}
+        or type(connected_players) is not int
+        or not 0 <= connected_players <= 1_000_000
+    ):
+        return _voice_status_error("Minecraft returned an invalid voice status.")
+
+    return {
+        "type": "voice_status",
+        "available": available,
+        "streaming": streaming,
+        "channel_type": channel_type,
+        "connected_players": connected_players,
+    }
+
+
 class RelayMixin:
     """Mixin providing browser/MC/DJ WebSocket handling and broadcasting.
 
     Mixed into VJServer -- all methods access shared state via self.
     """
 
+    @staticmethod
+    def _browser_remote_ip(websocket) -> str:
+        remote_address = getattr(websocket, "remote_address", None)
+        if isinstance(remote_address, tuple) and remote_address:
+            return str(remote_address[0])
+        return "unknown"
+
+    def _browser_auth_is_rate_limited(self, remote_ip: str, now: float | None = None) -> bool:
+        current_time = time.monotonic() if now is None else now
+        cutoff = current_time - self._browser_auth_rate_limit_window
+        recent_attempts = [
+            attempt
+            for attempt in self._browser_auth_attempts.get(remote_ip, [])
+            if attempt > cutoff
+        ]
+        if recent_attempts:
+            self._browser_auth_attempts[remote_ip] = recent_attempts
+        else:
+            self._browser_auth_attempts.pop(remote_ip, None)
+        return len(recent_attempts) >= self._browser_auth_rate_limit_max
+
+    def _record_browser_auth_failure(self, remote_ip: str, now: float | None = None) -> None:
+        current_time = time.monotonic() if now is None else now
+        attempts = self._browser_auth_attempts.setdefault(remote_ip, [])
+        attempts.append(current_time)
+
+    async def _reject_browser_auth(self, websocket, *, rate_limited: bool = False):
+        await websocket.send(
+            _json_str(
+                {
+                    "type": "auth_error",
+                    "error": "Invalid username or password",
+                }
+            )
+        )
+        close_code = 4008 if rate_limited else 4004
+        await websocket.close(close_code, "Authentication failed")
+
+    async def _negotiate_browser_auth(self, websocket) -> bool:
+        """Negotiate browser authentication before any control state is exposed."""
+        if not self.require_auth:
+            await websocket.send(_json_str({"type": "auth_success"}))
+            return True
+
+        await websocket.send(_json_str({"type": "auth_required"}))
+        try:
+            raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+            auth_data = mjson.decode(raw)
+            if auth_data.get("type") != "vj_auth":
+                await websocket.close(4003, "Expected vj_auth message")
+                return False
+            username = auth_data.get("username")
+            password = auth_data.get("password", "")
+            remote_ip = self._browser_remote_ip(websocket)
+            if self._browser_auth_is_rate_limited(remote_ip):
+                logger.warning(
+                    "Browser VJ auth rate limited from %s",
+                    websocket.remote_address,
+                )
+                await self._reject_browser_auth(websocket, rate_limited=True)
+                return False
+            authenticated = (
+                isinstance(username, str)
+                and bool(username)
+                and isinstance(password, str)
+                and bool(password)
+                and self.auth_config.verify_vj(username, password) is not None
+            )
+            if not authenticated:
+                self._record_browser_auth_failure(remote_ip)
+                logger.warning("Browser VJ auth failed from %s", websocket.remote_address)
+                await self._reject_browser_auth(websocket)
+                return False
+            self._browser_auth_attempts.pop(remote_ip, None)
+            await websocket.send(_json_str({"type": "auth_success"}))
+            logger.info("Browser VJ auth succeeded from %s", websocket.remote_address)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("Browser auth timeout from %s", websocket.remote_address)
+            await websocket.close(4003, "Auth timeout")
+            return False
+        except (msgspec.DecodeError, Exception) as exc:
+            logger.warning("Browser auth error: %s", exc)
+            await websocket.close(4003, "Auth error")
+            return False
+
     async def _handle_browser_client(self, websocket):
         """Handle browser preview/admin panel connection."""
 
         # --- VJ Authentication Gate ---
-        if self.require_auth:
-            try:
-                raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-                auth_data = mjson.decode(raw)
-                if auth_data.get("type") != "vj_auth":
-                    await websocket.close(4003, "Expected vj_auth message")
-                    return
-                password = auth_data.get("password", "")
-                # Check against any configured VJ operator
-                from vj_server.auth import verify_password
-
-                authenticated = False
-                for vj_id, vj_info in self.auth_config.vj_operators.items():
-                    if verify_password(password, vj_info.get("key_hash", "")):
-                        authenticated = True
-                        break
-                if not authenticated:
-                    logger.warning(f"Browser VJ auth failed from {websocket.remote_address}")
-                    await websocket.send(
-                        _json_str(
-                            {
-                                "type": "auth_error",
-                                "error": "Invalid VJ password",
-                            }
-                        )
-                    )
-                    await websocket.close(4004, "Authentication failed")
-                    return
-                await websocket.send(_json_str({"type": "auth_success"}))
-                logger.info(f"Browser VJ auth succeeded from {websocket.remote_address}")
-            except asyncio.TimeoutError:
-                logger.warning(f"Browser auth timeout from {websocket.remote_address}")
-                await websocket.close(4003, "Auth timeout")
-                return
-            except (msgspec.DecodeError, Exception) as exc:
-                logger.warning(f"Browser auth error: {exc}")
-                await websocket.close(4003, "Auth error")
-                return
+        if not await self._negotiate_browser_auth(websocket):
+            return
 
         # --- Rate limiter for state-mutating browser commands ---
         _RATE_LIMITED_COMMANDS = {
@@ -153,6 +247,10 @@ class RelayMixin:
                     "active_dj": self._active_dj_id,
                     "health_stats": self.get_health_stats(),
                     "minecraft_connected": mc_connected,
+                    "blackout": self._blackout,
+                    "freeze": self._freeze,
+                    "emergency_epoch": self._emergency_epoch,
+                    "emergency_revision": self._emergency_revision,
                     "minecraft_server_type": (
                         getattr(self.viz_client, "server_type", None) if self.viz_client else None
                     ),
@@ -198,6 +296,11 @@ class RelayMixin:
                                     {
                                         "type": "error",
                                         "message": "Rate limited — too many commands",
+                                        **(
+                                            {"request_id": data["request_id"]}
+                                            if data.get("request_id")
+                                            else {}
+                                        ),
                                     }
                                 )
                             )
@@ -234,6 +337,10 @@ class RelayMixin:
                                     "active_dj": self._active_dj_id,
                                     "health_stats": self.get_health_stats(),
                                     "minecraft_connected": mc_status,
+                                    "blackout": self._blackout,
+                                    "freeze": self._freeze,
+                                    "emergency_epoch": self._emergency_epoch,
+                                    "emergency_revision": self._emergency_revision,
                                     "minecraft_server_type": (
                                         getattr(self.viz_client, "server_type", None)
                                         if self.viz_client
@@ -668,43 +775,20 @@ class RelayMixin:
                         duration = data.get("duration", 500)
 
                         if effect in ("blackout", "freeze"):
-                            # Toggle effects
-                            if intensity <= 0:
-                                # Turn off
-                                if effect == "blackout":
-                                    self._blackout = False
-                                    if effect in self._active_effects:
-                                        del self._active_effects[effect]
-                                    # Re-show entities
-                                    if self.viz_client and self.viz_client.connected:
-                                        try:
-                                            await self.viz_client.set_visible(self.zone, True)
-                                        except Exception:
-                                            pass
-                                elif effect == "freeze":
-                                    self._freeze = False
-                                    if effect in self._active_effects:
-                                        del self._active_effects[effect]
-                                logger.info(f"{effect.capitalize()} OFF")
-                            else:
-                                # Turn on
-                                if effect == "blackout":
-                                    self._blackout = True
-                                    # Hide entities in MC
-                                    if self.viz_client and self.viz_client.connected:
-                                        try:
-                                            await self.viz_client.set_visible(self.zone, False)
-                                        except Exception:
-                                            pass
-                                elif effect == "freeze":
-                                    self._freeze = True
-                                self._active_effects[effect] = {
-                                    "intensity": intensity,
-                                    "end_time": time.time() + 999999,
-                                    "duration": 999999999,
-                                    "start_time": time.time(),
-                                }
-                                logger.info(f"{effect.capitalize()} ON")
+                            enabled = intensity > 0
+                            emergency_state = await self._apply_emergency_mutation(
+                                effect, enabled, intensity=intensity
+                            )
+                            if emergency_state is None:
+                                await self._send_emergency_control_error(
+                                    websocket, data.get("request_id")
+                                )
+                                continue
+                            logger.info(
+                                "%s %s",
+                                effect.capitalize(),
+                                "ON" if enabled else "OFF",
+                            )
                         else:
                             # Timed effects (flash, strobe, pulse, wave, spiral, explode)
                             self._active_effects[effect] = {
@@ -718,42 +802,38 @@ class RelayMixin:
                             )
 
                         await self._broadcast_effect_trigger(effect)
+                        if effect in ("blackout", "freeze"):
+                            await self._broadcast_emergency_state(
+                                websocket, data.get("request_id"), emergency_state
+                            )
 
                     elif msg_type in ("blackout", "set_blackout"):
-                        self._blackout = data.get("enabled", not self._blackout)
-                        if self._blackout:
-                            self._active_effects["blackout"] = {
-                                "intensity": 1.0,
-                                "end_time": time.time() + 999999,
-                                "duration": 999999999,
-                                "start_time": time.time(),
-                            }
-                            if self.viz_client and self.viz_client.connected:
-                                try:
-                                    await self.viz_client.set_visible(self.zone, False)
-                                except Exception:
-                                    pass
-                        else:
-                            self._active_effects.pop("blackout", None)
-                            if self.viz_client and self.viz_client.connected:
-                                try:
-                                    await self.viz_client.set_visible(self.zone, True)
-                                except Exception:
-                                    pass
+                        emergency_state = await self._apply_emergency_mutation(
+                            "blackout", data.get("enabled")
+                        )
+                        if emergency_state is None:
+                            await self._send_emergency_control_error(
+                                websocket, data.get("request_id")
+                            )
+                            continue
                         logger.info(f"Blackout: {self._blackout}")
+                        await self._broadcast_emergency_state(
+                            websocket, data.get("request_id"), emergency_state
+                        )
 
                     elif msg_type in ("freeze", "set_freeze"):
-                        self._freeze = data.get("enabled", not self._freeze)
-                        if self._freeze:
-                            self._active_effects["freeze"] = {
-                                "intensity": 1.0,
-                                "end_time": time.time() + 999999,
-                                "duration": 999999999,
-                                "start_time": time.time(),
-                            }
-                        else:
-                            self._active_effects.pop("freeze", None)
+                        emergency_state = await self._apply_emergency_mutation(
+                            "freeze", data.get("enabled")
+                        )
+                        if emergency_state is None:
+                            await self._send_emergency_control_error(
+                                websocket, data.get("request_id")
+                            )
+                            continue
                         logger.info(f"Freeze: {self._freeze}")
+                        await self._broadcast_emergency_state(
+                            websocket, data.get("request_id"), emergency_state
+                        )
 
                     # ========== Banner Profile Management ==========
 
@@ -854,9 +934,15 @@ class RelayMixin:
                     elif msg_type == "get_voice_status":
                         # Forward get_voice_status to Minecraft and relay response
                         if self.viz_client and self.viz_client.connected:
-                            response = await self.viz_client.send({"type": "get_voice_status"})
-                            if response:
-                                await websocket.send(_json_str(response))
+                            try:
+                                response = await self.viz_client.send({"type": "get_voice_status"})
+                                browser_status = _normalize_renderer_voice_status(response)
+                            except Exception:
+                                logger.warning("Minecraft voice status request failed")
+                                browser_status = _voice_status_error(
+                                    "Minecraft voice status request failed."
+                                )
+                            await websocket.send(_json_str(browser_status))
                         else:
                             await websocket.send(
                                 _json_str(
@@ -1422,6 +1508,81 @@ class RelayMixin:
             except Exception:
                 pass
 
+    def _record_emergency_mutation(self):
+        """Synchronously capture one monotonic authoritative emergency mutation."""
+        self._emergency_revision += 1
+        return {
+            "type": "emergency_state",
+            "blackout": self._blackout,
+            "freeze": self._freeze,
+            "emergency_epoch": self._emergency_epoch,
+            "emergency_revision": self._emergency_revision,
+        }
+
+    async def _apply_emergency_mutation(
+        self, effect: str, enabled: bool | None, *, intensity: float = 1.0
+    ) -> dict | None:
+        """Commit one renderer-backed emergency change in request order."""
+        async with self._emergency_mutation_lock:
+            current_enabled = self._blackout if effect == "blackout" else self._freeze
+            target_enabled = not current_enabled if enabled is None else bool(enabled)
+
+            if effect == "blackout" and self.viz_client and self.viz_client.connected:
+                try:
+                    applied = await self.viz_client.set_visible(self.zone, not target_enabled)
+                except Exception:
+                    logger.warning("Minecraft emergency visibility request failed")
+                    return None
+                if applied is not True:
+                    logger.warning("Minecraft did not acknowledge emergency visibility")
+                    return None
+
+            if effect == "blackout":
+                self._blackout = target_enabled
+            else:
+                self._freeze = target_enabled
+
+            if target_enabled:
+                self._active_effects[effect] = {
+                    "intensity": intensity,
+                    "end_time": time.time() + 999999,
+                    "duration": 999999999,
+                    "start_time": time.time(),
+                }
+            else:
+                self._active_effects.pop(effect, None)
+
+            return self._record_emergency_mutation()
+
+    async def _send_emergency_control_error(self, requester, request_id: str | None) -> None:
+        error = {
+            "type": "error",
+            "message": "Minecraft did not apply the emergency control change.",
+        }
+        if request_id:
+            error["request_id"] = request_id
+        await requester.send(_json_str(error))
+
+    async def _broadcast_emergency_state(
+        self, requester, request_id: str | None, emergency_state: dict
+    ):
+        """Broadcast authority while scoping correlation to the requesting socket."""
+        uncorrelated_message = _json_str(emergency_state)
+        correlated_message = (
+            _json_str({**emergency_state, "request_id": request_id})
+            if requester is not None and request_id
+            else uncorrelated_message
+        )
+        dead_clients = set()
+        for client in list(self._broadcast_clients):
+            try:
+                await client.send(
+                    correlated_message if client is requester else uncorrelated_message
+                )
+            except Exception:
+                dead_clients.add(client)
+        self._broadcast_clients -= dead_clients
+
     async def _broadcast_to_djs(self, msg: dict):
         """Broadcast a message dict to all connected DJs."""
         message = _json_str(msg)
@@ -1986,12 +2147,16 @@ class RelayMixin:
     async def _forward_voice_config(self, config: dict):
         """Forward voice_config to the Minecraft plugin and relay voice_status response."""
         if not self.viz_client or not self.viz_client.connected:
-            return
+            browser_status = _voice_status_error("Minecraft voice service is unavailable.")
+        else:
+            try:
+                response = await self.viz_client.send_voice_config(config)
+                browser_status = _normalize_renderer_voice_status(response)
+            except Exception:
+                logger.warning("Minecraft voice configuration failed")
+                browser_status = _voice_status_error("Minecraft voice configuration failed.")
 
-        response = await self.viz_client.send_voice_config(config)
-        if response and response.get("type") == "voice_status":
-            # Broadcast voice_status to all connected browser clients
-            await self._broadcast_voice_status(response)
+        await self._broadcast_voice_status(browser_status)
 
     async def _broadcast_voice_status(self, status: dict):
         """Broadcast voice_status to all connected browser clients."""

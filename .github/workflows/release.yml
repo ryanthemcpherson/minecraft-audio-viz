@@ -134,9 +134,72 @@ jobs:
             !minecraft_plugin/target/original-*.jar
           if-no-files-found: error
 
+  build-pterodactyl:
+    name: Build Pterodactyl Bundle
+    needs: [build-plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore portable runtime cache
+        uses: actions/cache@v4
+        with:
+          path: deploy/pterodactyl/.cache
+          key: pterodactyl-runtimes-${{ runner.os }}-${{ hashFiles('deploy/pterodactyl/runtime-lock.json') }}
+
+      - name: Download Plugin artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: minecraft-plugin
+          path: plugin/
+
+      - name: Test Pterodactyl packager
+        run: bash deploy/pterodactyl/test-build-release.sh
+
+      - name: Build and verify Pterodactyl bundle
+        run: |
+          set -euo pipefail
+          python -m venv vj_server/.venv
+          mapfile -d '' -t PLUGIN_JARS < <(
+            find plugin -maxdepth 1 -type f -name 'audioviz-plugin-*.jar' ! -name '*-shaded.jar' -print0
+          )
+          if [ "${#PLUGIN_JARS[@]}" -ne 1 ]; then
+            echo "ERROR: expected exactly one plugin JAR, found ${#PLUGIN_JARS[@]}."
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          bash deploy/pterodactyl/build-release.sh \
+            --version "$VERSION" \
+            --plugin-jar "${PLUGIN_JARS[0]}" \
+            --output-dir dist
+
+      - name: Cross-check Pterodactyl bundle with PowerShell verifier
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath dist -Filter 'mcav-pterodactyl-*.zip')
+          if ($archives.Count -ne 1) {
+            throw "Expected exactly one Pterodactyl archive, found $($archives.Count)."
+          }
+          ./deploy/pterodactyl/verify-release.ps1 -Archive $archives[0].FullName
+
+      - name: Upload Pterodactyl bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: pterodactyl-bundle
+          path: |
+            dist/mcav-pterodactyl-*.zip
+            dist/mcav-pterodactyl-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Create Release
-    needs: [build-mod, build-plugin]
+    needs: [build-mod, build-plugin, build-pterodactyl]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -158,6 +221,12 @@ jobs:
           name: minecraft-plugin
           path: plugin/
 
+      - name: Download Pterodactyl bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: pterodactyl-bundle
+          path: pterodactyl/
+
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -168,6 +237,8 @@ jobs:
           ls -la mod/
           echo "=== Minecraft plugin ==="
           ls -la plugin/
+          echo "=== Pterodactyl bundle ==="
+          ls -la pterodactyl/
 
       - name: Create Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -180,3 +251,5 @@ jobs:
           files: |
             mod/*.jar
             plugin/*.jar
+            pterodactyl/*.zip
+            pterodactyl/*.zip.sha256

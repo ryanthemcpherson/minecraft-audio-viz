@@ -10,6 +10,7 @@ import asyncio
 import os
 import signal
 import sys
+from pathlib import Path
 
 from vj_server.config import validate_http_bind_host
 
@@ -74,6 +75,12 @@ Examples:
         help="Port for DJ connections (default: 9000 or $VJ_SERVER_PORT)",
     )
     parser.add_argument(
+        "--dj-host",
+        type=validate_hostname,
+        default=os.environ.get("DJ_HOST", "0.0.0.0"),
+        help="Bind host for DJ connections (default: 0.0.0.0 or $DJ_HOST)",
+    )
+    parser.add_argument(
         "--minecraft-host",
         type=validate_hostname,
         default=os.environ.get("MINECRAFT_HOST", "localhost"),
@@ -104,6 +111,65 @@ Examples:
         type=validate_hostname,
         default=os.environ.get("HTTP_HOST", "127.0.0.1"),
         help="HTTP bind host for admin panel (default: 127.0.0.1 or $HTTP_HOST)",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=validate_port,
+        default=int(os.environ.get("HTTP_PORT", "8080")),
+        help="HTTPS/HTTP port for admin panel (default: 8080 or $HTTP_PORT)",
+    )
+    parser.add_argument(
+        "--unified-web",
+        action="store_true",
+        help="Serve admin, preview, and browser WebSocket traffic on the HTTPS port",
+    )
+    parser.add_argument(
+        "--public-origin",
+        help="Exact public HTTPS origin for unified browser WebSocket validation",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("MCAV_PROJECT_ROOT")) else None),
+        help="Project root containing admin, preview, patterns, and configs",
+    )
+    parser.add_argument(
+        "--bootstrap-pterodactyl",
+        action="store_true",
+        help="Install persistent Pterodactyl identity, plugin, and renderer configuration, then exit",
+    )
+    parser.add_argument(
+        "--public-host",
+        default=os.environ.get("MCAV_PUBLIC_HOST"),
+        help="Public IPv4 or IPv6 address used by Pterodactyl TLS bootstrap",
+    )
+    parser.add_argument(
+        "--rotate-tls-identity",
+        action="store_true",
+        help="Explicitly rotate only the Pterodactyl TLS certificate and private key",
+    )
+    parser.add_argument(
+        "--plugins-dir",
+        type=Path,
+        default=None,
+        help="Paper plugins directory used by --bootstrap-pterodactyl",
+    )
+    parser.add_argument(
+        "--release-version",
+        default=None,
+        help="Release label recorded by --bootstrap-pterodactyl",
+    )
+    parser.add_argument(
+        "--tls-cert",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("TLS_CERT")) else None),
+        help="TLS certificate for admin HTTPS and browser WSS",
+    )
+    parser.add_argument(
+        "--tls-key",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("TLS_KEY")) else None),
+        help="TLS private key for admin HTTPS and browser WSS",
     )
     parser.add_argument(
         "--auth-file",
@@ -164,6 +230,47 @@ Examples:
 
     args = parser.parse_args()
 
+    if args.rotate_tls_identity and not (args.bootstrap_pterodactyl and args.public_host):
+        print("ERROR: --rotate-tls-identity requires --bootstrap-pterodactyl and --public-host")
+        return 2
+    if args.bootstrap_pterodactyl and not args.public_host:
+        print("ERROR: --public-host is required with --bootstrap-pterodactyl")
+        return 2
+    if args.unified_web and args.http_port == args.port:
+        print("ERROR: HTTP and DJ listener ports must differ in unified mode")
+        return 2
+
+    if args.bootstrap_pterodactyl:
+        from vj_server.pterodactyl import BootstrapError, BootstrapPaths, bootstrap_pterodactyl
+
+        if args.project_root is None:
+            print("ERROR: --project-root is required with --bootstrap-pterodactyl")
+            return 2
+        plugins_dir = args.plugins_dir or args.project_root.parent / "plugins"
+        version_file = args.project_root / "VERSION"
+        release_version = args.release_version
+        if release_version is None:
+            release_version = (
+                version_file.read_text(encoding="utf-8").strip()
+                if version_file.is_file()
+                else "unknown"
+            )
+        try:
+            result = bootstrap_pterodactyl(
+                BootstrapPaths(args.project_root, plugins_dir),
+                release_version,
+                public_host=args.public_host,
+                rotate_tls_identity=args.rotate_tls_identity,
+                http_port=args.http_port,
+                dj_port=args.port,
+                unified_web=args.unified_web,
+            )
+        except BootstrapError as exc:
+            print(f"ERROR: Pterodactyl bootstrap failed: {exc}")
+            return 1
+        print(f"MCAV bootstrap complete. First login: {result.first_login}")
+        return 0
+
     # Import and run VJ server
     from vj_server.models import DJAuthConfig
     from vj_server.vj_server import VJServer
@@ -171,7 +278,6 @@ Examples:
     # Handle --hash-passwords: hash plaintext entries in-place and exit
     if args.hash_passwords:
         import json
-        from pathlib import Path
 
         from vj_server.auth import hash_password
 
@@ -201,7 +307,6 @@ Examples:
     auth_config = None
     if not args.no_auth and args.auth_file:
         import json
-        from pathlib import Path
 
         auth_path = Path(args.auth_file)
         if auth_path.exists():
@@ -232,11 +337,18 @@ Examples:
 
     server = VJServer(
         dj_port=args.port,
+        dj_host=args.dj_host,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
         minecraft_ws_secret=args.minecraft_ws_secret,
         broadcast_port=args.broadcast_port,
         http_host=args.http_host,
+        http_port=args.http_port,
+        project_root=args.project_root,
+        tls_cert=args.tls_cert,
+        tls_key=args.tls_key,
+        unified_web=args.unified_web,
+        public_origin=args.public_origin,
         entity_count=args.entities,
         auth_config=auth_config,
         require_auth=not args.no_auth,

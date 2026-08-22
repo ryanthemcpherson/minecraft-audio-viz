@@ -4,6 +4,13 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { UseAuthReturn } from './useAuth';
 import { PRESETS } from '../components/PresetBar';
 import * as api from '../lib/api';
+import {
+  buildCodeConnectionArgs,
+  buildDirectConnectionArgs,
+  formatConnectionError,
+  sanitizeConnectionStatus,
+} from '../lib/connectionProfile';
+import { useTlsFingerprintProfile } from './useTlsFingerprintProfile';
 import type {
   ConnectionStatus,
   AudioLevels,
@@ -31,6 +38,9 @@ export interface UseConnectionReturn {
   setServerHost: (host: string) => void;
   serverPort: number;
   setServerPort: (port: number) => void;
+  tlsFingerprint: string;
+  setTlsFingerprint: (fingerprint: string) => void;
+  isTlsFingerprintValid: boolean;
   status: ConnectionStatus;
   isConnecting: boolean;
 
@@ -74,6 +84,12 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   const [serverPort, setServerPort] = useState(
     () => parseInt(localStorage.getItem('mcav.serverPort') || '9000', 10),
   );
+  const {
+    tlsFingerprint,
+    setTlsFingerprint,
+    normalizedTlsFingerprint,
+    isTlsFingerprintValid,
+  } = useTlsFingerprintProfile();
 
   // Audio state
   const audioRef = useRef<AudioData>(DEFAULT_AUDIO_DATA);
@@ -128,7 +144,6 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   useEffect(() => {
     localStorage.setItem('mcav.serverPort', String(serverPort));
   }, [serverPort]);
-
   // Persist preset selection
   useEffect(() => {
     localStorage.setItem('mcav.preset', activePreset);
@@ -145,7 +160,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
   // Always listen for dj-status so reconnection events reach the frontend.
   useEffect(() => {
     const unlisten = listen<ConnectionStatus>('dj-status', (event) => {
-      setStatus(event.payload);
+      setStatus(sanitizeConnectionStatus(event.payload));
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
@@ -205,49 +220,46 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     handleStopTest: () => Promise<void>,
   ) => {
     const code = connectCode;
-    if (code.length !== 8 || !djName.trim()) {
+    if ((!directConnect && code.length !== 8) || !djName.trim() || !isTlsFingerprintValid) {
       return;
     }
 
     setIsConnecting(true);
-    setStatus((prev) => ({ ...prev, error: null }));
+    setStatus((prev) => ({ ...prev, error: null, error_code: null }));
     try {
       // Stop test audio if running
       if (isTestingAudio) {
         await handleStopTest();
       }
 
-      // Format code as XXXX-XXXX
-      const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
-
-      let connHost: string;
-      let connPort: number;
-      let djSessionId: string | null = null;
-
       if (directConnect) {
-        connHost = serverHost;
-        connPort = serverPort;
+        await invoke('connect_direct', buildDirectConnectionArgs({
+          djName: djName.trim(),
+          serverHost,
+          serverPort,
+          tlsFingerprint: normalizedTlsFingerprint,
+        }));
       } else {
+        // Format code as XXXX-XXXX
+        const formattedCode = `${code.slice(0, 4)}-${code.slice(4, 8)}`;
         const idempotencyKey =
           typeof crypto !== 'undefined' && crypto.randomUUID
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const resolved = await api.resolveConnectCode(formattedCode, idempotencyKey);
         const wsUrl = new URL(resolved.websocket_url);
-        connHost = wsUrl.hostname;
-        connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
+        const connPort = parseInt(wsUrl.port, 10) || (wsUrl.protocol === 'wss:' ? 443 : 80);
         setShowName(resolved.show_name);
-        djSessionId = resolved.dj_session_id ?? null;
+        await invoke('connect_with_code', buildCodeConnectionArgs({
+          code: formattedCode,
+          djName: djName.trim(),
+          serverHost: wsUrl.hostname,
+          serverPort: connPort,
+          tlsFingerprint: normalizedTlsFingerprint,
+          blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
+          djSessionId: resolved.dj_session_id ?? null,
+        }));
       }
-
-      await invoke('connect_with_code', {
-        code: formattedCode,
-        djName: djName.trim(),
-        serverHost: connHost,
-        serverPort: connPort,
-        blockPalette: auth?.user?.dj_profile?.block_palette ?? null,
-        djSessionId,
-      });
 
       // Start audio capture
       if (selectedSource) {
@@ -256,8 +268,7 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
 
       setStatus((prev) => ({ ...prev, connected: true }));
     } catch (e) {
-      const errStr = String(e);
-      let errorMessage = errStr;
+      let errorMessage: string;
 
       if (e instanceof api.ApiError) {
         if (e.status === 404) {
@@ -269,21 +280,11 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
         } else {
           errorMessage = e.message;
         }
-      } else if (
-        errStr.includes('timeout') ||
-        errStr.includes('timed out') ||
-        errStr.includes('connection refused')
-      ) {
-        errorMessage = "Can't reach server. Check that the VJ server is running.";
-      } else if (
-        errStr.includes('auth') ||
-        errStr.includes('invalid') ||
-        errStr.includes('unauthorized')
-      ) {
-        errorMessage = 'Authentication failed. Ask your VJ operator for a new code.';
+      } else {
+        errorMessage = formatConnectionError(e);
       }
 
-      setStatus((prev) => ({ ...prev, error: errorMessage }));
+      setStatus((prev) => ({ ...prev, error: errorMessage, error_code: null }));
     } finally {
       setIsConnecting(false);
     }
@@ -336,6 +337,9 @@ export function useConnection(auth: UseAuthReturn): UseConnectionReturn {
     setServerHost,
     serverPort,
     setServerPort,
+    tlsFingerprint,
+    setTlsFingerprint,
+    isTlsFingerprintValid,
     status,
     isConnecting,
     audioRef,

@@ -3,10 +3,11 @@
  * Professional Three.js visualization with particles and block indicators
  */
 
-// Configuration — port can be overridden via ?port=XXXX URL parameter
+import { PreviewAuthSession } from './PreviewAuthSession.js';
+import { resolveBrowserWebSocketUrl } from './browser-endpoint.js';
+
 const _urlParams = new URLSearchParams(window.location.search);
 const CONFIG = {
-    wsPort: parseInt(_urlParams.get('port'), 10) || 8766,
     entityCount: 16,
     gridSize: 4,
     blockSize: 0.8,
@@ -87,6 +88,7 @@ let availablePatterns = [];
 
 // WebSocket
 let ws = null;
+let wsGeneration = 0;
 let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -102,12 +104,28 @@ let lastFrameTime = 0;
 // Debounce helper for slider WebSocket messages
 const WS_DEBOUNCE_MS = 50;
 const _debounceTimers = {};
+const previewAuthSession = new PreviewAuthSession({
+    clearPending: clearPendingPreviewCommands,
+});
+
+function clearPendingPreviewCommands() {
+    for (const key of Object.keys(_debounceTimers)) {
+        clearTimeout(_debounceTimers[key]);
+        delete _debounceTimers[key];
+    }
+}
+
+function sendPreviewMessage(payload) {
+    if (!previewAuthSession.canSendControls()) return false;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+}
+
 function debouncedWsSend(key, payload) {
     if (_debounceTimers[key]) clearTimeout(_debounceTimers[key]);
     _debounceTimers[key] = setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(payload));
-        }
+        sendPreviewMessage(payload);
     }, WS_DEBOUNCE_MS);
 }
 
@@ -651,54 +669,74 @@ function updateParticleEntities() {
 function connectWebSocket() {
     const statusEl = document.getElementById('connection-status');
     const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
+    const previousSocket = ws;
+    ws = null;
+    const connectionGeneration = ++wsGeneration;
 
-    // VJ password: check URL param, then localStorage
-    const urlParams = new URLSearchParams(window.location.search);
-    const vjPassword = urlParams.get('vj_password')
-        || localStorage.getItem('mcav_vj_password')
-        || '';
+    if (previousSocket && previousSocket.readyState !== WebSocket.CLOSED) {
+        previousSocket.close(1000, 'Connection replaced');
+    }
 
     try {
-        const wsHost = window.location.hostname || 'localhost';
-        ws = new WebSocket(`ws://${wsHost}:${CONFIG.wsPort}`);
+        const wsUrl = resolveBrowserWebSocketUrl(
+            window.location,
+            _urlParams,
+            window.MCAV_RUNTIME_CONFIG,
+        );
+        const socket = new WebSocket(wsUrl);
+        ws = socket;
+        const isCurrentSocket = () => (
+            ws === socket && wsGeneration === connectionGeneration
+        );
 
-        ws.onopen = () => {
-            // Send VJ auth if a password is available
-            if (vjPassword) {
-                ws.send(JSON.stringify({ type: 'vj_auth', password: vjPassword }));
-                // Auth response handled in onmessage
-            }
-
+        const completeAuthentication = () => {
+            if (!isCurrentSocket()) return;
             if (statusEl) statusEl.classList.add('connected');
             if (statusEl) statusEl.classList.remove('error');
             if (statusText) statusText.textContent = 'Connected';
-            console.log('WebSocket connected');
-            reconnectAttempts = 0;  // Reset on successful connection
+            reconnectAttempts = 0;
             stageScanRequested = false;
-
-            // Request zone and stage data for scanned block rendering
-            ws.send(JSON.stringify({ type: 'get_zones' }));
-            ws.send(JSON.stringify({ type: 'get_stages' }));
+            hidePreviewLogin();
+            sendPreviewMessage({ type: 'get_zones' });
+            sendPreviewMessage({ type: 'get_stages' });
         };
 
-        ws.onmessage = (event) => {
+        socket.onopen = () => {
+            if (!isCurrentSocket()) return;
+            if (statusText) statusText.textContent = 'Negotiating access…';
+            previewAuthSession.onOpen((message) => socket.send(JSON.stringify(message)));
+        };
+
+        socket.onmessage = (event) => {
+            if (!isCurrentSocket()) return;
             try {
                 const data = JSON.parse(event.data);
-                if (data.type === 'auth_error') {
-                    console.error('[WS] VJ auth failed:', data.error);
-                    if (statusText) statusText.textContent = 'Auth Failed';
-                    if (statusEl) statusEl.classList.add('error');
-                    const newPassword = prompt(`VJ Auth Failed: ${data.error || 'Invalid password'}\nEnter VJ password:`);
-                    if (newPassword) {
-                        localStorage.setItem('mcav_vj_password', newPassword);
-                        ws.close();
-                        setTimeout(connectWebSocket, 500);
-                    }
-                    return;
-                } else if (data.type === 'auth_success') {
-                    console.log('[WS] VJ auth succeeded');
+                const protocolHandled = previewAuthSession.handleProtocolMessage(data, {
+                    send: (message) => socket.send(JSON.stringify(message)),
+                    onAuthenticated: completeAuthentication,
+                    onAuthRequired: () => {
+                        showPreviewLogin();
+                        socket.close(1000, 'Credentials required');
+                    },
+                    onAuthFailed: () => {
+                        console.error('[WS] VJ authentication failed');
+                        if (statusText) statusText.textContent = 'Auth Failed';
+                        if (statusEl) statusEl.classList.add('error');
+                        showPreviewLogin('Invalid username or password.');
+                        socket.close(4003, 'Authentication failed');
+                    },
+                });
+                if (protocolHandled) {
                     return;
                 }
+
+                if (!previewAuthSession.canSendControls()) {
+                    const legacyNoAuth = previewAuthSession.acceptLegacyNoAuth({
+                        onAuthenticated: completeAuthentication,
+                    });
+                    if (!legacyNoAuth) return;
+                }
+
                 if (data.type === 'audio' || data.type === 'state') {
                     updateAudioState(data);
                 } else if (data.type === 'patterns' || data.type === 'pattern_changed') {
@@ -747,13 +785,17 @@ function connectWebSocket() {
             }
         };
 
-        ws.onclose = () => {
+        socket.onclose = () => {
+            if (!isCurrentSocket()) return;
+            ws = null;
+            wsGeneration++;
             if (statusEl) statusEl.classList.remove('connected');
             if (statusText) statusText.textContent = 'Disconnected';
-            scheduleReconnect();
+            if (previewAuthSession.shouldReconnect()) scheduleReconnect();
         };
 
-        ws.onerror = () => {
+        socket.onerror = () => {
+            if (!isCurrentSocket()) return;
             if (statusEl) statusEl.classList.add('error');
             if (statusText) statusText.textContent = 'Error';
         };
@@ -765,6 +807,7 @@ function connectWebSocket() {
 }
 
 function scheduleReconnect() {
+    if (!previewAuthSession.shouldReconnect()) return;
     if (reconnectTimeout) clearTimeout(reconnectTimeout);
 
     reconnectAttempts++;
@@ -797,6 +840,89 @@ function scheduleReconnect() {
 
     console.log(`[WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
     reconnectTimeout = setTimeout(connectWebSocket, delay);
+}
+
+function showPreviewLogin(message = '') {
+    const gate = document.getElementById('auth-gate');
+    const previewApp = document.getElementById('preview-app');
+    const error = document.getElementById('auth-error');
+    const submit = document.getElementById('auth-submit');
+    const username = document.getElementById('auth-username');
+    const password = document.getElementById('auth-password');
+    if (!gate) return;
+
+    gate.hidden = false;
+    previewApp.hidden = true;
+    previewApp.setAttribute('aria-hidden', 'true');
+    error.textContent = message;
+    password.value = '';
+    submit.disabled = false;
+    submit.textContent = 'Open 3D Preview';
+    (username.value ? password : username).focus();
+}
+
+function hidePreviewLogin() {
+    const gate = document.getElementById('auth-gate');
+    const previewApp = document.getElementById('preview-app');
+    const error = document.getElementById('auth-error');
+    const submit = document.getElementById('auth-submit');
+    if (gate) gate.hidden = true;
+    if (previewApp) {
+        previewApp.hidden = false;
+        previewApp.removeAttribute('aria-hidden');
+    }
+    if (error) error.textContent = '';
+    if (submit) {
+        submit.disabled = false;
+        submit.textContent = 'Open 3D Preview';
+    }
+}
+
+function setupPreviewLogin() {
+    const form = document.getElementById('auth-form');
+    const error = document.getElementById('auth-error');
+    const submit = document.getElementById('auth-submit');
+    const username = document.getElementById('auth-username');
+    const password = document.getElementById('auth-password');
+    const logout = document.getElementById('btn-logout');
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const nextUsername = username.value.trim();
+        const nextPassword = password.value;
+        if (!nextUsername || !nextPassword) {
+            error.textContent = 'Enter the username and password from FIRST_LOGIN.txt.';
+            return;
+        }
+
+        previewAuthSession.setCredentials(nextUsername, nextPassword);
+        error.textContent = '';
+        submit.disabled = true;
+        submit.textContent = 'Authenticating…';
+        reconnectAttempts = 0;
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        connectWebSocket();
+    });
+
+    logout.addEventListener('click', () => {
+        previewAuthSession.logout();
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        const signedOutSocket = ws;
+        ws = null;
+        wsGeneration++;
+        if (signedOutSocket) signedOutSocket.close(1000, 'Operator signed out');
+        const statusEl = document.getElementById('connection-status');
+        const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
+        if (statusEl) {
+            statusEl.classList.remove('connected');
+            statusEl.classList.remove('error');
+        }
+        if (statusText) statusText.textContent = 'Signed out';
+        username.value = '';
+        showPreviewLogin('Signed out.');
+    });
+
+    showPreviewLogin();
 }
 
 function updateAudioState(data) {
@@ -1320,9 +1446,7 @@ function updatePatternList(patterns, currentPattern) {
 }
 
 function setPattern(patternId) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_pattern', pattern: patternId }));
-    }
+    sendPreviewMessage({ type: 'set_pattern', pattern: patternId });
 }
 
 function setBlockCount(count) {
@@ -1338,9 +1462,7 @@ function setBandSensitivity(bandIndex, sensitivity) {
 }
 
 function setPreset(presetName) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_preset', preset: presetName }));
-    }
+    sendPreviewMessage({ type: 'set_preset', preset: presetName });
 
     document.querySelectorAll('.preset-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.preset === presetName);
@@ -1542,21 +1664,19 @@ function handleStageBlocksResponse(data) {
 }
 
 function rescanStage() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!previewAuthSession.canSendControls()) return;
     stageScanRequested = false;
     disposeStageBlocks();
     disposeZoneGroups();
     zoneData = null;
     zoneEntitiesData = null;
-    ws.send(JSON.stringify({ type: 'get_zones' }));
-    ws.send(JSON.stringify({ type: 'get_stages' }));
+    sendPreviewMessage({ type: 'get_zones' });
+    sendPreviewMessage({ type: 'get_stages' });
     console.log('[Stage] Rescan requested');
 }
 
 function requestStageBlocks(stageName) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'scan_stage_blocks', stage: stageName }));
-    }
+    sendPreviewMessage({ type: 'scan_stage_blocks', stage: stageName });
 }
 
 function computeStageCenter(zones) {
@@ -1696,5 +1816,8 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
-// Start when DOM is ready
-document.addEventListener('DOMContentLoaded', init);
+// Start the renderer behind a protected operator login.
+document.addEventListener('DOMContentLoaded', () => {
+    setupPreviewLogin();
+    init();
+});

@@ -46,6 +46,9 @@ export default function DisconnectedView({
         onServerHostChange={connection.setServerHost}
         serverPort={connection.serverPort}
         onServerPortChange={connection.setServerPort}
+        tlsFingerprint={connection.tlsFingerprint}
+        onTlsFingerprintChange={connection.setTlsFingerprint}
+        isTlsFingerprintValid={connection.isTlsFingerprintValid}
         error={connection.status.error}
         isConnecting={connection.isConnecting}
         djName={connection.djName}

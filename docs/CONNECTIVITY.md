@@ -12,11 +12,11 @@ related:
 
 # WebSocket Connectivity Architecture
 
-This document describes the WebSocket connectivity architecture for the Minecraft Audio Visualizer system, including all ports, reconnection behavior, heartbeat mechanisms, and troubleshooting guidance.
+This document describes the WebSocket connectivity architecture for the Minecraft Audio Visualizer system, including deployment profiles, ports, reconnection behavior, heartbeat mechanisms, and troubleshooting guidance.
 
 ## Architecture Overview
 
-The system uses a three-tier distributed architecture with WebSocket connections:
+The system uses a three-tier distributed architecture with WebSocket connections. This first diagram shows the configurable source-development defaults; the packaged Pterodactyl profile is the two-port TLS topology documented below.
 
 ```mermaid
 graph TD
@@ -63,12 +63,34 @@ graph TD
 
 ## Port Reference
 
+### Development and legacy defaults
+
+These defaults remain available for local/source development. They are not instructions for public exposure.
+
 | Port | Protocol | Component | Description |
-|------|----------|-----------|-------------|
+|-|-|-|-|
 | **8765** | WebSocket | Minecraft (mod or plugin) | Primary visualization data channel. Receives batch entity updates, audio data, and zone commands. |
 | **8766** | WebSocket | VJ Server → Browsers | Browser client broadcast. Sends visualization state to 3D preview and admin panel. |
 | **9000** | WebSocket | VJ Server ← DJs | Remote DJ connections. Receives audio frames from remote DJs for centralized mixing. |
 | **8080** | HTTP | VJ Server | Admin panel web interface. Serves static files for DJ control panel. |
+| **9001** | HTTP | VJ Server | Optional health and Prometheus metrics endpoint. |
+
+### Pterodactyl two-port release
+
+The portable Pterodactyl deployment uses this fixed topology:
+
+| Exposure | Port | Transport | Purpose |
+|-|-|-|-|
+| Public | **8080** | HTTPS and WSS | Admin and preview assets plus authenticated same-origin browser WebSocket at `/ws` |
+| Public | **25808** | WSS | Authenticated remote DJ input with certificate pinning |
+| Loopback only | **8765** | WebSocket | Minecraft renderer control/data |
+| Loopback only | **9001** | HTTP | Health and Prometheus metrics |
+
+Unified mode does not start the separate browser listener on `8766`. The Pterodactyl wrapper requires `HTTP_PORT=8080`, `VJ_SERVER_PORT=25808`, `UNIFIED_WEB=true`, no `BROADCAST_PORT`, and `MCAV_PUBLIC_HOST=<public-ip>`. Global source-development defaults remain unchanged.
+
+One generated certificate, with the configured public IP in its subject alternative names, secures both public listeners. An administrator downloads `state/tls.crt`, verifies it against `TLS_SHA256_FINGERPRINT` in `FIRST_LOGIN.txt`, and imports it into the administrator machine's trust store. Each DJ copies the same fingerprint into the **Server certificate SHA-256 fingerprint** profile field before connecting to `DJ_ENDPOINT`.
+
+The native client verifies the pin before sending credentials, connection codes, palette data, or audio. There is no plaintext downgrade, trust-on-first-use path, or accept-anyway control. When the public IP or certificate changes, run the explicit `--rotate-tls-identity` procedure, replace the administrator trust entry, and update every DJ pin before reconnecting. See the [Pterodactyl operator guide](deployment/PTERODACTYL.md) for the exact command and recovery steps.
 
 ## Secure Renderer Transport
 
@@ -264,7 +286,7 @@ Python components use `asyncio.Queue` with sensible defaults.
 from audio_processor.dj_relay import DJRelayConfig
 
 config = DJRelayConfig(
-    vj_server_url="ws://vj-server.example.com:9000",
+    vj_server_url="ws://127.0.0.1:9000",  # Local development only
     dj_id="dj_alice",
     dj_name="DJ Alice",
     dj_key="secret_key",

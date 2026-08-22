@@ -214,7 +214,7 @@ class BeatPredictor:
         else:
             consistency_conf = 0.5
 
-        new_confidence = min(1.0, (prominence / 15.0) * sample_conf * consistency_conf)
+        new_confidence = float(min(1.0, (prominence / 15.0) * sample_conf * consistency_conf))
 
         # Smooth tempo transition
         if self._tempo_confidence > 0.3:

@@ -2,6 +2,8 @@
 
 import time
 
+import msgspec.json as mjson
+
 from vj_server.beat_predictor import BeatPredictor
 
 # ============================================================================
@@ -165,6 +167,19 @@ class TestBeatPhase:
 
 
 class TestTempoConfidence:
+    def test_confidence_remains_json_serializable_after_numpy_histogram(self):
+        """The hot broadcast path requires native floats, not NumPy scalars."""
+        bp = BeatPredictor(min_bpm=60.0, max_bpm=200.0)
+        bp._tempo_histogram[:] = 1.0
+        bp._ioi_history.extend([0.5] * 4)
+
+        bp._extract_tempo_from_histogram()
+
+        assert type(bp.tempo_confidence) is float
+        assert mjson.decode(mjson.encode({"confidence": bp.tempo_confidence})) == {
+            "confidence": bp.tempo_confidence
+        }
+
     def test_confidence_monotonically_increases_with_consistent_input(self, monkeypatch):
         """With perfectly consistent onsets, confidence should generally trend up."""
         bp = BeatPredictor(min_bpm=60.0, max_bpm=200.0)

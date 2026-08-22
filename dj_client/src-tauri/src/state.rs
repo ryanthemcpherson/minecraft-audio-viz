@@ -1,12 +1,49 @@
 //! Application state management
 
 use crate::audio::AudioCaptureHandle;
+use crate::protocol::ConnectionErrorCode;
 use crate::protocol::DjClient;
 use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+
+/// Per-generation cancellation state with an atomic synchronous boundary for
+/// credential `start_send` versus replacement cancellation.
+pub(crate) struct ConnectionCancellation {
+    cancelled: parking_lot::Mutex<bool>,
+    cancellation_tx: watch::Sender<bool>,
+}
+
+impl ConnectionCancellation {
+    pub(crate) fn new() -> Self {
+        let (cancellation_tx, _cancellation_rx) = watch::channel(false);
+        Self {
+            cancelled: parking_lot::Mutex::new(false),
+            cancellation_tx,
+        }
+    }
+
+    pub(crate) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.cancellation_tx.subscribe()
+    }
+
+    pub(crate) fn cancel(&self) {
+        *self.cancelled.lock() = true;
+        let _ = self.cancellation_tx.send(true);
+    }
+
+    pub(crate) fn start_authentication<T>(&self, start_send: impl FnOnce() -> T) -> Result<T, ()> {
+        let cancelled = self.cancelled.lock();
+        if *cancelled {
+            return Err(());
+        }
+        let result = start_send();
+        drop(cancelled);
+        Ok(result)
+    }
+}
 
 /// Connection status
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -20,6 +57,7 @@ pub struct ConnectionStatus {
     pub total_djs: usize,
     pub active_dj_name: Option<String>,
     pub error: Option<String>,
+    pub error_code: Option<ConnectionErrorCode>,
 }
 
 /// Application state
@@ -60,6 +98,26 @@ pub struct AppState {
     /// Server port
     pub server_port: u16,
 
+    /// Validated SHA-256 fingerprint for a self-signed TLS server certificate
+    pub tls_fingerprint: Option<String>,
+
+    /// Monotonically increasing identity for connection replacements.
+    pub connection_generation: u64,
+
+    /// Cancels connection work owned by `connection_generation`, including reconnects.
+    pub(crate) connection_cancellation: Option<Arc<ConnectionCancellation>>,
+
+    /// Serializes replacement preparation so every newer command can cancel
+    /// the generation immediately before it.
+    pub connection_replacement_lock: Arc<tokio::sync::Mutex<()>>,
+
+    /// Serializes teardown/publication while still allowing a newer command
+    /// to cancel the connection future currently holding the lock.
+    pub connection_operation_lock: Arc<tokio::sync::Mutex<()>>,
+
+    /// Linearizes credential sends against replacement generation/config publication.
+    pub connection_auth_commit_lock: Arc<tokio::sync::Mutex<()>>,
+
     /// Selected audio source ID
     pub audio_source_id: Option<String>,
 
@@ -97,6 +155,12 @@ impl Default for AppState {
             connect_code: None,
             server_host: "192.168.1.204".to_string(),
             server_port: 9000,
+            tls_fingerprint: None,
+            connection_generation: 0,
+            connection_cancellation: None,
+            connection_replacement_lock: Arc::new(tokio::sync::Mutex::new(())),
+            connection_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            connection_auth_commit_lock: Arc::new(tokio::sync::Mutex::new(())),
             audio_source_id: None,
             bridge_shutdown_tx: None,
             bridge_task_handle: None,
@@ -125,6 +189,7 @@ mod tests {
         assert_eq!(status.total_djs, 0);
         assert!(status.active_dj_name.is_none());
         assert!(status.error.is_none());
+        assert!(status.error_code.is_none());
     }
 
     #[test]
@@ -140,6 +205,12 @@ mod tests {
         assert_eq!(state.bpm, 120.0);
         assert_eq!(state.server_host, "192.168.1.204");
         assert_eq!(state.server_port, 9000);
+        assert!(state.tls_fingerprint.is_none());
+        assert_eq!(state.connection_generation, 0);
+        assert!(state.connection_cancellation.is_none());
+        assert!(state.connection_replacement_lock.try_lock().is_ok());
+        assert!(state.connection_operation_lock.try_lock().is_ok());
+        assert!(state.connection_auth_commit_lock.try_lock().is_ok());
         assert!(state.bridge_shutdown_tx.is_none());
         assert!(state.bridge_task_handle.is_none());
         assert!(state.voice_streamer.is_none());

@@ -32,6 +32,7 @@
 
 - [Features](#features)
 - [Quick Start](#quick-start)
+- [Pterodactyl two-port deployment](#pterodactyl-two-port-deployment)
 - [Architecture](#architecture)
 - [Minecraft Integration](#minecraft-integration)
 - [Screenshots & Demo](#screenshots--demo)
@@ -85,6 +86,19 @@ npm run tauri:build
 
 See [`dj_client/README.md`](dj_client/README.md) and [`demo/README.md`](demo/README.md) for the quarantine limitations.
 
+### Pterodactyl two-port deployment
+
+The portable Pterodactyl bundle exposes exactly two public TLS listeners:
+
+| Scope | Port | Transport and purpose |
+|-|-|-|
+| Public | `8080` | Admin HTTPS, preview HTTPS, and same-origin browser WSS at `/ws` |
+| Public | `25808` | DJ WSS with an explicit SHA-256 certificate pin |
+| Loopback only | `8765` | Minecraft renderer |
+| Loopback only | `9001` | Health and Prometheus metrics |
+
+Set `MCAV_PUBLIC_HOST` to the public IP before first start. Administrators verify and import the generated certificate; DJs copy its fingerprint from `FIRST_LOGIN.txt`. Plaintext public DJ connections and trust-on-first-use are prohibited. See the complete [Pterodactyl operator guide](docs/deployment/PTERODACTYL.md) for installation, certificate rotation, and failure recovery.
+
 ### Paper 26.2 release path
 
 **Requirements:** Paper 26.2 (`26.2.build.112-stable` validated), Java 25+, Python 3.11+, `mcav-paper-1.1.0.jar`, and matching VJ server source.
@@ -137,7 +151,9 @@ graph TD
     style F fill:#1a1a2e,stroke:#2fe098,color:#f5f5f5
 ```
 
-### Network Ports
+### Development and legacy network ports
+
+The following diagram and table describe the configurable source-development defaults. They are not the Pterodactyl public topology; the packaged deployment uses only `8080` and `25808` publicly as described above.
 
 ```mermaid
 graph LR
@@ -344,7 +360,7 @@ audioviz-vj
 Defaults:
 - DJ connection port: `ws://localhost:9000`
 - Browser preview: `http://localhost:8080`
-- Admin panel: `http://localhost:8081`
+- Admin panel: `http://localhost:8080`
 
 ### 2) DJs connect using a development DJ Client (each DJ machine)
 

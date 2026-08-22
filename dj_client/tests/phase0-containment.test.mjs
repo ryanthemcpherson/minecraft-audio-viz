@@ -389,7 +389,7 @@ test("unsupported DJ and Docker distribution workflows are fail closed", () => {
   assert.match(yamlBlock(dedicatedRelease, "release-disabled", 2), /\bexit 1\b/);
 
   assert.doesNotMatch(combinedRelease, /build-dj-client|DJ Client|dj-client\//i);
-  assert.equal((combinedRelease.match(/if-no-files-found:\s*error/g) ?? []).length, 2);
+  assert.equal((combinedRelease.match(/if-no-files-found:\s*error/g) ?? []).length, 3);
   assert.match(combinedRelease, /fail_on_unmatched_files:\s*true/);
   const releaseGate = yamlBlock(combinedRelease, "ci-gate", 2);
   assert.match(releaseGate, /\.github\/workflows\/ci\.yml/);

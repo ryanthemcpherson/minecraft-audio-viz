@@ -54,6 +54,23 @@ function validationErrors(schema, value) {
       if (propertySchema.type === "boolean" && typeof propertyValue !== "boolean") {
         errors.push(`${propertyName} must be a boolean`);
       }
+      if (propertySchema.type === "integer" && !Number.isInteger(propertyValue)) {
+        errors.push(`${propertyName} must be an integer`);
+      }
+      if (
+        typeof propertyValue === "number" &&
+        propertySchema.minimum !== undefined &&
+        propertyValue < propertySchema.minimum
+      ) {
+        errors.push(`${propertyName} is less than ${propertySchema.minimum}`);
+      }
+      if (
+        typeof propertyValue === "number" &&
+        propertySchema.maximum !== undefined &&
+        propertyValue > propertySchema.maximum
+      ) {
+        errors.push(`${propertyName} is greater than ${propertySchema.maximum}`);
+      }
       if (
         typeof propertyValue === "string" &&
         propertySchema.minLength !== undefined &&
@@ -167,4 +184,97 @@ test("ws-auth-ok schema accepts only the versioned or unversioned acknowledgemen
   assertInvalid(schema, { type: "auth" });
   assertInvalid(schema, { type: "auth_ok", v: 1 });
   assertInvalid(schema, { type: "auth_ok", accepted: true });
+});
+
+test("emergency state is inventoried and requires authoritative toggle values", () => {
+  const inventory = readJson(schemaIndexPath);
+  assert.equal(inventory.messages.emergency_state, "messages/emergency-state.schema.json");
+  const schema = readJson(resolve(repositoryRoot, "protocol", "schemas", inventory.messages.emergency_state));
+
+  assertValid(schema, {
+    type: "emergency_state",
+    blackout: true,
+    freeze: false,
+    emergency_epoch: "server-epoch-a",
+    emergency_revision: 0,
+  });
+  assertValid(schema, {
+    type: "emergency_state",
+    blackout: false,
+    freeze: true,
+    request_id: "emergency-123",
+    emergency_epoch: "server-epoch-a",
+    emergency_revision: 12,
+  });
+  assertInvalid(schema, { type: "emergency_state", blackout: true, freeze: false });
+  assertInvalid(schema, { type: "emergency_state", blackout: true });
+  assertInvalid(schema, { type: "emergency_state", blackout: "true", freeze: false });
+  assertInvalid(schema, {
+    type: "emergency_state",
+    blackout: true,
+    freeze: false,
+    emergency_epoch: "server-epoch-a",
+    emergency_revision: -1,
+  });
+
+  const vjStateSchema = readJson(
+    resolve(repositoryRoot, "protocol", "schemas", "messages", "vj-state.schema.json"),
+  );
+  assert.deepEqual(vjStateSchema.properties.emergency_revision, {
+    type: "integer",
+    minimum: 0,
+  });
+  assert.deepEqual(vjStateSchema.properties.emergency_epoch, {
+    type: "string",
+    minLength: 1,
+    maxLength: 128,
+  });
+});
+
+test("emergency command and error schemas accept request correlation", () => {
+  for (const file of ["trigger-effect.schema.json", "blackout.schema.json", "freeze.schema.json"]) {
+    const schema = readJson(resolve(repositoryRoot, "protocol", "schemas", "messages", file));
+    assert.deepEqual(schema.properties.request_id, { type: "string", minLength: 1, maxLength: 128 });
+  }
+  const errorSchema = readJson(resolve(repositoryRoot, "protocol", "schemas", "messages", "error.schema.json"));
+  assert.deepEqual(errorSchema.properties.request_id, { type: "string", minLength: 1, maxLength: 128 });
+});
+
+test("voice status schema carries a bounded explicit capability error", () => {
+  const schema = readJson(
+    resolve(repositoryRoot, "protocol", "schemas", "messages", "voice-status.schema.json"),
+  );
+  assertValid(schema, {
+    type: "voice_status",
+    available: false,
+    streaming: false,
+    error: "Minecraft voice status timed out.",
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: false,
+    error: "",
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: false,
+    error: "x".repeat(513),
+  });
+  assertValid(schema, {
+    type: "voice_status",
+    available: true,
+    streaming: false,
+    channel_type: "locational",
+    connected_players: 12,
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: true,
+    channel_type: "renderer-private-mode",
+  });
+  assertInvalid(schema, {
+    type: "voice_status",
+    available: true,
+    connected_players: 1_000_001,
+  });
 });

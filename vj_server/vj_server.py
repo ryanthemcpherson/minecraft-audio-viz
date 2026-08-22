@@ -26,9 +26,11 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -59,7 +61,8 @@ from vj_server.models import (
     DJConnection,
     ZonePatternState,
     _sanitize_audio_frame,
-    run_http_server,
+    build_server_ssl_context,
+    create_http_server,
 )
 from vj_server.patterns import (
     AudioState,
@@ -69,9 +72,36 @@ from vj_server.relay import RelayMixin
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.stage_manager import StageManagerMixin
 from vj_server.viz_client import VizClient
+from vj_server.web_gateway import UnifiedWebConfig, start_unified_web_gateway
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("vj_server")
+
+
+def _normalize_public_origin(public_origin: str) -> str:
+    """Return a canonical HTTPS origin suitable for an exact Origin check."""
+    try:
+        parsed = urlsplit(public_origin)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Public origin must be an exact https://host:port origin") from exc
+
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname is None
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Public origin must be an exact https://host:port origin")
+
+    hostname = parsed.hostname.lower()
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    return f"https://{hostname}:{port}"
 
 
 class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
@@ -90,6 +120,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
     def __init__(
         self,
         dj_port: int = 9000,
+        dj_host: str = "0.0.0.0",
         broadcast_port: int = 8766,
         http_port: int = 8080,
         http_host: str = "127.0.0.1",
@@ -105,11 +136,44 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         visual_delay_ms: float = 0.0,
         visual_delay_mode: str = "manual",
         enable_link: bool = False,
+        project_root: str | Path | None = None,
+        tls_cert: str | Path | None = None,
+        tls_key: str | Path | None = None,
+        unified_web: bool = False,
+        public_origin: str | None = None,
     ):
         self.dj_port = dj_port
+        self.dj_host = validate_http_bind_host(dj_host)
         self.broadcast_port = broadcast_port
         self.http_port = http_port
         self.http_host = validate_http_bind_host(http_host)
+        self.project_root = (
+            Path(project_root).resolve()
+            if project_root is not None
+            else Path(__file__).resolve().parent.parent
+        )
+        if bool(tls_cert) != bool(tls_key):
+            raise ValueError("TLS certificate and key must be provided together")
+        self.tls_cert = Path(tls_cert).resolve() if tls_cert is not None else None
+        self.tls_key = Path(tls_key).resolve() if tls_key is not None else None
+        self.server_ssl_context = (
+            build_server_ssl_context(self.tls_cert, self.tls_key)
+            if self.tls_cert is not None and self.tls_key is not None
+            else None
+        )
+        self.unified_web = unified_web
+        if self.unified_web:
+            if self.server_ssl_context is None:
+                raise ValueError("Unified web mode requires a TLS certificate and key")
+            if public_origin is None:
+                raise ValueError("Unified web mode requires a public origin")
+            if self.http_port <= 0:
+                raise ValueError("Unified web mode requires a positive HTTP port")
+            if self.http_port == self.dj_port:
+                raise ValueError("Unified web and DJ listeners must use different ports")
+            self.public_origin = _normalize_public_origin(public_origin)
+        else:
+            self.public_origin = public_origin
         self.minecraft_host = minecraft_host
         self.minecraft_port = minecraft_port
         self.minecraft_ws_secret = minecraft_ws_secret
@@ -143,6 +207,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self._auth_rate_limit_max: int = 5  # max attempts per window
         self._auth_rate_limit_window: float = 60.0  # seconds
         self._auth_last_cleanup: float = time.time()  # For time-based periodic cleanup
+        self._browser_auth_attempts: dict[str, list[float]] = {}
+        self._browser_auth_rate_limit_max: int = 5
+        self._browser_auth_rate_limit_window: float = 60.0
 
         # Coordinator integration (for centralized connect codes)
         self._coordinator: Optional["CoordinatorClient"] = None
@@ -180,6 +247,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         # Control state
         self._blackout = False
         self._freeze = False
+        self._emergency_epoch = uuid.uuid4().hex
+        self._emergency_revision = 0
+        self._emergency_mutation_lock = asyncio.Lock()
         self._active_effects = {}  # Active effects with end times
         self._band_sensitivity = [1.0, 1.0, 1.0, 1.0, 1.0]  # Per-band sensitivity
         self._band_materials: List[Optional[str]] = [
@@ -996,102 +1066,118 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 else:
                     await asyncio.sleep(frame_interval)
 
-    async def run(self):
-        """Start the VJ server."""
-        if not HAS_WEBSOCKETS:
-            logger.error("websockets not installed. Run: pip install websockets")
-            return
-
-        self._running = True
-
-        # Start HTTP server for admin panel
-        if self.http_port > 0:
-            project_root = Path(__file__).parent.parent
-            http_thread = threading.Thread(
-                target=run_http_server,
-                args=(self.http_port, str(project_root), self.http_host),
-                daemon=True,
-            )
-            http_thread.start()
-            logger.info(f"Admin panel: http://{self.http_host}:{self.http_port}/")
-            logger.info(f"3D Preview: http://{self.http_host}:{self.http_port}/preview/")
-
-        # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
-        dj_server = await ws_serve(
-            self._handle_dj_connection,
-            "0.0.0.0",
-            self.dj_port,
-            max_size=65_536,
-        )
-        logger.info(f"DJ WebSocket server: ws://localhost:{self.dj_port}")
-
-        # Start browser broadcast server (64KB — browsers only receive viz data)
-        broadcast_server = await ws_serve(
-            self._handle_browser_client,
-            "0.0.0.0",
-            self.broadcast_port,
-            max_size=65_536,
-        )
-        logger.info(f"Browser WebSocket: ws://localhost:{self.broadcast_port}")
-
-        # Start metrics HTTP server if enabled
-        metrics_server = None
-        if self.metrics_port is not None:
-            from vj_server.metrics import start_metrics_server
-
-            metrics_server = await start_metrics_server(self, self.metrics_port)
-
-        # Register with coordinator if configured
-        await self._init_coordinator()
-
-        _ft = getattr(sys, "_is_gil_enabled", None)
-        _ft_label = f"free-threaded (GIL={'on' if _ft() else 'off'})" if _ft else "standard"
-        logger.info(
-            "VJ Server ready. Python %s (%s), async_lua=%s",
-            sys.version.split()[0],
-            _ft_label,
-            _USE_ASYNC_LUA,
-        )
-
-        # Start Minecraft reconnection loop (runs in background)
-        # Skip when --no-minecraft is set to avoid spamming connection attempts
-        if not self._skip_minecraft:
-            self._mc_reconnect_task = asyncio.create_task(self._minecraft_reconnect_loop())
-            logger.debug("Started Minecraft reconnection monitor")
-        else:
-            logger.info("Minecraft reconnection disabled (--no-minecraft mode)")
-
-        # Start browser heartbeat loop (runs in background)
-        self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
-        logger.debug("Started browser heartbeat monitor")
-
-        # Start pattern hot-reload loop (runs in background)
-        if self._pattern_hot_reload_enabled:
-            self._pattern_hot_reload_task = asyncio.create_task(self._pattern_hot_reload_loop())
-            logger.info("Pattern hot-reload enabled (checking every 2.5s)")
-        else:
-            logger.info("Pattern hot-reload disabled")
-
-        # Start Ableton Link sync loop (runs in background)
-        if self._link_enabled and self._link is not None:
-            self._link_task = asyncio.create_task(self._link_sync_loop())
-            logger.info("Ableton Link sync loop started")
-
-        # Register signal handlers for graceful shutdown
-        import signal as _signal
-
-        loop = asyncio.get_running_loop()
-        for sig in (_signal.SIGINT, _signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, self.stop)
-            except NotImplementedError:
-                # Windows doesn't support add_signal_handler for all signals
-                pass
+    def _start_legacy_http_thread(
+        self,
+        ssl_context: Any,
+    ) -> tuple[Any | None, Any | None]:
+        """Start and return the split-port static server and its serve thread."""
+        if self.http_port <= 0:
+            return None, None
 
         try:
-            await self._main_loop()
-        finally:
-            # Notify all connected clients of shutdown
+            http_server = create_http_server(
+                self.http_port,
+                str(self.project_root),
+                self.http_host,
+                ssl_context,
+            )
+        except OSError as exc:
+            logger.error(f"HTTP server failed to start on port {self.http_port}: {exc}")
+            logger.error("Another instance may be running. Kill it or use a different port.")
+            return None, None
+
+        http_thread = threading.Thread(
+            target=http_server.serve_forever,
+            daemon=True,
+            name="legacy-http-server",
+        )
+        try:
+            http_thread.start()
+        except BaseException:
+            http_server.server_close()
+            raise
+
+        http_scheme = "https" if ssl_context is not None else "http"
+        logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
+        logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
+        return http_server, http_thread
+
+    async def _stop_legacy_http_thread(self, http_server: Any, http_thread: Any) -> None:
+        """Stop legacy HTTP resources with one sequential off-loop owner."""
+        completed = threading.Event()
+        failures: list[tuple[str, Exception]] = []
+        cleanup_steps = (
+            ("shutdown", http_server.shutdown),
+            ("server close", http_server.server_close),
+            ("thread join", http_thread.join),
+        )
+
+        def clean_up() -> None:
+            try:
+                for step_name, action in cleanup_steps:
+                    try:
+                        action()
+                    except Exception as exc:
+                        failures.append((step_name, exc))
+            finally:
+                completed.set()
+
+        cleanup_thread = threading.Thread(
+            target=clean_up,
+            daemon=False,
+            name="legacy-http-cleanup",
+        )
+        cleanup_thread.start()
+
+        while not completed.is_set():
+            await asyncio.sleep(0.01)
+
+        cleanup_thread.join()
+        for step_name, exc in failures:
+            logger.warning("Legacy HTTP %s failed: %s", step_name, exc)
+        if failures:
+            raise ExceptionGroup(
+                "Legacy HTTP cleanup failed",
+                [exc for _step_name, exc in failures],
+            )
+
+    async def _finalize_run(
+        self,
+        *,
+        gateway_runner: Any,
+        dj_server: Any,
+        broadcast_server: Any,
+        metrics_server: Any,
+        legacy_http_server: Any,
+        legacy_http_thread: Any,
+    ) -> None:
+        """Attempt every acquired-resource cleanup stage exactly once."""
+        cleanup_errors: list[Exception] = []
+
+        def attempt_sync(step_name: str, action: Any) -> None:
+            try:
+                action()
+            except Exception as exc:
+                logger.error("VJ server %s failed: %s", step_name, exc)
+                cleanup_errors.append(exc)
+
+        async def attempt_async(step_name: str, action: Any) -> None:
+            try:
+                await action()
+            except Exception as exc:
+                logger.error("VJ server %s failed: %s", step_name, exc)
+                cleanup_errors.append(exc)
+
+        if legacy_http_server is not None and legacy_http_thread is not None:
+            await attempt_async(
+                "legacy HTTP cleanup",
+                lambda: self._stop_legacy_http_thread(
+                    legacy_http_server,
+                    legacy_http_thread,
+                ),
+            )
+
+        async def notify_clients() -> None:
             logger.info("Shutting down VJ server...")
             shutdown_msg = json.dumps({"type": "server_shutdown"})
             drain_tasks = []
@@ -1107,10 +1193,12 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 await asyncio.gather(*drain_tasks, return_exceptions=True)
                 logger.info("Notified %d clients of shutdown", len(drain_tasks))
 
-            # Cancel all background tasks with timeout
+        await attempt_async("client notification", notify_clients)
+
+        async def stop_background_tasks() -> None:
             bg_tasks = [
-                t
-                for t in [
+                task
+                for task in [
                     self._mc_reconnect_task,
                     self._browser_heartbeat_task,
                     getattr(self, "_pattern_hot_reload_task", None),
@@ -1118,7 +1206,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     self._link_task,
                     getattr(self, "_health_log_task", None),
                 ]
-                if t is not None and not t.done()
+                if task is not None and not task.done()
             ]
             for task in bg_tasks:
                 task.cancel()
@@ -1126,22 +1214,210 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 await asyncio.wait(bg_tasks, timeout=5.0)
                 logger.info("Cancelled %d background tasks", len(bg_tasks))
 
-            # Disable Ableton Link
-            if self._link is not None:
+        await attempt_async("background task cleanup", stop_background_tasks)
+
+        if self._link is not None:
+            attempt_sync("Ableton Link cleanup", lambda: setattr(self._link, "enabled", False))
+
+        listeners = (
+            ("DJ listener close", dj_server),
+            ("browser listener close", broadcast_server),
+            ("metrics listener close", metrics_server),
+        )
+        for step_name, listener in listeners:
+            if listener is not None:
+                attempt_sync(step_name, listener.close)
+
+        waiters = (
+            ("metrics listener wait", metrics_server),
+            ("DJ listener wait", dj_server),
+            ("browser listener wait", broadcast_server),
+        )
+        for step_name, listener in waiters:
+            if listener is not None:
+                await attempt_async(step_name, listener.wait_closed)
+
+        if gateway_runner is not None:
+            await attempt_async("unified gateway cleanup", gateway_runner.cleanup)
+
+        if cleanup_errors:
+            raise ExceptionGroup("VJ server cleanup failed", cleanup_errors)
+        logger.info("VJ server shutdown complete")
+
+    async def _await_run_cleanup(
+        self,
+        cleanup_task: asyncio.Task,
+    ) -> tuple[bool, BaseException | None]:
+        """Wait for full cleanup and retain cancellation and failure independently."""
+        cancellation_requested = False
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                cancellation_requested = True
+            except Exception:
+                break
+
+        cleanup_failure = None
+        try:
+            cleanup_task.result()
+        except BaseException as exc:
+            cleanup_failure = exc
+        return cancellation_requested, cleanup_failure
+
+    async def run(self):
+        """Start the VJ server."""
+        if not HAS_WEBSOCKETS:
+            logger.error("websockets not installed. Run: pip install websockets")
+            return
+        listener_ssl_context = self.server_ssl_context
+        if self.unified_web and listener_ssl_context is None:
+            raise RuntimeError("Unified web mode requires TLS for all public listeners")
+
+        self._running = True
+        gateway_runner = None
+        dj_server = None
+        broadcast_server = None
+        metrics_server = None
+        legacy_http_server = None
+        legacy_http_thread = None
+        run_cancellation = None
+
+        try:
+            if self.unified_web:
+                gateway_runner = await start_unified_web_gateway(
+                    self._handle_browser_client,
+                    self.http_host,
+                    self.http_port,
+                    listener_ssl_context,
+                    UnifiedWebConfig(self.project_root, self.public_origin),
+                )
+                logger.info("Admin panel: %s/", self.public_origin)
+                logger.info("3D Preview: %s/preview/", self.public_origin)
+                logger.info(
+                    "Browser WebSocket: %s/ws",
+                    self.public_origin.replace("https://", "wss://", 1),
+                )
+            else:
+                legacy_http_server, legacy_http_thread = self._start_legacy_http_thread(
+                    listener_ssl_context
+                )
+
+            # Start DJ listener (64KB max message — valid audio frames are ~200 bytes)
+            dj_server = await ws_serve(
+                self._handle_dj_connection,
+                self.dj_host,
+                self.dj_port,
+                max_size=65_536,
+                ssl=listener_ssl_context,
+            )
+            dj_scheme = "wss" if listener_ssl_context is not None else "ws"
+            dj_log_host = f"[{self.dj_host}]" if ":" in self.dj_host else self.dj_host
+            logger.info("DJ WebSocket server: %s://%s:%s", dj_scheme, dj_log_host, self.dj_port)
+
+            if not self.unified_web:
+                # Start split-port browser listener for legacy deployments.
+                broadcast_server = await ws_serve(
+                    self._handle_browser_client,
+                    "0.0.0.0",
+                    self.broadcast_port,
+                    max_size=65_536,
+                    ssl=listener_ssl_context,
+                )
+                browser_scheme = "wss" if listener_ssl_context is not None else "ws"
+                logger.info(
+                    f"Browser WebSocket: {browser_scheme}://localhost:{self.broadcast_port}"
+                )
+
+            # Start metrics HTTP server if enabled
+            if self.metrics_port is not None:
+                from vj_server.metrics import start_metrics_server
+
+                metrics_server = await start_metrics_server(self, self.metrics_port)
+
+            # Register with coordinator if configured
+            await self._init_coordinator()
+
+            _ft = getattr(sys, "_is_gil_enabled", None)
+            _ft_label = f"free-threaded (GIL={'on' if _ft() else 'off'})" if _ft else "standard"
+            logger.info(
+                "VJ Server ready. Python %s (%s), async_lua=%s",
+                sys.version.split()[0],
+                _ft_label,
+                _USE_ASYNC_LUA,
+            )
+
+            # Start Minecraft reconnection loop (runs in background)
+            # Skip when --no-minecraft is set to avoid spamming connection attempts
+            if not self._skip_minecraft:
+                self._mc_reconnect_task = asyncio.create_task(self._minecraft_reconnect_loop())
+                logger.debug("Started Minecraft reconnection monitor")
+            else:
+                logger.info("Minecraft reconnection disabled (--no-minecraft mode)")
+
+            # Start browser heartbeat loop (runs in background)
+            self._browser_heartbeat_task = asyncio.create_task(self._browser_heartbeat_loop())
+            logger.debug("Started browser heartbeat monitor")
+
+            # Start pattern hot-reload loop (runs in background)
+            if self._pattern_hot_reload_enabled:
+                self._pattern_hot_reload_task = asyncio.create_task(self._pattern_hot_reload_loop())
+                logger.info("Pattern hot-reload enabled (checking every 2.5s)")
+            else:
+                logger.info("Pattern hot-reload disabled")
+
+            # Start Ableton Link sync loop (runs in background)
+            if self._link_enabled and self._link is not None:
+                self._link_task = asyncio.create_task(self._link_sync_loop())
+                logger.info("Ableton Link sync loop started")
+
+            # Register signal handlers for graceful shutdown
+            import signal as _signal
+
+            loop = asyncio.get_running_loop()
+            for sig in (_signal.SIGINT, _signal.SIGTERM):
                 try:
-                    self._link.enabled = False
-                except Exception:
+                    loop.add_signal_handler(sig, self.stop)
+                except NotImplementedError:
+                    # Windows doesn't support add_signal_handler for all signals
                     pass
 
-            # Close WebSocket servers
-            dj_server.close()
-            broadcast_server.close()
-            if metrics_server:
-                metrics_server.close()
-                await metrics_server.wait_closed()
-            await dj_server.wait_closed()
-            await broadcast_server.wait_closed()
-            logger.info("VJ server shutdown complete")
+            await self._main_loop()
+        except asyncio.CancelledError as exc:
+            run_cancellation = exc
+        finally:
+            cleanup_task = asyncio.create_task(
+                self._finalize_run(
+                    gateway_runner=gateway_runner,
+                    dj_server=dj_server,
+                    broadcast_server=broadcast_server,
+                    metrics_server=metrics_server,
+                    legacy_http_server=legacy_http_server,
+                    legacy_http_thread=legacy_http_thread,
+                ),
+                name="vj-server-finalizer",
+            )
+            cleanup_failure = None
+            cancellation_during_cleanup = False
+            try:
+                cancellation_during_cleanup, cleanup_failure = await self._await_run_cleanup(
+                    cleanup_task
+                )
+            except asyncio.CancelledError as exc:
+                cancellation_during_cleanup = True
+                if run_cancellation is None:
+                    run_cancellation = exc
+            except BaseException as exc:
+                cleanup_failure = exc
+
+            if cancellation_during_cleanup and run_cancellation is None:
+                run_cancellation = asyncio.CancelledError()
+            if run_cancellation is not None:
+                if cleanup_failure is not None:
+                    raise run_cancellation from cleanup_failure
+                raise run_cancellation
+            if cleanup_failure is not None:
+                raise cleanup_failure
 
     def stop(self):
         """Stop the server."""
@@ -1224,6 +1500,12 @@ async def main():
         help="Port for DJ connections (default: 9000)",
     )
     parser.add_argument(
+        "--dj-host",
+        type=_validate_http_host,
+        default=os.environ.get("DJ_HOST", "0.0.0.0"),
+        help="Bind host for DJ connections (default: 0.0.0.0 or $DJ_HOST)",
+    )
+    parser.add_argument(
         "--broadcast-port",
         type=_validate_port,
         default=8766,
@@ -1294,6 +1576,7 @@ async def main():
     # Create server
     server = VJServer(
         dj_port=args.dj_port,
+        dj_host=args.dj_host,
         broadcast_port=args.broadcast_port,
         http_port=args.http_port,
         http_host=args.http_host,

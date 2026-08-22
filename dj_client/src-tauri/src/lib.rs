@@ -14,18 +14,25 @@ pub mod state;
 pub mod voice;
 
 use audio::{AudioCaptureHandle, AudioPreset, AudioSource, CaptureMode};
-use protocol::{AudioFrameMessage, DjClient, DjClientConfig};
-use state::AppState;
+use futures_util::Sink;
+use protocol::{
+    AUTHENTICATION_SEND_TIMEOUT, AudioFrameMessage, ClientError, DjClient, DjClientConfig,
+    PendingDjConnection,
+};
+use state::{AppState, ConnectionCancellation};
 use voice::{VoiceStatus, VoiceStreamer};
 
 use parking_lot::Mutex;
+use std::future::poll_fn;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 /// Application state wrapper
@@ -36,16 +43,482 @@ static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Returns true if the host is a private/local IP address that should use ws:// instead of wss://.
 pub(crate) fn is_local_host(host: &str) -> bool {
+    let host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
     if host == "localhost" {
         return true;
     }
-    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
-        return ip.is_loopback() // 127.*
-            || ip.octets()[0] == 10 // 10.*
-            || (ip.octets()[0] == 172 && (16..=31).contains(&ip.octets()[1])) // 172.16-31.*
-            || (ip.octets()[0] == 192 && ip.octets()[1] == 168); // 192.168.*
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => {
+            ip.is_loopback() // 127.*
+                || ip.octets()[0] == 10 // 10.*
+                || (ip.octets()[0] == 172 && (16..=31).contains(&ip.octets()[1])) // 172.16-31.*
+                || (ip.octets()[0] == 192 && ip.octets()[1] == 168) // 192.168.*
+        }
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => false,
     }
-    false
+}
+
+pub(crate) fn format_websocket_url(scheme: &str, host: &str, port: u16) -> String {
+    let unbracketed_host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    if unbracketed_host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("{scheme}://[{unbracketed_host}]:{port}")
+    } else {
+        format!("{scheme}://{host}:{port}")
+    }
+}
+
+const CONNECTION_SUPERSEDED_ERROR: &str = "Connection attempt superseded by newer server settings";
+
+#[derive(Debug, thiserror::Error)]
+enum ReconnectError {
+    #[error("{CONNECTION_SUPERSEDED_ERROR}")]
+    Superseded,
+    #[error(transparent)]
+    Client(#[from] ClientError),
+    #[error("Reconnect authentication failed.")]
+    Authentication,
+}
+
+impl ReconnectError {
+    fn client_error(&self) -> Option<&ClientError> {
+        match self {
+            Self::Client(error) => Some(error),
+            Self::Superseded | Self::Authentication => None,
+        }
+    }
+}
+
+struct PreparedConnectionReplacement {
+    generation: u64,
+    cancellation: Arc<ConnectionCancellation>,
+    cancellation_rx: watch::Receiver<bool>,
+    bridge_shutdown_tx: Option<mpsc::Sender<()>>,
+    bridge_task_handle: Option<JoinHandle<()>>,
+}
+
+async fn prepare_connection_replacement(
+    state_arc: &Arc<Mutex<AppState>>,
+    config: &DjClientConfig,
+    connect_code: Option<String>,
+) -> PreparedConnectionReplacement {
+    let (replacement_lock, auth_commit_lock) = {
+        let app_state = state_arc.lock();
+        (
+            app_state.connection_replacement_lock.clone(),
+            app_state.connection_auth_commit_lock.clone(),
+        )
+    };
+    let _replacement_guard = replacement_lock.lock().await;
+
+    // Resolve cancellation against the old generation's synchronous
+    // `start_send` boundary before waiting for its bounded commit guard.
+    let previous_cancellation = state_arc.lock().connection_cancellation.take();
+    if let Some(previous_cancellation) = previous_cancellation {
+        previous_cancellation.cancel();
+    }
+
+    let _auth_commit_guard = auth_commit_lock.lock().await;
+    let cancellation = Arc::new(ConnectionCancellation::new());
+    let cancellation_rx = cancellation.subscribe();
+    let (generation, bridge_shutdown_tx, bridge_task_handle) = {
+        let mut app_state = state_arc.lock();
+        app_state.connection_generation = app_state
+            .connection_generation
+            .checked_add(1)
+            .expect("connection generation should not overflow");
+        let generation = app_state.connection_generation;
+        app_state.connection_cancellation = Some(Arc::clone(&cancellation));
+        let bridge_shutdown_tx = app_state.bridge_shutdown_tx.take();
+        let bridge_task_handle = app_state.bridge_task_handle.take();
+
+        app_state.connect_code = connect_code;
+        app_state.dj_name = config.dj_name.clone();
+        app_state.server_host = config.server_host.clone();
+        app_state.server_port = config.server_port;
+        app_state.tls_fingerprint = config.tls_fingerprint.clone();
+        (generation, bridge_shutdown_tx, bridge_task_handle)
+    };
+
+    PreparedConnectionReplacement {
+        generation,
+        cancellation,
+        cancellation_rx,
+        bridge_shutdown_tx,
+        bridge_task_handle,
+    }
+}
+
+async fn wait_for_connection_cancellation(cancellation_rx: &mut watch::Receiver<bool>) {
+    if *cancellation_rx.borrow() {
+        return;
+    }
+    let _ = cancellation_rx.changed().await;
+}
+
+async fn stop_bridge_task(
+    shutdown_tx: Option<mpsc::Sender<()>>,
+    bridge_task: Option<JoinHandle<()>>,
+    graceful_timeout: Duration,
+) {
+    if let Some(shutdown_tx) = shutdown_tx {
+        let _ = shutdown_tx.try_send(());
+    }
+
+    if let Some(mut bridge_task) = bridge_task {
+        match tokio::time::timeout(graceful_timeout, &mut bridge_task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("Bridge task stopped with an error: {error}"),
+            Err(_) => {
+                log::warn!(
+                    "Bridge task did not stop within {}ms; aborting it",
+                    graceful_timeout.as_millis()
+                );
+                bridge_task.abort();
+                let _ = bridge_task.await;
+            }
+        }
+    }
+}
+
+async fn connect_client_until_cancelled(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    mut client: DjClient,
+    block_palette: Option<Vec<Option<String>>>,
+    cancellation: &ConnectionCancellation,
+    mut cancellation_rx: watch::Receiver<bool>,
+) -> Result<DjClient, String> {
+    let pending_connection = tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(&mut cancellation_rx) => {
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        result = client.establish_transport() => {
+            result.map_err(|error| error.to_string())?
+        }
+    };
+    client = connect_established_client_for_generation(
+        state_arc,
+        generation,
+        client,
+        pending_connection,
+        cancellation,
+        &mut cancellation_rx,
+    )
+    .await?;
+
+    if let Some(palette) = block_palette
+        && palette.iter().any(|material| material.is_some())
+    {
+        tokio::select! {
+            biased;
+            _ = wait_for_connection_cancellation(&mut cancellation_rx) => {
+                return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+            }
+            result = client.send_palette(palette) => {
+                if let Err(error) = result {
+                    log::warn!("Failed to send block palette: {error}");
+                }
+            }
+        }
+    }
+
+    Ok(client)
+}
+
+async fn connect_client_for_generation(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    mut client: DjClient,
+    cancellation: &ConnectionCancellation,
+    cancellation_rx: &mut watch::Receiver<bool>,
+) -> Result<DjClient, ReconnectError> {
+    let pending_connection = tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(cancellation_rx) => {
+            return Err(ReconnectError::Superseded);
+        }
+        result = client.establish_transport() => {
+            result?
+        }
+    };
+    connect_established_client_for_generation(
+        state_arc,
+        generation,
+        client,
+        pending_connection,
+        cancellation,
+        cancellation_rx,
+    )
+    .await
+    .map_err(|error| {
+        if error == CONNECTION_SUPERSEDED_ERROR {
+            ReconnectError::Superseded
+        } else {
+            ReconnectError::Authentication
+        }
+    })
+}
+
+async fn connect_established_client_for_generation(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    mut client: DjClient,
+    pending_connection: PendingDjConnection,
+    cancellation: &ConnectionCancellation,
+    cancellation_rx: &mut watch::Receiver<bool>,
+) -> Result<DjClient, String> {
+    let authentication_message = client
+        .authentication_message()
+        .map_err(|error| error.to_string())?;
+    let websocket = commit_authentication_sink_for_generation(
+        state_arc,
+        generation,
+        cancellation,
+        cancellation_rx,
+        pending_connection.into_websocket(),
+        authentication_message,
+        AUTHENTICATION_SEND_TIMEOUT,
+    )
+    .await?;
+    let pending_connection = PendingDjConnection::from_websocket(websocket);
+
+    tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(cancellation_rx) => {
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        result = client.finish_connection(pending_connection) => {
+            result.map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(client)
+}
+
+async fn commit_authentication_sink_for_generation<S>(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    cancellation: &ConnectionCancellation,
+    cancellation_rx: &mut watch::Receiver<bool>,
+    mut sink: S,
+    authentication_message: Message,
+    authentication_timeout: Duration,
+) -> Result<S, String>
+where
+    S: Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    let auth_commit_lock = state_arc.lock().connection_auth_commit_lock.clone();
+    let auth_commit_guard = tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(cancellation_rx) => {
+            drop(sink);
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        guard = auth_commit_lock.lock() => guard,
+    };
+    if state_arc.lock().connection_generation != generation {
+        drop(sink);
+        drop(auth_commit_guard);
+        return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+    }
+
+    let deadline = tokio::time::Instant::now() + authentication_timeout;
+    let readiness = tokio::select! {
+        biased;
+        _ = wait_for_connection_cancellation(cancellation_rx) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        result = tokio::time::timeout_at(
+            deadline,
+            poll_fn(|context| Pin::new(&mut sink).poll_ready(context)),
+        ) => result,
+    };
+    match readiness {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send failed".to_string());
+        }
+        Err(_) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send timed out".to_string());
+        }
+    }
+
+    let start_send = cancellation
+        .start_authentication(|| Pin::new(&mut sink).start_send(authentication_message));
+    match start_send {
+        Err(()) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+        }
+        Ok(Err(_)) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send failed".to_string());
+        }
+        Ok(Ok(())) => {}
+    }
+
+    // `start_send` is the commit point. Replacement cancellation may now be
+    // signalled, but config/generation publication waits on this guard until
+    // flush succeeds or the finite deadline aborts the old transport.
+    match tokio::time::timeout_at(
+        deadline,
+        poll_fn(|context| Pin::new(&mut sink).poll_flush(context)),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send failed".to_string());
+        }
+        Err(_) => {
+            drop(sink);
+            drop(auth_commit_guard);
+            return Err("Authentication send timed out".to_string());
+        }
+    }
+    drop(auth_commit_guard);
+    Ok(sink)
+}
+
+fn clear_connection_attempt_if_current(state_arc: &Arc<Mutex<AppState>>, generation: u64) {
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation == generation {
+        app_state.connection_cancellation = None;
+    }
+}
+
+fn publish_connected_client_if_current(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    client: DjClient,
+    shutdown_tx: mpsc::Sender<()>,
+) -> Option<DjClient> {
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return Some(client);
+    }
+
+    app_state.client = Some(client);
+    app_state.bridge_shutdown_tx = Some(shutdown_tx);
+    app_state.status.connected = true;
+    app_state.status.error = None;
+    app_state.status.error_code = None;
+    None
+}
+
+fn store_bridge_handle_if_current(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    bridge_task: JoinHandle<()>,
+) -> Result<(), JoinHandle<()>> {
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return Err(bridge_task);
+    }
+    app_state.bridge_task_handle = Some(bridge_task);
+    Ok(())
+}
+
+fn publish_reconnected_client_if_current(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    client: DjClient,
+) -> Option<DjClient> {
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return Some(client);
+    }
+    app_state.client = Some(client);
+    app_state.status.connected = true;
+    app_state.status.error = None;
+    app_state.status.error_code = None;
+    None
+}
+
+fn reconnect_failure_log(error: &ClientError) -> String {
+    format!("Reconnect failed [{}]: {error}", error.code().as_str())
+}
+
+fn update_and_emit_status_if_current<Update, Emit>(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    update: Update,
+    emit: Emit,
+) -> bool
+where
+    Update: FnOnce(&mut state::ConnectionStatus),
+    Emit: FnOnce(&state::ConnectionStatus),
+{
+    let mut app_state = state_arc.lock();
+    if app_state.connection_generation != generation {
+        return false;
+    }
+    update(&mut app_state.status);
+    emit(&app_state.status);
+    true
+}
+
+fn emit_reconnect_error_if_current<Emit>(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    error: &ClientError,
+    emit: Emit,
+) -> bool
+where
+    Emit: FnOnce(&state::ConnectionStatus),
+{
+    update_and_emit_status_if_current(
+        state_arc,
+        generation,
+        |status| {
+            status.connected = false;
+            status.error = Some(error.to_string());
+            status.error_code = Some(error.code());
+        },
+        emit,
+    )
+}
+
+fn emit_reconnect_backoff_if_current<Emit>(
+    state_arc: &Arc<Mutex<AppState>>,
+    generation: u64,
+    delay_secs: u64,
+    reconnect_count: u32,
+    emit: Emit,
+) -> bool
+where
+    Emit: FnOnce(&state::ConnectionStatus),
+{
+    update_and_emit_status_if_current(
+        state_arc,
+        generation,
+        |status| {
+            if status.error_code.is_none() {
+                status.error = Some(format!(
+                    "Reconnecting in {}s ({}/{})",
+                    delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
+                ));
+            }
+        },
+        emit,
+    )
 }
 
 /// List available audio sources
@@ -61,78 +534,90 @@ async fn list_audio_sources() -> Result<Vec<AudioSource>, String> {
 async fn connect_common(
     app_handle: AppHandle,
     state_arc: Arc<Mutex<AppState>>,
-    config: DjClientConfig,
+    mut config: DjClientConfig,
     connect_code: Option<String>,
     block_palette: Option<Vec<Option<String>>>,
 ) -> Result<(), String> {
-    // If a previous bridge task is still running (e.g. reconnecting after
-    // server restart), shut it down and await completion before starting a new
-    // connection to avoid two bridge tasks running concurrently.
-    {
-        let (old_tx, old_handle) = {
-            let mut app_state = state_arc.lock();
-            (
-                app_state.bridge_shutdown_tx.take(),
-                app_state.bridge_task_handle.take(),
-            )
-        };
-        if let Some(tx) = old_tx {
-            log::info!("Shutting down existing bridge task before reconnecting");
-            let _ = tx.send(()).await;
-        }
-        if let Some(handle) = old_handle {
-            match tokio::time::timeout(Duration::from_millis(500), handle).await {
-                Ok(_) => log::info!("Old bridge task stopped cleanly"),
-                Err(_) => {
-                    log::warn!("Old bridge task did not stop within 500ms, proceeding anyway")
-                }
-            }
-        }
-        // Clean up old client
-        let old_client = state_arc.lock().client.take();
-        if let Some(c) = old_client {
-            let _ = c.disconnect().await;
-        }
-    }
+    // Validate before disconnecting the current client or storing reconnect settings.
+    config.validate().map_err(|error| error.to_string())?;
 
-    {
+    let connection_operation_lock = state_arc.lock().connection_operation_lock.clone();
+    let replacement = prepare_connection_replacement(&state_arc, &config, connect_code).await;
+    let generation = replacement.generation;
+    // A newer command can reach the cancellation send above while an older
+    // command holds this lock. Once acquired, all older replacement work has
+    // terminated, including any bridge JoinHandle it owned.
+    let _connection_operation_guard = connection_operation_lock.lock().await;
+    stop_bridge_task(
+        replacement.bridge_shutdown_tx,
+        replacement.bridge_task_handle,
+        Duration::from_millis(500),
+    )
+    .await;
+
+    // The latest replacement owns cleanup. An older concurrent command must
+    // never take a client already published by a newer generation.
+    let old_client = {
         let mut app_state = state_arc.lock();
-        app_state.connect_code = connect_code;
-        app_state.dj_name = config.dj_name.clone();
-        app_state.server_host = config.server_host.clone();
-        app_state.server_port = config.server_port;
+        if app_state.connection_generation == generation {
+            app_state.status.connected = false;
+            app_state.status.mc_connected = false;
+            app_state.client.take()
+        } else {
+            None
+        }
+    };
+    if let Some(old_client) = old_client {
+        let _ = old_client.disconnect().await;
     }
 
-    // Create and connect client (async, no mutex held)
-    let mut client = DjClient::new(config);
-    client.connect().await.map_err(|e| e.to_string())?;
-
-    // Send block palette if provided
-    if let Some(palette) = block_palette
-        && palette.iter().any(|m| m.is_some())
-        && let Err(e) = client.send_palette(palette).await
+    let client = match connect_client_until_cancelled(
+        &state_arc,
+        generation,
+        DjClient::new(config),
+        block_palette,
+        &replacement.cancellation,
+        replacement.cancellation_rx.clone(),
+    )
+    .await
     {
-        log::warn!("Failed to send block palette: {}", e);
-    }
+        Ok(client) => client,
+        Err(error) => {
+            clear_connection_attempt_if_current(&state_arc, generation);
+            return Err(error);
+        }
+    };
 
     // Create shutdown channel for bridge task
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
 
-    // Store connected client and shutdown channel
+    if let Some(client) =
+        publish_connected_client_if_current(&state_arc, generation, client, shutdown_tx)
     {
-        let mut app_state = state_arc.lock();
-        app_state.client = Some(client);
-        app_state.bridge_shutdown_tx = Some(shutdown_tx);
-        app_state.status.connected = true;
-        app_state.status.error = None;
+        let _ = client.disconnect().await;
+        return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
     }
 
     // Spawn bridge task and store its handle
     let bridge_state = state_arc.clone();
+    let bridge_cancellation = Arc::clone(&replacement.cancellation);
+    let bridge_cancellation_rx = replacement.cancellation_rx;
     let handle = tokio::spawn(async move {
-        run_bridge(bridge_state, shutdown_rx, app_handle).await;
+        run_bridge(
+            bridge_state,
+            shutdown_rx,
+            bridge_cancellation,
+            bridge_cancellation_rx,
+            app_handle,
+            generation,
+        )
+        .await;
     });
-    state_arc.lock().bridge_task_handle = Some(handle);
+    if let Err(stale_handle) = store_bridge_handle_if_current(&state_arc, generation, handle) {
+        stale_handle.abort();
+        let _ = stale_handle.await;
+        return Err(CONNECTION_SUPERSEDED_ERROR.to_string());
+    }
 
     Ok(())
 }
@@ -147,6 +632,7 @@ async fn connect_with_code(
     dj_name: String,
     server_host: String,
     server_port: u16,
+    tls_fingerprint: Option<String>,
     block_palette: Option<Vec<Option<String>>>,
     dj_session_id: Option<String>,
 ) -> Result<(), String> {
@@ -158,6 +644,7 @@ async fn connect_with_code(
         dj_name: dj_name.clone(),
         connect_code: Some(code.clone()),
         dj_session_id,
+        tls_fingerprint,
         ..Default::default()
     };
 
@@ -179,6 +666,7 @@ async fn connect_direct(
     dj_name: String,
     server_host: String,
     server_port: u16,
+    tls_fingerprint: Option<String>,
 ) -> Result<(), String> {
     content_filter::validate_no_slurs(&dj_name, "DJ name")?;
 
@@ -188,6 +676,7 @@ async fn connect_direct(
         dj_name: dj_name.clone(),
         dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
         dj_key: Some(String::new()),
+        tls_fingerprint,
         ..Default::default()
     };
 
@@ -199,16 +688,40 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 10;
 /// Maximum backoff delay between reconnection attempts in seconds.
 const MAX_RECONNECT_DELAY_SECS: u64 = 30;
 
+fn build_reconnect_config(app_state: &AppState) -> DjClientConfig {
+    DjClientConfig {
+        server_host: app_state.server_host.clone(),
+        server_port: app_state.server_port,
+        dj_name: app_state.dj_name.clone(),
+        connect_code: app_state.connect_code.clone(),
+        dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
+        dj_key: if app_state.connect_code.is_none() {
+            Some(String::new())
+        } else {
+            None
+        },
+        tls_fingerprint: app_state.tls_fingerprint.clone(),
+        ..Default::default()
+    }
+}
+
 /// Bridge task: reads audio analysis and sends frames to VJ server at ~60fps.
 /// Automatically reconnects with exponential backoff when the connection drops.
 async fn run_bridge(
     state_arc: Arc<Mutex<AppState>>,
     mut shutdown_rx: mpsc::Receiver<()>,
+    cancellation: Arc<ConnectionCancellation>,
+    mut cancellation_rx: watch::Receiver<bool>,
     app_handle: AppHandle,
+    generation: u64,
 ) {
     let mut reconnect_count: u32 = 0;
 
     'reconnect: loop {
+        if state_arc.lock().connection_generation != generation {
+            log::info!("Bridge task stopped because its connection was superseded");
+            break;
+        }
         let mut interval = tokio::time::interval(Duration::from_millis(16));
         // Direct MC publish is disabled: the VJ server's pattern engine handles
         // all zones (multi-zone, transitions, crossfades). The DJ client sends
@@ -226,12 +739,23 @@ async fn run_bridge(
 
         loop {
             tokio::select! {
+                biased;
+                _ = wait_for_connection_cancellation(&mut cancellation_rx) => {
+                    log::info!("Bridge task received replacement cancellation");
+                    shutdown_requested = true;
+                    break;
+                }
                 _ = shutdown_rx.recv() => {
                     log::info!("Bridge task received shutdown signal");
                     shutdown_requested = true;
                     break;
                 }
                 _ = interval.tick() => {
+                    if state_arc.lock().connection_generation != generation {
+                        log::info!("Bridge task observed a newer connection generation");
+                        shutdown_requested = true;
+                        break;
+                    }
                     // 1. Read audio analysis + VJ sender + connection state (brief lock)
                     let (analysis, tx, conn_state_opt) = {
                         let app_state = state_arc.lock();
@@ -253,6 +777,7 @@ async fn run_bridge(
                             let mut app_state = state_arc.lock();
                             app_state.status.connected = false;
                             app_state.status.error = Some("Connection lost".to_string());
+                            app_state.status.error_code = None;
                             break;
                         }
                     };
@@ -262,6 +787,7 @@ async fn run_bridge(
                             let mut app_state = state_arc.lock();
                             app_state.status.connected = false;
                             app_state.status.error = Some("Connection lost".to_string());
+                            app_state.status.error_code = None;
                             break;
                         }
                     };
@@ -327,6 +853,7 @@ async fn run_bridge(
                                     let mut app_state = state_arc.lock();
                                     app_state.status.connected = false;
                                     app_state.status.error = Some("Connection lost".to_string());
+                                    app_state.status.error_code = None;
                                     break;
                                 }
                             }
@@ -398,6 +925,7 @@ async fn run_bridge(
                             if !latest.connected {
                                 app_state.status.connected = false;
                                 app_state.status.error = Some("Server disconnected".to_string());
+                                app_state.status.error_code = None;
                             }
 
                             // Sync voice status from server messages
@@ -477,24 +1005,43 @@ async fn run_bridge(
 
         // Cleanup current connection
         log::info!("Bridge task cleaning up");
-        let client = {
+        let (is_current_generation, client) = {
             let mut app_state = state_arc.lock();
-            app_state.client.take()
+            if app_state.connection_generation == generation {
+                (true, app_state.client.take())
+            } else {
+                (false, None)
+            }
         };
+        if !is_current_generation {
+            log::info!("Stale bridge task exited without touching replacement state");
+            break 'reconnect;
+        }
         if let Some(client) = client {
             let _ = client.disconnect().await;
         }
-        {
+        let still_current = {
             let mut app_state = state_arc.lock();
-            app_state.status.connected = false;
-            app_state.status.mc_connected = false;
+            if app_state.connection_generation == generation {
+                app_state.status.connected = false;
+                app_state.status.mc_connected = false;
+                true
+            } else {
+                false
+            }
+        };
+        if !still_current {
+            log::info!("Bridge cleanup was superseded while disconnecting");
+            break 'reconnect;
         }
 
         // If shutdown was explicitly requested, do not reconnect
         if shutdown_requested {
             let mut app_state = state_arc.lock();
-            app_state.bridge_shutdown_tx = None;
-            app_state.bridge_task_handle = None;
+            if app_state.connection_generation == generation {
+                app_state.bridge_shutdown_tx = None;
+                app_state.bridge_task_handle = None;
+            }
             log::info!("Bridge task stopped (user disconnect)");
             break 'reconnect;
         }
@@ -503,10 +1050,13 @@ async fn run_bridge(
         reconnect_count += 1;
         if reconnect_count > MAX_RECONNECT_ATTEMPTS {
             let mut app_state = state_arc.lock();
-            app_state.bridge_shutdown_tx = None;
-            app_state.bridge_task_handle = None;
-            app_state.status.error = Some("Connection lost (max retries reached)".to_string());
-            let _ = app_handle.emit("dj-status", &app_state.status);
+            if app_state.connection_generation == generation {
+                app_state.bridge_shutdown_tx = None;
+                app_state.bridge_task_handle = None;
+                app_state.status.error = Some("Connection lost (max retries reached)".to_string());
+                app_state.status.error_code = None;
+                let _ = app_handle.emit("dj-status", &app_state.status);
+            }
             log::error!(
                 "Bridge task gave up after {} reconnect attempts",
                 MAX_RECONNECT_ATTEMPTS
@@ -521,60 +1071,104 @@ async fn run_bridge(
             reconnect_count,
             MAX_RECONNECT_ATTEMPTS
         );
-        {
-            let mut app_state = state_arc.lock();
-            app_state.status.error = Some(format!(
-                "Reconnecting in {}s ({}/{})",
-                delay_secs, reconnect_count, MAX_RECONNECT_ATTEMPTS
-            ));
-            let _ = app_handle.emit("dj-status", &app_state.status);
+        let emitted = emit_reconnect_backoff_if_current(
+            &state_arc,
+            generation,
+            delay_secs,
+            reconnect_count,
+            |status| {
+                let _ = app_handle.emit("dj-status", status);
+            },
+        );
+        if !emitted {
+            log::info!("Reconnect backoff skipped because its connection was superseded");
+            break 'reconnect;
         }
 
         // Wait for backoff delay or shutdown signal
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(delay_secs)) => {}
+            biased;
+            _ = wait_for_connection_cancellation(&mut cancellation_rx) => {
+                log::info!("Bridge task stopped during reconnect backoff (superseded)");
+                break 'reconnect;
+            }
             _ = shutdown_rx.recv() => {
                 let mut app_state = state_arc.lock();
-                app_state.bridge_shutdown_tx = None;
-                app_state.bridge_task_handle = None;
+                if app_state.connection_generation == generation {
+                    app_state.bridge_shutdown_tx = None;
+                    app_state.bridge_task_handle = None;
+                }
                 log::info!("Bridge task stopped during reconnect backoff (user disconnect)");
                 break 'reconnect;
             }
+            _ = tokio::time::sleep(Duration::from_secs(delay_secs)) => {}
         }
 
         // Attempt to reconnect using stored config
         let reconnect_result = {
             let app_state = state_arc.lock();
-
-            DjClientConfig {
-                server_host: app_state.server_host.clone(),
-                server_port: app_state.server_port,
-                dj_name: app_state.dj_name.clone(),
-                connect_code: app_state.connect_code.clone(),
-                dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
-                dj_key: if app_state.connect_code.is_none() {
-                    Some(String::new())
-                } else {
-                    None
-                },
-                ..Default::default()
+            if app_state.connection_generation != generation {
+                None
+            } else {
+                Some(build_reconnect_config(&app_state))
             }
         };
+        let Some(reconnect_result) = reconnect_result else {
+            log::info!("Reconnect skipped because its connection was superseded");
+            break 'reconnect;
+        };
 
-        let mut client = DjClient::new(reconnect_result);
-        match client.connect().await {
-            Ok(()) => {
+        let client = DjClient::new(reconnect_result);
+        let reconnect_outcome = tokio::select! {
+            biased;
+            _ = shutdown_rx.recv() => {
                 let mut app_state = state_arc.lock();
-                app_state.client = Some(client);
-                app_state.status.connected = true;
-                app_state.status.error = None;
-                let _ = app_handle.emit("dj-status", &app_state.status);
+                if app_state.connection_generation == generation {
+                    app_state.bridge_shutdown_tx = None;
+                    app_state.bridge_task_handle = None;
+                }
+                log::info!("Bridge task stopped during reconnect attempt (user disconnect)");
+                break 'reconnect;
+            }
+            result = connect_client_for_generation(
+                &state_arc,
+                generation,
+                client,
+                &cancellation,
+                &mut cancellation_rx,
+            ) => result,
+        };
+        match reconnect_outcome {
+            Ok(client) => {
+                if let Some(stale_client) =
+                    publish_reconnected_client_if_current(&state_arc, generation, client)
+                {
+                    let _ = stale_client.disconnect().await;
+                    log::info!("Reconnect result discarded because it was superseded");
+                    break 'reconnect;
+                }
+                {
+                    let app_state = state_arc.lock();
+                    let _ = app_handle.emit("dj-status", &app_state.status);
+                }
                 log::info!("Reconnected successfully");
                 reconnect_count = 0;
                 continue 'reconnect;
             }
             Err(e) => {
-                log::warn!("Reconnect failed: {}", e);
+                if let Some(client_error) = e.client_error() {
+                    emit_reconnect_error_if_current(
+                        &state_arc,
+                        generation,
+                        client_error,
+                        |status| {
+                            let _ = app_handle.emit("dj-status", status);
+                        },
+                    );
+                    log::warn!("{}", reconnect_failure_log(client_error));
+                } else {
+                    log::warn!("Reconnect failed: {e}");
+                }
                 continue 'reconnect;
             }
         }
@@ -733,37 +1327,57 @@ fn get_capture_status(state: State<'_, AppStateWrapper>) -> CaptureStatus {
 /// Disconnect from VJ server
 #[tauri::command]
 async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
-    // Signal bridge task to stop (it handles client disconnect)
-    let (shutdown_tx, bridge_handle, capture, voice_streamer) = {
-        let mut app_state = state.0.lock();
+    // Invalidate in-flight connection work before stopping the bridge so a
+    // delayed TLS/auth attempt cannot publish after this command returns.
+    let (connection_operation_lock, replacement_lock, auth_commit_lock) = {
+        let app_state = state.0.lock();
         (
+            app_state.connection_operation_lock.clone(),
+            app_state.connection_replacement_lock.clone(),
+            app_state.connection_auth_commit_lock.clone(),
+        )
+    };
+    let replacement_guard = replacement_lock.lock().await;
+    let connection_cancellation = state.0.lock().connection_cancellation.take();
+    if let Some(connection_cancellation) = connection_cancellation {
+        connection_cancellation.cancel();
+    }
+    let auth_commit_guard = auth_commit_lock.lock().await;
+    let (generation, shutdown_tx, bridge_handle, capture, voice_streamer) = {
+        let mut app_state = state.0.lock();
+        app_state.connection_generation = app_state
+            .connection_generation
+            .checked_add(1)
+            .expect("connection generation should not overflow");
+        (
+            app_state.connection_generation,
             app_state.bridge_shutdown_tx.take(),
             app_state.bridge_task_handle.take(),
             app_state.audio_capture.take(),
             app_state.voice_streamer.take(),
         )
     };
+    drop(auth_commit_guard);
+    drop(replacement_guard);
 
     // Disable voice streaming
     if let Some(ref streamer) = voice_streamer {
         streamer.set_enabled(false);
     }
 
-    if let Some(tx) = shutdown_tx {
-        let _ = tx.send(()).await;
-        // Await the bridge task handle instead of a fixed sleep
-        if let Some(handle) = bridge_handle {
-            let _ = tokio::time::timeout(Duration::from_millis(500), handle).await;
-        }
-    } else {
-        // No bridge task running, disconnect client directly
-        let client = {
-            let mut app_state = state.0.lock();
+    let _connection_operation_guard = connection_operation_lock.lock().await;
+    stop_bridge_task(shutdown_tx, bridge_handle, Duration::from_millis(500)).await;
+
+    let client = {
+        let mut app_state = state.0.lock();
+        if app_state.connection_generation == generation {
             app_state.client.take()
-        };
-        if let Some(client) = client {
-            let _ = client.disconnect().await;
+        } else {
+            None
         }
+    };
+    if let Some(client) = client {
+        let _ = client.disconnect().await;
     }
 
     // Stop audio capture
@@ -774,14 +1388,17 @@ async fn disconnect(state: State<'_, AppStateWrapper>) -> Result<(), String> {
     // Reset status
     {
         let mut app_state = state.0.lock();
-        app_state.status.connected = false;
-        app_state.status.is_active = false;
-        app_state.status.latency_ms = 0.0;
-        app_state.status.route_mode = String::new();
-        app_state.status.mc_connected = false;
-        app_state.status.error = None;
-        app_state.voice_config.enabled = false;
-        app_state.voice_status = VoiceStatus::default();
+        if app_state.connection_generation == generation {
+            app_state.status.connected = false;
+            app_state.status.is_active = false;
+            app_state.status.latency_ms = 0.0;
+            app_state.status.route_mode = String::new();
+            app_state.status.mc_connected = false;
+            app_state.status.error = None;
+            app_state.status.error_code = None;
+            app_state.voice_config.enabled = false;
+            app_state.voice_status = VoiceStatus::default();
+        }
     }
 
     Ok(())
@@ -1082,4 +1699,252 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::oneshot;
+
+    #[test]
+    fn ipv6_loopback_hosts_are_local_with_or_without_brackets() {
+        assert!(is_local_host("::1"));
+        assert!(is_local_host("[::1]"));
+    }
+
+    #[test]
+    fn websocket_url_brackets_raw_ipv6_without_double_bracketing() {
+        assert_eq!(
+            format_websocket_url("wss", "2001:db8::1", 9000),
+            "wss://[2001:db8::1]:9000"
+        );
+        assert_eq!(
+            format_websocket_url("wss", "[2001:db8::1]", 9000),
+            "wss://[2001:db8::1]:9000"
+        );
+        assert_eq!(
+            format_websocket_url("ws", "127.0.0.1", 9000),
+            "ws://127.0.0.1:9000"
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_stop_aborts_and_awaits_a_task_that_ignores_shutdown() {
+        struct DropSignal(Arc<AtomicBool>);
+
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let task_dropped = Arc::new(AtomicBool::new(false));
+        let task_signal = Arc::clone(&task_dropped);
+        let (task_started_tx, task_started_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _drop_signal = DropSignal(task_signal);
+            let _ = task_started_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        tokio::time::timeout(Duration::from_secs(1), task_started_rx)
+            .await
+            .expect("bridge fixture task should start")
+            .expect("bridge fixture should signal task start");
+
+        stop_bridge_task(None, Some(task), Duration::from_millis(10)).await;
+
+        assert!(
+            task_dropped.load(Ordering::SeqCst),
+            "timed-out bridge task must be aborted and awaited, not detached"
+        );
+    }
+
+    #[test]
+    fn reconnect_config_preserves_validated_tls_fingerprint() {
+        let state = AppState {
+            dj_name: "Reconnect DJ".to_string(),
+            connect_code: Some("test-code".to_string()),
+            server_host: "203.0.113.10".to_string(),
+            server_port: 9000,
+            tls_fingerprint: Some("ab".repeat(32)),
+            ..Default::default()
+        };
+
+        let config = build_reconnect_config(&state);
+
+        assert_eq!(config.tls_fingerprint, state.tls_fingerprint);
+        assert_eq!(config.server_host, state.server_host);
+        assert_eq!(config.server_port, state.server_port);
+        assert_eq!(config.dj_name, state.dj_name);
+        assert_eq!(config.connect_code, state.connect_code);
+    }
+
+    #[test]
+    fn reconnect_tls_failure_emits_typed_safe_status_and_log_without_resetting_profile() {
+        const EXPECTED_DIGEST: &str =
+            "EXPECTED_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const OBSERVED_DIGEST: &str =
+            "OBSERVED_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+        let state = Arc::new(Mutex::new(AppState {
+            connection_generation: 7,
+            tls_fingerprint: Some(EXPECTED_DIGEST.to_string()),
+            status: state::ConnectionStatus {
+                queue_position: 4,
+                total_djs: 9,
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+        let error =
+            protocol::ClientError::tls_fingerprint_mismatch(EXPECTED_DIGEST, OBSERVED_DIGEST);
+
+        let mut event = None;
+        assert!(emit_reconnect_error_if_current(
+            &state,
+            7,
+            &error,
+            |status| event = Some(status.clone()),
+        ));
+        let event = event.expect("current reconnect generation should publish an error");
+        let event_json = serde_json::to_string(&event).expect("status event should serialize");
+        let log_line = reconnect_failure_log(&error);
+
+        assert_eq!(
+            event.error_code,
+            Some(protocol::ConnectionErrorCode::TlsFingerprintMismatch)
+        );
+        assert!(
+            event
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("update the configured fingerprint"))
+        );
+        assert_eq!(event.queue_position, 4);
+        assert_eq!(event.total_djs, 9);
+        assert!(!event.connected);
+        assert_eq!(state.lock().connection_generation, 7);
+        assert_eq!(
+            state.lock().tls_fingerprint.as_deref(),
+            Some(EXPECTED_DIGEST)
+        );
+        for sentinel in [EXPECTED_DIGEST, OBSERVED_DIGEST] {
+            assert!(!event_json.contains(sentinel), "event leaked {sentinel}");
+            assert!(!log_line.contains(sentinel), "log leaked {sentinel}");
+        }
+    }
+
+    #[test]
+    fn reconnect_backoff_does_not_replace_actionable_typed_tls_failure() {
+        let state = Arc::new(Mutex::new(AppState {
+            connection_generation: 11,
+            ..Default::default()
+        }));
+        let error = protocol::ClientError::TlsFingerprintMismatch;
+        assert!(emit_reconnect_error_if_current(&state, 11, &error, |_| {},));
+
+        let mut backoff_status = None;
+        assert!(emit_reconnect_backoff_if_current(
+            &state,
+            11,
+            4,
+            3,
+            |status| backoff_status = Some(status.clone()),
+        ));
+        let backoff_status =
+            backoff_status.expect("current reconnect generation should publish backoff state");
+
+        assert_eq!(
+            backoff_status.error_code,
+            Some(protocol::ConnectionErrorCode::TlsFingerprintMismatch)
+        );
+        assert!(
+            backoff_status
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("update the configured fingerprint"))
+        );
+    }
+
+    #[test]
+    fn reconnect_emission_is_atomic_with_generation_replacement() {
+        let state = Arc::new(Mutex::new(AppState {
+            connection_generation: 21,
+            status: state::ConnectionStatus {
+                queue_position: 3,
+                total_djs: 8,
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+        let error = protocol::ClientError::TlsFingerprintMismatch;
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+
+        let current_emitted = Arc::clone(&emitted);
+        let current_state = Arc::clone(&state);
+        assert!(emit_reconnect_error_if_current(
+            &state,
+            21,
+            &error,
+            |status| {
+                assert!(
+                    current_state.try_lock().is_none(),
+                    "generation lock must remain held through synchronous emission"
+                );
+                current_emitted.lock().push(status.clone());
+            },
+        ));
+
+        {
+            let mut replacement = state.lock();
+            replacement.connection_generation = 22;
+            replacement.status = state::ConnectionStatus {
+                queue_position: 1,
+                total_djs: 2,
+                ..Default::default()
+            };
+        }
+
+        assert!(!emit_reconnect_error_if_current(
+            &state,
+            21,
+            &error,
+            |_| panic!("stale mismatch status emitted"),
+        ));
+        assert!(!emit_reconnect_backoff_if_current(
+            &state,
+            21,
+            2,
+            2,
+            |_| panic!("stale backoff status emitted"),
+        ));
+
+        let replacement_emitted = Arc::clone(&emitted);
+        let replacement_state = Arc::clone(&state);
+        assert!(emit_reconnect_backoff_if_current(
+            &state,
+            22,
+            2,
+            2,
+            |status| {
+                assert!(replacement_state.try_lock().is_none());
+                replacement_emitted.lock().push(status.clone());
+            },
+        ));
+
+        let emitted = emitted.lock();
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(
+            emitted[0].error_code,
+            Some(protocol::ConnectionErrorCode::TlsFingerprintMismatch)
+        );
+        assert_eq!(emitted[0].queue_position, 3);
+        assert_eq!(emitted[1].error_code, None);
+        assert_eq!(emitted[1].queue_position, 1);
+        assert_eq!(
+            emitted[1].error.as_deref(),
+            Some("Reconnecting in 2s (2/10)")
+        );
+        assert_eq!(state.lock().connection_generation, 22);
+    }
 }
