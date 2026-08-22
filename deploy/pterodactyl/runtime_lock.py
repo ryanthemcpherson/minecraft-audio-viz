@@ -53,6 +53,7 @@ def validate_lock(lock: Any) -> dict[str, Any]:
     if (
         not isinstance(lock, dict)
         or set(lock) != {"schema_version", "python", "release", "runtimes", "dependencies"}
+        or type(lock.get("schema_version")) is not int
         or lock.get("schema_version") != 1
     ):
         raise LockError("runtime lock schema_version must be 1")
