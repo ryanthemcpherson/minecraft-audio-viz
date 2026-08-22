@@ -145,6 +145,11 @@ def parse_public_ip(value: str) -> PublicIPAddress:
     return address
 
 
+def public_bind_host(public_ip: PublicIPAddress) -> str:
+    """Select the wildcard address family matching a validated public identity."""
+    return "::" if isinstance(public_ip, ipaddress.IPv6Address) else "0.0.0.0"
+
+
 def certificate_covers_ip(
     certificate: Path,
     public_ip: PublicIPAddress,
@@ -512,6 +517,7 @@ def _identity_metadata(public_ip: PublicIPAddress, fingerprint: str) -> bytes:
     metadata = {
         "schema": 1,
         "public_host": str(public_ip),
+        "public_bind_host": public_bind_host(public_ip),
         "sha256_fingerprint": fingerprint,
         "http_port": PTERODACTYL_HTTP_PORT,
         "dj_port": PTERODACTYL_DJ_PORT,
@@ -633,6 +639,11 @@ def _validate_existing_identity(
         if any(metadata.get(field) != value for field, value in expected_topology.items()):
             raise ValueError("identity metadata has an invalid Pterodactyl topology")
         identity_public_ip = parse_public_ip(metadata.get("public_host", ""))
+        metadata_bind_host = metadata.get("public_bind_host")
+        if metadata_bind_host is not None and metadata_bind_host != public_bind_host(
+            identity_public_ip
+        ):
+            raise ValueError("identity metadata has an invalid public bind host")
         fingerprint = str(metadata.get("sha256_fingerprint", ""))
         if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
             raise ValueError("identity metadata has an invalid TLS fingerprint")

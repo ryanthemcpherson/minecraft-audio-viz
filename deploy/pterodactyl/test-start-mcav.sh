@@ -109,7 +109,12 @@ test_exact_paper_arguments_and_secure_vj_flags() {
   grep -Fx -- '--unified-web' "$fixture/bootstrap.args" >/dev/null || \
     fail 'bootstrap unified web flag missing'
   assert_arg_value "$fixture/vj.args" '--http-port' '8080'
+  assert_arg_value "$fixture/vj.args" '--http-host' '0.0.0.0'
+  assert_arg_value "$fixture/vj.args" '--dj-host' '0.0.0.0'
   assert_arg_value "$fixture/vj.args" '--port' '25808'
+  assert_arg_value "$fixture/vj.args" '--minecraft-host' '127.0.0.1'
+  assert_arg_value "$fixture/vj.args" '--minecraft-port' '8765'
+  assert_arg_value "$fixture/vj.args" '--metrics-port' '9001'
   local identity_dir="$fixture/mcav-vj/state/identity-generations/test-generation"
   assert_arg_value "$fixture/vj.args" '--auth-file' "$identity_dir/dj_auth.json"
   assert_arg_value "$fixture/vj.args" '--tls-cert' "$identity_dir/tls.crt"
@@ -132,6 +137,8 @@ test_ipv6_public_origin_is_bracketed() {
     "$fixture/vj.args" \
     '--public-origin' \
     'https://[2606:4700:4700::1111]:8080'
+  assert_arg_value "$fixture/vj.args" '--http-host' '::'
+  assert_arg_value "$fixture/vj.args" '--dj-host' '::'
 }
 
 test_runtime_origin_uses_canonical_generation_endpoints() {

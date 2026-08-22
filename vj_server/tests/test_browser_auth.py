@@ -1,6 +1,7 @@
 """Focused browser authentication boundary and real gateway tests."""
 
 import asyncio
+import socket
 import ssl
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -138,6 +139,81 @@ class LiveDJListener:
     secure_url: str
     plaintext_url: str
     client_ssl_context: ssl.SSLContext
+
+
+@pytest.mark.asyncio
+async def test_vj_dj_listener_binds_ipv6_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+    tls_context: ssl.SSLContext,
+) -> None:
+    if not socket.has_ipv6:
+        pytest.skip("host has no IPv6 support")
+    probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        probe.bind(("::1", 0))
+    except OSError:
+        pytest.skip("IPv6 loopback is unavailable")
+    finally:
+        probe.close()
+
+    monkeypatch.setattr(vj_server_module, "build_server_ssl_context", lambda *_args: tls_context)
+
+    class FakeGatewayRunner:
+        async def cleanup(self) -> None:
+            return None
+
+    async def fake_gateway(*_args, **_kwargs):
+        return FakeGatewayRunner()
+
+    real_ws_serve = vj_server_module.ws_serve
+    dj_listener = None
+    listener_started = asyncio.Event()
+    main_loop_release = asyncio.Event()
+
+    async def capture_listener(handler, host, port, **kwargs):
+        nonlocal dj_listener
+        listener = await real_ws_serve(handler, host, port, **kwargs)
+        dj_listener = listener
+        listener_started.set()
+        return listener
+
+    async def no_op() -> None:
+        return None
+
+    async def main_loop() -> None:
+        await main_loop_release.wait()
+
+    monkeypatch.setattr(vj_server_module, "start_unified_web_gateway", fake_gateway)
+    monkeypatch.setattr(vj_server_module, "ws_serve", capture_listener)
+    server = VJServer(
+        dj_host="::1",
+        dj_port=0,
+        http_port=8080,
+        http_host="::1",
+        tls_cert="fixture.crt",
+        tls_key="fixture.key",
+        unified_web=True,
+        public_origin="https://[::1]:8080",
+        metrics_port=None,
+        show_spectrograph=False,
+    )
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = main_loop
+
+    task = asyncio.create_task(server.run())
+    try:
+        await asyncio.wait_for(listener_started.wait(), timeout=1.0)
+        assert dj_listener is not None
+        sockets = dj_listener.sockets
+        assert sockets
+        assert all(bound.family == socket.AF_INET6 for bound in sockets)
+        assert all(bound.getsockname()[0] == "::1" for bound in sockets)
+    finally:
+        main_loop_release.set()
+        await asyncio.wait_for(task, timeout=1.0)
 
 
 @pytest.fixture
@@ -295,7 +371,7 @@ async def test_tls_dj_listener_logs_wss(
     with caplog.at_level("INFO", logger="vj_server"):
         await server.run()
 
-    assert "DJ WebSocket server: wss://localhost:25808" in caplog.messages
+    assert "DJ WebSocket server: wss://0.0.0.0:25808" in caplog.messages
 
 
 class AuthWebSocket:

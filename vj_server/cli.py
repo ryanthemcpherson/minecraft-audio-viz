@@ -75,6 +75,12 @@ Examples:
         help="Port for DJ connections (default: 9000 or $VJ_SERVER_PORT)",
     )
     parser.add_argument(
+        "--dj-host",
+        type=validate_hostname,
+        default=os.environ.get("DJ_HOST", "0.0.0.0"),
+        help="Bind host for DJ connections (default: 0.0.0.0 or $DJ_HOST)",
+    )
+    parser.add_argument(
         "--minecraft-host",
         type=validate_hostname,
         default=os.environ.get("MINECRAFT_HOST", "localhost"),
@@ -331,6 +337,7 @@ Examples:
 
     server = VJServer(
         dj_port=args.port,
+        dj_host=args.dj_host,
         minecraft_host=args.minecraft_host,
         minecraft_port=args.minecraft_port,
         minecraft_ws_secret=args.minecraft_ws_secret,
