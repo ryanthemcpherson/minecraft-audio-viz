@@ -44,7 +44,7 @@ try {
 } finally {
     Pop-Location
 }
-$pluginJar = Get-ChildItem (Join-Path $repoRoot 'minecraft_plugin\target') -Filter 'audioviz-plugin-*.jar' |
+$pluginJar = Get-ChildItem (Join-Path $repoRoot 'minecraft_plugin\target') -Filter 'mcav-paper-*.jar' |
     Where-Object Name -NotLike 'original-*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $pluginJar) { throw 'Built AudioViz plugin JAR was not found.' }
 
