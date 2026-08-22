@@ -4,18 +4,24 @@ import asyncio
 import json
 import shlex
 import struct
+import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from packaged_smoke import (
     PlaintextConnectionRecorder,
     WebSocketApplicationRecorder,
+    generate_certificate,
     parse_rust_smoke_output,
     redact_bytes,
     redact_command,
     redact_text,
     service_command,
+    validate_recorded_tls_connections,
+    verify_and_extract,
 )
 
 
@@ -119,6 +125,32 @@ class RustSmokeOutputTests(unittest.TestCase):
             parse_rust_smoke_output(f"{line}\n", expected_mode="match")
 
 
+class ProductionPinRecorderTests(unittest.TestCase):
+    def test_matching_pin_requires_probe_then_application_connection(self) -> None:
+        probe = {
+            "upstream_connected": False,
+            "post_tls_application_bytes": 0,
+            "websocket_upgrade_requests": 0,
+            "auth_messages": 0,
+            "audio_messages": 0,
+            "parse_errors": 0,
+        }
+        application = {
+            "upstream_connected": True,
+            "post_tls_application_bytes": 512,
+            "websocket_upgrade_requests": 1,
+            "auth_messages": 1,
+            "audio_messages": 1,
+            "parse_errors": 0,
+        }
+
+        selected = validate_recorded_tls_connections("match", [probe, application])
+
+        self.assertIs(selected, application)
+        with self.assertRaisesRegex(AssertionError, "two TLS connections"):
+            validate_recorded_tls_connections("match", [application])
+
+
 class PlaintextConnectionRecorderTests(unittest.IsolatedAsyncioTestCase):
     async def test_counts_unexpected_upgrade_and_auth_instead_of_assuming_zero(self) -> None:
         recorder = PlaintextConnectionRecorder(listen_port=0)
@@ -182,6 +214,53 @@ class EvidenceRedactionTests(unittest.TestCase):
         for output in outputs:
             self.assertNotIn(sentinel, output)
             self.assertIn("<redacted>", output)
+
+
+class ReleaseExtractionTests(unittest.TestCase):
+    @patch("packaged_smoke.subprocess.run")
+    def test_accepts_exact_plugin_install_path_beside_mcav_root(self, verifier_run) -> None:
+        with tempfile.TemporaryDirectory() as temporary_text:
+            temporary = Path(temporary_text)
+            archive = temporary / "release.zip"
+            with zipfile.ZipFile(archive, "w") as release:
+                release.writestr("mcav-vj/VERSION", "rc2")
+                release.writestr("plugins/AudioViz.jar", b"plugin")
+
+            bundle = verify_and_extract(archive, temporary / "extracted")
+
+            self.assertEqual((bundle / "VERSION").read_text(), "rc2")
+            self.assertEqual(
+                (temporary / "extracted/plugins/AudioViz.jar").read_bytes(),
+                b"plugin",
+            )
+            verifier_run.assert_called_once()
+
+    @patch("packaged_smoke.subprocess.run")
+    def test_rejects_any_other_plugin_payload(self, _verifier_run) -> None:
+        with tempfile.TemporaryDirectory() as temporary_text:
+            temporary = Path(temporary_text)
+            archive = temporary / "release.zip"
+            with zipfile.ZipFile(archive, "w") as release:
+                release.writestr("mcav-vj/VERSION", "rc2")
+                release.writestr("plugins/Other.jar", b"plugin")
+
+            with self.assertRaisesRegex(AssertionError, "unsafe archive entry"):
+                verify_and_extract(archive, temporary / "extracted")
+
+
+class CertificateFixtureTests(unittest.TestCase):
+    def test_generated_leaf_is_not_a_ca_and_allows_server_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_text:
+            certificate, _private_key, _fingerprint = generate_certificate(Path(temporary_text))
+            details = subprocess.run(
+                ["openssl", "x509", "-in", str(certificate), "-noout", "-text"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+
+        self.assertIn("CA:FALSE", details)
+        self.assertIn("TLS Web Server Authentication", details)
 
 
 if __name__ == "__main__":
