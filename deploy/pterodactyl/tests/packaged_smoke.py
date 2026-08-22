@@ -42,11 +42,52 @@ VJ_USERNAME = "smoke-vj"
 VJ_PASSWORD = "packaged-smoke-vj-password"
 DJ_ID = "smoke-dj"
 DJ_PASSWORD = "packaged-smoke-dj-password"
+REDACTED = "<redacted>"
+SENSITIVE_COMMAND_OPTIONS = {"--minecraft-ws-secret"}
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def redact_command(command: list[str]) -> list[str]:
+    """Return a retention-safe command while leaving the subprocess argv untouched."""
+    redacted: list[str] = []
+    redact_next = False
+    for argument in command:
+        if redact_next:
+            redacted.append(REDACTED)
+            redact_next = False
+            continue
+        matching_option = next(
+            (option for option in SENSITIVE_COMMAND_OPTIONS if argument.startswith(f"{option}=")),
+            None,
+        )
+        if argument in SENSITIVE_COMMAND_OPTIONS:
+            redacted.append(argument)
+            redact_next = True
+        elif matching_option is not None:
+            redacted.append(f"{matching_option}={REDACTED}")
+        else:
+            redacted.append(argument)
+    return redacted
+
+
+def redact_text(value: str, secrets: tuple[str, ...]) -> str:
+    redacted = value
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, REDACTED)
+    return redacted
+
+
+def redact_bytes(value: bytes, secrets: tuple[str, ...]) -> bytes:
+    redacted = value
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret.encode(), REDACTED.encode())
+    return redacted
 
 
 def parse_rust_smoke_output(stdout: str, *, expected_mode: str) -> dict[str, Any]:
@@ -964,6 +1005,7 @@ def service_command(
     auth_file: Path,
     *,
     no_auth: bool,
+    renderer_secret: str = RENDERER_SECRET,
 ) -> list[str]:
     command = [
         str(bundle / "bin/linux-amd64/audioviz-vj"),
@@ -974,7 +1016,7 @@ def service_command(
         "--minecraft-port",
         "8765",
         "--minecraft-ws-secret",
-        RENDERER_SECRET,
+        renderer_secret,
         "--broadcast-port",
         "8766",
         "--http-host",
@@ -1032,8 +1074,9 @@ async def run_service_scenario(
     occupied = listeners_on_ports(PUBLIC_PORTS | {METRICS_PORT, 8766})
     require(not occupied, f"ports required for {mode} service are occupied: {occupied}")
     command = service_command(bundle, certificate, private_key, auth_file, no_auth=no_auth)
+    retained_command = redact_command(command)
     log_handle.write(f"\n=== packaged service: {mode} ===\n".encode())
-    log_handle.write(f"command: {shlex.join(command)}\n".encode())
+    log_handle.write(f"command: {shlex.join(retained_command)}\n".encode())
     log_handle.flush()
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -1043,11 +1086,17 @@ async def run_service_scenario(
         *command,
         cwd=bundle,
         env=environment,
-        stdout=log_handle,
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+    require(process.stdout is not None, "packaged service output pipe is unavailable")
+    output_task = asyncio.create_task(process.stdout.read())
     shutdown: dict[str, Any] | None = None
-    result: dict[str, Any] = {"mode": mode, "command": command, "pid": process.pid}
+    result: dict[str, Any] = {
+        "mode": mode,
+        "command": retained_command,
+        "pid": process.pid,
+    }
     try:
         await wait_for_https(fingerprint, process)
         listener_records = await wait_for_listener_state(
@@ -1067,7 +1116,10 @@ async def run_service_scenario(
             "packaged process bound an internal port",
         )
         executable = os.readlink(f"/proc/{process.pid}/exe")
-        cmdline = Path(f"/proc/{process.pid}/cmdline").read_bytes().replace(b"\0", b" ").decode()
+        raw_cmdline = (
+            Path(f"/proc/{process.pid}/cmdline").read_bytes().replace(b"\0", b" ").decode()
+        )
+        cmdline = redact_text(raw_cmdline, (RENDERER_SECRET,))
         expected_executable = str((bundle / "bin/linux-amd64/python/bin/python3.12").resolve())
         require(
             str(Path(executable).resolve()) == expected_executable,
@@ -1108,6 +1160,9 @@ async def run_service_scenario(
             )
     finally:
         shutdown = await stop_service(process)
+        process_output = await output_task
+        log_handle.write(redact_bytes(process_output, (RENDERER_SECRET,)))
+        log_handle.flush()
         result["shutdown"] = shutdown
         result["post_shutdown_listeners"] = await wait_for_listener_state(
             PUBLIC_PORTS | {METRICS_PORT, 8766}, present=False

@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 import struct
+import tempfile
 import unittest
+from pathlib import Path
 
 from packaged_smoke import (
     PlaintextConnectionRecorder,
     WebSocketApplicationRecorder,
     parse_rust_smoke_output,
+    redact_bytes,
+    redact_command,
+    redact_text,
+    service_command,
 )
 
 
@@ -139,6 +146,42 @@ class PlaintextConnectionRecorderTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("never-retained", json.dumps(evidence))
         finally:
             await recorder.stop()
+
+
+class EvidenceRedactionTests(unittest.TestCase):
+    def test_renderer_secret_never_reaches_json_log_or_report_evidence(self) -> None:
+        sentinel = "MCAV_RENDERER_SECRET_SENTINEL_7f19c9"
+        with tempfile.TemporaryDirectory() as temporary_text:
+            temporary = Path(temporary_text)
+            command = service_command(
+                temporary / "bundle",
+                temporary / "certificate.pem",
+                temporary / "private-key.pem",
+                temporary / "auth.json",
+                no_auth=False,
+                renderer_secret=sentinel,
+            )
+
+        self.assertIn(sentinel, command, "the actual subprocess command must receive the secret")
+        collected_command = redact_command(command)
+        collected_cmdline = redact_text(" ".join(command), (sentinel,))
+        collected_log = redact_bytes(
+            f"command: {shlex.join(command)}\nserver echoed {sentinel}\n".encode(),
+            (sentinel,),
+        ).decode()
+        evidence = {
+            "command": collected_command,
+            "process_identity": {"cmdline": collected_cmdline},
+        }
+        report = (
+            f"command={shlex.join(collected_command)}\n"
+            f"cmdline={collected_cmdline}\nlog={collected_log}"
+        )
+        outputs = (json.dumps(evidence, sort_keys=True), collected_log, report)
+
+        for output in outputs:
+            self.assertNotIn(sentinel, output)
+            self.assertIn("<redacted>", output)
 
 
 if __name__ == "__main__":
