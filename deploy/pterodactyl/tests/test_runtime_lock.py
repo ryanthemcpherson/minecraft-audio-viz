@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,23 +33,36 @@ def elf_payload(machine: int) -> bytes:
     return bytes(header)
 
 
-def build_wheel(directory: Path, architecture: str, *, machine: int | None = None) -> Path:
-    platform = ARCHITECTURES[architecture]["platform"]
-    filename = f"tinydep-1.0.0-cp312-cp312-{platform}.whl"
+def build_wheel(
+    directory: Path,
+    architecture: str,
+    *,
+    machine: int | None = None,
+    python_tag: str = "cp312",
+    abi_tag: str = "cp312",
+    platform: str | None = None,
+    include_native: bool = True,
+) -> Path:
+    platform = platform or ARCHITECTURES[architecture]["platform"]
+    filename = f"tinydep-1.0.0-{python_tag}-{abi_tag}-{platform}.whl"
     wheel_path = directory / filename
     native_machine = machine if machine is not None else ARCHITECTURES[architecture]["machine"]
     files = {
         "tinydep/__init__.py": b'VERSION = "1.0.0"\n',
-        "tinydep/native.so": elf_payload(native_machine),
         "tinydep-1.0.0.dist-info/METADATA": (
             b"Metadata-Version: 2.1\nName: tinydep\nVersion: 1.0.0\n"
         ),
         "tinydep-1.0.0.dist-info/WHEEL": (
             b"Wheel-Version: 1.0\nGenerator: mcav-test\n"
-            + f"Root-Is-Purelib: false\nTag: cp312-cp312-{platform}\n".encode()
+            + (
+                f"Root-Is-Purelib: {'false' if include_native else 'true'}\n"
+                f"Tag: {python_tag}-{abi_tag}-{platform}\n"
+            ).encode()
         ),
         "tinydep-1.0.0.dist-info/RECORD": b"",
     }
+    if include_native:
+        files["tinydep/native.so"] = elf_payload(native_machine)
     with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_STORED) as wheel:
         for name, payload in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
@@ -134,6 +148,13 @@ class RuntimeLockTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(expected_error, result.stderr)
 
+    def replace_wheel(self, architecture: str, **wheel_options: object) -> Path:
+        self.wheels[architecture].unlink()
+        replacement = build_wheel(self.wheelhouses[architecture], architecture, **wheel_options)
+        self.wheels[architecture] = replacement
+        write_lock(self.lock, self.wheels)
+        return replacement
+
     def test_valid_locked_wheelhouse_and_install_pass_for_each_architecture(self) -> None:
         for architecture in ARCHITECTURES:
             with self.subTest(architecture=architecture):
@@ -203,6 +224,121 @@ class RuntimeLockTests(unittest.TestCase):
         foreign.write_bytes(self.wheels["linux-amd64"].read_bytes())
         self.wheels["linux-arm64"].unlink()
         self.assert_rejected("linux-arm64", "is not compatible with linux-arm64")
+
+    def test_wheel_tags_require_compatible_python_abi_and_exact_platform(self) -> None:
+        invalid_tags = {
+            "wrong-python": {
+                "python_tag": "cp311",
+                "abi_tag": "cp311",
+            },
+            "wrong-abi": {
+                "python_tag": "cp312",
+                "abi_tag": "cp311",
+            },
+            "near-miss-platform": {
+                "platform": "manylinux_2_17_x86_64evil",
+            },
+            "unlocked-platform": {
+                "platform": "manylinux_2_27_x86_64",
+            },
+        }
+        for case, wheel_options in invalid_tags.items():
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temporary:
+                    wheelhouse = Path(temporary)
+                    wheel = build_wheel(
+                        wheelhouse,
+                        "linux-amd64",
+                        **wheel_options,
+                    )
+                    wheels = dict(self.wheels)
+                    wheels["linux-amd64"] = wheel
+                    write_lock(self.lock, wheels)
+                    self.assert_rejected(
+                        "linux-amd64",
+                        "is not compatible with linux-amd64",
+                        target=wheelhouse,
+                    )
+
+    def test_py3_none_any_and_older_cpython_abi3_tags_are_accepted(self) -> None:
+        valid_tags = {
+            "pure-python": {
+                "python_tag": "py3",
+                "abi_tag": "none",
+                "platform": "any",
+                "include_native": False,
+            },
+            "stable-abi": {
+                "python_tag": "cp39",
+                "abi_tag": "abi3",
+            },
+        }
+        for case, wheel_options in valid_tags.items():
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temporary:
+                    wheelhouse = Path(temporary)
+                    wheel = build_wheel(
+                        wheelhouse,
+                        "linux-amd64",
+                        **wheel_options,
+                    )
+                    wheels = dict(self.wheels)
+                    wheels["linux-amd64"] = wheel
+                    write_lock(self.lock, wheels)
+                    result = run_lock(
+                        "verify-wheelhouse",
+                        self.lock,
+                        "linux-amd64",
+                        wheelhouse,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_final_install_replaces_base_packages_and_is_reverified(self) -> None:
+        staged = self.root / "staged-install"
+        with zipfile.ZipFile(self.wheels["linux-amd64"]) as wheel:
+            wheel.extractall(staged)
+        final = self.root / "runtime/python/lib/python3.12/site-packages"
+        extra_metadata = final / "pip-99.0.dist-info/METADATA"
+        extra_metadata.parent.mkdir(parents=True)
+        extra_metadata.write_text("Name: pip\nVersion: 99.0\n", encoding="utf-8")
+
+        result = run_lock(
+            "install-staged",
+            self.lock,
+            "linux-amd64",
+            staged,
+            final,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(extra_metadata.exists())
+        self.assertTrue((final / "tinydep-1.0.0.dist-info/METADATA").is_file())
+
+    def test_final_install_missing_extra_and_wrong_version_are_rejected(self) -> None:
+        cases = ("missing", "extra", "wrong-version")
+        for case in cases:
+            with self.subTest(case=case):
+                site_packages = self.root / f"final-{case}"
+                with zipfile.ZipFile(self.wheels["linux-amd64"]) as wheel:
+                    wheel.extractall(site_packages)
+                metadata = site_packages / "tinydep-1.0.0.dist-info/METADATA"
+                if case == "missing":
+                    shutil.rmtree(metadata.parent)
+                    expected = "missing installed dependencies"
+                elif case == "extra":
+                    extra = site_packages / "unexpected-9.0.dist-info/METADATA"
+                    extra.parent.mkdir()
+                    extra.write_text("Name: unexpected\nVersion: 9.0\n", encoding="utf-8")
+                    expected = "extra installed dependencies"
+                else:
+                    metadata.write_text("Name: tinydep\nVersion: 2.0.0\n", encoding="utf-8")
+                    expected = "version 2.0.0 does not match 1.0.0"
+                self.assert_rejected(
+                    "linux-amd64",
+                    expected,
+                    command="verify-install",
+                    target=site_packages,
+                )
 
     def test_installed_native_elf_must_match_architecture(self) -> None:
         wheel = build_wheel(

@@ -90,9 +90,8 @@ for architecture in linux-amd64 linux-arm64; do
     "${platform_args[@]}" \
     --target "$install_root" \
     "${wheel_paths[@]}"
-  "$BUILD_PYTHON" "$LOCK_TOOL" verify-install \
-    "$LOCK_FILE" "$architecture" "$install_root" > /dev/null
-  cp -a "$install_root/." "$site_packages/"
+  "$BUILD_PYTHON" "$LOCK_TOOL" install-staged \
+    "$LOCK_FILE" "$architecture" "$install_root" "$site_packages" > /dev/null
 
   launcher="$runtime_root/audioviz-vj"
   printf '%s\n' \
@@ -111,6 +110,8 @@ for architecture in linux-amd64 linux-arm64; do
   rm -rf "$runtime_root/python/share" "$runtime_root/python/include" "$runtime_root/python/lib/pkgconfig"
   find "$runtime_root/python/bin" -mindepth 1 -maxdepth 1 ! -name python3.12 -delete
   find "$runtime_root/python" -type l -delete
+  "$BUILD_PYTHON" "$LOCK_TOOL" verify-install \
+    "$LOCK_FILE" "$architecture" "$site_packages" > /dev/null
 done
 
 native_arch="$(uname -m)"
