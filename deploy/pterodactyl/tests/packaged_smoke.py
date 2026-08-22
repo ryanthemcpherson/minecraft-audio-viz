@@ -5,14 +5,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 import hashlib
 import json
 import os
 import re
 import shlex
 import signal
-import socket
 import ssl
 import struct
 import subprocess
@@ -21,6 +19,8 @@ import tempfile
 import time
 import traceback
 import zipfile
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,8 @@ PUBLIC_ORIGIN = "https://127.0.0.1:8080"
 PUBLIC_PORTS = {8080, 25808}
 INTERNAL_PORTS = {8765, 8766, 9001}
 METRICS_PORT = 19001
+DJ_TLS_RECORDER_PORT = 25809
+PINNED_PLAINTEXT_RECORDER_PORT = 25810
 RENDERER_SECRET = "packaged-smoke-renderer-secret"
 VJ_USERNAME = "smoke-vj"
 VJ_PASSWORD = "packaged-smoke-vj-password"
@@ -45,6 +47,154 @@ DJ_PASSWORD = "packaged-smoke-dj-password"
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def parse_rust_smoke_output(stdout: str, *, expected_mode: str) -> dict[str, Any]:
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    require(len(lines) == 1, "Rust smoke must emit exactly one JSON line")
+    try:
+        output = json.loads(lines[0])
+    except json.JSONDecodeError as error:
+        raise AssertionError("Rust smoke output is not valid JSON") from error
+    require(isinstance(output, dict), "Rust smoke output must be a JSON object")
+    require(output.get("schema_version") == 1, "Rust smoke schema version mismatch")
+    require(output.get("mode") == expected_mode, "Rust smoke mode mismatch")
+    require(output.get("status") == "passed", "Rust smoke did not pass")
+    require(
+        isinstance(output.get("process_id"), int) and output["process_id"] > 0,
+        "Rust smoke process identity is missing",
+    )
+    require(
+        isinstance(output.get("executable"), str) and output["executable"],
+        "Rust smoke executable identity is missing",
+    )
+    expected_production_paths = {
+        "match": "DjClient::connect + DjClient::try_send",
+        "mismatch": "DjClient::connect",
+        "plaintext": "connect_verified",
+    }
+    require(
+        output.get("production_path") == expected_production_paths[expected_mode],
+        "Rust smoke did not exercise the expected production path",
+    )
+    for field_name in ("connected", "authenticated", "audio_frame_queued"):
+        require(
+            isinstance(output.get(field_name), bool),
+            f"Rust smoke {field_name} result is missing",
+        )
+    if expected_mode == "match":
+        require(
+            output["connected"] and output["authenticated"] and output["audio_frame_queued"],
+            "Rust production DJ did not connect, authenticate, and queue audio",
+        )
+        require(output.get("error_code") is None, "matching Rust DJ returned an error")
+    else:
+        expected_error = {
+            "mismatch": "tls_fingerprint_mismatch",
+            "plaintext": "missing_peer_certificate",
+        }[expected_mode]
+        require(
+            output.get("error_code") == expected_error,
+            f"Rust {expected_mode} smoke returned the wrong fail-closed error",
+        )
+        require(
+            not output["connected"]
+            and not output["authenticated"]
+            and not output["audio_frame_queued"],
+            f"Rust {expected_mode} smoke crossed the security boundary",
+        )
+    return output
+
+
+class WebSocketApplicationRecorder:
+    """Counts decrypted DJ client traffic without retaining credentials or payloads."""
+
+    def __init__(self) -> None:
+        self._buffer = bytearray()
+        self._http_complete = False
+        self._application_bytes = 0
+        self._upgrade_requests = 0
+        self._auth_messages = 0
+        self._audio_messages = 0
+        self._message_types: list[str] = []
+        self._parse_errors = 0
+
+    def feed(self, chunk: bytes) -> None:
+        self._application_bytes += len(chunk)
+        self._buffer.extend(chunk)
+        if not self._http_complete:
+            marker = self._buffer.find(b"\r\n\r\n")
+            if marker < 0:
+                return
+            header = bytes(self._buffer[: marker + 4])
+            del self._buffer[: marker + 4]
+            lowered = header.lower()
+            if (
+                header.startswith(b"GET ")
+                and b"\r\nupgrade: websocket\r\n" in lowered
+                and b"\r\nconnection: upgrade\r\n" in lowered
+            ):
+                self._upgrade_requests += 1
+            else:
+                self._parse_errors += 1
+            self._http_complete = True
+        self._parse_frames()
+
+    def _parse_frames(self) -> None:
+        while len(self._buffer) >= 2:
+            first = self._buffer[0]
+            second = self._buffer[1]
+            opcode = first & 0x0F
+            masked = bool(second & 0x80)
+            payload_length = second & 0x7F
+            header_length = 2
+            if payload_length == 126:
+                if len(self._buffer) < 4:
+                    return
+                payload_length = struct.unpack("!H", self._buffer[2:4])[0]
+                header_length = 4
+            elif payload_length == 127:
+                if len(self._buffer) < 10:
+                    return
+                payload_length = struct.unpack("!Q", self._buffer[2:10])[0]
+                header_length = 10
+            if not masked or payload_length > 1_048_576:
+                self._parse_errors += 1
+                self._buffer.clear()
+                return
+            frame_length = header_length + 4 + payload_length
+            if len(self._buffer) < frame_length:
+                return
+            mask = self._buffer[header_length : header_length + 4]
+            masked_payload = self._buffer[header_length + 4 : frame_length]
+            payload = bytes(value ^ mask[index % 4] for index, value in enumerate(masked_payload))
+            del self._buffer[:frame_length]
+            if opcode != 0x1:
+                continue
+            try:
+                message = json.loads(payload)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._parse_errors += 1
+                continue
+            message_type = message.get("type") if isinstance(message, dict) else None
+            if not isinstance(message_type, str):
+                self._parse_errors += 1
+                continue
+            self._message_types.append(message_type)
+            if message_type in {"dj_auth", "code_auth"}:
+                self._auth_messages += 1
+            elif message_type == "dj_audio_frame":
+                self._audio_messages += 1
+
+    def evidence(self) -> dict[str, Any]:
+        return {
+            "post_tls_application_bytes": self._application_bytes,
+            "websocket_upgrade_requests": self._upgrade_requests,
+            "auth_messages": self._auth_messages,
+            "audio_messages": self._audio_messages,
+            "message_types": self._message_types.copy(),
+            "parse_errors": self._parse_errors,
+        }
 
 
 def sha256_password(password: str, salt: str) -> str:
@@ -179,6 +329,175 @@ async def wait_for_listener_state(
     )
 
 
+@dataclass
+class _RecordedTlsConnection:
+    index: int
+    peer: str
+    traffic: WebSocketApplicationRecorder = field(default_factory=WebSocketApplicationRecorder)
+    upstream_connected: bool = False
+    failure: str | None = None
+    completed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+
+    def evidence(self) -> dict[str, Any]:
+        return {
+            "connection_index": self.index,
+            "peer": self.peer,
+            "upstream_connected": self.upstream_connected,
+            "failure": self.failure,
+            "completed": self.completed.is_set(),
+            **self.traffic.evidence(),
+        }
+
+
+class RecordingTlsForwarder:
+    """Loopback TLS forwarder that records bytes after the production pin check."""
+
+    def __init__(self, certificate: Path, private_key: Path) -> None:
+        self._certificate = certificate
+        self._private_key = private_key
+        self._server: asyncio.Server | None = None
+        self._records: list[_RecordedTlsConnection] = []
+        self._handlers: set[asyncio.Task[Any]] = set()
+
+    @property
+    def record_count(self) -> int:
+        return len(self._records)
+
+    async def start(self) -> None:
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(self._certificate, self._private_key)
+        self._server = await asyncio.start_server(
+            self._handle,
+            "127.0.0.1",
+            DJ_TLS_RECORDER_PORT,
+            ssl=server_context,
+        )
+
+    async def stop(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
+        if self._handlers:
+            done, pending = await asyncio.wait(self._handlers, timeout=3.0)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                with suppress(asyncio.CancelledError, Exception):
+                    task.result()
+
+    async def wait_for_record(self, index: int, timeout: float = 8.0) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        while len(self._records) <= index and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        require(len(self._records) > index, "TLS recorder did not observe a connection")
+        remaining = max(0.01, deadline - time.monotonic())
+        await asyncio.wait_for(self._records[index].completed.wait(), timeout=remaining)
+        return self._records[index].evidence()
+
+    async def _copy_server_responses(
+        self,
+        upstream_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+    ) -> None:
+        while response := await upstream_reader.read(65_536):
+            client_writer.write(response)
+            await client_writer.drain()
+
+    async def _handle(
+        self,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+    ) -> None:
+        handler = asyncio.current_task()
+        if handler is not None:
+            self._handlers.add(handler)
+        peer = client_writer.get_extra_info("peername")
+        record = _RecordedTlsConnection(len(self._records), repr(peer))
+        self._records.append(record)
+        upstream_writer: asyncio.StreamWriter | None = None
+        response_task: asyncio.Task[None] | None = None
+        try:
+            while client_chunk := await client_reader.read(65_536):
+                record.traffic.feed(client_chunk)
+                if upstream_writer is None:
+                    upstream_context = ssl.create_default_context(cafile=str(self._certificate))
+                    upstream_reader, upstream_writer = await asyncio.open_connection(
+                        "127.0.0.1",
+                        25808,
+                        ssl=upstream_context,
+                        server_hostname="127.0.0.1",
+                    )
+                    record.upstream_connected = True
+                    response_task = asyncio.create_task(
+                        self._copy_server_responses(upstream_reader, client_writer)
+                    )
+                upstream_writer.write(client_chunk)
+                await upstream_writer.drain()
+        except (ConnectionError, OSError, ssl.SSLError) as error:
+            record.failure = type(error).__name__
+        finally:
+            if upstream_writer is not None:
+                upstream_writer.close()
+                with suppress(ConnectionError, OSError, ssl.SSLError):
+                    await upstream_writer.wait_closed()
+            if response_task is not None:
+                with suppress(asyncio.CancelledError, ConnectionError, OSError, ssl.SSLError):
+                    await response_task
+            client_writer.close()
+            with suppress(ConnectionError, OSError, ssl.SSLError):
+                await client_writer.wait_closed()
+            record.completed.set()
+            if handler is not None:
+                self._handlers.discard(handler)
+
+
+class PlaintextConnectionRecorder:
+    """Counts connections and bytes at the pinned plaintext fail-closed boundary."""
+
+    def __init__(self, *, listen_port: int = PINNED_PLAINTEXT_RECORDER_PORT) -> None:
+        self._listen_port = listen_port
+        self._server: asyncio.Server | None = None
+        self._connections = 0
+        self._traffic = WebSocketApplicationRecorder()
+
+    @property
+    def port(self) -> int:
+        require(self._server is not None, "plaintext recorder is not running")
+        sockets = self._server.sockets or []
+        require(len(sockets) == 1, "plaintext recorder listener is unavailable")
+        return int(sockets[0].getsockname()[1])
+
+    async def start(self) -> None:
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", self._listen_port)
+
+    async def stop(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._connections += 1
+        try:
+            while chunk := await reader.read(65_536):
+                self._traffic.feed(chunk)
+        finally:
+            writer.close()
+            with suppress(ConnectionError, OSError):
+                await writer.wait_closed()
+
+    def evidence(self) -> dict[str, Any]:
+        traffic = self._traffic.evidence()
+        return {
+            "connections": self._connections,
+            "post_policy_application_bytes": traffic.pop("post_tls_application_bytes"),
+            **traffic,
+        }
+
+
 class FakeRenderer:
     """Minimal authenticated Paper renderer used by the packaged service."""
 
@@ -266,179 +585,139 @@ class FakeRenderer:
             )
 
 
-def _receive_exact(stream: ssl.SSLSocket, length: int) -> bytes:
-    chunks = bytearray()
-    while len(chunks) < length:
-        chunk = stream.recv(length - len(chunks))
-        if not chunk:
-            raise ConnectionError("WebSocket closed before the frame completed")
-        chunks.extend(chunk)
-    return bytes(chunks)
-
-
-def _send_client_frame(stream: socket.socket, opcode: int, payload: bytes) -> int:
-    first = 0x80 | opcode
-    mask = os.urandom(4)
-    length = len(payload)
-    if length < 126:
-        header = bytes((first, 0x80 | length))
-    elif length < 65_536:
-        header = bytes((first, 0x80 | 126)) + struct.pack("!H", length)
-    else:
-        header = bytes((first, 0x80 | 127)) + struct.pack("!Q", length)
-    masked = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
-    frame = header + mask + masked
-    stream.sendall(frame)
-    return len(frame)
-
-
-def _receive_server_frame(stream: ssl.SSLSocket) -> tuple[int, bytes]:
-    first, second = _receive_exact(stream, 2)
-    opcode = first & 0x0F
-    length = second & 0x7F
-    if length == 126:
-        length = struct.unpack("!H", _receive_exact(stream, 2))[0]
-    elif length == 127:
-        length = struct.unpack("!Q", _receive_exact(stream, 8))[0]
-    mask = _receive_exact(stream, 4) if second & 0x80 else None
-    payload = _receive_exact(stream, length)
-    if mask is not None:
-        payload = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
-    return opcode, payload
-
-
-def _receive_json_type(stream: ssl.SSLSocket, expected_type: str) -> tuple[dict[str, Any], int]:
-    frames = 0
-    while frames < 30:
-        opcode, payload = _receive_server_frame(stream)
-        frames += 1
-        if opcode == 0x9:
-            _send_client_frame(stream, 0xA, payload)
-            continue
-        if opcode == 0x8:
-            raise ConnectionError(f"WebSocket closed while waiting for {expected_type}")
-        if opcode != 0x1:
-            continue
-        message = json.loads(payload)
-        if message.get("type") == expected_type:
-            return message, frames
-    raise AssertionError(f"did not receive WebSocket message type {expected_type}")
-
-
-def run_pinned_dj(fingerprint: str, *, expect_match: bool, no_auth: bool) -> dict[str, Any]:
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    application_bytes = 0
-    with socket.create_connection(("127.0.0.1", 25808), timeout=5.0) as raw_socket:
-        with context.wrap_socket(raw_socket, server_hostname="127.0.0.1") as secure_socket:
-            secure_socket.settimeout(5.0)
-            actual = hashlib.sha256(secure_socket.getpeercert(binary_form=True)).hexdigest()
-            pin_matches = actual == fingerprint
-            if not pin_matches:
-                require(not expect_match, "certificate pin unexpectedly mismatched")
-                return {
-                    "tls_established": True,
-                    "pin_matches": False,
-                    "expected_fingerprint": fingerprint,
-                    "actual_fingerprint": actual,
-                    "post_tls_application_bytes": 0,
-                }
-            require(expect_match, "certificate pin unexpectedly matched")
-
-            websocket_key = base64.b64encode(os.urandom(16)).decode()
-            request = (
-                "GET / HTTP/1.1\r\n"
-                "Host: 127.0.0.1:25808\r\n"
-                "Upgrade: websocket\r\n"
-                "Connection: Upgrade\r\n"
-                f"Sec-WebSocket-Key: {websocket_key}\r\n"
-                "Sec-WebSocket-Version: 13\r\n\r\n"
-            ).encode("ascii")
-            secure_socket.sendall(request)
-            application_bytes += len(request)
-            response = bytearray()
-            while b"\r\n\r\n" not in response:
-                response.extend(secure_socket.recv(4096))
-            require(response.startswith(b"HTTP/1.1 101"), "DJ WebSocket upgrade failed")
-
-            auth = {
-                "type": "dj_auth",
-                "dj_id": DJ_ID,
-                "dj_key": "ignored-in-no-auth" if no_auth else DJ_PASSWORD,
-                "dj_name": "Packaged Smoke DJ",
-            }
-            application_bytes += _send_client_frame(
-                secure_socket, 0x1, json.dumps(auth, separators=(",", ":")).encode()
-            )
-            auth_success, _ = _receive_json_type(secure_socket, "auth_success")
-            clock_request, _ = _receive_json_type(secure_socket, "clock_sync_request")
-            server_time = clock_request["server_time"]
-            clock_response = {
-                "type": "clock_sync_response",
-                "dj_recv_time": server_time,
-                "dj_send_time": server_time,
-            }
-            application_bytes += _send_client_frame(
-                secure_socket,
-                0x1,
-                json.dumps(clock_response, separators=(",", ":")).encode(),
-            )
-            stream_route, _ = _receive_json_type(secure_socket, "stream_route")
-            audio_frame = {
-                "type": "dj_audio_frame",
-                "bands": [0.8, 0.6, 0.4, 0.2, 0.1],
-                "peak": 0.9,
-                "beat": True,
-                "bpm": 128.0,
-                "beat_i": 0.8,
-                "i_bass": 0.7,
-                "i_kick": True,
-                "seq": 1,
-                "ts": time.time(),
-                "tempo_conf": 0.9,
-                "beat_phase": 0.0,
-            }
-            application_bytes += _send_client_frame(
-                secure_socket,
-                0x1,
-                json.dumps(audio_frame, separators=(",", ":")).encode(),
-            )
-            time.sleep(0.5)
-            application_bytes += _send_client_frame(secure_socket, 0x8, b"")
-            return {
-                "tls_established": True,
-                "pin_matches": True,
-                "expected_fingerprint": fingerprint,
-                "actual_fingerprint": actual,
-                "post_tls_application_bytes": application_bytes,
-                "auth_success": auth_success.get("dj_id") == DJ_ID,
-                "clock_sync": clock_request.get("type") == "clock_sync_request",
-                "stream_route": stream_route.get("route_mode") == "relay",
-                "audio_frame_sent": True,
-            }
-
-
-def run_plaintext_probe() -> dict[str, Any]:
-    request = (
-        "GET / HTTP/1.1\r\nHost: 127.0.0.1:25808\r\n"
-        "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-        "Sec-WebSocket-Key: cGxhaW50ZXh0LXByb2JlIQ==\r\n"
-        "Sec-WebSocket-Version: 13\r\n\r\n"
-    ).encode("ascii")
-    response = b""
-    with socket.create_connection(("127.0.0.1", 25808), timeout=3.0) as stream:
-        stream.settimeout(2.0)
-        stream.sendall(request)
-        try:
-            response = stream.recv(4096)
-        except (ConnectionResetError, TimeoutError, socket.timeout):
-            response = b""
+async def run_rust_smoke_executable(
+    executable: Path,
+    *,
+    mode: str,
+    port: int,
+    fingerprint: str,
+) -> dict[str, Any]:
+    executable = executable.resolve()
+    require(executable.is_file(), f"Rust smoke executable not found: {executable}")
+    command = [
+        str(executable),
+        "--mode",
+        mode,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--fingerprint",
+        fingerprint,
+        "--dj-id",
+        DJ_ID,
+        "--dj-key",
+        DJ_PASSWORD,
+    ]
+    redacted_command = command.copy()
+    redacted_command[redacted_command.index("--fingerprint") + 1] = "<redacted>"
+    redacted_command[redacted_command.index("--dj-key") + 1] = "<redacted>"
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=20.0)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise AssertionError(f"Rust {mode} smoke timed out") from None
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    require(
+        DJ_PASSWORD not in stdout and DJ_PASSWORD not in stderr,
+        "Rust smoke output exposed the DJ credential",
+    )
+    require(
+        process.returncode == 0,
+        f"Rust {mode} smoke exited {process.returncode}: {stderr.strip()}",
+    )
+    output = parse_rust_smoke_output(stdout, expected_mode=mode)
     return {
-        "plaintext_bytes_sent": len(request),
-        "response_prefix": response[:80].decode("ascii", errors="replace"),
-        "websocket_upgrade_refused": b"101 Switching Protocols" not in response,
+        "process": {
+            "launcher_pid": process.pid,
+            "reported_pid": output["process_id"],
+            "requested_executable": str(executable),
+            "reported_executable": output["executable"],
+            "executable_size_bytes": executable.stat().st_size,
+            "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+            "command": shlex.join(redacted_command),
+            "returncode": process.returncode,
+        },
+        "raw_stdout": stdout,
+        "raw_stderr": stderr,
+        "result": output,
     }
+
+
+async def run_recorded_rust_dj(
+    executable: Path,
+    forwarder: RecordingTlsForwarder,
+    *,
+    mode: str,
+    fingerprint: str,
+) -> dict[str, Any]:
+    require(mode in {"match", "mismatch"}, "invalid recorded Rust DJ mode")
+    record_index = forwarder.record_count
+    client = await run_rust_smoke_executable(
+        executable,
+        mode=mode,
+        port=DJ_TLS_RECORDER_PORT,
+        fingerprint=fingerprint,
+    )
+    server = await forwarder.wait_for_record(record_index)
+    require(
+        forwarder.record_count == record_index + 1,
+        f"Rust {mode} smoke opened an unexpected number of TLS connections",
+    )
+    if mode == "match":
+        require(server["upstream_connected"], "matching DJ did not reach packaged service")
+        require(
+            server["websocket_upgrade_requests"] == 1,
+            "matching DJ did not send one WebSocket Upgrade",
+        )
+        require(server["auth_messages"] == 1, "matching DJ auth was not observed")
+        require(server["audio_messages"] >= 1, "matching DJ audio was not observed")
+        require(server["parse_errors"] == 0, "matching DJ traffic could not be parsed")
+    else:
+        require(
+            server["post_tls_application_bytes"] == 0,
+            "mismatching production DJ sent post-TLS application bytes",
+        )
+        require(
+            not server["upstream_connected"]
+            and server["websocket_upgrade_requests"] == 0
+            and server["auth_messages"] == 0
+            and server["audio_messages"] == 0,
+            "mismatching production DJ crossed the pin boundary",
+        )
+    return {"production_client": client, "server_side_recorder": server}
+
+
+async def run_recorded_pinned_plaintext(
+    executable: Path,
+    recorder: PlaintextConnectionRecorder,
+    fingerprint: str,
+) -> dict[str, Any]:
+    before = recorder.evidence()
+    client = await run_rust_smoke_executable(
+        executable,
+        mode="plaintext",
+        port=PINNED_PLAINTEXT_RECORDER_PORT,
+        fingerprint=fingerprint,
+    )
+    await asyncio.sleep(0.2)
+    after = recorder.evidence()
+    require(after == before, "pinned plaintext production path attempted network traffic")
+    require(
+        after["connections"] == 0
+        and after["post_policy_application_bytes"] == 0
+        and after["websocket_upgrade_requests"] == 0
+        and after["auth_messages"] == 0,
+        "pinned plaintext production path crossed the fail-closed boundary",
+    )
+    return {"production_client": client, "server_side_recorder": after}
 
 
 async def receive_browser_json(websocket: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
@@ -567,6 +846,8 @@ async def invalid_browser_auth_check(fingerprint: str) -> dict[str, Any]:
 async def browser_protocol_check(
     fingerprint: str,
     renderer: FakeRenderer,
+    rust_smoke_executable: Path,
+    forwarder: RecordingTlsForwarder,
     *,
     no_auth: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -617,11 +898,11 @@ async def browser_protocol_check(
                 }
             )
             dj_task = asyncio.create_task(
-                asyncio.to_thread(
-                    run_pinned_dj,
-                    fingerprint,
-                    expect_match=True,
-                    no_auth=no_auth,
+                run_recorded_rust_dj(
+                    rust_smoke_executable,
+                    forwarder,
+                    mode="match",
+                    fingerprint=fingerprint,
                 )
             )
 
@@ -740,6 +1021,9 @@ async def run_service_scenario(
     auth_file: Path,
     fingerprint: str,
     renderer: FakeRenderer,
+    rust_smoke_executable: Path,
+    forwarder: RecordingTlsForwarder,
+    plaintext_recorder: PlaintextConnectionRecorder,
     log_handle: Any,
     *,
     no_auth: bool,
@@ -801,23 +1085,26 @@ async def run_service_scenario(
         if not no_auth:
             result["invalid_browser_auth"] = await invalid_browser_auth_check(fingerprint)
         browser_result, dj_result = await browser_protocol_check(
-            fingerprint, renderer, no_auth=no_auth
+            fingerprint,
+            renderer,
+            rust_smoke_executable,
+            forwarder,
+            no_auth=no_auth,
         )
         result["browser_protocol"] = browser_result
         result["dj_matching_pin"] = dj_result
         if not no_auth:
             wrong_pin = ("0" if fingerprint[0] != "0" else "1") + fingerprint[1:]
-            result["dj_mismatching_pin"] = await asyncio.to_thread(
-                run_pinned_dj, wrong_pin, expect_match=False, no_auth=False
+            result["dj_mismatching_pin"] = await run_recorded_rust_dj(
+                rust_smoke_executable,
+                forwarder,
+                mode="mismatch",
+                fingerprint=wrong_pin,
             )
-            result["plaintext_dj"] = await asyncio.to_thread(run_plaintext_probe)
-            require(
-                result["dj_mismatching_pin"]["post_tls_application_bytes"] == 0,
-                "mismatching DJ pin sent application bytes",
-            )
-            require(
-                result["plaintext_dj"]["websocket_upgrade_refused"],
-                "plaintext DJ WebSocket was accepted",
+            result["pinned_plaintext_dj"] = await run_recorded_pinned_plaintext(
+                rust_smoke_executable,
+                plaintext_recorder,
+                fingerprint,
             )
     finally:
         shutdown = await stop_service(process)
@@ -832,13 +1119,19 @@ async def run_service_scenario(
 
 async def execute_smoke(arguments: argparse.Namespace, evidence: dict[str, Any]) -> None:
     archive = arguments.archive.resolve()
+    rust_smoke_executable = arguments.rust_smoke_executable.resolve()
     require(archive.is_file(), f"release archive not found: {archive}")
+    require(
+        rust_smoke_executable.is_file(),
+        f"Rust smoke executable not found: {rust_smoke_executable}",
+    )
     evidence["archive"] = {
         "path": str(archive),
         "size_bytes": archive.stat().st_size,
         "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
     }
-    preflight_ports = PUBLIC_PORTS | {8765, 8766, METRICS_PORT}
+    fixture_ports = {8765, DJ_TLS_RECORDER_PORT, PINNED_PLAINTEXT_RECORDER_PORT}
+    preflight_ports = PUBLIC_PORTS | fixture_ports | {8766, METRICS_PORT}
     evidence["preflight_listeners"] = listeners_on_ports(preflight_ports | {9001})
     conflicts = [
         item for item in evidence["preflight_listeners"] if item["port"] in preflight_ports
@@ -858,14 +1151,18 @@ async def execute_smoke(arguments: argparse.Namespace, evidence: dict[str, Any])
         }
 
         renderer = FakeRenderer()
-        await renderer.start()
+        forwarder = RecordingTlsForwarder(certificate, private_key)
+        plaintext_recorder = PlaintextConnectionRecorder()
         try:
-            renderer_listener = await wait_for_listener_state({8765}, present=True)
+            await forwarder.start()
+            await plaintext_recorder.start()
+            await renderer.start()
+            fixture_listeners = await wait_for_listener_state(fixture_ports, present=True)
             require(
-                all(not item["public_bind"] for item in renderer_listener),
-                "renderer fixture was publicly bound",
+                all(not item["public_bind"] for item in fixture_listeners),
+                "smoke fixture was publicly bound",
             )
-            evidence["renderer_listener"] = renderer_listener
+            evidence["fixture_listeners"] = fixture_listeners
             with arguments.log.open("wb") as log_handle:
                 evidence["scenarios"] = [
                     await run_service_scenario(
@@ -875,6 +1172,9 @@ async def execute_smoke(arguments: argparse.Namespace, evidence: dict[str, Any])
                         auth_file,
                         fingerprint,
                         renderer,
+                        rust_smoke_executable,
+                        forwarder,
+                        plaintext_recorder,
                         log_handle,
                         no_auth=False,
                     ),
@@ -885,20 +1185,41 @@ async def execute_smoke(arguments: argparse.Namespace, evidence: dict[str, Any])
                         auth_file,
                         fingerprint,
                         renderer,
+                        rust_smoke_executable,
+                        forwarder,
+                        plaintext_recorder,
                         log_handle,
                         no_auth=True,
                     ),
                 ]
         finally:
             await renderer.stop()
+            await forwarder.stop()
+            await plaintext_recorder.stop()
 
     evidence["post_cleanup_listeners"] = listeners_on_ports(
-        PUBLIC_PORTS | {8765, 8766, METRICS_PORT, 9001}
+        PUBLIC_PORTS
+        | {
+            8765,
+            8766,
+            METRICS_PORT,
+            9001,
+            DJ_TLS_RECORDER_PORT,
+            PINNED_PLAINTEXT_RECORDER_PORT,
+        }
     )
     remaining_owned = [
         item
         for item in evidence["post_cleanup_listeners"]
-        if item["port"] in PUBLIC_PORTS | {8765, 8766, METRICS_PORT}
+        if item["port"]
+        in PUBLIC_PORTS
+        | {
+            8765,
+            8766,
+            METRICS_PORT,
+            DJ_TLS_RECORDER_PORT,
+            PINNED_PLAINTEXT_RECORDER_PORT,
+        }
     ]
     require(not remaining_owned, f"temporary smoke listeners remain: {remaining_owned}")
     evidence["cleanup"] = {
@@ -917,6 +1238,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--log", required=True, type=Path)
+    parser.add_argument("--rust-smoke-executable", required=True, type=Path)
     arguments = parser.parse_args()
     arguments.output = arguments.output.resolve()
     arguments.log = arguments.log.resolve()
