@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import shutil
@@ -33,6 +34,19 @@ def elf_payload(machine: int) -> bytes:
     return bytes(header)
 
 
+def record_hash(payload: bytes) -> str:
+    digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=")
+    return f"sha256={digest.decode()}"
+
+
+def record_payload(files: dict[str, bytes], record_name: str) -> bytes:
+    rows = [
+        f"{name},{record_hash(payload)},{len(payload)}" for name, payload in sorted(files.items())
+    ]
+    rows.append(f"{record_name},,")
+    return ("\n".join(rows) + "\n").encode()
+
+
 def build_wheel(
     directory: Path,
     architecture: str,
@@ -47,6 +61,7 @@ def build_wheel(
     filename = f"tinydep-1.0.0-{python_tag}-{abi_tag}-{platform}.whl"
     wheel_path = directory / filename
     native_machine = machine if machine is not None else ARCHITECTURES[architecture]["machine"]
+    record_name = "tinydep-1.0.0.dist-info/RECORD"
     files = {
         "tinydep/__init__.py": b'VERSION = "1.0.0"\n',
         "tinydep-1.0.0.dist-info/METADATA": (
@@ -59,10 +74,10 @@ def build_wheel(
                 f"Tag: {python_tag}-{abi_tag}-{platform}\n"
             ).encode()
         ),
-        "tinydep-1.0.0.dist-info/RECORD": b"",
     }
     if include_native:
         files["tinydep/native.so"] = elf_payload(native_machine)
+    files[record_name] = record_payload(files, record_name)
     with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_STORED) as wheel:
         for name, payload in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
@@ -112,6 +127,30 @@ def run_lock(*arguments: object) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def extract_install(wheel_path: Path, destination: Path) -> Path:
+    site_packages = destination / "python/lib/python3.12/site-packages"
+    site_packages.mkdir(parents=True)
+    with zipfile.ZipFile(wheel_path) as wheel:
+        wheel.extractall(site_packages)
+    return site_packages
+
+
+def replace_recorded_file(site_packages: Path, relative_path: str, payload: bytes) -> None:
+    target = site_packages / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    record = site_packages / "tinydep-1.0.0.dist-info/RECORD"
+    rows = record.read_text(encoding="utf-8").splitlines()
+    replacement = f"{relative_path},{record_hash(payload)},{len(payload)}"
+    for index, row in enumerate(rows):
+        if row.split(",", 1)[0] == relative_path:
+            rows[index] = replacement
+            break
+    else:
+        rows.insert(-1, replacement)
+    record.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
 class RuntimeLockTests(unittest.TestCase):
@@ -170,9 +209,9 @@ class RuntimeLockTests(unittest.TestCase):
                     str(self.wheels[architecture]),
                 )
 
-                site_packages = self.root / f"installed-{architecture}"
-                with zipfile.ZipFile(self.wheels[architecture]) as wheel:
-                    wheel.extractall(site_packages)
+                site_packages = extract_install(
+                    self.wheels[architecture], self.root / f"installed-{architecture}"
+                )
                 install_result = run_lock(
                     "verify-install",
                     self.lock,
@@ -193,9 +232,7 @@ class RuntimeLockTests(unittest.TestCase):
         self.assert_rejected("linux-amd64", "extra wheels")
 
     def test_extra_installed_dependency_is_rejected(self) -> None:
-        site_packages = self.root / "extra-install"
-        with zipfile.ZipFile(self.wheels["linux-amd64"]) as wheel:
-            wheel.extractall(site_packages)
+        site_packages = extract_install(self.wheels["linux-amd64"], self.root / "extra-install")
         metadata = site_packages / "unexpected-9.0.dist-info/METADATA"
         metadata.parent.mkdir()
         metadata.write_text("Name: unexpected\nVersion: 9.0\n", encoding="utf-8")
@@ -294,9 +331,7 @@ class RuntimeLockTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_final_install_replaces_base_packages_and_is_reverified(self) -> None:
-        staged = self.root / "staged-install"
-        with zipfile.ZipFile(self.wheels["linux-amd64"]) as wheel:
-            wheel.extractall(staged)
+        staged = extract_install(self.wheels["linux-amd64"], self.root / "staged")
         final = self.root / "runtime/python/lib/python3.12/site-packages"
         extra_metadata = final / "pip-99.0.dist-info/METADATA"
         extra_metadata.parent.mkdir(parents=True)
@@ -318,9 +353,9 @@ class RuntimeLockTests(unittest.TestCase):
         cases = ("missing", "extra", "wrong-version")
         for case in cases:
             with self.subTest(case=case):
-                site_packages = self.root / f"final-{case}"
-                with zipfile.ZipFile(self.wheels["linux-amd64"]) as wheel:
-                    wheel.extractall(site_packages)
+                site_packages = extract_install(
+                    self.wheels["linux-amd64"], self.root / f"final-{case}"
+                )
                 metadata = site_packages / "tinydep-1.0.0.dist-info/METADATA"
                 if case == "missing":
                     shutil.rmtree(metadata.parent)
@@ -353,15 +388,139 @@ class RuntimeLockTests(unittest.TestCase):
                 "linux-arm64": wheel,
             },
         )
-        site_packages = self.root / "wrong-elf-install"
-        with zipfile.ZipFile(wheel) as archive:
-            archive.extractall(site_packages)
+        site_packages = extract_install(wheel, self.root / "wrong-elf-install")
         self.assert_rejected(
             "linux-arm64",
             "native ELF machine 62; expected 183",
             command="verify-install",
             target=site_packages,
         )
+
+    def test_record_closure_rejects_missing_tampered_unowned_and_invalid_rows(self) -> None:
+        for architecture in ARCHITECTURES:
+            cases = (
+                "removed",
+                "tampered",
+                "unowned",
+                "malformed",
+                "traversal",
+                "wrong-hash",
+                "wrong-size",
+                "duplicate",
+            )
+            for case in cases:
+                with self.subTest(architecture=architecture, case=case):
+                    site_packages = extract_install(
+                        self.wheels[architecture], self.root / f"record-{architecture}-{case}"
+                    )
+                    module = site_packages / "tinydep/__init__.py"
+                    record = site_packages / "tinydep-1.0.0.dist-info/RECORD"
+                    rows = record.read_text(encoding="utf-8").splitlines()
+                    module_index = next(
+                        index
+                        for index, row in enumerate(rows)
+                        if row.startswith("tinydep/__init__.py,")
+                    )
+                    expected = ""
+                    if case == "removed":
+                        module.unlink()
+                        expected = "RECORD file is missing"
+                    elif case == "tampered":
+                        original = module.read_bytes()
+                        module.write_bytes(bytes((original[0] ^ 1,)) + original[1:])
+                        expected = "RECORD SHA-256 mismatch"
+                    elif case == "unowned":
+                        (site_packages / "unowned.py").write_text("UNOWNED = True\n")
+                        expected = "unowned site-packages file"
+                    elif case == "malformed":
+                        rows[module_index] = "tinydep/__init__.py,sha256=bad"
+                        record.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                        expected = "malformed RECORD row"
+                    elif case == "traversal":
+                        rows.insert(0, "../../../../escape.py,,")
+                        record.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                        expected = "noncanonical RECORD path"
+                    elif case == "wrong-hash":
+                        fields = rows[module_index].split(",")
+                        fields[1] = "sha256=" + "A" * 43
+                        rows[module_index] = ",".join(fields)
+                        record.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                        expected = "RECORD SHA-256 mismatch"
+                    elif case == "wrong-size":
+                        fields = rows[module_index].split(",")
+                        fields[2] = str(int(fields[2]) + 1)
+                        rows[module_index] = ",".join(fields)
+                        record.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                        expected = "RECORD size mismatch"
+                    else:
+                        rows.insert(module_index, rows[module_index])
+                        record.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                        expected = "ambiguous RECORD ownership"
+                    self.assert_rejected(
+                        architecture,
+                        expected,
+                        command="verify-install",
+                        target=site_packages,
+                    )
+
+    def test_all_native_files_require_64_bit_elf_for_the_exact_architecture(self) -> None:
+        for architecture, details in ARCHITECTURES.items():
+            other_machine = 183 if details["machine"] == 62 else 62
+            cases = {
+                "non-elf-so": ("tinydep/native.so", b"not an ELF library\n", "not ELF"),
+                "non-elf-pyd": ("tinydep/native.pyd", b"MZ-not-ELF\n", "not ELF"),
+                "elf-without-extension": (
+                    "tinydep/native_blob",
+                    elf_payload(other_machine),
+                    f"ELF machine {other_machine}; expected {details['machine']}",
+                ),
+                "elf32": (
+                    "tinydep/native.so",
+                    bytes(bytearray(elf_payload(details["machine"]))[:4])
+                    + b"\x01"
+                    + elf_payload(details["machine"])[5:],
+                    "not 64-bit ELF",
+                ),
+            }
+            for case, (relative_path, payload, expected) in cases.items():
+                with self.subTest(architecture=architecture, case=case):
+                    site_packages = extract_install(
+                        self.wheels[architecture], self.root / f"native-{architecture}-{case}"
+                    )
+                    replace_recorded_file(site_packages, relative_path, payload)
+                    self.assert_rejected(
+                        architecture,
+                        expected,
+                        command="verify-install",
+                        target=site_packages,
+                    )
+
+    def test_builder_canonicalizes_pip_target_records_and_prunes_only_removed_tests(self) -> None:
+        site_packages = extract_install(
+            self.wheels["linux-amd64"], self.root / "normalized-install"
+        )
+        record = site_packages / "tinydep-1.0.0.dist-info/RECORD"
+        rows = record.read_text(encoding="utf-8").splitlines()
+        module_index = next(
+            index for index, row in enumerate(rows) if row.startswith("tinydep/__init__.py,")
+        )
+        rows[module_index] = "../../" + rows[module_index]
+        record.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        normalize_result = run_lock(
+            "normalize-target-records", self.lock, "linux-amd64", site_packages
+        )
+        self.assertEqual(normalize_result.returncode, 0, normalize_result.stderr)
+        self.assertNotIn("..", record.read_text(encoding="utf-8"))
+
+        removed_test = "tinydep/tests/test_removed.py"
+        replace_recorded_file(site_packages, removed_test, b"def test_removed(): pass\n")
+        shutil.rmtree(site_packages / "tinydep/tests")
+        prune_result = run_lock("prune-records", self.lock, "linux-amd64", site_packages)
+        self.assertEqual(prune_result.returncode, 0, prune_result.stderr)
+        self.assertNotIn(removed_test, record.read_text(encoding="utf-8"))
+        verify_result = run_lock("verify-install", self.lock, "linux-amd64", site_packages)
+        self.assertEqual(verify_result.returncode, 0, verify_result.stderr)
 
 
 if __name__ == "__main__":

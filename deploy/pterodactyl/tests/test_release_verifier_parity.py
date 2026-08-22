@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import shutil
@@ -13,6 +14,7 @@ import unittest
 import warnings
 import zipfile
 from pathlib import Path
+from typing import Any, Callable
 
 DEPLOY_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERIFIER = DEPLOY_ROOT / "release_archive.py"
@@ -57,6 +59,11 @@ SITE_PACKAGES = "mcav-vj/bin/{architecture}/python/lib/python3.12/site-packages"
 LOCKED_PACKAGE = "tinydep"
 LOCKED_VERSION = "1.0.0"
 LOCKED_METADATA = "tinydep-1.0.0.dist-info/METADATA"
+LOCKED_RECORD = "tinydep-1.0.0.dist-info/RECORD"
+LOCKED_WHEEL = "tinydep-1.0.0.dist-info/WHEEL"
+LOCKED_MODULE = "tinydep/__init__.py"
+LOCKED_NATIVE = "tinydep/native.so"
+ARCHITECTURE_MACHINES = {"linux-amd64": 62, "linux-arm64": 183}
 
 
 def elf_payload(machine: int) -> bytes:
@@ -66,15 +73,35 @@ def elf_payload(machine: int) -> bytes:
     return bytes(header)
 
 
+def record_hash(payload: bytes) -> str:
+    digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=")
+    return f"sha256={digest.decode()}"
+
+
+def installed_distribution_payloads(architecture: str) -> dict[str, bytes]:
+    prefix = SITE_PACKAGES.format(architecture=architecture)
+    relative_payloads = {
+        LOCKED_METADATA: installed_metadata_payload(),
+        LOCKED_WHEEL: b"Wheel-Version: 1.0\nGenerator: mcav-test\n",
+        LOCKED_MODULE: b'VERSION = "1.0.0"\n',
+        LOCKED_NATIVE: elf_payload(ARCHITECTURE_MACHINES[architecture]),
+    }
+    rows = [
+        f"{name},{record_hash(payload)},{len(payload)}"
+        for name, payload in sorted(relative_payloads.items())
+    ]
+    rows.append(f"{LOCKED_RECORD},,")
+    relative_payloads[LOCKED_RECORD] = ("\n".join(rows) + "\n").encode()
+    return {f"{prefix}/{name}": payload for name, payload in relative_payloads.items()}
+
+
 def base_payloads() -> dict[str, bytes]:
     payloads = {name: f"fixture:{name}\n".encode() for name in REQUIRED - {MANIFEST}}
     payloads["mcav-vj/bin/linux-amd64/python/bin/python3.12"] = elf_payload(62)
     payloads["mcav-vj/bin/linux-arm64/python/bin/python3.12"] = elf_payload(183)
     payloads["mcav-vj/release/runtime-lock.json"] = runtime_lock_payload()
     for architecture in ("linux-amd64", "linux-arm64"):
-        payloads[f"{SITE_PACKAGES.format(architecture=architecture)}/{LOCKED_METADATA}"] = (
-            installed_metadata_payload()
-        )
+        payloads.update(installed_distribution_payloads(architecture))
     payloads[OPTIONAL_PAYLOAD] = b"path validation fixture\n"
     payloads[MANIFEST] = manifest_payload(payloads)
     return payloads
@@ -116,6 +143,33 @@ def runtime_lock_payload() -> bytes:
 
 def installed_metadata_payload(*, version: str = LOCKED_VERSION) -> bytes:
     return f"Metadata-Version: 2.1\nName: {LOCKED_PACKAGE}\nVersion: {version}\n".encode()
+
+
+def replace_recorded_payload(
+    payloads: dict[str, bytes], architecture: str, relative_path: str, payload: bytes
+) -> None:
+    prefix = SITE_PACKAGES.format(architecture=architecture)
+    payloads[f"{prefix}/{relative_path}"] = payload
+    record_name = f"{prefix}/{LOCKED_RECORD}"
+    rows = payloads[record_name].decode().splitlines()
+    replacement = f"{relative_path},{record_hash(payload)},{len(payload)}"
+    for index, row in enumerate(rows):
+        if row.split(",", 1)[0] == relative_path:
+            rows[index] = replacement
+            break
+    else:
+        rows.insert(-1, replacement)
+    payloads[record_name] = ("\n".join(rows) + "\n").encode()
+
+
+def mutate_runtime_lock(
+    payloads: dict[str, bytes], mutation: Callable[[dict[str, Any]], None]
+) -> None:
+    lock = json.loads(payloads["mcav-vj/release/runtime-lock.json"])
+    mutation(lock)
+    payloads["mcav-vj/release/runtime-lock.json"] = (
+        json.dumps(lock, sort_keys=True) + "\n"
+    ).encode()
 
 
 def manifest_payload(payloads: dict[str, bytes]) -> bytes:
@@ -365,7 +419,7 @@ class ReleaseVerifierParityTests(unittest.TestCase):
                     payloads = base_payloads()
                     if case == "missing":
                         payloads.pop(metadata_name)
-                        expected = "missing installed dependencies"
+                        expected = "missing METADATA"
                     elif case == "extra":
                         extra_name = (
                             f"{SITE_PACKAGES.format(architecture=architecture)}/"
@@ -381,6 +435,143 @@ class ReleaseVerifierParityTests(unittest.TestCase):
                         self.write_case(f"runtime-closure-{architecture}-{case}", payloads),
                         expected,
                     )
+
+    def test_record_closure_rejections_are_identical_for_both_architectures(self) -> None:
+        cases = (
+            "removed",
+            "tampered",
+            "unowned",
+            "malformed",
+            "traversal",
+            "wrong-hash",
+            "wrong-size",
+            "duplicate",
+        )
+        for architecture in ARCHITECTURE_MACHINES:
+            prefix = SITE_PACKAGES.format(architecture=architecture)
+            module_name = f"{prefix}/{LOCKED_MODULE}"
+            record_name = f"{prefix}/{LOCKED_RECORD}"
+            for case in cases:
+                with self.subTest(architecture=architecture, case=case):
+                    payloads = base_payloads()
+                    rows = payloads[record_name].decode().splitlines()
+                    module_index = next(
+                        index
+                        for index, row in enumerate(rows)
+                        if row.startswith(f"{LOCKED_MODULE},")
+                    )
+                    expected = ""
+                    if case == "removed":
+                        payloads.pop(module_name)
+                        expected = "RECORD file is missing"
+                    elif case == "tampered":
+                        original = payloads[module_name]
+                        payloads[module_name] = bytes((original[0] ^ 1,)) + original[1:]
+                        expected = "RECORD SHA-256 mismatch"
+                    elif case == "unowned":
+                        payloads[f"{prefix}/unowned.py"] = b"UNOWNED = True\n"
+                        expected = "unowned site-packages file"
+                    elif case == "malformed":
+                        rows[module_index] = f"{LOCKED_MODULE},sha256=bad"
+                        payloads[record_name] = ("\n".join(rows) + "\n").encode()
+                        expected = "malformed RECORD row"
+                    elif case == "traversal":
+                        rows.insert(0, "../../../../escape.py,,")
+                        payloads[record_name] = ("\n".join(rows) + "\n").encode()
+                        expected = "noncanonical RECORD path"
+                    elif case == "wrong-hash":
+                        fields = rows[module_index].split(",")
+                        fields[1] = "sha256=" + "A" * 43
+                        rows[module_index] = ",".join(fields)
+                        payloads[record_name] = ("\n".join(rows) + "\n").encode()
+                        expected = "RECORD SHA-256 mismatch"
+                    elif case == "wrong-size":
+                        fields = rows[module_index].split(",")
+                        fields[2] = str(int(fields[2]) + 1)
+                        rows[module_index] = ",".join(fields)
+                        payloads[record_name] = ("\n".join(rows) + "\n").encode()
+                        expected = "RECORD size mismatch"
+                    else:
+                        rows.insert(module_index, rows[module_index])
+                        payloads[record_name] = ("\n".join(rows) + "\n").encode()
+                        expected = "ambiguous RECORD ownership"
+                    payloads[MANIFEST] = manifest_payload(payloads)
+                    self.assert_rejected(
+                        self.write_case(f"record-{architecture}-{case}", payloads), expected
+                    )
+
+    def test_every_native_site_package_file_is_elf64_for_the_exact_architecture(self) -> None:
+        for architecture, machine in ARCHITECTURE_MACHINES.items():
+            other_machine = 183 if machine == 62 else 62
+            elf32 = bytearray(elf_payload(machine))
+            elf32[4] = 1
+            cases = {
+                "non-elf-so": (LOCKED_NATIVE, b"not an ELF library\n", "not ELF"),
+                "non-elf-pyd": ("tinydep/native.pyd", b"MZ-not-ELF\n", "not ELF"),
+                "elf-without-extension": (
+                    "tinydep/native_blob",
+                    elf_payload(other_machine),
+                    f"ELF machine {other_machine}; expected {machine}",
+                ),
+                "elf32": (LOCKED_NATIVE, bytes(elf32), "not 64-bit ELF"),
+            }
+            for case, (relative_path, native_payload, expected) in cases.items():
+                with self.subTest(architecture=architecture, case=case):
+                    payloads = base_payloads()
+                    replace_recorded_payload(payloads, architecture, relative_path, native_payload)
+                    payloads[MANIFEST] = manifest_payload(payloads)
+                    self.assert_rejected(
+                        self.write_case(f"native-{architecture}-{case}", payloads), expected
+                    )
+
+    def test_malformed_runtime_lock_and_wheel_tags_are_rejected_by_both_verifiers(self) -> None:
+        def set_wrong_python(lock: dict[str, Any]) -> None:
+            lock["python"] = "3.11.9"
+
+        def set_wrong_platform_list(lock: dict[str, Any]) -> None:
+            lock["runtimes"]["linux-amd64"]["pip_platforms"] = ["manylinux_2_17_aarch64"]
+
+        def set_non_list_platforms(lock: dict[str, Any]) -> None:
+            lock["runtimes"]["linux-amd64"]["pip_platforms"] = "manylinux_2_17_x86_64"
+
+        def set_filename_tag(tag: str) -> Callable[[dict[str, Any]], None]:
+            def mutate(lock: dict[str, Any]) -> None:
+                lock["dependencies"][0]["wheels"]["linux-amd64"]["filename"] = (
+                    f"tinydep-1.0.0-{tag}.whl"
+                )
+
+            return mutate
+
+        cases = {
+            "wrong-python": set_wrong_python,
+            "wrong-platform-list": set_wrong_platform_list,
+            "non-list-platforms": set_non_list_platforms,
+            "wrong-python-tag": set_filename_tag("cp311-cp311-manylinux_2_17_x86_64"),
+            "wrong-abi-tag": set_filename_tag("cp312-cp311-manylinux_2_17_x86_64"),
+            "near-miss-platform-tag": set_filename_tag("cp312-cp312-manylinux_2_17_x86_64evil"),
+        }
+        for case, mutation in cases.items():
+            with self.subTest(case=case):
+                payloads = base_payloads()
+                mutate_runtime_lock(payloads, mutation)
+                payloads[MANIFEST] = manifest_payload(payloads)
+                self.assert_rejected(self.write_case(f"lock-{case}", payloads), "runtime lock")
+
+    def test_forbidden_names_are_case_insensitive_and_cover_test_spec_files(self) -> None:
+        invalid_names = (
+            "mcav-vj/TeStS/fixture.txt",
+            "mcav-vj/misc/fixture.TEST.js",
+            "mcav-vj/misc/fixture.Spec.JSON",
+        )
+        for invalid_name in invalid_names:
+            with self.subTest(invalid_name=invalid_name):
+                payloads = base_payloads()
+                payloads[invalid_name] = b"forbidden fixture\n"
+                payloads[MANIFEST] = manifest_payload(payloads)
+                self.assert_rejected(
+                    self.write_case("forbidden-" + invalid_name.replace("/", "-"), payloads),
+                    "forbidden",
+                )
 
 
 if __name__ == "__main__":

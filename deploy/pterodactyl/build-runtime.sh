@@ -90,6 +90,8 @@ for architecture in linux-amd64 linux-arm64; do
     "${platform_args[@]}" \
     --target "$install_root" \
     "${wheel_paths[@]}"
+  "$BUILD_PYTHON" "$LOCK_TOOL" normalize-target-records \
+    "$LOCK_FILE" "$architecture" "$install_root" > /dev/null
   "$BUILD_PYTHON" "$LOCK_TOOL" install-staged \
     "$LOCK_FILE" "$architecture" "$install_root" "$site_packages" > /dev/null
 
@@ -105,11 +107,14 @@ for architecture in linux-amd64 linux-arm64; do
   chmod 755 "$launcher" "$runtime_root/python/bin/python3.12"
 
   find "$runtime_root" -type d -name __pycache__ -prune -exec rm -rf {} +
-  find "$runtime_root/python" -type d \( -name test -o -name tests \) -prune -exec rm -rf {} +
+  find "$runtime_root/python" -type d \( -iname test -o -iname tests \) -prune -exec rm -rf {} +
+  find "$runtime_root/python" -type f \( -iname '*.test.*' -o -iname '*.spec.*' \) -delete
   find "$runtime_root" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
   rm -rf "$runtime_root/python/share" "$runtime_root/python/include" "$runtime_root/python/lib/pkgconfig"
   find "$runtime_root/python/bin" -mindepth 1 -maxdepth 1 ! -name python3.12 -delete
   find "$runtime_root/python" -type l -delete
+  "$BUILD_PYTHON" "$LOCK_TOOL" prune-records \
+    "$LOCK_FILE" "$architecture" "$site_packages" > /dev/null
   "$BUILD_PYTHON" "$LOCK_TOOL" verify-install \
     "$LOCK_FILE" "$architecture" "$site_packages" > /dev/null
 done
