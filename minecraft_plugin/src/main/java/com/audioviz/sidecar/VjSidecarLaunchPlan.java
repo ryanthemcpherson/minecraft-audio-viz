@@ -68,6 +68,12 @@ public final class VjSidecarLaunchPlan {
 
         String publicHost = environment.getOrDefault("MCAV_PUBLIC_HOST", "").strip();
         if (publicHost.isEmpty()) {
+            publicHost = readEnvironmentFileValue(
+                projectRoot.resolve("mcav.env"),
+                "MCAV_PUBLIC_HOST"
+            );
+        }
+        if (publicHost.isEmpty()) {
             throw new IllegalArgumentException("MCAV_PUBLIC_HOST is not configured");
         }
         Path versionFile = projectRoot.resolve("VERSION");
@@ -87,6 +93,23 @@ public final class VjSidecarLaunchPlan {
             releaseVersion,
             sharedSecret
         );
+    }
+
+    private static String readEnvironmentFileValue(Path path, String key) throws IOException {
+        if (!Files.isRegularFile(path)) {
+            return "";
+        }
+        for (String line : Files.readAllLines(path)) {
+            String stripped = line.strip();
+            if (stripped.isEmpty() || stripped.startsWith("#")) {
+                continue;
+            }
+            int separator = stripped.indexOf('=');
+            if (separator > 0 && stripped.substring(0, separator).strip().equals(key)) {
+                return stripped.substring(separator + 1).strip();
+            }
+        }
+        return "";
     }
 
     public List<String> bootstrapCommand() {

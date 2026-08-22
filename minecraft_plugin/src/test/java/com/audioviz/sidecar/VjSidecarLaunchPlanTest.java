@@ -76,6 +76,24 @@ class VjSidecarLaunchPlanTest {
     }
 
     @Test
+    void readsPublicHostFromMcavEnvironmentFileWithoutShellEvaluation() throws Exception {
+        Path pluginData = prepareBundle("linux-amd64");
+        Files.writeString(
+            temporaryDirectory.resolve("mcav-vj/mcav.env"),
+            "# operator configuration\nMCAV_PUBLIC_HOST=8.8.4.4\n"
+        );
+
+        VjSidecarLaunchPlan plan = VjSidecarLaunchPlan.create(
+            pluginData,
+            "amd64",
+            Map.of(),
+            SECRET
+        );
+
+        assertTrue(plan.serviceCommand().contains("https://8.8.4.4:8080"));
+    }
+
+    @Test
     void validatesCommittedIdentityFiles() throws Exception {
         Path pluginData = prepareBundle("linux-amd64");
         VjSidecarLaunchPlan plan = VjSidecarLaunchPlan.create(
