@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Executable contract tests for portable runtime wheel locking."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+SCRIPT = Path(__file__).resolve().parents[1] / "runtime_lock.py"
+ARCHITECTURES = {
+    "linux-amd64": {
+        "machine": 62,
+        "platform": "manylinux_2_17_x86_64",
+    },
+    "linux-arm64": {
+        "machine": 183,
+        "platform": "manylinux_2_17_aarch64",
+    },
+}
+
+
+def elf_payload(machine: int) -> bytes:
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    header[18:20] = machine.to_bytes(2, "little")
+    return bytes(header)
+
+
+def build_wheel(directory: Path, architecture: str, *, machine: int | None = None) -> Path:
+    platform = ARCHITECTURES[architecture]["platform"]
+    filename = f"tinydep-1.0.0-cp312-cp312-{platform}.whl"
+    wheel_path = directory / filename
+    native_machine = machine if machine is not None else ARCHITECTURES[architecture]["machine"]
+    files = {
+        "tinydep/__init__.py": b'VERSION = "1.0.0"\n',
+        "tinydep/native.so": elf_payload(native_machine),
+        "tinydep-1.0.0.dist-info/METADATA": (
+            b"Metadata-Version: 2.1\nName: tinydep\nVersion: 1.0.0\n"
+        ),
+        "tinydep-1.0.0.dist-info/WHEEL": (
+            b"Wheel-Version: 1.0\nGenerator: mcav-test\n"
+            + f"Root-Is-Purelib: false\nTag: cp312-cp312-{platform}\n".encode()
+        ),
+        "tinydep-1.0.0.dist-info/RECORD": b"",
+    }
+    with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_STORED) as wheel:
+        for name, payload in sorted(files.items()):
+            info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+            info.external_attr = 0o100644 << 16
+            wheel.writestr(info, payload)
+    return wheel_path
+
+
+def wheel_record(path: Path) -> dict[str, str]:
+    return {
+        "filename": path.name,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def write_lock(path: Path, wheels: dict[str, Path], *, version: str = "1.0.0") -> None:
+    lock = {
+        "schema_version": 1,
+        "python": "3.12.14",
+        "release": "test",
+        "runtimes": {
+            architecture: {
+                "url": f"https://example.invalid/{architecture}.tar.gz",
+                "sha256": "1" * 64,
+                "pip_platforms": [details["platform"]],
+            }
+            for architecture, details in ARCHITECTURES.items()
+        },
+        "dependencies": [
+            {
+                "name": "tinydep",
+                "version": version,
+                "wheels": {
+                    architecture: wheel_record(wheel_path)
+                    for architecture, wheel_path in wheels.items()
+                },
+            }
+        ],
+    }
+    path.write_text(json.dumps(lock), encoding="utf-8")
+
+
+def run_lock(*arguments: object) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *(str(argument) for argument in arguments)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+class RuntimeLockTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.wheelhouses: dict[str, Path] = {}
+        self.wheels: dict[str, Path] = {}
+        for architecture in ARCHITECTURES:
+            wheelhouse = self.root / architecture
+            wheelhouse.mkdir()
+            self.wheelhouses[architecture] = wheelhouse
+            self.wheels[architecture] = build_wheel(wheelhouse, architecture)
+        self.lock = self.root / "runtime-lock.json"
+        write_lock(self.lock, self.wheels)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def assert_rejected(
+        self,
+        architecture: str,
+        expected_error: str,
+        *,
+        command: str = "verify-wheelhouse",
+        target: Path | None = None,
+    ) -> None:
+        result = run_lock(
+            command,
+            self.lock,
+            architecture,
+            target or self.wheelhouses[architecture],
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(expected_error, result.stderr)
+
+    def test_valid_locked_wheelhouse_and_install_pass_for_each_architecture(self) -> None:
+        for architecture in ARCHITECTURES:
+            with self.subTest(architecture=architecture):
+                wheelhouse_result = run_lock(
+                    "verify-wheelhouse",
+                    self.lock,
+                    architecture,
+                    self.wheelhouses[architecture],
+                )
+                self.assertEqual(wheelhouse_result.returncode, 0, wheelhouse_result.stderr)
+                self.assertEqual(
+                    wheelhouse_result.stdout.strip(),
+                    str(self.wheels[architecture]),
+                )
+
+                site_packages = self.root / f"installed-{architecture}"
+                with zipfile.ZipFile(self.wheels[architecture]) as wheel:
+                    wheel.extractall(site_packages)
+                install_result = run_lock(
+                    "verify-install",
+                    self.lock,
+                    architecture,
+                    site_packages,
+                )
+                self.assertEqual(install_result.returncode, 0, install_result.stderr)
+                self.assertIn("tinydep==1.0.0", install_result.stdout)
+
+    def test_missing_locked_wheel_is_rejected(self) -> None:
+        self.wheels["linux-amd64"].unlink()
+        self.assert_rejected("linux-amd64", "missing locked wheels")
+
+    def test_extra_wheel_is_rejected(self) -> None:
+        (self.wheelhouses["linux-amd64"] / "unexpected-1.0.0-py3-none-any.whl").write_bytes(
+            b"unexpected"
+        )
+        self.assert_rejected("linux-amd64", "extra wheels")
+
+    def test_extra_installed_dependency_is_rejected(self) -> None:
+        site_packages = self.root / "extra-install"
+        with zipfile.ZipFile(self.wheels["linux-amd64"]) as wheel:
+            wheel.extractall(site_packages)
+        metadata = site_packages / "unexpected-9.0.dist-info/METADATA"
+        metadata.parent.mkdir()
+        metadata.write_text("Name: unexpected\nVersion: 9.0\n", encoding="utf-8")
+        self.assert_rejected(
+            "linux-amd64",
+            "extra installed dependencies: unexpected",
+            command="verify-install",
+            target=site_packages,
+        )
+
+    def test_wrong_wheel_hash_is_rejected(self) -> None:
+        lock = json.loads(self.lock.read_text(encoding="utf-8"))
+        lock["dependencies"][0]["wheels"]["linux-amd64"]["sha256"] = "0" * 64
+        self.lock.write_text(json.dumps(lock), encoding="utf-8")
+        self.assert_rejected("linux-amd64", "SHA-256 mismatch")
+
+    def test_wheel_metadata_version_must_match_lock(self) -> None:
+        write_lock(self.lock, self.wheels, version="2.0.0")
+        self.assert_rejected("linux-amd64", "metadata version 1.0.0 does not match 2.0.0")
+
+    def test_foreign_platform_wheel_is_rejected(self) -> None:
+        lock = json.loads(self.lock.read_text(encoding="utf-8"))
+        lock["dependencies"][0]["wheels"]["linux-arm64"] = wheel_record(self.wheels["linux-amd64"])
+        self.lock.write_text(json.dumps(lock), encoding="utf-8")
+        foreign = self.wheelhouses["linux-arm64"] / self.wheels["linux-amd64"].name
+        foreign.write_bytes(self.wheels["linux-amd64"].read_bytes())
+        self.wheels["linux-arm64"].unlink()
+        self.assert_rejected("linux-arm64", "is not compatible with linux-arm64")
+
+    def test_installed_native_elf_must_match_architecture(self) -> None:
+        wheel = build_wheel(
+            self.wheelhouses["linux-arm64"],
+            "linux-arm64",
+            machine=ARCHITECTURES["linux-amd64"]["machine"],
+        )
+        write_lock(
+            self.lock,
+            {
+                "linux-amd64": self.wheels["linux-amd64"],
+                "linux-arm64": wheel,
+            },
+        )
+        site_packages = self.root / "wrong-elf-install"
+        with zipfile.ZipFile(wheel) as archive:
+            archive.extractall(site_packages)
+        self.assert_rejected(
+            "linux-arm64",
+            "native ELF machine 62; expected 183",
+            command="verify-install",
+            target=site_packages,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

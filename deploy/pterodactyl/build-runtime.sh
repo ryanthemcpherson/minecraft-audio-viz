@@ -9,9 +9,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LOCK_FILE="$SCRIPT_DIR/runtime-lock.json"
+LOCK_TOOL="$SCRIPT_DIR/runtime_lock.py"
 OUTPUT_ROOT="$(mkdir -p "$1" && cd "$1" && pwd)"
 CACHE_DIR="$SCRIPT_DIR/.cache"
-mkdir -p "$CACHE_DIR" "$OUTPUT_ROOT/bin"
+TEMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TEMP_ROOT"' EXIT
+mkdir -p "$CACHE_DIR/wheels" "$OUTPUT_ROOT/bin"
 
 BUILD_PYTHON="$REPO_ROOT/vj_server/.venv/bin/python"
 if [[ ! -x "$BUILD_PYTHON" ]]; then
@@ -19,7 +22,7 @@ if [[ ! -x "$BUILD_PYTHON" ]]; then
 fi
 
 mapfile -t dependencies < <(
-  "$BUILD_PYTHON" -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["dependencies"]))' "$LOCK_FILE"
+  "$BUILD_PYTHON" "$LOCK_TOOL" requirements "$LOCK_FILE"
 )
 
 for architecture in linux-amd64 linux-arm64; do
@@ -27,6 +30,7 @@ for architecture in linux-amd64 linux-arm64; do
   expected_sha="$($BUILD_PYTHON -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtimes"][sys.argv[2]]["sha256"])' "$LOCK_FILE" "$architecture")"
   archive="$CACHE_DIR/${architecture}-python.tar.gz"
   runtime_root="$OUTPUT_ROOT/bin/$architecture"
+  wheelhouse="$CACHE_DIR/wheels/$architecture"
 
   if [[ ! -f "$archive" ]] || [[ "$(sha256sum "$archive" | cut -d' ' -f1)" != "$expected_sha" ]]; then
     rm -f "$archive"
@@ -43,25 +47,52 @@ for architecture in linux-amd64 linux-arm64; do
   mkdir -p "$runtime_root"
   tar -xzf "$archive" -C "$runtime_root"
   site_packages="$runtime_root/python/lib/python3.12/site-packages"
-  mkdir -p "$site_packages"
+  install_root="$TEMP_ROOT/install-$architecture"
+  mkdir -p "$site_packages" "$install_root"
 
-  pip_args=(
-    -m pip install
-    --disable-pip-version-check
-    --no-compile
-    --only-binary=:all:
-    --implementation cp
-    --python-version 3.12
-    --target "$site_packages"
-    --upgrade
-  )
   mapfile -t platforms < <(
     "$BUILD_PYTHON" -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["runtimes"][sys.argv[2]]["pip_platforms"]))' "$LOCK_FILE" "$architecture"
   )
+  platform_args=()
   for platform in "${platforms[@]}"; do
-    pip_args+=(--platform "$platform")
+    platform_args+=(--platform "$platform")
   done
-  "$BUILD_PYTHON" "${pip_args[@]}" "${dependencies[@]}"
+
+  if [[ ! -d "$wheelhouse" ]]; then
+    download_root="$TEMP_ROOT/wheels-$architecture"
+    mkdir -p "$download_root"
+    "$BUILD_PYTHON" -m pip download \
+      --disable-pip-version-check \
+      --no-deps \
+      --only-binary=:all: \
+      --implementation cp \
+      --python-version 3.12 \
+      "${platform_args[@]}" \
+      --dest "$download_root" \
+      "${dependencies[@]}"
+    "$BUILD_PYTHON" "$LOCK_TOOL" verify-wheelhouse \
+      "$LOCK_FILE" "$architecture" "$download_root" > /dev/null
+    mv "$download_root" "$wheelhouse"
+  fi
+
+  mapfile -t wheel_paths < <(
+    "$BUILD_PYTHON" "$LOCK_TOOL" verify-wheelhouse \
+      "$LOCK_FILE" "$architecture" "$wheelhouse"
+  )
+  "$BUILD_PYTHON" -m pip install \
+    --disable-pip-version-check \
+    --no-compile \
+    --no-deps \
+    --no-index \
+    --only-binary=:all: \
+    --implementation cp \
+    --python-version 3.12 \
+    "${platform_args[@]}" \
+    --target "$install_root" \
+    "${wheel_paths[@]}"
+  "$BUILD_PYTHON" "$LOCK_TOOL" verify-install \
+    "$LOCK_FILE" "$architecture" "$install_root" > /dev/null
+  cp -a "$install_root/." "$site_packages/"
 
   launcher="$runtime_root/audioviz-vj"
   printf '%s\n' \
