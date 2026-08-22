@@ -880,13 +880,14 @@ def _create_identity(
     release_version: str,
     public_ip: PublicIPAddress,
     command_runner: CommandRunner,
+    required_shared_secret: str | None = None,
 ) -> str:
     certificate, private_key, fingerprint = _generate_tls_material(
         paths,
         public_ip,
         command_runner,
     )
-    shared_secret = secrets.token_urlsafe(32)
+    shared_secret = required_shared_secret or secrets.token_urlsafe(32)
     admin_username = f"mcav-admin-{secrets.token_hex(3)}"
     admin_password = secrets.token_urlsafe(24)
     dj_username = f"mcav-dj-{secrets.token_hex(3)}"
@@ -988,11 +989,19 @@ def _ensure_identity(
     public_ip: PublicIPAddress,
     rotate_tls_identity: bool,
     command_runner: CommandRunner,
+    required_shared_secret: str | None = None,
 ) -> tuple[str, bool]:
     generation = _current_identity_generation(paths)
     if generation is None:
         if _has_complete_legacy_identity(paths):
             legacy_identity = _validate_legacy_identity(paths, command_runner)
+            if (
+                required_shared_secret is not None
+                and legacy_identity.shared_secret != required_shared_secret
+            ):
+                raise BootstrapError(
+                    "Existing plugin-managed shared secret does not match AudioViz config"
+                )
             if not rotate_tls_identity and legacy_identity.public_ip != public_ip:
                 raise BootstrapError(
                     "Existing TLS certificate does not cover MCAV_PUBLIC_HOST. "
@@ -1015,13 +1024,24 @@ def _ensure_identity(
             raise BootstrapError(
                 "--rotate-tls-identity requires an existing complete deployment identity"
             )
-        return _create_identity(paths, release_version, public_ip, command_runner), True
+        return (
+            _create_identity(
+                paths,
+                release_version,
+                public_ip,
+                command_runner,
+                required_shared_secret,
+            ),
+            True,
+        )
 
     shared_secret, identity_public_ip = _validate_existing_identity(
         paths,
         generation,
         command_runner,
     )
+    if required_shared_secret is not None and shared_secret != required_shared_secret:
+        raise BootstrapError("Existing plugin-managed shared secret does not match AudioViz config")
     _reconcile_identity_entrypoints(paths, generation)
     if rotate_tls_identity:
         _rotate_tls_identity(paths, generation, public_ip, command_runner)
@@ -1148,12 +1168,20 @@ def bootstrap_pterodactyl(
     http_port: int = PTERODACTYL_HTTP_PORT,
     dj_port: int = PTERODACTYL_DJ_PORT,
     unified_web: bool = True,
+    required_shared_secret: str | None = None,
     command_runner: CommandRunner = _run_command,
 ) -> BootstrapResult:
     """Bootstrap persistent identity, plugin, and loopback renderer configuration."""
     paths = BootstrapPaths(paths.project_root.resolve(), paths.plugins_dir.resolve())
     if public_host is None:
         raise BootstrapError("MCAV_PUBLIC_HOST must be a public IPv4 or IPv6 address")
+    if required_shared_secret is not None and (
+        len(required_shared_secret) < 32
+        or any(character.isspace() for character in required_shared_secret)
+    ):
+        raise BootstrapError(
+            "MINECRAFT_WS_SECRET must contain at least 32 non-whitespace characters"
+        )
     public_ip = parse_public_ip(public_host)
     _validate_pterodactyl_topology(http_port, dj_port, unified_web)
 
@@ -1165,6 +1193,7 @@ def bootstrap_pterodactyl(
                 public_ip,
                 True,
                 command_runner,
+                required_shared_secret,
             )
             return BootstrapResult(
                 credentials_created=credentials_created,
@@ -1184,6 +1213,7 @@ def bootstrap_pterodactyl(
             public_ip,
             False,
             command_runner,
+            required_shared_secret,
         )
         plugin_installed, backup_dir = _install_plugin(paths)
         config_updated, _ = _configure_plugin(paths, shared_secret, backup_dir)

@@ -139,6 +139,11 @@ Examples:
         help="Install persistent Pterodactyl identity, plugin, and renderer configuration, then exit",
     )
     parser.add_argument(
+        "--plugin-managed",
+        action="store_true",
+        help="Require the Minecraft shared secret from the plugin environment during bootstrap",
+    )
+    parser.add_argument(
         "--public-host",
         default=os.environ.get("MCAV_PUBLIC_HOST"),
         help="Public IPv4 or IPv6 address used by Pterodactyl TLS bootstrap",
@@ -233,6 +238,15 @@ Examples:
     if args.rotate_tls_identity and not (args.bootstrap_pterodactyl and args.public_host):
         print("ERROR: --rotate-tls-identity requires --bootstrap-pterodactyl and --public-host")
         return 2
+    if args.plugin_managed and not args.bootstrap_pterodactyl:
+        print("ERROR: --plugin-managed requires --bootstrap-pterodactyl")
+        return 2
+    required_shared_secret = None
+    if args.plugin_managed:
+        required_shared_secret = os.environ.get("MINECRAFT_WS_SECRET")
+        if not required_shared_secret:
+            print("ERROR: MINECRAFT_WS_SECRET is required in plugin-managed mode")
+            return 2
     if args.bootstrap_pterodactyl and not args.public_host:
         print("ERROR: --public-host is required with --bootstrap-pterodactyl")
         return 2
@@ -264,6 +278,7 @@ Examples:
                 http_port=args.http_port,
                 dj_port=args.port,
                 unified_web=args.unified_web,
+                required_shared_secret=required_shared_secret,
             )
         except BootstrapError as exc:
             print(f"ERROR: Pterodactyl bootstrap failed: {exc}")

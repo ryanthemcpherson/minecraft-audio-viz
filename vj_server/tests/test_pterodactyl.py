@@ -27,6 +27,7 @@ SECOND_PUBLIC_IPV4 = "1.1.1.1"
 THIRD_PUBLIC_IPV4 = "9.9.9.9"
 PUBLIC_IPV6 = "2606:4700:4700::1111"
 EXPANDED_PUBLIC_IPV6 = "2606:4700:4700:0:0:0:0:1111"
+PLUGIN_MANAGED_SECRET = "plugin-managed-secret-0123456789-abcdefgh"
 
 
 def write_plugin_jar(path: Path, payload: bytes = b"release") -> None:
@@ -313,6 +314,65 @@ def test_first_run_creates_secure_identity_and_plugin(bootstrap_paths: Bootstrap
     if os.name != "nt":
         assert bootstrap_paths.tls_key.stat().st_mode & 0o777 == 0o600
         assert bootstrap_paths.tls_cert.stat().st_mode & 0o777 == 0o644
+
+
+def test_plugin_managed_first_run_uses_required_shared_secret(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.2-event-rc2",
+        public_host=PUBLIC_IPV4,
+        required_shared_secret=PLUGIN_MANAGED_SECRET,
+    )
+
+    assert bootstrap_paths.runtime_env.read_text(encoding="utf-8") == (
+        f"MINECRAFT_WS_SECRET={PLUGIN_MANAGED_SECRET}\n"
+    )
+
+
+def test_plugin_managed_existing_secret_must_match_without_mutating_identity(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.2-event-rc2",
+        public_host=PUBLIC_IPV4,
+        required_shared_secret=PLUGIN_MANAGED_SECRET,
+    )
+    before = identity_snapshot(bootstrap_paths)
+
+    with pytest.raises(BootstrapError, match="plugin-managed shared secret does not match"):
+        bootstrap_pterodactyl(
+            bootstrap_paths,
+            "26.2-event-rc2",
+            public_host=PUBLIC_IPV4,
+            required_shared_secret="different-plugin-managed-secret-0123456789",
+        )
+
+    assert identity_snapshot(bootstrap_paths) == before
+
+
+def test_plugin_managed_existing_matching_secret_is_idempotent(
+    bootstrap_paths: BootstrapPaths,
+) -> None:
+    bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.2-event-rc2",
+        public_host=PUBLIC_IPV4,
+        required_shared_secret=PLUGIN_MANAGED_SECRET,
+    )
+    before = identity_snapshot(bootstrap_paths)
+
+    result = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.2-event-rc2",
+        public_host=PUBLIC_IPV4,
+        required_shared_secret=PLUGIN_MANAGED_SECRET,
+    )
+
+    assert result.credentials_created is False
+    assert identity_snapshot(bootstrap_paths) == before
 
 
 def test_first_run_commits_one_immutable_identity_generation(
@@ -1193,6 +1253,35 @@ def test_cli_rotation_requires_bootstrap_and_public_host(
         "--rotate-tls-identity requires --bootstrap-pterodactyl and --public-host"
         in capsys.readouterr().out
     )
+
+
+def test_cli_plugin_managed_bootstrap_requires_environment_secret(
+    bootstrap_paths: BootstrapPaths,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("MINECRAFT_WS_SECRET", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--bootstrap-pterodactyl",
+            "--plugin-managed",
+            "--project-root",
+            str(bootstrap_paths.project_root),
+            "--plugins-dir",
+            str(bootstrap_paths.plugins_dir),
+            "--public-host",
+            PUBLIC_IPV4,
+            "--unified-web",
+        ],
+    )
+
+    assert vj_server() == 2
+    output = capsys.readouterr().out
+    assert "MINECRAFT_WS_SECRET is required in plugin-managed mode" in output
+    assert PLUGIN_MANAGED_SECRET not in output
 
 
 def test_cli_explicitly_rotates_existing_tls_identity(
