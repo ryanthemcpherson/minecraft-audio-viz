@@ -35,7 +35,7 @@ if [[ "${1:-}" == "--bootstrap-pterodactyl" ]]; then
   canonical_host="${FAKE_CANONICAL_HOST:-8.8.8.8}"
   endpoint_host="$canonical_host"
   if [[ "$canonical_host" == *:* ]]; then endpoint_host="[$canonical_host]"; fi
-  printf 'ADMIN_URL=https://%s:8080/\nPREVIEW_URL=https://%s:8080/preview/\nDJ_ENDPOINT=wss://%s:25808\n' \
+  printf 'ADMIN_URL=https://%s:25927/\nPREVIEW_URL=https://%s:25927/preview/\nDJ_ENDPOINT=wss://%s:25808\n' \
     "$endpoint_host" "$endpoint_host" "$endpoint_host" > "$identity_dir/FIRST_LOGIN.txt"
   printf '{"public_host":"%s"}\n' "$canonical_host" > "$identity_dir/identity.json"
   ln -s 'identity-generations/test-generation' "$MCAV_ROOT/state/current-identity"
@@ -104,11 +104,11 @@ test_exact_paper_arguments_and_secure_vj_flags() {
   grep -Fx -- '--tls-key' "$fixture/vj.args" >/dev/null || fail 'TLS key flag missing'
   grep -Fx -- '--http-host' "$fixture/vj.args" >/dev/null || fail 'HTTP bind flag missing'
   assert_arg_value "$fixture/bootstrap.args" '--public-host' '8.8.8.8'
-  assert_arg_value "$fixture/bootstrap.args" '--http-port' '8080'
+  assert_arg_value "$fixture/bootstrap.args" '--http-port' '25927'
   assert_arg_value "$fixture/bootstrap.args" '--port' '25808'
   grep -Fx -- '--unified-web' "$fixture/bootstrap.args" >/dev/null || \
     fail 'bootstrap unified web flag missing'
-  assert_arg_value "$fixture/vj.args" '--http-port' '8080'
+  assert_arg_value "$fixture/vj.args" '--http-port' '25927'
   assert_arg_value "$fixture/vj.args" '--http-host' '0.0.0.0'
   assert_arg_value "$fixture/vj.args" '--dj-host' '0.0.0.0'
   assert_arg_value "$fixture/vj.args" '--port' '25808'
@@ -119,7 +119,7 @@ test_exact_paper_arguments_and_secure_vj_flags() {
   assert_arg_value "$fixture/vj.args" '--auth-file' "$identity_dir/dj_auth.json"
   assert_arg_value "$fixture/vj.args" '--tls-cert' "$identity_dir/tls.crt"
   assert_arg_value "$fixture/vj.args" '--tls-key' "$identity_dir/tls.key"
-  assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:8080'
+  assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:25927'
   grep -Fx -- '--unified-web' "$fixture/vj.args" >/dev/null || fail 'unified web flag missing'
   ! grep -Fx -- '--broadcast-port' "$fixture/vj.args" >/dev/null || \
     fail 'broadcast port must not be supplied in unified mode'
@@ -136,7 +136,7 @@ test_ipv6_public_origin_is_bracketed() {
   assert_arg_value \
     "$fixture/vj.args" \
     '--public-origin' \
-    'https://[2606:4700:4700::1111]:8080'
+    'https://[2606:4700:4700::1111]:25927'
   assert_arg_value "$fixture/vj.args" '--http-host' '::'
   assert_arg_value "$fixture/vj.args" '--dj-host' '::'
 }
@@ -146,7 +146,7 @@ test_runtime_origin_uses_canonical_generation_endpoints() {
   make_fixture "$fixture"
   TEST_MCAV_PUBLIC_HOST=' 8.8.8.8 ' FAKE_CANONICAL_HOST='8.8.8.8' \
     run_wrapper "$fixture" "$fixture/paper"
-  assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:8080'
+  assert_arg_value "$fixture/vj.args" '--public-origin' 'https://8.8.8.8:25927'
 
   fixture="$TEST_ROOT/canonical-expanded-ipv6"
   make_fixture "$fixture"
@@ -156,7 +156,7 @@ test_runtime_origin_uses_canonical_generation_endpoints() {
   assert_arg_value \
     "$fixture/vj.args" \
     '--public-origin' \
-    'https://[2606:4700:4700::1111]:8080'
+    'https://[2606:4700:4700::1111]:25927'
 }
 
 test_missing_public_host_still_starts_paper() {
@@ -215,7 +215,7 @@ test_example_environment_uses_two_public_ports() {
   cp "$SOURCE_DIR/mcav.env.example" "$fixture/mcav-vj/mcav.env"
   run_wrapper "$fixture" "$fixture/paper"
 
-  assert_arg_value "$fixture/vj.args" '--http-port' '8080'
+  assert_arg_value "$fixture/vj.args" '--http-port' '25927'
   assert_arg_value "$fixture/vj.args" '--port' '25808'
   grep -Fx -- '--unified-web' "$fixture/vj.args" >/dev/null || \
     fail 'example environment did not enable unified web mode'

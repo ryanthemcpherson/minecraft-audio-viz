@@ -202,8 +202,8 @@ def assert_current_identity_is_coherent(paths: BootstrapPaths) -> dict[str, str]
 
     assert login["TLS_SHA256_FINGERPRINT"] == metadata["sha256_fingerprint"]
     assert actual_fingerprint == metadata["sha256_fingerprint"]
-    assert login["ADMIN_URL"] == f"https://{endpoint_host}:8080/"
-    assert login["PREVIEW_URL"] == f"https://{endpoint_host}:8080/preview/"
+    assert login["ADMIN_URL"] == f"https://{endpoint_host}:25927/"
+    assert login["PREVIEW_URL"] == f"https://{endpoint_host}:25927/preview/"
     assert login["DJ_ENDPOINT"] == f"wss://{endpoint_host}:25808"
     assert pterodactyl.certificate_covers_ip(generation / "tls.crt", public_ip)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -273,7 +273,12 @@ def test_missing_public_host_is_rejected_before_identity_creation(
 
 
 def test_first_run_creates_secure_identity_and_plugin(bootstrap_paths: BootstrapPaths) -> None:
-    result = bootstrap_pterodactyl(bootstrap_paths, "26.1", public_host=PUBLIC_IPV4)
+    result = bootstrap_pterodactyl(
+        bootstrap_paths,
+        "26.1",
+        public_host=PUBLIC_IPV4,
+        http_port=25927,
+    )
 
     assert result.credentials_created is True
     assert (bootstrap_paths.plugins_dir / "AudioViz.jar").is_file()
@@ -288,10 +293,11 @@ def test_first_run_creates_secure_identity_and_plugin(bootstrap_paths: Bootstrap
     assert verify_password(admin_password, auth["vj_operators"][admin_id]["key_hash"])
     assert "MINECRAFT_WS_SECRET" not in first_login
     assert re.search(r"TLS_SHA256_FINGERPRINT=[0-9a-f]{64}$", first_login, re.MULTILINE)
-    assert "ADMIN_URL=https://8.8.8.8:8080/" in first_login
-    assert "PREVIEW_URL=https://8.8.8.8:8080/preview/" in first_login
+    assert "ADMIN_URL=https://8.8.8.8:25927/" in first_login
+    assert "PREVIEW_URL=https://8.8.8.8:25927/preview/" in first_login
     assert "DJ_ENDPOINT=wss://8.8.8.8:25808" in first_login
     metadata = json.loads(bootstrap_paths.identity_metadata.read_text(encoding="utf-8"))
+    assert metadata["http_port"] == 25927
     assert metadata["public_bind_host"] == "0.0.0.0"
     assert pterodactyl.certificate_covers_ip(
         bootstrap_paths.tls_cert,
@@ -405,8 +411,8 @@ def test_first_run_formats_ipv6_san_and_endpoints(bootstrap_paths: BootstrapPath
     bootstrap_pterodactyl(bootstrap_paths, "26.1", public_host=PUBLIC_IPV6)
 
     first_login = bootstrap_paths.first_login.read_text(encoding="utf-8")
-    assert "ADMIN_URL=https://[2606:4700:4700::1111]:8080/" in first_login
-    assert "PREVIEW_URL=https://[2606:4700:4700::1111]:8080/preview/" in first_login
+    assert "ADMIN_URL=https://[2606:4700:4700::1111]:25927/" in first_login
+    assert "PREVIEW_URL=https://[2606:4700:4700::1111]:25927/preview/" in first_login
     assert "DJ_ENDPOINT=wss://[2606:4700:4700::1111]:25808" in first_login
     metadata = json.loads(bootstrap_paths.identity_metadata.read_text(encoding="utf-8"))
     assert metadata["public_bind_host"] == "::"
@@ -463,7 +469,7 @@ def test_existing_wrong_san_requires_exact_explicit_rotation_command(
             "--public-host",
             SECOND_PUBLIC_IPV4,
             "--http-port",
-            "8080",
+            "25927",
             "--port",
             "25808",
             "--unified-web",
@@ -530,7 +536,7 @@ def test_explicit_rotation_replaces_only_tls_and_endpoint_metadata(
         if key in {"ADMIN_USERNAME", "ADMIN_PASSWORD", "DJ_USERNAME", "DJ_PASSWORD"}
     } == old_credentials
     login = bootstrap_paths.first_login.read_text(encoding="utf-8")
-    assert "ADMIN_URL=https://1.1.1.1:8080/" in login
+    assert "ADMIN_URL=https://1.1.1.1:25927/" in login
     assert "DJ_ENDPOINT=wss://1.1.1.1:25808" in login
     assert pterodactyl.certificate_covers_ip(
         bootstrap_paths.tls_cert,
@@ -972,7 +978,7 @@ def test_matching_fd0b918_flat_identity_is_adopted_with_canonical_ipv6_origin(
     metadata = assert_current_identity_is_coherent(bootstrap_paths)
     assert metadata["public_host"] == PUBLIC_IPV6
     assert first_login_values(bootstrap_paths)["ADMIN_URL"] == (
-        "https://[2606:4700:4700::1111]:8080/"
+        "https://[2606:4700:4700::1111]:25927/"
     )
     assert bootstrap_paths.tls_key.stat().st_mode & 0o777 == 0o600
 
@@ -1222,7 +1228,7 @@ def test_rejects_release_jar_with_wrong_plugin_name(bootstrap_paths: BootstrapPa
 @pytest.mark.parametrize(
     "topology_override",
     [
-        {"http_port": 8081},
+        {"http_port": 8080},
         {"dj_port": 9000},
         {"unified_web": False},
     ],
@@ -1231,7 +1237,7 @@ def test_bootstrap_rejects_non_exact_pterodactyl_topology(
     bootstrap_paths: BootstrapPaths,
     topology_override: dict[str, int | bool],
 ) -> None:
-    with pytest.raises(BootstrapError, match="HTTP 8080, DJ 25808, and unified web"):
+    with pytest.raises(BootstrapError, match="HTTP 25927, DJ 25808, and unified web"):
         bootstrap_pterodactyl(
             bootstrap_paths,
             "26.1-test",
@@ -1305,7 +1311,7 @@ def test_cli_explicitly_rotates_existing_tls_identity(
             "--public-host",
             SECOND_PUBLIC_IPV4,
             "--http-port",
-            "8080",
+            "25927",
             "--port",
             "25808",
             "--unified-web",
@@ -1340,9 +1346,9 @@ def test_bootstrap_cli_rejects_public_listener_port_collision(
             PUBLIC_IPV4,
             "--unified-web",
             "--http-port",
-            "8080",
+            "25927",
             "--port",
-            "8080",
+            "25927",
         ],
     )
 
@@ -1356,7 +1362,7 @@ def test_pterodactyl_operator_guide_exposes_only_the_two_tls_ports() -> None:
     deployment = (repository_root / "docs/deployment/PTERODACTYL.md").read_text(encoding="utf-8")
     allocation_section = deployment.split("## Allocations", 1)[1].split("##", 1)[0]
 
-    assert re.findall(r"(?m)^- `(\d+)`", allocation_section) == ["8080", "25808"]
+    assert re.findall(r"(?m)^- `(\d+)`", allocation_section) == ["25927", "25808"]
     assert "/ws" in allocation_section
     assert "8766" not in allocation_section
     assert "9000" not in allocation_section

@@ -1,10 +1,10 @@
-# MCAV 26.2 Event RC2 — Pterodactyl Server Installation
+# MCAV 26.1.2 Event RC3 — Pterodactyl Server Installation
 
 This package runs the Paper plugin and VJ service together in the existing Java 25 server container. It does not require node access, Docker changes, system Python, npm, or a second Pterodactyl server.
 
 ## Upload
 
-1. Stop Paper, download `mcav-pterodactyl-26.2-event-rc2.zip`, and verify its SHA-256 against the published checksum.
+1. Stop Paper, download `mcav-pterodactyl-26.1.2-event-rc3.zip`, and verify its SHA-256 against the published checksum.
 2. If the Pterodactyl file manager has **Unarchive**, upload the ZIP to the server root and unarchive it there.
 3. If only SFTP is available, extract the ZIP on your computer and upload both resulting folders to the SFTP root.
 
@@ -22,7 +22,7 @@ The plugin starts and owns the bundled VJ process automatically. The two copies 
 
 Assign exactly these two public TCP allocations to the same Pterodactyl server:
 
-- `8080` — admin HTTPS, preview HTTPS, and same-origin browser WSS at `/ws`
+- `25927` — admin HTTPS, preview HTTPS, and same-origin browser WSS at `/ws`
 - `25808` — DJ WSS
 
 The Minecraft game allocation does not change.
@@ -40,7 +40,7 @@ Copy `/home/container/mcav-vj/mcav.env.example` to `/home/container/mcav-vj/mcav
 
 ```text
 MCAV_PUBLIC_HOST=<public-ip>
-HTTP_PORT=8080
+HTTP_PORT=25927
 VJ_SERVER_PORT=25808
 UNIFIED_WEB=true
 ```
@@ -61,12 +61,13 @@ java -Xms128M -Xmx8G -jar server.jar nogui
 Start Paper normally. `AudioViz.jar` bootstraps the bundled runtime asynchronously and
 keeps bootstrap and process I/O away from the Minecraft tick thread.
 
-### RC1 rollback
+### RC2 and RC1 rollback
 
-The published `event-2026-08-23-rc1` release remains available. To roll back, stop
-Paper, restore the prior plugin JAR and RC1 `mcav-vj` folder, then use the RC1 wrapper
-startup command documented on that release. Do not mix an RC1 plugin with the RC2
-runtime.
+The published `event-2026-08-23-rc2` and `event-2026-08-23-rc1` releases remain
+available. To roll back, stop Paper and restore the complete matching plugin, `mcav-vj`
+folder, environment, and identity backup. RC2 uses web port `8080` with unchanged Paper
+startup; RC1 uses the wrapper command documented on that release. Do not mix files,
+state, or startup instructions across release candidates.
 
 ## Trust the admin certificate
 
@@ -101,7 +102,7 @@ Both commands hash the certificate's DER bytes. Compare the resulting 64 hexadec
 
 Import the verified `state/tls.crt` into the administrator machine's trusted root certificate store. Do this on every machine that opens the admin panel or preview. Do not click through a browser warning as trust-on-first-use; verify and import the downloaded certificate first.
 
-Open the exact `ADMIN_URL` and `PREVIEW_URL` from `FIRST_LOGIN.txt`, then sign in with `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Browser credentials remain in memory only and are cleared on sign-out or tab close. Live browser state and controls use the same `8080` origin at `/ws`; there is no third browser allocation.
+Open the exact `ADMIN_URL` and `PREVIEW_URL` from `FIRST_LOGIN.txt`, then sign in with `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Browser credentials remain in memory only and are cleared on sign-out or tab close. Live browser state and controls use the same `25927` origin at `/ws`; there is no third browser allocation.
 
 ## Configure each DJ
 
@@ -123,7 +124,7 @@ Rotate when the public IP changes, the certificate expires, or a certificate/pri
   --project-root /home/container/mcav-vj \
   --plugins-dir /home/container/plugins \
   --public-host <new-public-ip> \
-  --http-port 8080 \
+  --http-port 25927 \
   --port 25808 \
   --unified-web \
   --rotate-tls-identity
@@ -152,7 +153,7 @@ The wrapper prints a specific `[MCAV VJ]` error and still starts Paper when VJ b
 
 - **Missing or invalid public IP:** set `MCAV_PUBLIC_HOST` to the externally reachable public IP literal. No new identity is committed until validation succeeds.
 - **Certificate does not cover the configured IP:** preserve `state/`, then run the explicit rotation command above with the new public IP. Never delete the old identity to force regeneration.
-- **Topology rejected:** restore `HTTP_PORT=8080`, `VJ_SERVER_PORT=25808`, and `UNIFIED_WEB=true`; remove `BROADCAST_PORT` from `mcav.env` and Pterodactyl variables.
+- **Topology rejected:** restore `HTTP_PORT=25927`, `VJ_SERVER_PORT=25808`, and `UNIFIED_WEB=true`; remove `BROADCAST_PORT` from `mcav.env` and Pterodactyl variables.
 - **Port bind failed:** stop the duplicate process or correct the two allocations, then restart. Do not expose the renderer, metrics, or legacy browser port.
 - **Partial or inconsistent identity:** stop and preserve the entire `mcav-vj/state` directory plus `FIRST_LOGIN.txt`. Restore those paths together from one known-good backup or identity generation; never mix files from different generations.
 - **Plugin installation failed:** inspect the console error and restore the latest matching JAR/config backup from `/home/container/mcav-vj/backups/` before restarting.

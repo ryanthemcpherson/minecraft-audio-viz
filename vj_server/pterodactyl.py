@@ -111,7 +111,7 @@ class _LegacyIdentity:
 
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 PublicIPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
-PTERODACTYL_HTTP_PORT = 8080
+PTERODACTYL_HTTP_PORT = 25927
 PTERODACTYL_DJ_PORT = 25808
 
 
@@ -183,7 +183,7 @@ def _validate_pterodactyl_topology(
     unified_web: bool,
 ) -> None:
     if http_port != PTERODACTYL_HTTP_PORT or dj_port != PTERODACTYL_DJ_PORT or not unified_web:
-        raise BootstrapError("Pterodactyl requires HTTP 8080, DJ 25808, and unified web")
+        raise BootstrapError("Pterodactyl requires HTTP 25927, DJ 25808, and unified web")
 
 
 @contextmanager

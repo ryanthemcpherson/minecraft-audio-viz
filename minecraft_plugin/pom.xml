@@ -10,12 +10,12 @@
     <packaging>jar</packaging>
 
     <name>AudioViz</name>
-    <description>Real-time audio visualization for Paper 26.2 using Display Entities</description>
+    <description>Real-time audio visualization for Paper 26.1.2 using Display Entities</description>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <paper.version>26.2.build.112-stable</paper.version>
+        <paper.version>26.1.2.build.74-stable</paper.version>
         <mockito.version>5.23.0</mockito.version>
     </properties>
 

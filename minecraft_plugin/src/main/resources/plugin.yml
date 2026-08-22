@@ -1,8 +1,8 @@
 name: AudioViz
 version: ${project.version}
 main: com.audioviz.AudioVizPlugin
-api-version: '26.2'
-description: Real-time audio visualization for Paper 26.2 using Display Entities
+api-version: '26.1.2'
+description: Real-time audio visualization for Paper 26.1.2 using Display Entities
 
 authors:
   - AudioViz Team

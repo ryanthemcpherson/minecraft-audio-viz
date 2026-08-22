@@ -23,7 +23,7 @@ cargo build --release --manifest-path dj_client/src-tauri/Cargo.toml \
 When that build runs on Windows and the harness runs in WSL, pass the WSL path
 to `packaged_pin_smoke.exe` under `target/release/examples/`.
 
-The host must provide `openssl` and `ss`, and ports `8080`, `25808`, `8765`,
+The host must provide `openssl` and `ss`, and ports `25927`, `25808`, `8765`,
 `8766`, `19001`, `25809`, and `25810` must be free. The harness never stops an
 existing process; it records conflicts and fails before launch. Ports `25809`
 and `25810` are loopback-only recorders and are never deployment listeners.

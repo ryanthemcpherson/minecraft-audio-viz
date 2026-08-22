@@ -40,7 +40,7 @@ if [[ -z "${MCAV_PUBLIC_HOST:-}" ]]; then
   launch_paper
 fi
 public_host="${MCAV_PUBLIC_HOST:?MCAV_PUBLIC_HOST must be the public server IP}"
-http_port="${HTTP_PORT:-8080}"
+http_port="${HTTP_PORT:-25927}"
 dj_port="${VJ_SERVER_PORT:-25808}"
 metrics_port="${METRICS_PORT:-9001}"
 entity_count="${ENTITY_COUNT:-160}"
@@ -53,8 +53,8 @@ case "${UNIFIED_WEB:-true}" in
     unified_web_enabled=false
     ;;
 esac
-if [[ "$http_port" != '8080' || "$dj_port" != '25808' || "$unified_web_enabled" != 'true' || -n "${BROADCAST_PORT+x}" ]]; then
-  log 'Pterodactyl requires HTTP_PORT=8080, VJ_SERVER_PORT=25808, unified web, and no BROADCAST_PORT; VJ is disabled for this start.' >&2
+if [[ "$http_port" != '25927' || "$dj_port" != '25808' || "$unified_web_enabled" != 'true' || -n "${BROADCAST_PORT+x}" ]]; then
+  log 'Pterodactyl requires HTTP_PORT=25927, VJ_SERVER_PORT=25808, unified web, and no BROADCAST_PORT; VJ is disabled for this start.' >&2
   launch_paper
 fi
 

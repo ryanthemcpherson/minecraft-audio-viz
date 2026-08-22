@@ -115,8 +115,8 @@ Examples:
     parser.add_argument(
         "--http-port",
         type=validate_port,
-        default=int(os.environ.get("HTTP_PORT", "8080")),
-        help="HTTPS/HTTP port for admin panel (default: 8080 or $HTTP_PORT)",
+        default=int(os.environ.get("HTTP_PORT", "25927")),
+        help="HTTPS/HTTP port for admin panel (default: 25927 or $HTTP_PORT)",
     )
     parser.add_argument(
         "--unified-web",

@@ -31,8 +31,8 @@ from websockets.exceptions import ConnectionClosed
 from yarl import URL
 
 DEPLOY_ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_ORIGIN = "https://127.0.0.1:8080"
-PUBLIC_PORTS = {8080, 25808}
+PUBLIC_ORIGIN = "https://127.0.0.1:25927"
+PUBLIC_PORTS = {25927, 25808}
 INTERNAL_PORTS = {8765, 8766, 9001}
 METRICS_PORT = 19001
 DJ_TLS_RECORDER_PORT = 25809
@@ -1056,7 +1056,7 @@ def service_command(
         "--http-host",
         "0.0.0.0",
         "--http-port",
-        "8080",
+        "25927",
         "--unified-web",
         "--public-origin",
         PUBLIC_ORIGIN,

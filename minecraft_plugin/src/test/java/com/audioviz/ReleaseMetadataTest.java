@@ -11,13 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReleaseMetadataTest {
     @Test
-    void filteredPluginMetadataTargetsPaper262() throws IOException {
+    void filteredPluginMetadataTargetsPaper2612() throws IOException {
         try (InputStream stream = getClass().getClassLoader().getResourceAsStream("plugin.yml")) {
             assertNotNull(stream);
             String metadata = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(metadata.contains("version: 1.2.0-rc.1"));
-            assertTrue(metadata.contains("api-version: '26.2'"));
-            assertTrue(metadata.contains("Paper 26.2"));
+            assertTrue(metadata.contains("api-version: '26.1.2'"));
+            assertTrue(metadata.contains("Paper 26.1.2"));
         }
     }
 }
