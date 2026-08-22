@@ -95,10 +95,15 @@ runtime_lock = json.loads(
     (repository_root / "deploy/pterodactyl/runtime-lock.json").read_text(encoding="utf-8")
 )
 locked_dependencies = {
-    name.casefold(): version
+    dependency["name"].casefold(): dependency["version"]
     for dependency in runtime_lock["dependencies"]
-    for name, version in [dependency.split("==", 1)]
 }
+assert runtime_lock["schema_version"] == 1
+for dependency in runtime_lock["dependencies"]:
+    assert dependency["wheels"].keys() == {"linux-amd64", "linux-arm64"}
+    for wheel in dependency["wheels"].values():
+        assert wheel["filename"].endswith(".whl")
+        assert re.fullmatch(r"[0-9a-f]{64}", wheel["sha256"])
 expected_aiohttp_closure = {
     "aiohttp": "3.14.3",
     "aiohappyeyeballs": "2.7.1",
@@ -201,5 +206,8 @@ if bash "$SCRIPT_DIR/build-release.sh" \
 fi
 grep -q 'linux-arm64 Python executable has ELF machine 62; expected 183' \
   "$TEMP_ROOT/wrong-architecture.log"
+
+python3 "$SCRIPT_DIR/tests/test_runtime_lock.py"
+python3 "$SCRIPT_DIR/tests/test_release_verifier_parity.py"
 
 printf 'Pterodactyl release packaging test passed.\n'

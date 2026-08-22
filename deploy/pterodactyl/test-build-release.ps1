@@ -23,6 +23,26 @@ function Write-FixtureFile {
     [IO.File]::WriteAllText($path, $Content, [Text.UTF8Encoding]::new($false))
 }
 
+function Write-ElfFixture {
+    param(
+        [string]$RelativePath,
+        [int]$Machine
+    )
+
+    $path = Join-Path $mcavRoot $RelativePath
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+    $header = [byte[]]::new(64)
+    $header[0] = 0x7f
+    $header[1] = 0x45
+    $header[2] = 0x4c
+    $header[3] = 0x46
+    $header[4] = 2
+    $header[5] = 1
+    $header[18] = $Machine -band 0xff
+    $header[19] = ($Machine -shr 8) -band 0xff
+    [IO.File]::WriteAllBytes($path, $header)
+}
+
 function Get-ArchiveNames {
     param([string]$Path)
 
@@ -74,17 +94,32 @@ try {
     foreach ($relativePath in @(
         'start-mcav.sh',
         'VERSION',
+        'mcav.env.example',
         'release/AudioViz.jar',
         'release/plugin-config.default.yml',
+        'release/runtime-lock.json',
         'bin/linux-amd64/audioviz-vj',
         'bin/linux-amd64/python/bin/python3.12',
         'bin/linux-arm64/audioviz-vj',
         'bin/linux-arm64/python/bin/python3.12',
         'admin_panel/index.html',
-        'preview_tool/frontend/index.html'
+        'admin_panel/runtime-config.js',
+        'preview_tool/frontend/index.html',
+        'preview_tool/frontend/runtime-config.js',
+        'vj_server/__init__.py',
+        'vj_server/auth.py',
+        'vj_server/cli.py',
+        'vj_server/config.py',
+        'vj_server/patterns.py',
+        'vj_server/vj_server.py',
+        'vj_server/web_gateway.py',
+        'patterns/lib.lua',
+        'patterns/bars.lua'
     )) {
         Write-FixtureFile -RelativePath $relativePath
     }
+    Write-ElfFixture -RelativePath 'bin/linux-amd64/python/bin/python3.12' -Machine 62
+    Write-ElfFixture -RelativePath 'bin/linux-arm64/python/bin/python3.12' -Machine 183
     Write-FixtureFile -RelativePath 'admin_panel/tests/control.test.mjs'
     Write-FixtureFile -RelativePath 'preview_tool/frontend/component.spec.mjs'
 
