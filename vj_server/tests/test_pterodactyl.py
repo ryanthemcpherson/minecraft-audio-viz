@@ -290,6 +290,8 @@ def test_first_run_creates_secure_identity_and_plugin(bootstrap_paths: Bootstrap
     assert "ADMIN_URL=https://8.8.8.8:8080/" in first_login
     assert "PREVIEW_URL=https://8.8.8.8:8080/preview/" in first_login
     assert "DJ_ENDPOINT=wss://8.8.8.8:25808" in first_login
+    metadata = json.loads(bootstrap_paths.identity_metadata.read_text(encoding="utf-8"))
+    assert metadata["public_bind_host"] == "0.0.0.0"
     assert pterodactyl.certificate_covers_ip(
         bootstrap_paths.tls_cert,
         ipaddress.ip_address(PUBLIC_IPV4),
@@ -346,6 +348,8 @@ def test_first_run_formats_ipv6_san_and_endpoints(bootstrap_paths: BootstrapPath
     assert "ADMIN_URL=https://[2606:4700:4700::1111]:8080/" in first_login
     assert "PREVIEW_URL=https://[2606:4700:4700::1111]:8080/preview/" in first_login
     assert "DJ_ENDPOINT=wss://[2606:4700:4700::1111]:25808" in first_login
+    metadata = json.loads(bootstrap_paths.identity_metadata.read_text(encoding="utf-8"))
+    assert metadata["public_bind_host"] == "::"
     assert pterodactyl.certificate_covers_ip(
         bootstrap_paths.tls_cert,
         ipaddress.ip_address(PUBLIC_IPV6),

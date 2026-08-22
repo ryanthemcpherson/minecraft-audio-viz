@@ -142,6 +142,10 @@ if [[ -z "$admin_url" || -z "$preview_url" || -z "$dj_endpoint" ]]; then
   launch_paper
 fi
 public_origin="${admin_url%/}"
+case "$admin_url" in
+  'https://['*) public_bind_host='::' ;;
+  *) public_bind_host='0.0.0.0' ;;
+esac
 web_arguments=(--unified-web --public-origin "$public_origin")
 
 log 'Starting authenticated HTTPS/WSS VJ service.'
@@ -150,8 +154,9 @@ MINECRAFT_WS_SECRET="$shared_secret" "$runtime" \
   --minecraft-host 127.0.0.1 \
   --minecraft-port 8765 \
   --auth-file "$identity_dir/dj_auth.json" \
-  --http-host 0.0.0.0 \
+  --http-host "$public_bind_host" \
   --http-port "$http_port" \
+  --dj-host "$public_bind_host" \
   --port "$dj_port" \
   "${web_arguments[@]}" \
   --metrics-port "$metrics_port" \

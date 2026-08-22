@@ -120,6 +120,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
     def __init__(
         self,
         dj_port: int = 9000,
+        dj_host: str = "0.0.0.0",
         broadcast_port: int = 8766,
         http_port: int = 8080,
         http_host: str = "127.0.0.1",
@@ -142,6 +143,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         public_origin: str | None = None,
     ):
         self.dj_port = dj_port
+        self.dj_host = validate_http_bind_host(dj_host)
         self.broadcast_port = broadcast_port
         self.http_port = http_port
         self.http_host = validate_http_bind_host(http_host)
@@ -1304,13 +1306,14 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             # Start DJ listener (64KB max message — valid audio frames are ~200 bytes)
             dj_server = await ws_serve(
                 self._handle_dj_connection,
-                "0.0.0.0",
+                self.dj_host,
                 self.dj_port,
                 max_size=65_536,
                 ssl=listener_ssl_context,
             )
             dj_scheme = "wss" if listener_ssl_context is not None else "ws"
-            logger.info(f"DJ WebSocket server: {dj_scheme}://localhost:{self.dj_port}")
+            dj_log_host = f"[{self.dj_host}]" if ":" in self.dj_host else self.dj_host
+            logger.info("DJ WebSocket server: %s://%s:%s", dj_scheme, dj_log_host, self.dj_port)
 
             if not self.unified_web:
                 # Start split-port browser listener for legacy deployments.
@@ -1497,6 +1500,12 @@ async def main():
         help="Port for DJ connections (default: 9000)",
     )
     parser.add_argument(
+        "--dj-host",
+        type=_validate_http_host,
+        default=os.environ.get("DJ_HOST", "0.0.0.0"),
+        help="Bind host for DJ connections (default: 0.0.0.0 or $DJ_HOST)",
+    )
+    parser.add_argument(
         "--broadcast-port",
         type=_validate_port,
         default=8766,
@@ -1567,6 +1576,7 @@ async def main():
     # Create server
     server = VJServer(
         dj_port=args.dj_port,
+        dj_host=args.dj_host,
         broadcast_port=args.broadcast_port,
         http_port=args.http_port,
         http_host=args.http_host,

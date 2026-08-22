@@ -165,7 +165,7 @@ async def test_unified_mode_snapshots_tls_context_before_listener_startup(
 
     assert gateway_contexts == [original_context]
     assert dj_contexts == [original_context]
-    assert "DJ WebSocket server: wss://localhost:25808" in caplog.messages
+    assert "DJ WebSocket server: wss://0.0.0.0:25808" in caplog.messages
 
 
 @pytest.mark.parametrize(
@@ -225,6 +225,10 @@ def test_modern_cli_propagates_unified_web_options(
             "--unified-web",
             "--public-origin",
             "https://203.0.113.9:18080",
+            "--http-host",
+            "::",
+            "--dj-host",
+            "::",
             "--tls-cert",
             str(cert_file),
             "--tls-key",
@@ -235,6 +239,8 @@ def test_modern_cli_propagates_unified_web_options(
     assert cli_module.vj_server() == 0
     assert captured["unified_web"] is True
     assert captured["public_origin"] == "https://203.0.113.9:18080"
+    assert captured["http_host"] == "::"
+    assert captured["dj_host"] == "::"
 
 
 @pytest.mark.asyncio
@@ -258,13 +264,13 @@ async def test_unified_mode_starts_gateway_without_legacy_browser_listener(
             cleanup_calls += 1
 
     async def fake_gateway(*args, **_kwargs):
-        starts.append(("gateway", args[2]))
+        starts.append((f"gateway:{args[1]}", args[2]))
         assert isinstance(args[4], UnifiedWebConfig)
         assert args[4].public_origin == "https://203.0.113.9:18080"
         return FakeGatewayRunner()
 
-    async def fake_ws_serve(_handler, _host, port, **_kwargs):
-        starts.append(("websocket", port))
+    async def fake_ws_serve(_handler, host, port, **_kwargs):
+        starts.append((f"websocket:{host}", port))
         return FakeListener()
 
     async def no_op():
@@ -281,7 +287,12 @@ async def test_unified_mode_starts_gateway_without_legacy_browser_listener(
         "Thread",
         lambda **_kwargs: pytest.fail("unified mode started the legacy HTTP thread"),
     )
-    server = _make_unified_server(monkeypatch, broadcast_port=18766)
+    server = _make_unified_server(
+        monkeypatch,
+        broadcast_port=18766,
+        http_host="::",
+        dj_host="::",
+    )
     server._skip_minecraft = True
     server._pattern_hot_reload_enabled = False
     server._init_coordinator = no_op
@@ -294,8 +305,8 @@ async def test_unified_mode_starts_gateway_without_legacy_browser_listener(
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert starts.count(("gateway", 18080)) == 1
-    assert starts.count(("websocket", server.dj_port)) == 1
+    assert starts.count(("gateway:::", 18080)) == 1
+    assert starts.count(("websocket:::", server.dj_port)) == 1
     assert all(port != 18766 for _kind, port in starts)
     assert cleanup_calls == 1
 

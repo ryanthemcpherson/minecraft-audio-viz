@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import ssl
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -389,5 +390,35 @@ async def test_start_unified_web_gateway_returns_live_runner(tmp_path: Path) -> 
         assert runner.sites
         assert all(site._server is not None for site in runner.sites)
         assert all(site._ssl_context is ssl_context for site in runner.sites)
+    finally:
+        await runner.cleanup()
+
+
+async def test_unified_web_gateway_binds_ipv6_when_supported(tmp_path: Path) -> None:
+    if not socket.has_ipv6:
+        pytest.skip("host has no IPv6 support")
+    probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        probe.bind(("::1", 0))
+    except OSError:
+        pytest.skip("IPv6 loopback is unavailable")
+    finally:
+        probe.close()
+
+    (tmp_path / "admin_panel").mkdir()
+    (tmp_path / "preview_tool" / "frontend").mkdir(parents=True)
+    runner = await start_unified_web_gateway(
+        _recording_browser_handler,
+        "::1",
+        0,
+        ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER),
+        UnifiedWebConfig(project_root=tmp_path, public_origin="https://[::1]:8080"),
+    )
+    try:
+        site = next(iter(runner.sites))
+        sockets = site._server.sockets  # type: ignore[union-attr]
+        assert sockets
+        assert all(bound.family == socket.AF_INET6 for bound in sockets)
+        assert all(bound.getsockname()[0] == "::1" for bound in sockets)
     finally:
         await runner.cleanup()
