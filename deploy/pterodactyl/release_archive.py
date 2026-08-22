@@ -20,8 +20,10 @@ from pathlib import Path
 from runtime_lock import LockError, normalize_package_name, validate_lock
 
 ARCHIVE_ROOT = "mcav-vj/"
+INSTALLED_PLUGIN = "plugins/AudioViz.jar"
 MANIFEST_NAME = "mcav-vj/MANIFEST.sha256"
 REQUIRED_ENTRIES = {
+    INSTALLED_PLUGIN,
     "mcav-vj/start-mcav.sh",
     "mcav-vj/VERSION",
     "mcav-vj/mcav.env.example",
@@ -163,6 +165,15 @@ def create_archive(release_root: Path, archive_path: Path) -> None:
                 with file_path.open("rb") as source, release_zip.open(archive_info, "w") as target:
                     while chunk := source.read(1024 * 1024):
                         target.write(chunk)
+            installed_plugin = release_root.parent / INSTALLED_PLUGIN
+            if installed_plugin.is_file():
+                archive_info = zipfile.ZipInfo.from_file(installed_plugin, INSTALLED_PLUGIN)
+                archive_info.create_system = 3
+                archive_info.external_attr = (
+                    stat.S_IFREG | stat.S_IMODE(installed_plugin.stat().st_mode)
+                ) << 16
+                archive_info.compress_type = zipfile.ZIP_DEFLATED
+                release_zip.writestr(archive_info, installed_plugin.read_bytes())
         os.replace(temporary_path, archive_path)
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -375,8 +386,14 @@ def verify_archive(archive_path: Path) -> int:
                     f"{casefolded_names[casefolded_name]} and {entry.filename}"
                 )
             casefolded_names[casefolded_name] = entry.filename
-        if any(not name.startswith(ARCHIVE_ROOT) for name in names):
-            raise ValueError(f"Every release entry must be under {ARCHIVE_ROOT}")
+        unexpected_entries = [
+            name for name in names if not name.startswith(ARCHIVE_ROOT) and name != INSTALLED_PLUGIN
+        ]
+        if unexpected_entries:
+            raise ValueError(
+                f"Unexpected release entries outside {ARCHIVE_ROOT}: "
+                f"{', '.join(unexpected_entries)}"
+            )
 
         missing_entries = REQUIRED_ENTRIES.difference(names)
         if missing_entries:
@@ -402,6 +419,10 @@ def verify_archive(archive_path: Path) -> int:
             )
 
         entries_by_name = {entry.filename: entry for entry in entries}
+        if sha256_bytes(release_zip.read(INSTALLED_PLUGIN)) != sha256_bytes(
+            release_zip.read("mcav-vj/release/AudioViz.jar")
+        ):
+            raise ValueError("Installed and release plugin JAR digests do not match")
         for executable_name in EXECUTABLE_ENTRIES:
             unix_mode = entries_by_name[executable_name].external_attr >> 16
             if unix_mode & 0o111 == 0:
@@ -417,7 +438,11 @@ def verify_archive(archive_path: Path) -> int:
                 )
 
         manifest = parse_manifest(release_zip.read(MANIFEST_NAME))
-        payload_names = {name.removeprefix(ARCHIVE_ROOT) for name in names if name != MANIFEST_NAME}
+        payload_names = {
+            name.removeprefix(ARCHIVE_ROOT)
+            for name in names
+            if name.startswith(ARCHIVE_ROOT) and name != MANIFEST_NAME
+        }
         if manifest.keys() != payload_names:
             missing_manifest = sorted(payload_names.difference(manifest))
             extra_manifest = sorted(manifest.keys() - payload_names)

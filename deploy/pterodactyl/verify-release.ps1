@@ -751,11 +751,16 @@ try {
             throw "Noncanonical ZIP entry: $($entry.FullName)"
         }
     }
-    if ($names | Where-Object { -not $_.StartsWith('mcav-vj/', [StringComparison]::Ordinal) }) {
-        throw 'Every release entry must be under the single mcav-vj/ root.'
+    $unexpectedEntries = @($names | Where-Object {
+        -not $_.StartsWith('mcav-vj/', [StringComparison]::Ordinal) -and
+        $_ -cne 'plugins/AudioViz.jar'
+    })
+    if ($unexpectedEntries) {
+        throw "Unexpected release entries outside mcav-vj/: $($unexpectedEntries -join ', ')"
     }
 
     $required = @(
+        'plugins/AudioViz.jar',
         'mcav-vj/start-mcav.sh',
         'mcav-vj/VERSION',
         'mcav-vj/mcav.env.example',
@@ -854,7 +859,10 @@ try {
     }
 
     $payloadNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($entry in $entries | Where-Object FullName -cne 'mcav-vj/MANIFEST.sha256') {
+    foreach ($entry in $entries | Where-Object {
+        $_.FullName.StartsWith('mcav-vj/', [StringComparison]::Ordinal) -and
+        $_.FullName -cne 'mcav-vj/MANIFEST.sha256'
+    }) {
         [void]$payloadNames.Add($entry.FullName.Substring('mcav-vj/'.Length))
     }
     $missingManifest = @($payloadNames | Where-Object { -not $manifest.ContainsKey($_) } | Sort-Object)
@@ -865,7 +873,19 @@ try {
 
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        foreach ($entry in $entries | Where-Object FullName -cne 'mcav-vj/MANIFEST.sha256') {
+        $installedPluginStream = $entriesByName['plugins/AudioViz.jar'].Open()
+        try { $installedPluginHash = [Convert]::ToHexString($sha.ComputeHash($installedPluginStream)) }
+        finally { $installedPluginStream.Dispose() }
+        $releasePluginStream = $entriesByName['mcav-vj/release/AudioViz.jar'].Open()
+        try { $releasePluginHash = [Convert]::ToHexString($sha.ComputeHash($releasePluginStream)) }
+        finally { $releasePluginStream.Dispose() }
+        if ($installedPluginHash -cne $releasePluginHash) {
+            throw 'Installed and release plugin JAR digests do not match'
+        }
+        foreach ($entry in $entries | Where-Object {
+            $_.FullName.StartsWith('mcav-vj/', [StringComparison]::Ordinal) -and
+            $_.FullName -cne 'mcav-vj/MANIFEST.sha256'
+        }) {
             $relative = $entry.FullName.Substring('mcav-vj/'.Length)
             $stream = $entry.Open()
             try { $actual = [Convert]::ToHexString($sha.ComputeHash($stream)).ToLowerInvariant() }
