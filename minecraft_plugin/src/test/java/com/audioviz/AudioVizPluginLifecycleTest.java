@@ -1,6 +1,8 @@
 package com.audioviz;
 
 import com.audioviz.metrics.MetricsDisplay;
+import com.audioviz.sidecar.VjSidecarLaunchPlan;
+import com.audioviz.sidecar.VjSidecarManager;
 import com.audioviz.websocket.VizWebSocketServer;
 import com.audioviz.websocket.WebSocketSecretManager;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -9,6 +11,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -18,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doNothing;
@@ -30,6 +35,30 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AudioVizPluginLifecycleTest {
+
+    @Test
+    void persistedSecretStartsSidecarManager() throws Exception {
+        AudioVizPlugin plugin = mock(AudioVizPlugin.class, CALLS_REAL_METHODS);
+        VjSidecarLaunchPlan plan = mock(VjSidecarLaunchPlan.class);
+        VjSidecarManager manager = mock(VjSidecarManager.class);
+        WebSocketSecretManager.SecretResolution resolution =
+            new WebSocketSecretManager.SecretResolution(
+                "plugin-managed-secret-0123456789-abcdefgh",
+                false
+            );
+        doReturn(Path.of("plugins", "AudioViz").toFile()).when(plugin).getDataFolder();
+        doReturn(plan).when(plugin).createVjSidecarLaunchPlan(
+            org.mockito.ArgumentMatchers.any(Path.class),
+            anyString(),
+            anyMap(),
+            anyString()
+        );
+        doReturn(manager).when(plugin).createVjSidecarManager(plan);
+
+        plugin.startVjSidecar(resolution, Map.of("MCAV_PUBLIC_HOST", "8.8.8.8"), "amd64");
+
+        verify(manager).start();
+    }
 
     @Test
     void generatedSecretIsPersistedBeforeWebSocketStartup() {
@@ -100,14 +129,17 @@ class AudioVizPluginLifecycleTest {
         AudioVizPlugin plugin = mock(AudioVizPlugin.class, CALLS_REAL_METHODS);
         WebSocketStartupManager<VizWebSocketServer> startupManager =
             mock(WebSocketStartupManager.class);
+        VjSidecarManager sidecarManager = mock(VjSidecarManager.class);
         MetricsDisplay metricsDisplay = mock(MetricsDisplay.class);
         doReturn(Logger.getLogger(getClass().getName())).when(plugin).getLogger();
         setField(plugin, "webSocketStartupManager", startupManager);
+        setField(plugin, "vjSidecarManager", sidecarManager);
         setField(plugin, "metricsDisplay", metricsDisplay);
 
         plugin.onDisable();
 
-        InOrder shutdownOrder = inOrder(startupManager, metricsDisplay);
+        InOrder shutdownOrder = inOrder(sidecarManager, startupManager, metricsDisplay);
+        shutdownOrder.verify(sidecarManager).stop();
         shutdownOrder.verify(startupManager).stop();
         shutdownOrder.verify(metricsDisplay).stop();
     }

@@ -6,7 +6,7 @@
 
     <groupId>com.audioviz</groupId>
     <artifactId>audioviz-plugin</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0-rc.1</version>
     <packaging>jar</packaging>
 
     <name>AudioViz</name>
