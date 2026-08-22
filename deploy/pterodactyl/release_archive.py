@@ -79,6 +79,11 @@ FORBIDDEN_ENTRIES = {
     "mcav-vj/state/tls.key",
     "mcav-vj/FIRST_LOGIN.txt",
 }
+WINDOWS_ZIP_SYSTEM = 0
+DOS_DIRECTORY_ATTRIBUTE = 0x10
+DOS_DEVICE_ATTRIBUTE = 0x40
+DOS_REPARSE_POINT_ATTRIBUTE = 0x400
+UNSAFE_DOS_ATTRIBUTES = DOS_DEVICE_ATTRIBUTE | DOS_REPARSE_POINT_ATTRIBUTE
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -95,6 +100,31 @@ def validate_canonical_path(path: str, description: str) -> None:
         or any(component in {"", ".", ".."} for component in components)
     ):
         raise ValueError(f"Noncanonical {description}: {path}")
+
+
+def validate_zip_entry_type(entry: zipfile.ZipInfo) -> bool:
+    unix_mode = (entry.external_attr >> 16) & 0xFFFF
+    unix_type = stat.S_IFMT(unix_mode)
+    dos_attributes = entry.external_attr & 0xFFFF
+    path_is_directory = entry.is_dir()
+
+    if dos_attributes & UNSAFE_DOS_ATTRIBUTES:
+        raise ValueError(f"Unsafe Windows ZIP entry attributes: {entry.filename}")
+    if unix_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
+        raise ValueError(f"Non-regular ZIP entry type: {entry.filename}")
+
+    if unix_type == 0:
+        if entry.create_system != WINDOWS_ZIP_SYSTEM:
+            raise ValueError(f"Ambiguous ZIP entry type metadata: {entry.filename}")
+        metadata_is_directory = bool(dos_attributes & DOS_DIRECTORY_ATTRIBUTE)
+    else:
+        metadata_is_directory = unix_type == stat.S_IFDIR
+        if dos_attributes & DOS_DIRECTORY_ATTRIBUTE and not metadata_is_directory:
+            raise ValueError(f"ZIP entry type does not match path: {entry.filename}")
+
+    if metadata_is_directory != path_is_directory:
+        raise ValueError(f"ZIP entry type does not match path: {entry.filename}")
+    return metadata_is_directory
 
 
 def write_manifest(release_root: Path) -> None:
@@ -334,7 +364,7 @@ def verify_archive(archive_path: Path) -> int:
         casefolded_names: dict[str, str] = {}
         for entry in entries:
             validate_canonical_path(entry.filename, "ZIP entry")
-            if entry.is_dir():
+            if validate_zip_entry_type(entry):
                 raise ValueError(f"Noncanonical ZIP entry: {entry.filename}")
             casefolded_name = entry.filename.casefold()
             if casefolded_name in casefolded_names:

@@ -76,6 +76,233 @@ function Get-ZipEntryBytes {
     }
 }
 
+function Assert-ZipEntryType {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchiveEntry]$Entry,
+        [Parameter(Mandatory = $true)]
+        [int]$MadeByPlatform
+    )
+
+    $unixMode = ($Entry.ExternalAttributes -shr 16) -band 0xFFFF
+    $unixType = $unixMode -band 0xF000
+    $dosAttributes = $Entry.ExternalAttributes -band 0xFFFF
+    $pathIsDirectory = $Entry.FullName.EndsWith('/', [StringComparison]::Ordinal)
+
+    if (($dosAttributes -band 0x440) -ne 0) {
+        throw "Unsafe Windows ZIP entry attributes: $($Entry.FullName)"
+    }
+    if ($unixType -notin @(0, 0x4000, 0x8000)) {
+        throw "Non-regular ZIP entry type: $($Entry.FullName)"
+    }
+
+    if ($unixType -eq 0) {
+        if ($MadeByPlatform -ne 0) {
+            throw "Ambiguous ZIP entry type metadata: $($Entry.FullName)"
+        }
+        $metadataIsDirectory = ($dosAttributes -band 0x10) -ne 0
+    } else {
+        $metadataIsDirectory = $unixType -eq 0x4000
+        if (($dosAttributes -band 0x10) -ne 0 -and -not $metadataIsDirectory) {
+            throw "ZIP entry type does not match path: $($Entry.FullName)"
+        }
+    }
+
+    if ($metadataIsDirectory -ne $pathIsDirectory) {
+        throw "ZIP entry type does not match path: $($Entry.FullName)"
+    }
+    return $metadataIsDirectory
+}
+
+function Get-ZipCentralDirectoryPlatforms {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][object[]]$Entries
+    )
+
+    $stream = [System.IO.File]::Open(
+        $ArchivePath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read
+    )
+    $reader = [System.IO.BinaryReader]::new($stream, [System.Text.Encoding]::UTF8, $true)
+    try {
+        if ($stream.Length -lt 22) { throw 'ZIP end-of-central-directory record is missing' }
+        $tailLength = [int][Math]::Min(65557L, $stream.Length)
+        $stream.Position = $stream.Length - $tailLength
+        $tail = $reader.ReadBytes($tailLength)
+        if ($tail.Length -ne $tailLength) { throw 'Cannot read ZIP central-directory trailer' }
+
+        $eocdIndex = -1
+        for ($index = $tail.Length - 22; $index -ge 0; $index--) {
+            if ([BitConverter]::ToUInt32($tail, $index) -ne 0x06054B50) { continue }
+            $commentLength = [BitConverter]::ToUInt16($tail, $index + 20)
+            if ($index + 22 + $commentLength -eq $tail.Length) {
+                $eocdIndex = $index
+                break
+            }
+        }
+        if ($eocdIndex -lt 0) { throw 'ZIP end-of-central-directory record is missing' }
+
+        $eocdOffset = $stream.Length - $tailLength + $eocdIndex
+        $diskNumber = [BitConverter]::ToUInt16($tail, $eocdIndex + 4)
+        $centralDirectoryDisk = [BitConverter]::ToUInt16($tail, $eocdIndex + 6)
+        $entriesOnDisk16 = [BitConverter]::ToUInt16($tail, $eocdIndex + 8)
+        $entryCount16 = [BitConverter]::ToUInt16($tail, $eocdIndex + 10)
+        $centralSize32 = [BitConverter]::ToUInt32($tail, $eocdIndex + 12)
+        $centralOffset32 = [BitConverter]::ToUInt32($tail, $eocdIndex + 16)
+        $usesZip64 = $entriesOnDisk16 -eq 0xFFFF -or $entryCount16 -eq 0xFFFF -or
+            $centralSize32 -eq [uint32]::MaxValue -or
+            $centralOffset32 -eq [uint32]::MaxValue
+
+        if ($usesZip64) {
+            $locatorOffset = $eocdOffset - 20
+            if ($locatorOffset -lt 0) { throw 'ZIP64 locator is missing' }
+            $stream.Position = $locatorOffset
+            $locator = $reader.ReadBytes(20)
+            if ($locator.Length -ne 20 -or [BitConverter]::ToUInt32($locator, 0) -ne 0x07064B50) {
+                throw 'ZIP64 locator is missing'
+            }
+            if ([BitConverter]::ToUInt32($locator, 4) -ne 0 -or
+                [BitConverter]::ToUInt32($locator, 16) -ne 1) {
+                throw 'Multi-disk ZIP archives are not supported'
+            }
+            $zip64OffsetValue = [BitConverter]::ToUInt64($locator, 8)
+            if ($zip64OffsetValue -gt [uint64][long]::MaxValue) {
+                throw 'ZIP64 end-of-central-directory offset is out of range'
+            }
+            $zip64Offset = [long]$zip64OffsetValue
+            if ($zip64Offset -lt 0 -or $zip64Offset + 56 -gt $locatorOffset) {
+                throw 'ZIP64 end-of-central-directory record is invalid'
+            }
+            $stream.Position = $zip64Offset
+            $zip64Header = $reader.ReadBytes(56)
+            if ($zip64Header.Length -ne 56 -or
+                [BitConverter]::ToUInt32($zip64Header, 0) -ne 0x06064B50) {
+                throw 'ZIP64 end-of-central-directory record is invalid'
+            }
+            $zip64RecordSize = [BitConverter]::ToUInt64($zip64Header, 4)
+            if ($zip64RecordSize -lt 44 -or
+                $zip64RecordSize -gt [uint64][long]::MaxValue -or
+                $zip64Offset + 12 + [long]$zip64RecordSize -ne $locatorOffset) {
+                throw 'ZIP64 end-of-central-directory record is invalid'
+            }
+            if ([BitConverter]::ToUInt32($zip64Header, 16) -ne 0 -or
+                [BitConverter]::ToUInt32($zip64Header, 20) -ne 0) {
+                throw 'Multi-disk ZIP archives are not supported'
+            }
+            $entriesOnDisk64 = [BitConverter]::ToUInt64($zip64Header, 24)
+            $entryCount64 = [BitConverter]::ToUInt64($zip64Header, 32)
+            if ($entriesOnDisk64 -ne $entryCount64) {
+                throw 'Multi-disk ZIP archives are not supported'
+            }
+            $centralSizeValue = [BitConverter]::ToUInt64($zip64Header, 40)
+            $centralOffsetValue = [BitConverter]::ToUInt64($zip64Header, 48)
+            if ($entryCount64 -gt [uint64][int]::MaxValue -or
+                $centralSizeValue -gt [uint64][long]::MaxValue -or
+                $centralOffsetValue -gt [uint64][long]::MaxValue) {
+                throw 'ZIP64 central directory is too large'
+            }
+            if (($entriesOnDisk16 -ne 0xFFFF -and $entriesOnDisk16 -ne $entriesOnDisk64) -or
+                ($entryCount16 -ne 0xFFFF -and $entryCount16 -ne $entryCount64) -or
+                ($centralSize32 -ne [uint32]::MaxValue -and
+                    $centralSize32 -ne $centralSizeValue) -or
+                ($centralOffset32 -ne [uint32]::MaxValue -and
+                    $centralOffset32 -ne $centralOffsetValue)) {
+                throw 'ZIP64 central-directory metadata is inconsistent'
+            }
+            $entryCount = [int]$entryCount64
+            $centralSize = [long]$centralSizeValue
+            $centralOffset = [long]$centralOffsetValue
+            $expectedCentralEnd = $zip64Offset
+        } else {
+            if ($diskNumber -ne 0 -or $centralDirectoryDisk -ne 0 -or
+                $entriesOnDisk16 -ne $entryCount16) {
+                throw 'Multi-disk ZIP archives are not supported'
+            }
+            $entryCount = [int]$entryCount16
+            $centralSize = [long]$centralSize32
+            $centralOffset = [long]$centralOffset32
+            $expectedCentralEnd = $eocdOffset
+        }
+
+        if ($entryCount -ne $Entries.Count) {
+            throw 'ZIP central-directory entry count does not match ZipArchive'
+        }
+        if ($centralOffset -lt 0 -or $centralSize -lt 0 -or
+            $centralOffset -gt $expectedCentralEnd -or
+            $centralSize -ne ($expectedCentralEnd - $centralOffset)) {
+            throw 'ZIP central-directory bounds are invalid'
+        }
+
+        $platforms = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+        $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+        $legacyEncoding = $null
+        $stream.Position = $centralOffset
+        for ($index = 0; $index -lt $entryCount; $index++) {
+            if ($stream.Position + 46 -gt $expectedCentralEnd) {
+                throw 'ZIP central-directory entry is truncated'
+            }
+            $header = $reader.ReadBytes(46)
+            if ($header.Length -ne 46 -or [BitConverter]::ToUInt32($header, 0) -ne 0x02014B50) {
+                throw 'ZIP central-directory entry signature is invalid'
+            }
+            $madeByPlatform = [int]$header[5]
+            $flags = [BitConverter]::ToUInt16($header, 8)
+            $nameLength = [BitConverter]::ToUInt16($header, 28)
+            $extraLength = [BitConverter]::ToUInt16($header, 30)
+            $commentLength = [BitConverter]::ToUInt16($header, 32)
+            $centralAttributes = [BitConverter]::ToUInt32($header, 38)
+            $variableLength = [long]$nameLength + $extraLength + $commentLength
+            if ($stream.Position + $variableLength -gt $expectedCentralEnd) {
+                throw 'ZIP central-directory entry is truncated'
+            }
+            $nameBytes = $reader.ReadBytes($nameLength)
+            if ($nameBytes.Length -ne $nameLength) {
+                throw 'ZIP central-directory entry name is truncated'
+            }
+            if (($flags -band 0x800) -ne 0) {
+                $name = $utf8.GetString($nameBytes)
+            } else {
+                if ($null -eq $legacyEncoding) {
+                    try {
+                        $legacyEncoding = [System.Text.Encoding]::GetEncoding(
+                            437,
+                            [System.Text.EncoderFallback]::ExceptionFallback,
+                            [System.Text.DecoderFallback]::ExceptionFallback
+                        )
+                    } catch {
+                        throw "Cannot decode legacy ZIP entry names: $($_.Exception.Message)"
+                    }
+                }
+                $name = $legacyEncoding.GetString($nameBytes)
+            }
+            $stream.Position += [long]$extraLength + $commentLength
+
+            $entry = $Entries[$index]
+            if ($entry.FullName -cne $name) {
+                throw "ZIP central-directory entry order/name mismatch: $name"
+            }
+            $entryAttributes = [uint32]([int64]$entry.ExternalAttributes -band 0xFFFFFFFFL)
+            if ($entryAttributes -ne $centralAttributes) {
+                throw "ZIP central-directory attributes mismatch: $name"
+            }
+            if ($platforms.ContainsKey($name)) {
+                throw "Duplicate ZIP entries in central directory: $name"
+            }
+            $platforms.Add($name, $madeByPlatform)
+        }
+        if ($stream.Position -ne $expectedCentralEnd) {
+            throw 'ZIP central-directory size does not match its entries'
+        }
+        return ,$platforms
+    } finally {
+        $reader.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-ZipEntryHeader {
     param(
         [Parameter(Mandatory = $true)]
@@ -239,18 +466,28 @@ function Assert-PackagedRuntimeClosure {
     } catch {
         throw "Invalid packaged runtime lock: $($_.Exception.Message)"
     }
-    if ($lock.schema_version -ne 1) { throw 'Invalid packaged runtime lock schema_version' }
+    if ($null -eq $lock -or -not ($lock -is [pscustomobject])) {
+        throw 'Invalid packaged runtime lock root object'
+    }
+    $schemaVersionIsInteger = $lock.schema_version -is [int] -or
+        $lock.schema_version -is [long]
+    if (-not $schemaVersionIsInteger -or [long]$lock.schema_version -ne 1) {
+        throw 'Invalid packaged runtime lock schema_version'
+    }
     $lockPropertyNames = @($lock.PSObject.Properties.Name)
     $requiredLockProperties = @('schema_version', 'python', 'release', 'runtimes', 'dependencies')
     if ($lockPropertyNames.Count -ne $requiredLockProperties.Count -or
         @($requiredLockProperties | Where-Object { $lockPropertyNames -cnotcontains $_ }).Count -gt 0) {
         throw 'Invalid packaged runtime lock properties'
     }
-    if ([string]$lock.python -cnotmatch '^3\.12\.[0-9]+$') {
+    if (-not ($lock.python -is [string]) -or $lock.python -cnotmatch '^3\.12\.[0-9]+$') {
         throw 'Invalid packaged runtime lock Python version'
     }
-    if ([string]::IsNullOrEmpty([string]$lock.release)) {
+    if (-not ($lock.release -is [string]) -or [string]::IsNullOrEmpty($lock.release)) {
         throw 'Invalid packaged runtime lock release'
+    }
+    if (-not ($lock.runtimes -is [pscustomobject])) {
+        throw 'Invalid packaged runtime lock runtimes object'
     }
     $architectures = @('linux-amd64', 'linux-arm64')
     $runtimeNames = @($lock.runtimes.PSObject.Properties.Name)
@@ -265,6 +502,9 @@ function Assert-PackagedRuntimeClosure {
     $runtimePlatforms = @{}
     foreach ($architecture in $architectures) {
         $runtime = $lock.runtimes.PSObject.Properties[$architecture].Value
+        if (-not ($runtime -is [pscustomobject])) {
+            throw "Invalid packaged runtime lock $architecture runtime object"
+        }
         $runtimePropertyNames = @($runtime.PSObject.Properties.Name)
         $requiredRuntimeProperties = @('url', 'sha256', 'pip_platforms')
         if ($runtimePropertyNames.Count -ne $requiredRuntimeProperties.Count -or
@@ -273,8 +513,10 @@ function Assert-PackagedRuntimeClosure {
             }).Count -gt 0) {
             throw "Invalid packaged runtime lock $architecture runtime properties"
         }
-        if (-not ([string]$runtime.url).StartsWith('https://', [StringComparison]::Ordinal) -or
-            [string]$runtime.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        if (-not ($runtime.url -is [string]) -or
+            -not $runtime.url.StartsWith('https://', [StringComparison]::Ordinal) -or
+            -not ($runtime.sha256 -is [string]) -or
+            $runtime.sha256 -cnotmatch '^[0-9a-f]{64}$') {
             throw "Invalid packaged runtime lock $architecture runtime identity"
         }
         if (-not ($runtime.pip_platforms -is [System.Array])) {
@@ -296,17 +538,30 @@ function Assert-PackagedRuntimeClosure {
     }
 
     $expected = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
-    $dependencies = @($lock.dependencies)
+    if (-not ($lock.dependencies -is [System.Array])) {
+        throw 'Packaged runtime lock dependencies must be an array'
+    }
+    $dependencies = $lock.dependencies
     if ($dependencies.Count -eq 0) { throw 'Packaged runtime lock has no dependencies' }
     foreach ($dependency in $dependencies) {
-        $name = [string]$dependency.name
-        $version = [string]$dependency.version
+        if (-not ($dependency -is [pscustomobject])) {
+            throw 'Packaged runtime lock dependency must be an object'
+        }
+        if (-not ($dependency.name -is [string]) -or
+            -not ($dependency.version -is [string])) {
+            throw 'Packaged runtime lock dependency name and version must be strings'
+        }
+        $name = $dependency.name
+        $version = $dependency.version
         if ([string]::IsNullOrEmpty($name) -or [string]::IsNullOrEmpty($version)) {
             throw 'Packaged runtime lock dependency name and version must be non-empty'
         }
         $normalizedName = Get-NormalizedPackageName -Name $name
         if ($expected.ContainsKey($normalizedName)) {
             throw "Duplicate packaged runtime dependency: $name"
+        }
+        if (-not ($dependency.wheels -is [pscustomobject])) {
+            throw "Packaged runtime dependency $name wheels must be an object"
         }
         $wheelArchitectures = @($dependency.wheels.PSObject.Properties.Name)
         if ($wheelArchitectures.Count -ne 2 -or
@@ -315,16 +570,21 @@ function Assert-PackagedRuntimeClosure {
         }
         foreach ($architecture in $architectures) {
             $wheel = $dependency.wheels.PSObject.Properties[$architecture].Value
+            if (-not ($wheel -is [pscustomobject])) {
+                throw "Packaged runtime dependency $name has an invalid $architecture wheel"
+            }
             $wheelPropertyNames = @($wheel.PSObject.Properties.Name)
             if ($wheelPropertyNames.Count -ne 2 -or
                 $wheelPropertyNames -cnotcontains 'filename' -or
                 $wheelPropertyNames -cnotcontains 'sha256' -or
-                [string]$wheel.filename -cnotmatch '^[^/\\]+\.whl$' -or
-                [string]$wheel.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+                -not ($wheel.filename -is [string]) -or
+                $wheel.filename -cnotmatch '^[^/\\]+\.whl$' -or
+                -not ($wheel.sha256 -is [string]) -or
+                $wheel.sha256 -cnotmatch '^[0-9a-f]{64}$') {
                 throw "Packaged runtime dependency $name has an invalid $architecture wheel"
             }
             $filenameMatch = [regex]::Match(
-                [string]$wheel.filename,
+                $wheel.filename,
                 '^.+-([^-]+)-([^-]+)-([^-]+)\.whl$'
             )
             if (-not $filenameMatch.Success) {
@@ -468,6 +728,9 @@ $resolvedArchive = (Resolve-Path -LiteralPath $Archive).Path
 $zip = [System.IO.Compression.ZipFile]::OpenRead($resolvedArchive)
 try {
     $entries = @($zip.Entries)
+    $entryPlatforms = Get-ZipCentralDirectoryPlatforms `
+        -ArchivePath $resolvedArchive `
+        -Entries $entries
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $caseFoldedNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $entriesByName = [Collections.Generic.Dictionary[string, System.IO.Compression.ZipArchiveEntry]]::new([StringComparer]::Ordinal)
@@ -480,7 +743,10 @@ try {
         }
         $entriesByName.Add($entry.FullName, $entry)
         Assert-CanonicalPath -Path $entry.FullName -Description 'ZIP entry'
-        if ([string]::IsNullOrEmpty($entry.Name)) {
+        $isDirectory = Assert-ZipEntryType `
+            -Entry $entry `
+            -MadeByPlatform $entryPlatforms[$entry.FullName]
+        if ($isDirectory -or [string]::IsNullOrEmpty($entry.Name)) {
             throw "Noncanonical ZIP entry: $($entry.FullName)"
         }
     }

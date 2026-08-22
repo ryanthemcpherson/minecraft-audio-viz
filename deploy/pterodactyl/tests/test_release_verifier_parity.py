@@ -7,6 +7,8 @@ import base64
 import hashlib
 import json
 import shutil
+import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -141,8 +143,10 @@ def runtime_lock_payload() -> bytes:
     return (json.dumps(lock, sort_keys=True) + "\n").encode()
 
 
-def installed_metadata_payload(*, version: str = LOCKED_VERSION) -> bytes:
-    return f"Metadata-Version: 2.1\nName: {LOCKED_PACKAGE}\nVersion: {version}\n".encode()
+def installed_metadata_payload(
+    *, name: str = LOCKED_PACKAGE, version: str = LOCKED_VERSION
+) -> bytes:
+    return f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n".encode()
 
 
 def replace_recorded_payload(
@@ -182,11 +186,18 @@ def manifest_payload(payloads: dict[str, bytes]) -> bytes:
     return ("\n".join(rows) + "\n").encode()
 
 
-def archive_info(name: str) -> zipfile.ZipInfo:
+def archive_info(
+    name: str,
+    *,
+    create_system: int = 3,
+    mode: int | None = None,
+    dos_attributes: int = 0,
+) -> zipfile.ZipInfo:
     info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
-    mode = 0o100755 if name in EXECUTABLES | {CASE_VARIANT_LAUNCHER} else 0o100644
-    info.create_system = 3
-    info.external_attr = mode << 16
+    if mode is None:
+        mode = stat.S_IFREG | (0o755 if name in EXECUTABLES | {CASE_VARIANT_LAUNCHER} else 0o644)
+    info.create_system = create_system
+    info.external_attr = (mode << 16) | dos_attributes
     return info
 
 
@@ -195,14 +206,61 @@ def write_archive(
     payloads: dict[str, bytes],
     *,
     duplicate_name: str | None = None,
+    create_system: int = 3,
+    entry_modes: dict[str, int] | None = None,
+    entry_dos_attributes: dict[str, int] | None = None,
 ) -> None:
+    entry_modes = entry_modes or {}
+    entry_dos_attributes = entry_dos_attributes or {}
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, payload in payloads.items():
-            archive.writestr(archive_info(name), payload)
+            archive.writestr(
+                archive_info(
+                    name,
+                    create_system=create_system,
+                    mode=entry_modes.get(name),
+                    dos_attributes=entry_dos_attributes.get(name, 0),
+                ),
+                payload,
+            )
         if duplicate_name is not None:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
-                archive.writestr(archive_info(duplicate_name), payloads[duplicate_name])
+                archive.writestr(
+                    archive_info(
+                        duplicate_name,
+                        create_system=create_system,
+                        mode=entry_modes.get(duplicate_name),
+                        dos_attributes=entry_dos_attributes.get(duplicate_name, 0),
+                    ),
+                    payloads[duplicate_name],
+                )
+
+
+def promote_archive_to_zip64(path: Path) -> None:
+    payload = bytearray(path.read_bytes())
+    eocd_offset = payload.rfind(b"PK\x05\x06", max(0, len(payload) - 65557))
+    if eocd_offset < 0:
+        raise AssertionError("fixture EOCD is missing")
+    entry_count = struct.unpack_from("<H", payload, eocd_offset + 10)[0]
+    central_size = struct.unpack_from("<I", payload, eocd_offset + 12)[0]
+    central_offset = struct.unpack_from("<I", payload, eocd_offset + 16)[0]
+    zip64_eocd = struct.pack(
+        "<IQHHIIQQQQ",
+        0x06064B50,
+        44,
+        45,
+        45,
+        0,
+        0,
+        entry_count,
+        entry_count,
+        central_size,
+        central_offset,
+    )
+    zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, eocd_offset, 1)
+    struct.pack_into("<HHII", payload, eocd_offset + 8, 0xFFFF, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+    path.write_bytes(payload[:eocd_offset] + zip64_eocd + zip64_locator + payload[eocd_offset:])
 
 
 def replace_manifest_row(manifest: bytes, old_path: str, new_path: str) -> bytes:
@@ -286,13 +344,109 @@ class ReleaseVerifierParityTests(unittest.TestCase):
         payloads: dict[str, bytes],
         *,
         duplicate_name: str | None = None,
+        create_system: int = 3,
+        entry_modes: dict[str, int] | None = None,
+        entry_dos_attributes: dict[str, int] | None = None,
     ) -> Path:
         archive = self.root / f"{case}.zip"
-        write_archive(archive, payloads, duplicate_name=duplicate_name)
+        write_archive(
+            archive,
+            payloads,
+            duplicate_name=duplicate_name,
+            create_system=create_system,
+            entry_modes=entry_modes,
+            entry_dos_attributes=entry_dos_attributes,
+        )
         return archive
 
     def test_valid_archive_with_both_native_architectures(self) -> None:
         self.assert_valid(self.write_case("valid", base_payloads()))
+
+    def test_windows_created_valid_archive_without_unix_types(self) -> None:
+        payloads = base_payloads()
+        entry_modes = {
+            name: stat.S_IFREG | 0o755 if name in EXECUTABLES else 0o600 for name in payloads
+        }
+        self.assert_valid(
+            self.write_case(
+                "valid-windows",
+                payloads,
+                create_system=0,
+                entry_modes=entry_modes,
+            )
+        )
+
+    def test_non_regular_zip_entry_types_are_rejected_everywhere(self) -> None:
+        unsafe_types = {
+            "symlink": stat.S_IFLNK,
+            "character-device": stat.S_IFCHR,
+            "block-device": stat.S_IFBLK,
+            "fifo": stat.S_IFIFO,
+            "socket": stat.S_IFSOCK,
+        }
+        targets = {
+            "ordinary": (OPTIONAL_PAYLOAD, None),
+            "record-owned": (
+                f"{SITE_PACKAGES.format(architecture='linux-amd64')}/{LOCKED_MODULE}",
+                "linux-amd64",
+            ),
+        }
+        escape_target = self.root / "verifier-must-not-extract.txt"
+        malicious_payload = b"../../../../../../verifier-must-not-extract.txt"
+        for type_name, file_type in unsafe_types.items():
+            for target_kind, (target_name, architecture) in targets.items():
+                with self.subTest(type_name=type_name, target_kind=target_kind):
+                    payloads = base_payloads()
+                    if architecture is None:
+                        payloads[target_name] = malicious_payload
+                    else:
+                        replace_recorded_payload(
+                            payloads,
+                            architecture,
+                            LOCKED_MODULE,
+                            malicious_payload,
+                        )
+                    payloads[MANIFEST] = manifest_payload(payloads)
+                    archive = self.write_case(
+                        f"zip-type-{type_name}-{target_kind}",
+                        payloads,
+                        entry_modes={target_name: file_type | 0o777},
+                    )
+                    self.assert_rejected(archive, "non-regular ZIP entry type")
+                    self.assertFalse(escape_target.exists())
+
+    def test_unix_entries_with_missing_file_type_are_rejected(self) -> None:
+        for target_name in (
+            OPTIONAL_PAYLOAD,
+            f"{SITE_PACKAGES.format(architecture='linux-amd64')}/{LOCKED_MODULE}",
+        ):
+            with self.subTest(target_name=target_name):
+                payloads = base_payloads()
+                self.assert_rejected(
+                    self.write_case(
+                        "missing-unix-type-" + target_name.replace("/", "-"),
+                        payloads,
+                        entry_modes={target_name: 0o644},
+                    ),
+                    "ambiguous ZIP entry type metadata",
+                )
+
+    def test_windows_reparse_entries_are_rejected(self) -> None:
+        payloads = base_payloads()
+        entry_modes = {
+            name: stat.S_IFREG | 0o755 if name in EXECUTABLES else 0o600 for name in payloads
+        }
+        entry_dos_attributes = {OPTIONAL_PAYLOAD: 0x400}
+        self.assert_rejected(
+            self.write_case(
+                "windows-reparse",
+                payloads,
+                create_system=0,
+                entry_modes=entry_modes,
+                entry_dos_attributes=entry_dos_attributes,
+            ),
+            "unsafe Windows ZIP entry attributes",
+        )
 
     def test_every_required_asset_is_enforced(self) -> None:
         for missing_name in sorted(REQUIRED):
@@ -308,6 +462,21 @@ class ReleaseVerifierParityTests(unittest.TestCase):
         payloads = base_payloads()
         archive = self.write_case("duplicate-zip", payloads, duplicate_name=OPTIONAL_PAYLOAD)
         self.assert_rejected(archive, "duplicate zip")
+
+    def test_central_directory_size_integrity_is_enforced(self) -> None:
+        archive = self.write_case("central-directory-size", base_payloads())
+        payload = bytearray(archive.read_bytes())
+        eocd_offset = payload.rfind(b"PK\x05\x06", max(0, len(payload) - 65557))
+        self.assertGreaterEqual(eocd_offset, 0)
+        central_size = struct.unpack_from("<I", payload, eocd_offset + 12)[0]
+        struct.pack_into("<I", payload, eocd_offset + 12, central_size + 1)
+        archive.write_bytes(payload)
+        self.assert_rejected(archive, "central")
+
+    def test_zip64_central_directory_metadata_is_supported(self) -> None:
+        archive = self.write_case("zip64-central-directory", base_payloads())
+        promote_archive_to_zip64(archive)
+        self.assert_valid(archive)
 
     def test_case_fold_path_collision_is_rejected(self) -> None:
         payloads = base_payloads()
@@ -556,6 +725,85 @@ class ReleaseVerifierParityTests(unittest.TestCase):
                 mutate_runtime_lock(payloads, mutation)
                 payloads[MANIFEST] = manifest_payload(payloads)
                 self.assert_rejected(self.write_case(f"lock-{case}", payloads), "runtime lock")
+
+    def test_runtime_lock_json_types_are_rejected_without_scalar_coercion(self) -> None:
+        def set_string_schema_version(lock: dict[str, Any]) -> None:
+            lock["schema_version"] = "1"
+
+        def set_boolean_schema_version(lock: dict[str, Any]) -> None:
+            lock["schema_version"] = True
+
+        def set_numeric_release(lock: dict[str, Any]) -> None:
+            lock["release"] = 7
+
+        def set_object_dependencies(lock: dict[str, Any]) -> None:
+            lock["dependencies"] = lock["dependencies"][0]
+
+        def set_numeric_dependency_name(lock: dict[str, Any]) -> None:
+            lock["dependencies"][0]["name"] = 123
+
+        def set_numeric_dependency_version(lock: dict[str, Any]) -> None:
+            lock["dependencies"][0]["version"] = 100
+
+        def set_numeric_runtime_hash(lock: dict[str, Any]) -> None:
+            lock["runtimes"]["linux-amd64"]["sha256"] = int("1" * 64)
+
+        def set_numeric_wheel_hash(lock: dict[str, Any]) -> None:
+            lock["dependencies"][0]["wheels"]["linux-amd64"]["sha256"] = int("2" * 64)
+
+        def set_numeric_platform(lock: dict[str, Any]) -> None:
+            lock["runtimes"]["linux-amd64"]["pip_platforms"] = [17]
+
+        def set_runtime_array(lock: dict[str, Any]) -> None:
+            lock["runtimes"] = list(lock["runtimes"].values())
+
+        def set_wheels_array(lock: dict[str, Any]) -> None:
+            lock["dependencies"][0]["wheels"] = list(lock["dependencies"][0]["wheels"].values())
+
+        def set_wheel_record_array(lock: dict[str, Any]) -> None:
+            lock["dependencies"][0]["wheels"]["linux-amd64"] = [
+                "tinydep-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "2" * 64,
+            ]
+
+        cases = {
+            "string-schema-version": set_string_schema_version,
+            "boolean-schema-version": set_boolean_schema_version,
+            "numeric-release": set_numeric_release,
+            "object-dependencies": set_object_dependencies,
+            "numeric-dependency-name": set_numeric_dependency_name,
+            "numeric-dependency-version": set_numeric_dependency_version,
+            "numeric-runtime-hash": set_numeric_runtime_hash,
+            "numeric-wheel-hash": set_numeric_wheel_hash,
+            "numeric-platform": set_numeric_platform,
+            "runtime-array": set_runtime_array,
+            "wheels-array": set_wheels_array,
+            "wheel-record-array": set_wheel_record_array,
+        }
+        for case, mutation in cases.items():
+            with self.subTest(case=case):
+                payloads = base_payloads()
+                mutate_runtime_lock(payloads, mutation)
+                if case in {"numeric-dependency-name", "numeric-dependency-version"}:
+                    metadata_name = "123" if case == "numeric-dependency-name" else LOCKED_PACKAGE
+                    metadata_version = (
+                        "100" if case == "numeric-dependency-version" else LOCKED_VERSION
+                    )
+                    for architecture in ARCHITECTURE_MACHINES:
+                        replace_recorded_payload(
+                            payloads,
+                            architecture,
+                            LOCKED_METADATA,
+                            installed_metadata_payload(
+                                name=metadata_name,
+                                version=metadata_version,
+                            ),
+                        )
+                payloads[MANIFEST] = manifest_payload(payloads)
+                self.assert_rejected(
+                    self.write_case(f"lock-type-{case}", payloads),
+                    "runtime",
+                )
 
     def test_forbidden_names_are_case_insensitive_and_cover_test_spec_files(self) -> None:
         invalid_names = (
