@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import stat
 import tempfile
 import zipfile
+from email.parser import BytesParser
 from pathlib import Path
+
+from runtime_lock import LockError, normalize_package_name, validate_lock
 
 ARCHIVE_ROOT = "mcav-vj/"
 MANIFEST_NAME = "mcav-vj/MANIFEST.sha256"
@@ -119,6 +123,7 @@ def create_archive(release_root: Path, archive_path: Path) -> None:
 
 def parse_manifest(payload: bytes) -> dict[str, str]:
     manifest: dict[str, str] = {}
+    casefolded_paths: dict[str, str] = {}
     for line in payload.decode("utf-8").splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
         if match is None:
@@ -127,6 +132,13 @@ def parse_manifest(payload: bytes) -> dict[str, str]:
         validate_canonical_path(relative_path, "manifest path")
         if relative_path in manifest:
             raise ValueError(f"Duplicate manifest entry: {relative_path}")
+        casefolded_path = relative_path.casefold()
+        if casefolded_path in casefolded_paths:
+            raise ValueError(
+                "Case-fold path collision in manifest: "
+                f"{casefolded_paths[casefolded_path]} and {relative_path}"
+            )
+        casefolded_paths[casefolded_path] = relative_path
         manifest[relative_path] = digest
     return manifest
 
@@ -140,16 +152,88 @@ def read_elf_machine(header: bytes, executable_name: str) -> int:
     return int.from_bytes(header[18:20], byte_order)
 
 
+def verify_packaged_runtime_closure(
+    release_zip: zipfile.ZipFile,
+    entries_by_name: dict[str, zipfile.ZipInfo],
+) -> None:
+    try:
+        lock = validate_lock(json.loads(release_zip.read("mcav-vj/release/runtime-lock.json")))
+    except (KeyError, json.JSONDecodeError, UnicodeDecodeError, LockError) as error:
+        raise ValueError(f"Invalid packaged runtime lock: {error}") from error
+
+    expected = {
+        normalize_package_name(dependency["name"]): dependency
+        for dependency in lock["dependencies"]
+    }
+    for architecture in ("linux-amd64", "linux-arm64"):
+        prefix = f"mcav-vj/bin/{architecture}/python/lib/python3.12/site-packages/"
+        dist_info_directories: set[str] = set()
+        for entry_name in entries_by_name:
+            if not entry_name.startswith(prefix):
+                continue
+            relative_path = entry_name.removeprefix(prefix)
+            for index, component in enumerate(relative_path.split("/")):
+                if not component.casefold().endswith(".dist-info"):
+                    continue
+                if index != 0 or not component.endswith(".dist-info"):
+                    raise ValueError(
+                        f"{architecture} has noncanonical installed dist-info: {relative_path}"
+                    )
+                dist_info_directories.add(component)
+
+        installed: dict[str, tuple[str, str]] = {}
+        for directory in sorted(dist_info_directories):
+            metadata_name = f"{prefix}{directory}/METADATA"
+            metadata_entry = entries_by_name.get(metadata_name)
+            if metadata_entry is None:
+                raise ValueError(
+                    f"{architecture} installed dist-info is missing METADATA: {directory}"
+                )
+            metadata = BytesParser().parsebytes(release_zip.read(metadata_entry))
+            name = metadata.get("Name")
+            version = metadata.get("Version")
+            if not name or not version:
+                raise ValueError(
+                    f"{architecture} installed metadata is incomplete: {metadata_name}"
+                )
+            normalized_name = normalize_package_name(name)
+            if normalized_name in installed:
+                raise ValueError(f"{architecture} duplicate installed dependency: {name}")
+            installed[normalized_name] = (version, metadata_name)
+
+        missing = sorted(set(expected) - set(installed))
+        extra = sorted(set(installed) - set(expected))
+        if missing:
+            raise ValueError(f"{architecture} missing installed dependencies: {', '.join(missing)}")
+        if extra:
+            raise ValueError(f"{architecture} extra installed dependencies: {', '.join(extra)}")
+        for normalized_name, dependency in expected.items():
+            installed_version = installed[normalized_name][0]
+            if installed_version != dependency["version"]:
+                raise ValueError(
+                    f"{architecture} installed {dependency['name']} version "
+                    f"{installed_version} does not match {dependency['version']}"
+                )
+
+
 def verify_archive(archive_path: Path) -> int:
     with zipfile.ZipFile(archive_path) as release_zip:
         entries = release_zip.infolist()
         names = [entry.filename for entry in entries]
         if len(names) != len(set(names)):
             raise ValueError("Release archive contains duplicate ZIP entries")
+        casefolded_names: dict[str, str] = {}
         for entry in entries:
             validate_canonical_path(entry.filename, "ZIP entry")
             if entry.is_dir():
                 raise ValueError(f"Noncanonical ZIP entry: {entry.filename}")
+            casefolded_name = entry.filename.casefold()
+            if casefolded_name in casefolded_names:
+                raise ValueError(
+                    "Case-fold path collision in ZIP: "
+                    f"{casefolded_names[casefolded_name]} and {entry.filename}"
+                )
+            casefolded_names[casefolded_name] = entry.filename
         if any(not name.startswith(ARCHIVE_ROOT) for name in names):
             raise ValueError(f"Every release entry must be under {ARCHIVE_ROOT}")
 
@@ -203,6 +287,7 @@ def verify_archive(archive_path: Path) -> int:
             actual_digest = sha256_bytes(release_zip.read(f"{ARCHIVE_ROOT}{relative_path}"))
             if actual_digest != expected_digest:
                 raise ValueError(f"Manifest digest mismatch: {relative_path}")
+        verify_packaged_runtime_closure(release_zip, entries_by_name)
         return len(entries)
 
 

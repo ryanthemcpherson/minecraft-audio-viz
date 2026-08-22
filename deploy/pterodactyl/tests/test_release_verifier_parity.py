@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,11 @@ EXECUTABLES = {
     "mcav-vj/bin/linux-arm64/python/bin/python3.12",
 }
 OPTIONAL_PAYLOAD = "mcav-vj/misc/payload.txt"
+CASE_VARIANT_LAUNCHER = "mcav-vj/Start-Mcav.sh"
+SITE_PACKAGES = "mcav-vj/bin/{architecture}/python/lib/python3.12/site-packages"
+LOCKED_PACKAGE = "tinydep"
+LOCKED_VERSION = "1.0.0"
+LOCKED_METADATA = "tinydep-1.0.0.dist-info/METADATA"
 
 
 def elf_payload(machine: int) -> bytes:
@@ -64,9 +70,52 @@ def base_payloads() -> dict[str, bytes]:
     payloads = {name: f"fixture:{name}\n".encode() for name in REQUIRED - {MANIFEST}}
     payloads["mcav-vj/bin/linux-amd64/python/bin/python3.12"] = elf_payload(62)
     payloads["mcav-vj/bin/linux-arm64/python/bin/python3.12"] = elf_payload(183)
+    payloads["mcav-vj/release/runtime-lock.json"] = runtime_lock_payload()
+    for architecture in ("linux-amd64", "linux-arm64"):
+        payloads[f"{SITE_PACKAGES.format(architecture=architecture)}/{LOCKED_METADATA}"] = (
+            installed_metadata_payload()
+        )
     payloads[OPTIONAL_PAYLOAD] = b"path validation fixture\n"
     payloads[MANIFEST] = manifest_payload(payloads)
     return payloads
+
+
+def runtime_lock_payload() -> bytes:
+    architectures = {
+        "linux-amd64": "manylinux_2_17_x86_64",
+        "linux-arm64": "manylinux_2_17_aarch64",
+    }
+    lock = {
+        "schema_version": 1,
+        "python": "3.12.14",
+        "release": "test",
+        "runtimes": {
+            architecture: {
+                "url": f"https://example.invalid/{architecture}.tar.gz",
+                "sha256": "1" * 64,
+                "pip_platforms": [platform],
+            }
+            for architecture, platform in architectures.items()
+        },
+        "dependencies": [
+            {
+                "name": LOCKED_PACKAGE,
+                "version": LOCKED_VERSION,
+                "wheels": {
+                    architecture: {
+                        "filename": (f"tinydep-1.0.0-cp312-cp312-{platform}.whl"),
+                        "sha256": "2" * 64,
+                    }
+                    for architecture, platform in architectures.items()
+                },
+            }
+        ],
+    }
+    return (json.dumps(lock, sort_keys=True) + "\n").encode()
+
+
+def installed_metadata_payload(*, version: str = LOCKED_VERSION) -> bytes:
+    return f"Metadata-Version: 2.1\nName: {LOCKED_PACKAGE}\nVersion: {version}\n".encode()
 
 
 def manifest_payload(payloads: dict[str, bytes]) -> bytes:
@@ -81,7 +130,7 @@ def manifest_payload(payloads: dict[str, bytes]) -> bytes:
 
 def archive_info(name: str) -> zipfile.ZipInfo:
     info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
-    mode = 0o100755 if name in EXECUTABLES else 0o100644
+    mode = 0o100755 if name in EXECUTABLES | {CASE_VARIANT_LAUNCHER} else 0o100644
     info.create_system = 3
     info.external_attr = mode << 16
     return info
@@ -206,6 +255,23 @@ class ReleaseVerifierParityTests(unittest.TestCase):
         archive = self.write_case("duplicate-zip", payloads, duplicate_name=OPTIONAL_PAYLOAD)
         self.assert_rejected(archive, "duplicate zip")
 
+    def test_case_fold_path_collision_is_rejected(self) -> None:
+        payloads = base_payloads()
+        payloads[CASE_VARIANT_LAUNCHER] = b"#!/usr/bin/env bash\nexit 99\n"
+        payloads[MANIFEST] = manifest_payload(payloads)
+        self.assert_rejected(
+            self.write_case("case-fold-launcher-collision", payloads),
+            "case-fold path collision",
+        )
+
+    def test_manifest_lookup_is_case_sensitive(self) -> None:
+        payloads = base_payloads()
+        payloads["mcav-vj/manifest.sha256"] = payloads.pop(MANIFEST)
+        self.assert_rejected(
+            self.write_case("case-variant-manifest", payloads),
+            "required release entr",
+        )
+
     def test_duplicate_missing_and_extra_manifest_rows_are_rejected(self) -> None:
         base = base_payloads()
         first_row = base[MANIFEST].decode().splitlines()[0]
@@ -289,6 +355,32 @@ class ReleaseVerifierParityTests(unittest.TestCase):
                 self.assert_rejected(
                     self.write_case(f"wrong-elf-{architecture}", payloads), "elf machine"
                 )
+
+    def test_runtime_lock_matches_final_site_packages_for_each_architecture(self) -> None:
+        for architecture in ("linux-amd64", "linux-arm64"):
+            metadata_name = f"{SITE_PACKAGES.format(architecture=architecture)}/{LOCKED_METADATA}"
+            cases = ("missing", "extra", "wrong-version")
+            for case in cases:
+                with self.subTest(architecture=architecture, case=case):
+                    payloads = base_payloads()
+                    if case == "missing":
+                        payloads.pop(metadata_name)
+                        expected = "missing installed dependencies"
+                    elif case == "extra":
+                        extra_name = (
+                            f"{SITE_PACKAGES.format(architecture=architecture)}/"
+                            "unexpected-9.0.dist-info/METADATA"
+                        )
+                        payloads[extra_name] = b"Name: unexpected\nVersion: 9.0\n"
+                        expected = "extra installed dependencies"
+                    else:
+                        payloads[metadata_name] = installed_metadata_payload(version="2.0.0")
+                        expected = "version 2.0.0 does not match 1.0.0"
+                    payloads[MANIFEST] = manifest_payload(payloads)
+                    self.assert_rejected(
+                        self.write_case(f"runtime-closure-{architecture}-{case}", payloads),
+                        expected,
+                    )
 
 
 if __name__ == "__main__":

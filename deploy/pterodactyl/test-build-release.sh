@@ -11,11 +11,14 @@ OUTPUT_DIR="$TEMP_ROOT/output"
 PLUGIN_JAR="$TEMP_ROOT/AudioViz.jar"
 VERSION="26.1-release+test"
 
-python3 - "$RUNTIME_SOURCE" <<'PY'
+python3 - "$RUNTIME_SOURCE" "$SCRIPT_DIR/runtime-lock.json" <<'PY'
+import json
+import re
 import sys
 from pathlib import Path
 
 runtime_source = Path(sys.argv[1])
+runtime_lock = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 for architecture, elf_machine in (("linux-amd64", 62), ("linux-arm64", 183)):
     binary_path = runtime_source / architecture / "python/bin/python3.12"
     binary_path.parent.mkdir(parents=True)
@@ -23,6 +26,17 @@ for architecture, elf_machine in (("linux-amd64", 62), ("linux-arm64", 183)):
     header[:6] = b"\x7fELF\x02\x01"
     header[18:20] = elf_machine.to_bytes(2, "little")
     binary_path.write_bytes(header)
+    site_packages = binary_path.parents[1] / "lib/python3.12/site-packages"
+    for dependency in runtime_lock["dependencies"]:
+        distribution = re.sub(r"[-_.]+", "_", dependency["name"])
+        metadata = site_packages / (
+            f"{distribution}-{dependency['version']}.dist-info/METADATA"
+        )
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text(
+            f"Name: {dependency['name']}\nVersion: {dependency['version']}\n",
+            encoding="utf-8",
+        )
 PY
 for architecture in linux-amd64 linux-arm64; do
   printf '%s\n' \
