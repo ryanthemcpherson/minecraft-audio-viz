@@ -1,6 +1,6 @@
 use super::client::ClientError;
-use native_tls::TlsConnector;
-use rustls_pki_types::{CertificateDer as PkiCertificateDer, ServerName};
+use native_tls::{Certificate, TlsConnector};
+use rustls_pki_types::{CertificateDer as PkiCertificateDer, ServerName, UnixTime};
 use sha2::{Digest, Sha256};
 use std::net::Ipv6Addr;
 use subtle::ConstantTimeEq;
@@ -11,7 +11,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, client_async_with_config, connect_async_tls_with_config,
 };
-use webpki::EndEntityCert;
+use webpki::{ALL_VERIFICATION_ALGS, EndEntityCert, KeyUsage, anchor_from_trusted_cert};
 
 /// Parse a SHA-256 certificate fingerprint into its 32-byte representation.
 ///
@@ -73,36 +73,43 @@ pub async fn connect_verified(
         format!("{tls_host}:{port}")
     };
 
-    let mut connector_builder = TlsConnector::builder();
-    connector_builder
+    let mut probe_connector_builder = TlsConnector::builder();
+    probe_connector_builder
         .danger_accept_invalid_certs(true)
         .danger_accept_invalid_hostnames(false);
-    let connector = connector_builder
+    let probe_connector = probe_connector_builder
         .build()
         .map_err(ClientError::tls_handshake)?;
 
-    let tcp_stream = TcpStream::connect(socket_address)
+    let probe_tcp_stream = TcpStream::connect(&socket_address)
         .await
         .map_err(|_| ClientError::ConnectionFailed)?;
-    let tls_stream = TokioTlsConnector::from(connector)
-        .connect(tls_host, tcp_stream)
+    let probe_tls_stream = TokioTlsConnector::from(probe_connector)
+        .connect(tls_host, probe_tcp_stream)
         .await
         .map_err(ClientError::tls_handshake)?;
 
-    let certificate = tls_stream
-        .get_ref()
-        .peer_certificate()
-        .map_err(ClientError::tls_handshake)?
-        .ok_or(ClientError::MissingPeerCertificate)?;
-    let certificate_der = certificate.to_der().map_err(ClientError::tls_handshake)?;
-    verify_certificate_host(&certificate_der, tls_host)?;
-    let observed_bytes: [u8; 32] = Sha256::digest(&certificate_der).into();
-    if !fingerprints_match(&expected_bytes, &observed_bytes) {
-        return Err(ClientError::tls_fingerprint_mismatch(
-            expected_bytes,
-            observed_bytes,
-        ));
-    }
+    let probe_certificate_der = peer_certificate_der(&probe_tls_stream)?;
+    verify_pinned_certificate(&probe_certificate_der, tls_host)?;
+    verify_certificate_fingerprint(&probe_certificate_der, &expected_bytes)?;
+    drop(probe_tls_stream);
+
+    let trusted_certificate =
+        Certificate::from_der(&probe_certificate_der).map_err(ClientError::tls_handshake)?;
+    let mut verified_connector_builder = TlsConnector::builder();
+    verified_connector_builder.add_root_certificate(trusted_certificate);
+    let verified_connector = verified_connector_builder
+        .build()
+        .map_err(ClientError::tls_handshake)?;
+    let verified_tcp_stream = TcpStream::connect(socket_address)
+        .await
+        .map_err(|_| ClientError::ConnectionFailed)?;
+    let tls_stream = TokioTlsConnector::from(verified_connector)
+        .connect(tls_host, verified_tcp_stream)
+        .await
+        .map_err(ClientError::tls_handshake)?;
+    let verified_certificate_der = peer_certificate_der(&tls_stream)?;
+    verify_certificate_fingerprint(&verified_certificate_der, &expected_bytes)?;
 
     let tls_stream = MaybeTlsStream::NativeTls(tls_stream);
     let (websocket, _) = client_async_with_config(request, tls_stream, Some(websocket_config))
@@ -115,6 +122,33 @@ fn fingerprints_match(expected: &[u8; 32], observed: &[u8; 32]) -> bool {
     bool::from(expected.ct_eq(observed))
 }
 
+fn peer_certificate_der(
+    tls_stream: &tokio_native_tls::TlsStream<TcpStream>,
+) -> Result<Vec<u8>, ClientError> {
+    tls_stream
+        .get_ref()
+        .peer_certificate()
+        .map_err(ClientError::tls_handshake)?
+        .ok_or(ClientError::MissingPeerCertificate)?
+        .to_der()
+        .map_err(ClientError::tls_handshake)
+}
+
+fn verify_certificate_fingerprint(
+    certificate_der: &[u8],
+    expected_bytes: &[u8; 32],
+) -> Result<(), ClientError> {
+    let observed_bytes: [u8; 32] = Sha256::digest(certificate_der).into();
+    if fingerprints_match(expected_bytes, &observed_bytes) {
+        Ok(())
+    } else {
+        Err(ClientError::tls_fingerprint_mismatch(
+            expected_bytes,
+            observed_bytes,
+        ))
+    }
+}
+
 fn map_websocket_connection_error(error: tokio_tungstenite::tungstenite::Error) -> ClientError {
     if matches!(&error, tokio_tungstenite::tungstenite::Error::Tls(_)) {
         ClientError::tls_handshake(error)
@@ -123,10 +157,23 @@ fn map_websocket_connection_error(error: tokio_tungstenite::tungstenite::Error) 
     }
 }
 
-fn verify_certificate_host(certificate_der: &[u8], host: &str) -> Result<(), ClientError> {
+fn verify_pinned_certificate(certificate_der: &[u8], host: &str) -> Result<(), ClientError> {
     let certificate_der = PkiCertificateDer::from(certificate_der);
     let certificate =
         EndEntityCert::try_from(&certificate_der).map_err(ClientError::tls_handshake)?;
+    let trust_anchor =
+        anchor_from_trusted_cert(&certificate_der).map_err(ClientError::tls_handshake)?;
+    certificate
+        .verify_for_usage(
+            ALL_VERIFICATION_ALGS,
+            &[trust_anchor],
+            &[],
+            UnixTime::now(),
+            KeyUsage::server_auth(),
+            None,
+            None,
+        )
+        .map_err(ClientError::tls_handshake)?;
     let server_name = ServerName::try_from(host).map_err(|_| ClientError::ConnectionFailed)?;
     certificate
         .verify_is_valid_for_subject_name(&server_name)
@@ -138,7 +185,10 @@ mod tests {
     use super::super::client::{DjClient, DjClientConfig};
     use super::*;
     use futures_util::{Sink, SinkExt, StreamExt};
-    use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+    use rcgen::{
+        CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair,
+        SerialNumber, date_time_ymd,
+    };
     use sha2::{Digest, Sha256};
     use std::pin::Pin;
     use std::sync::Arc;
@@ -165,6 +215,15 @@ mod tests {
         EofWithoutUpgrade,
         TlsFailed,
         NoConnection,
+    }
+
+    #[derive(Clone, Copy)]
+    enum CertificateProfile {
+        Valid,
+        Expired,
+        NotYetValid,
+        ClientAuthOnly,
+        CorruptSignature,
     }
 
     struct ApplicationFrameRecorder {
@@ -433,23 +492,70 @@ mod tests {
             subject_alt_name: &str,
             common_name: Option<&str>,
         ) -> Self {
-            Self::start_configured(url_host, subject_alt_name, common_name, false, false).await
+            Self::start_configured(
+                url_host,
+                subject_alt_name,
+                common_name,
+                CertificateProfile::Valid,
+                false,
+                false,
+                false,
+            )
+            .await
         }
 
         async fn start_with_auth_response() -> Self {
-            Self::start_configured("127.0.0.1", "127.0.0.1", None, false, true).await
+            Self::start_configured(
+                "127.0.0.1",
+                "127.0.0.1",
+                None,
+                CertificateProfile::Valid,
+                false,
+                true,
+                false,
+            )
+            .await
         }
 
         async fn start_with_delayed_tls() -> Self {
-            Self::start_configured("127.0.0.1", "127.0.0.1", None, true, false).await
+            Self::start_configured(
+                "127.0.0.1",
+                "127.0.0.1",
+                None,
+                CertificateProfile::Valid,
+                true,
+                false,
+                false,
+            )
+            .await
+        }
+
+        async fn start_with_certificate_profile(profile: CertificateProfile) -> Self {
+            Self::start_configured("127.0.0.1", "127.0.0.1", None, profile, false, false, false)
+                .await
+        }
+
+        async fn start_with_leaf_substitution() -> Self {
+            Self::start_configured(
+                "127.0.0.1",
+                "127.0.0.1",
+                None,
+                CertificateProfile::Valid,
+                false,
+                false,
+                true,
+            )
+            .await
         }
 
         async fn start_configured(
             url_host: &str,
             subject_alt_name: &str,
             common_name: Option<&str>,
+            certificate_profile: CertificateProfile,
             delay_tls_handshake: bool,
             respond_to_authentication: bool,
+            substitute_second_leaf: bool,
         ) -> Self {
             let key_pair = KeyPair::generate().expect("test key should generate");
             let mut certificate_params = CertificateParams::new(vec![subject_alt_name.to_string()])
@@ -459,10 +565,31 @@ mod tests {
                 distinguished_name.push(DnType::CommonName, common_name);
                 certificate_params.distinguished_name = distinguished_name;
             }
+            match certificate_profile {
+                CertificateProfile::Valid | CertificateProfile::CorruptSignature => {}
+                CertificateProfile::Expired => {
+                    certificate_params.not_before = date_time_ymd(2020, 1, 1);
+                    certificate_params.not_after = date_time_ymd(2021, 1, 1);
+                }
+                CertificateProfile::NotYetValid => {
+                    certificate_params.not_before = date_time_ymd(2040, 1, 1);
+                    certificate_params.not_after = date_time_ymd(2041, 1, 1);
+                }
+                CertificateProfile::ClientAuthOnly => {
+                    certificate_params.extended_key_usages =
+                        vec![ExtendedKeyUsagePurpose::ClientAuth];
+                }
+            }
             let cert = certificate_params
                 .self_signed(&key_pair)
                 .expect("test certificate should generate");
-            let certificate_der = cert.der().to_vec();
+            let mut certificate_der = cert.der().to_vec();
+            if matches!(certificate_profile, CertificateProfile::CorruptSignature) {
+                let signature_byte = certificate_der
+                    .last_mut()
+                    .expect("test certificate should contain a signature");
+                *signature_byte ^= 0x01;
+            }
             let private_key_der =
                 PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
             let tls_config = ServerConfig::builder()
@@ -473,6 +600,34 @@ mod tests {
                 )
                 .expect("test TLS server config should build");
             let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
+            let substituted_tls_acceptor = if substitute_second_leaf {
+                let mut substituted_params =
+                    CertificateParams::new(vec![subject_alt_name.to_string()])
+                        .expect("substituted test certificate parameters should parse");
+                let mut substituted_distinguished_name = DistinguishedName::new();
+                substituted_distinguished_name.push(DnType::CommonName, "Substituted leaf");
+                substituted_params.distinguished_name = substituted_distinguished_name;
+                substituted_params.serial_number = Some(SerialNumber::from(2_u64));
+                substituted_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+                let substituted_certificate = substituted_params
+                    .signed_by(&key_pair, &cert, &key_pair)
+                    .expect("substituted test certificate should generate");
+                let substituted_private_key =
+                    PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+                let substituted_tls_config = ServerConfig::builder()
+                    .with_no_client_auth()
+                    .with_single_cert(
+                        vec![
+                            CertificateDer::from(substituted_certificate.der().to_vec()),
+                            CertificateDer::from(certificate_der.clone()),
+                        ],
+                        substituted_private_key,
+                    )
+                    .expect("substituted test TLS server config should build");
+                Some(TlsAcceptor::from(Arc::new(substituted_tls_config)))
+            } else {
+                None
+            };
             let fingerprint = format_fingerprint(&Sha256::digest(&certificate_der));
 
             let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -500,37 +655,62 @@ mod tests {
 
             let server_task = tokio::spawn(async move {
                 let _ = server_started_tx.send(());
-                let accepted = tokio::select! {
-                    biased;
-                    accepted = listener.accept() => accepted,
-                    _ = &mut shutdown_rx => return FixtureTerminalOutcome::NoConnection,
-                };
-                let Ok((tcp_stream, _)) = accepted else {
-                    return FixtureTerminalOutcome::NoConnection;
-                };
-                let _ = tcp_accepted_tx.send(());
-                if delay_tls_handshake {
-                    let _ = release_tls_rx.await;
-                }
-                let tls_stream = tls_acceptor.accept(tcp_stream).await;
-                let Ok(tls_stream) = tls_stream else {
-                    return FixtureTerminalOutcome::TlsFailed;
-                };
-                let _ = transport_ready_tx.send(true);
-                let recording_stream = RecordingStream::new(
-                    tls_stream,
-                    Arc::clone(&received_application_bytes_by_server),
-                );
-                let websocket = accept_async(recording_stream).await;
-                let Ok(mut websocket) = websocket else {
-                    assert!(
-                        received_application_bytes_by_server
-                            .lock()
-                            .expect("test byte recorder mutex should not be poisoned")
-                            .is_empty(),
-                        "rejected connection must reach EOF without partial Upgrade bytes"
+                let mut tcp_accepted_tx = Some(tcp_accepted_tx);
+                let mut release_tls_rx = Some(release_tls_rx);
+                let mut saw_eof_without_upgrade = false;
+                let mut connection_index = 0;
+                let mut websocket = loop {
+                    let accepted = tokio::select! {
+                        biased;
+                        accepted = listener.accept() => accepted,
+                        _ = &mut shutdown_rx => {
+                            return if saw_eof_without_upgrade {
+                                FixtureTerminalOutcome::EofWithoutUpgrade
+                            } else {
+                                FixtureTerminalOutcome::NoConnection
+                            };
+                        }
+                    };
+                    let Ok((tcp_stream, _)) = accepted else {
+                        return FixtureTerminalOutcome::NoConnection;
+                    };
+                    if let Some(tcp_accepted_tx) = tcp_accepted_tx.take() {
+                        let _ = tcp_accepted_tx.send(());
+                    }
+                    if delay_tls_handshake {
+                        let _ = release_tls_rx
+                            .take()
+                            .expect("delayed TLS fixture should wait only once")
+                            .await;
+                    }
+                    let connection_tls_acceptor = if connection_index > 0 {
+                        substituted_tls_acceptor.as_ref().unwrap_or(&tls_acceptor)
+                    } else {
+                        &tls_acceptor
+                    };
+                    connection_index += 1;
+                    let tls_stream = connection_tls_acceptor.accept(tcp_stream).await;
+                    let Ok(tls_stream) = tls_stream else {
+                        return FixtureTerminalOutcome::TlsFailed;
+                    };
+                    let _ = transport_ready_tx.send(true);
+                    let recording_stream = RecordingStream::new(
+                        tls_stream,
+                        Arc::clone(&received_application_bytes_by_server),
                     );
-                    return FixtureTerminalOutcome::EofWithoutUpgrade;
+                    match accept_async(recording_stream).await {
+                        Ok(websocket) => break websocket,
+                        Err(_) => {
+                            assert!(
+                                received_application_bytes_by_server
+                                    .lock()
+                                    .expect("test byte recorder mutex should not be poisoned")
+                                    .is_empty(),
+                                "rejected connection must reach EOF without partial Upgrade bytes"
+                            );
+                            saw_eof_without_upgrade = true;
+                        }
+                    }
                 };
                 let _ = upgrade_observed_tx.send(true);
                 let mut authentication_response_sent = false;
@@ -779,6 +959,53 @@ mod tests {
         );
     }
 
+    async fn assert_pinned_certificate_rejected_before_application_data(
+        certificate_profile: CertificateProfile,
+    ) {
+        let fixture =
+            TlsWebSocketFixture::start_with_certificate_profile(certificate_profile).await;
+
+        let result = connect_verified(
+            &fixture.url,
+            WebSocketConfig::default(),
+            Some(&fixture.fingerprint),
+        )
+        .await;
+        let error = match result {
+            Ok(mut websocket) => {
+                websocket
+                    .close(None)
+                    .await
+                    .expect("unexpected WebSocket should still close cleanly");
+                None
+            }
+            Err(error) => Some(error),
+        };
+        let application_bytes = fixture.received_application_bytes().await;
+        let terminal_outcome = fixture.terminal_outcome().await;
+        let received_messages = fixture.received_messages().await;
+
+        assert!(
+            matches!(error, Some(ClientError::TlsHandshake)),
+            "invalid pinned certificate must fail TLS validation, got {error:?}"
+        );
+        assert!(
+            matches!(
+                terminal_outcome,
+                FixtureTerminalOutcome::EofWithoutUpgrade | FixtureTerminalOutcome::TlsFailed
+            ),
+            "invalid pinned certificate must fail before Upgrade, got {terminal_outcome:?}"
+        );
+        assert!(
+            application_bytes.is_empty(),
+            "invalid pinned certificate must send zero HTTP Upgrade bytes"
+        );
+        assert!(
+            received_messages.is_empty(),
+            "invalid pinned certificate must send zero authentication or audio frames"
+        );
+    }
+
     #[test]
     fn lowercase_fingerprint_parses_to_sha256_bytes() {
         let parsed = normalize_sha256_fingerprint(LOWERCASE_FINGERPRINT)
@@ -902,6 +1129,73 @@ mod tests {
             FixtureTerminalOutcome::UpgradeObserved
         );
         assert!(fixture.received_messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn expired_pinned_certificate_is_rejected_before_application_data() {
+        assert_pinned_certificate_rejected_before_application_data(CertificateProfile::Expired)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn not_yet_valid_pinned_certificate_is_rejected_before_application_data() {
+        assert_pinned_certificate_rejected_before_application_data(CertificateProfile::NotYetValid)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn client_auth_only_pinned_certificate_is_rejected_before_application_data() {
+        assert_pinned_certificate_rejected_before_application_data(
+            CertificateProfile::ClientAuthOnly,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn corrupt_signature_pinned_certificate_is_rejected_before_application_data() {
+        assert_pinned_certificate_rejected_before_application_data(
+            CertificateProfile::CorruptSignature,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn substituted_second_leaf_is_rejected_before_application_data() {
+        let fixture = TlsWebSocketFixture::start_with_leaf_substitution().await;
+
+        let result = connect_verified(
+            &fixture.url,
+            WebSocketConfig::default(),
+            Some(&fixture.fingerprint),
+        )
+        .await;
+        let error = match result {
+            Ok(mut websocket) => {
+                websocket
+                    .close(None)
+                    .await
+                    .expect("unexpected substituted WebSocket should close cleanly");
+                None
+            }
+            Err(error) => Some(error),
+        };
+        let application_bytes = fixture.received_application_bytes().await;
+        let terminal_outcome = fixture.terminal_outcome().await;
+        let received_messages = fixture.received_messages().await;
+
+        assert!(
+            matches!(error, Some(ClientError::TlsFingerprintMismatch)),
+            "second TLS connection must recheck the configured pin, got {error:?}"
+        );
+        assert_eq!(terminal_outcome, FixtureTerminalOutcome::EofWithoutUpgrade);
+        assert!(
+            application_bytes.is_empty(),
+            "substituted leaf must send zero HTTP Upgrade bytes"
+        );
+        assert!(
+            received_messages.is_empty(),
+            "substituted leaf must send zero authentication or audio frames"
+        );
     }
 
     #[tokio::test]
