@@ -59,6 +59,157 @@ function Get-ZipEntryText {
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
+function Get-ZipEntryBytes {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchiveEntry]$Entry
+    )
+
+    $stream = $Entry.Open()
+    $memory = [System.IO.MemoryStream]::new()
+    try {
+        $stream.CopyTo($memory)
+        return ,$memory.ToArray()
+    } finally {
+        $memory.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Get-ZipEntryHeader {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchiveEntry]$Entry
+    )
+
+    $header = [byte[]]::new(20)
+    $stream = $Entry.Open()
+    try {
+        $offset = 0
+        while ($offset -lt $header.Length) {
+            $read = $stream.Read($header, $offset, $header.Length - $offset)
+            if ($read -eq 0) { break }
+            $offset += $read
+        }
+        return [pscustomobject]@{ Bytes = $header; Length = $offset }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Get-NativeElfMachine {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchiveEntry]$Entry
+    )
+
+    $headerResult = Get-ZipEntryHeader -Entry $Entry
+    $header = $headerResult.Bytes
+    if ($headerResult.Length -lt 20 -or $header[0] -ne 0x7f -or $header[1] -ne 0x45 -or
+        $header[2] -ne 0x4c -or $header[3] -ne 0x46) {
+        throw "Native library is not ELF: $($Entry.FullName)"
+    }
+    if ($header[4] -ne 2) { throw "Native library is not 64-bit ELF: $($Entry.FullName)" }
+    if ($header[5] -eq 1) { return [int]$header[18] -bor ([int]$header[19] -shl 8) }
+    if ($header[5] -eq 2) { return ([int]$header[18] -shl 8) -bor [int]$header[19] }
+    throw "Native ELF has unsupported byte order: $($Entry.FullName)"
+}
+
+function Test-PythonAbiCompatible {
+    param([string]$PythonTag, [string]$AbiTag)
+
+    if ($PythonTag -ceq 'cp312' -and $AbiTag -cin @('cp312', 'abi3', 'none')) {
+        return $true
+    }
+    $stableAbi = [regex]::Match($PythonTag, '^cp3([0-9]+)$')
+    if ($stableAbi.Success -and $AbiTag -ceq 'abi3') {
+        return [int]$stableAbi.Groups[1].Value -le 12
+    }
+    return $PythonTag -cin @('py3', 'py312') -and $AbiTag -ceq 'none'
+}
+
+function Test-WheelTagCompatible {
+    param(
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)]
+        [Collections.Generic.HashSet[string]]$Platforms
+    )
+
+    $parts = $Tag.Split([char]'-', [StringSplitOptions]::None)
+    if ($parts.Count -ne 3) { return $false }
+    $pythonTags = $parts[0].Split([char]'.', [StringSplitOptions]::None)
+    $abiTags = $parts[1].Split([char]'.', [StringSplitOptions]::None)
+    $platformTags = $parts[2].Split([char]'.', [StringSplitOptions]::None)
+    $pythonAbiCompatible = $false
+    foreach ($pythonTag in $pythonTags) {
+        foreach ($abiTag in $abiTags) {
+            if (Test-PythonAbiCompatible -PythonTag $pythonTag -AbiTag $abiTag) {
+                $pythonAbiCompatible = $true
+            }
+        }
+    }
+    if (-not $pythonAbiCompatible) { return $false }
+    $platformCompatible = $false
+    foreach ($platformTag in $platformTags) {
+        if ($platformTag -ceq 'any' -or $Platforms.Contains($platformTag)) {
+            $platformCompatible = $true
+        }
+    }
+    if (-not $platformCompatible) { return $false }
+    if ($platformTags -ccontains 'any' -and $abiTags -cnotcontains 'none') { return $false }
+    return $true
+}
+
+function Get-RecordRows {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchiveEntry]$Entry
+    )
+
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $stream = $Entry.Open()
+    $encoding = [System.Text.UTF8Encoding]::new($false, $true)
+    $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($stream, $encoding, $true)
+    try {
+        $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
+        $parser.SetDelimiters(',')
+        $parser.HasFieldsEnclosedInQuotes = $true
+        $rows = [Collections.Generic.List[object]]::new()
+        while (-not $parser.EndOfData) {
+            $fields = $parser.ReadFields()
+            if ($fields.Count -ne 3) {
+                throw "Malformed RECORD row in $($Entry.FullName)"
+            }
+            $relativePath = [string]$fields[0]
+            $digest = [string]$fields[1]
+            $size = [string]$fields[2]
+            Assert-CanonicalPath -Path $relativePath -Description 'RECORD path'
+            if ([string]::IsNullOrEmpty($digest) -ne [string]::IsNullOrEmpty($size)) {
+                throw "Malformed RECORD row in $($Entry.FullName): $relativePath"
+            }
+            if (-not [string]::IsNullOrEmpty($digest) -and
+                $digest -cnotmatch '^sha256=[A-Za-z0-9_-]{43}$') {
+                throw "Malformed RECORD hash in $($Entry.FullName): $relativePath"
+            }
+            if (-not [string]::IsNullOrEmpty($size) -and $size -cnotmatch '^[0-9]+$') {
+                throw "Malformed RECORD size in $($Entry.FullName): $relativePath"
+            }
+            $rows.Add([pscustomobject]@{
+                Path = $relativePath
+                Digest = $digest
+                Size = $size
+            })
+        }
+        if ($rows.Count -eq 0) { throw "Installed RECORD is empty: $($Entry.FullName)" }
+        return $rows.ToArray()
+    } catch {
+        throw $_
+    } finally {
+        $parser.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-NormalizedPackageName {
     param([Parameter(Mandatory = $true)][string]$Name)
     return ([regex]::Replace($Name, '[-_.]+', '-')).ToLowerInvariant()
@@ -89,11 +240,59 @@ function Assert-PackagedRuntimeClosure {
         throw "Invalid packaged runtime lock: $($_.Exception.Message)"
     }
     if ($lock.schema_version -ne 1) { throw 'Invalid packaged runtime lock schema_version' }
+    $lockPropertyNames = @($lock.PSObject.Properties.Name)
+    $requiredLockProperties = @('schema_version', 'python', 'release', 'runtimes', 'dependencies')
+    if ($lockPropertyNames.Count -ne $requiredLockProperties.Count -or
+        @($requiredLockProperties | Where-Object { $lockPropertyNames -cnotcontains $_ }).Count -gt 0) {
+        throw 'Invalid packaged runtime lock properties'
+    }
+    if ([string]$lock.python -cnotmatch '^3\.12\.[0-9]+$') {
+        throw 'Invalid packaged runtime lock Python version'
+    }
+    if ([string]::IsNullOrEmpty([string]$lock.release)) {
+        throw 'Invalid packaged runtime lock release'
+    }
     $architectures = @('linux-amd64', 'linux-arm64')
     $runtimeNames = @($lock.runtimes.PSObject.Properties.Name)
     if ($runtimeNames.Count -ne 2 -or
         @($architectures | Where-Object { $runtimeNames -cnotcontains $_ }).Count -gt 0) {
         throw 'Packaged runtime lock must define exactly linux-amd64 and linux-arm64'
+    }
+    $platformSuffixes = @{
+        'linux-amd64' = 'x86_64'
+        'linux-arm64' = 'aarch64'
+    }
+    $runtimePlatforms = @{}
+    foreach ($architecture in $architectures) {
+        $runtime = $lock.runtimes.PSObject.Properties[$architecture].Value
+        $runtimePropertyNames = @($runtime.PSObject.Properties.Name)
+        $requiredRuntimeProperties = @('url', 'sha256', 'pip_platforms')
+        if ($runtimePropertyNames.Count -ne $requiredRuntimeProperties.Count -or
+            @($requiredRuntimeProperties | Where-Object {
+                $runtimePropertyNames -cnotcontains $_
+            }).Count -gt 0) {
+            throw "Invalid packaged runtime lock $architecture runtime properties"
+        }
+        if (-not ([string]$runtime.url).StartsWith('https://', [StringComparison]::Ordinal) -or
+            [string]$runtime.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw "Invalid packaged runtime lock $architecture runtime identity"
+        }
+        if (-not ($runtime.pip_platforms -is [System.Array])) {
+            throw "Invalid packaged runtime lock $architecture pip_platforms list"
+        }
+        $platforms = @($runtime.pip_platforms)
+        if ($platforms.Count -eq 0) {
+            throw "Invalid packaged runtime lock $architecture pip_platforms list"
+        }
+        $platformSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($platform in $platforms) {
+            if (-not ($platform -is [string]) -or [string]::IsNullOrEmpty($platform) -or
+                $platform -cnotmatch "^(?:manylinux[^/]*|musllinux[^/]*)_$($platformSuffixes[$architecture])$" -or
+                -not $platformSet.Add($platform)) {
+                throw "Invalid packaged runtime lock $architecture pip_platforms list"
+            }
+        }
+        $runtimePlatforms[$architecture] = $platformSet
     }
 
     $expected = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
@@ -116,9 +315,24 @@ function Assert-PackagedRuntimeClosure {
         }
         foreach ($architecture in $architectures) {
             $wheel = $dependency.wheels.PSObject.Properties[$architecture].Value
-            if ([string]$wheel.filename -notmatch '\.whl$' -or
+            $wheelPropertyNames = @($wheel.PSObject.Properties.Name)
+            if ($wheelPropertyNames.Count -ne 2 -or
+                $wheelPropertyNames -cnotcontains 'filename' -or
+                $wheelPropertyNames -cnotcontains 'sha256' -or
+                [string]$wheel.filename -cnotmatch '^[^/\\]+\.whl$' -or
                 [string]$wheel.sha256 -cnotmatch '^[0-9a-f]{64}$') {
                 throw "Packaged runtime dependency $name has an invalid $architecture wheel"
+            }
+            $filenameMatch = [regex]::Match(
+                [string]$wheel.filename,
+                '^.+-([^-]+)-([^-]+)-([^-]+)\.whl$'
+            )
+            if (-not $filenameMatch.Success) {
+                throw "Invalid packaged runtime lock $architecture wheel filename tags"
+            }
+            $filenameTag = "$($filenameMatch.Groups[1].Value)-$($filenameMatch.Groups[2].Value)-$($filenameMatch.Groups[3].Value)"
+            if (-not (Test-WheelTagCompatible -Tag $filenameTag -Platforms $runtimePlatforms[$architecture])) {
+                throw "Invalid packaged runtime lock $architecture wheel filename tags"
             }
         }
         $expected.Add($normalizedName, [pscustomobject]@{ Name = $name; Version = $version })
@@ -174,6 +388,72 @@ function Assert-PackagedRuntimeClosure {
         foreach ($normalizedName in $expected.Keys) {
             if ($installed[$normalizedName].Version -cne $expected[$normalizedName].Version) {
                 throw "$architecture installed $($expected[$normalizedName].Name) version $($installed[$normalizedName].Version) does not match $($expected[$normalizedName].Version)"
+            }
+        }
+
+        $ownership = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+        foreach ($directory in $distInfoDirectories) {
+            $recordName = "${prefix}${directory}/RECORD"
+            if (-not $EntriesByName.ContainsKey($recordName)) {
+                throw "$architecture installed dist-info is missing RECORD: $directory"
+            }
+            $recordRows = @(Get-RecordRows -Entry $EntriesByName[$recordName])
+            foreach ($recordRow in $recordRows) {
+                $relativePath = [string]$recordRow.Path
+                if ($ownership.ContainsKey($relativePath)) {
+                    throw "Ambiguous RECORD ownership for ${relativePath}: $($ownership[$relativePath]) and $recordName"
+                }
+                $ownership.Add($relativePath, $recordName)
+                $installedName = "${prefix}${relativePath}"
+                if (-not $EntriesByName.ContainsKey($installedName)) {
+                    throw "RECORD file is missing: $relativePath"
+                }
+                $installedBytes = Get-ZipEntryBytes -Entry $EntriesByName[$installedName]
+                if (-not [string]::IsNullOrEmpty([string]$recordRow.Size) -and
+                    $installedBytes.LongLength -ne [long]$recordRow.Size) {
+                    throw "RECORD size mismatch for ${relativePath}: expected $($recordRow.Size), got $($installedBytes.LongLength)"
+                }
+                if (-not [string]::IsNullOrEmpty([string]$recordRow.Digest)) {
+                    $sha = [System.Security.Cryptography.SHA256]::Create()
+                    try { $hashBytes = $sha.ComputeHash($installedBytes) } finally { $sha.Dispose() }
+                    $encodedHash = [Convert]::ToBase64String($hashBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+                    $expectedHash = ([string]$recordRow.Digest).Substring('sha256='.Length)
+                    if ($encodedHash -cne $expectedHash) {
+                        throw "RECORD SHA-256 mismatch for $relativePath"
+                    }
+                }
+            }
+        }
+
+        $actualSitePackages = [Collections.Generic.Dictionary[string, System.IO.Compression.ZipArchiveEntry]]::new([StringComparer]::Ordinal)
+        foreach ($entry in $Entries) {
+            if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+            $relativePath = $entry.FullName.Substring($prefix.Length)
+            $actualSitePackages.Add($relativePath, $entry)
+        }
+        $unowned = @($actualSitePackages.Keys | Where-Object {
+            -not $ownership.ContainsKey($_)
+        } | Sort-Object)
+        if ($unowned.Count -gt 0) {
+            throw "Unowned site-packages file: $($unowned[0])"
+        }
+
+        $expectedMachine = if ($architecture -ceq 'linux-amd64') { 62 } else { 183 }
+        foreach ($relativePath in $actualSitePackages.Keys) {
+            $entry = $actualSitePackages[$relativePath]
+            $headerResult = Get-ZipEntryHeader -Entry $entry
+            $header = $headerResult.Bytes
+            $extensionMarksNative = $relativePath -match '\.so(\.[^/]*)?$|\.(pyd|dll|dylib|node)$'
+            $magic = if ($headerResult.Length -ge 4) {
+                '{0:X2}{1:X2}{2:X2}{3:X2}' -f $header[0], $header[1], $header[2], $header[3]
+            } else { '' }
+            $magicMarksNative = $magic -in @(
+                '7F454C46', '4D5A0000', 'FEEDFACE', 'CEFAEDFE', 'FEEDFACF', 'CFFAEDFE'
+            ) -or ($headerResult.Length -ge 2 -and $header[0] -eq 0x4d -and $header[1] -eq 0x5a)
+            if (-not $extensionMarksNative -and -not $magicMarksNative) { continue }
+            $actualMachine = Get-NativeElfMachine -Entry $entry
+            if ($actualMachine -ne $expectedMachine) {
+                throw "$architecture native ELF machine $actualMachine; expected ${expectedMachine}: $relativePath"
             }
         }
     }

@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import re
@@ -56,8 +59,20 @@ EXPECTED_ELF_MACHINES = {
     "mcav-vj/bin/linux-arm64/python/bin/python3.12": 183,
 }
 FORBIDDEN_PATH = re.compile(
-    r"(^|/)(node_modules|\.git|\.venv|__pycache__|tests?)(/|$)|\.(pyc|pyo)$"
+    r"(^|/)(node_modules|\.git|\.venv|__pycache__|tests?)(/|$)|"
+    r"\.(pyc|pyo)$|(^|/)[^/]+\.(test|spec)\.[^/]+$",
+    re.I,
 )
+RECORD_HASH_PATTERN = re.compile(r"sha256=([A-Za-z0-9_-]{43})")
+NATIVE_SUFFIX_PATTERN = re.compile(r"\.so(?:\.[^/]*)?$|\.(?:pyd|dll|dylib|node)$", re.I)
+NATIVE_MAGICS = {
+    b"\x7fELF",
+    b"MZ",
+    b"\xfe\xed\xfa\xce",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xcf\xfa\xed\xfe",
+}
 FORBIDDEN_ENTRIES = {
     "mcav-vj/state/dj_auth.json",
     "mcav-vj/state/runtime.env",
@@ -152,6 +167,41 @@ def read_elf_machine(header: bytes, executable_name: str) -> int:
     return int.from_bytes(header[18:20], byte_order)
 
 
+def read_native_elf_machine(header: bytes, entry_name: str) -> int:
+    if len(header) < 20 or header[:4] != b"\x7fELF":
+        raise ValueError(f"Native library is not ELF: {entry_name}")
+    if header[4] != 2:
+        raise ValueError(f"Native library is not 64-bit ELF: {entry_name}")
+    if header[5] not in {1, 2}:
+        raise ValueError(f"Native ELF has unsupported byte order: {entry_name}")
+    byte_order = "little" if header[5] == 1 else "big"
+    return int.from_bytes(header[18:20], byte_order)
+
+
+def parse_record(payload: bytes, record_name: str) -> list[tuple[str, str, str]]:
+    try:
+        text = payload.decode("utf-8")
+        rows = list(csv.reader(io.StringIO(text, newline=""), strict=True))
+    except (UnicodeDecodeError, csv.Error) as error:
+        raise ValueError(f"Cannot parse installed RECORD {record_name}: {error}") from error
+    parsed: list[tuple[str, str, str]] = []
+    for row in rows:
+        if len(row) != 3:
+            raise ValueError(f"Malformed RECORD row in {record_name}: {row}")
+        relative_path, digest, size = row
+        validate_canonical_path(relative_path, "RECORD path")
+        if bool(digest) != bool(size):
+            raise ValueError(f"Malformed RECORD row in {record_name}: {row}")
+        if digest and RECORD_HASH_PATTERN.fullmatch(digest) is None:
+            raise ValueError(f"Malformed RECORD hash in {record_name}: {relative_path}")
+        if size and (not size.isascii() or not size.isdecimal()):
+            raise ValueError(f"Malformed RECORD size in {record_name}: {relative_path}")
+        parsed.append((relative_path, digest, size))
+    if not parsed:
+        raise ValueError(f"Installed RECORD is empty: {record_name}")
+    return parsed
+
+
 def verify_packaged_runtime_closure(
     release_zip: zipfile.ZipFile,
     entries_by_name: dict[str, zipfile.ZipInfo],
@@ -213,6 +263,65 @@ def verify_packaged_runtime_closure(
                 raise ValueError(
                     f"{architecture} installed {dependency['name']} version "
                     f"{installed_version} does not match {dependency['version']}"
+                )
+
+        ownership: dict[str, str] = {}
+        for directory in sorted(dist_info_directories):
+            record_name = f"{prefix}{directory}/RECORD"
+            record_entry = entries_by_name.get(record_name)
+            if record_entry is None:
+                raise ValueError(
+                    f"{architecture} installed dist-info is missing RECORD: {directory}"
+                )
+            for relative_path, digest, size in parse_record(
+                release_zip.read(record_entry), record_name
+            ):
+                previous_owner = ownership.get(relative_path)
+                if previous_owner is not None:
+                    raise ValueError(
+                        "Ambiguous RECORD ownership for "
+                        f"{relative_path}: {previous_owner} and {record_name}"
+                    )
+                ownership[relative_path] = record_name
+                installed_name = f"{prefix}{relative_path}"
+                installed_entry = entries_by_name.get(installed_name)
+                if installed_entry is None:
+                    raise ValueError(f"RECORD file is missing: {relative_path}")
+                installed_payload = release_zip.read(installed_entry)
+                if size and len(installed_payload) != int(size):
+                    raise ValueError(
+                        f"RECORD size mismatch for {relative_path}: "
+                        f"expected {size}, got {len(installed_payload)}"
+                    )
+                if digest:
+                    encoded_digest = base64.urlsafe_b64encode(
+                        hashlib.sha256(installed_payload).digest()
+                    ).rstrip(b"=")
+                    if digest.removeprefix("sha256=") != encoded_digest.decode("ascii"):
+                        raise ValueError(f"RECORD SHA-256 mismatch for {relative_path}")
+
+        actual_site_packages = {
+            entry_name.removeprefix(prefix): entry
+            for entry_name, entry in entries_by_name.items()
+            if entry_name.startswith(prefix)
+        }
+        unowned = sorted(set(actual_site_packages) - set(ownership))
+        if unowned:
+            raise ValueError(f"Unowned site-packages file: {unowned[0]}")
+
+        expected_machine = 62 if architecture == "linux-amd64" else 183
+        for relative_path, entry in actual_site_packages.items():
+            with release_zip.open(entry) as installed_file:
+                header = installed_file.read(20)
+            extension_marks_native = NATIVE_SUFFIX_PATTERN.search(relative_path) is not None
+            magic_marks_native = header[:4] in NATIVE_MAGICS or header[:2] == b"MZ"
+            if not extension_marks_native and not magic_marks_native:
+                continue
+            actual_machine = read_native_elf_machine(header, f"{prefix}{relative_path}")
+            if actual_machine != expected_machine:
+                raise ValueError(
+                    f"{architecture} native ELF machine {actual_machine}; "
+                    f"expected {expected_machine}: {relative_path}"
                 )
 
 
