@@ -94,6 +94,36 @@ class VjSidecarLaunchPlanTest {
     }
 
     @Test
+    void readsAllocatedPortsAndEntityCountFromMcavEnvironmentFile() throws Exception {
+        Path pluginData = prepareBundle("linux-amd64");
+        Files.writeString(
+            temporaryDirectory.resolve("mcav-vj/mcav.env"),
+            """
+            MCAV_PUBLIC_HOST=8.8.4.4
+            HTTP_PORT=18080
+            VJ_SERVER_PORT=25818
+            METRICS_PORT=19001
+            ENTITY_COUNT=96
+            """
+        );
+
+        VjSidecarLaunchPlan plan = VjSidecarLaunchPlan.create(
+            pluginData,
+            "amd64",
+            Map.of(),
+            SECRET
+        );
+
+        assertOption(plan.bootstrapCommand(), "--http-port", "18080");
+        assertOption(plan.bootstrapCommand(), "--port", "25818");
+        assertOption(plan.serviceCommand(), "--http-port", "18080");
+        assertOption(plan.serviceCommand(), "--port", "25818");
+        assertOption(plan.serviceCommand(), "--metrics-port", "19001");
+        assertOption(plan.serviceCommand(), "--entities", "96");
+        assertTrue(plan.serviceCommand().contains("https://8.8.4.4:18080"));
+    }
+
+    @Test
     void validatesCommittedIdentityFiles() throws Exception {
         Path pluginData = prepareBundle("linux-amd64");
         VjSidecarLaunchPlan plan = VjSidecarLaunchPlan.create(
@@ -122,5 +152,11 @@ class VjSidecarLaunchPlanTest {
         Files.writeString(runtime, "runtime");
         Files.writeString(projectRoot.resolve("VERSION"), "26.2-event-rc2");
         return pluginData;
+    }
+
+    private static void assertOption(java.util.List<String> command, String option, String value) {
+        int optionIndex = command.indexOf(option);
+        assertTrue(optionIndex >= 0, () -> "Missing option " + option);
+        assertEquals(value, command.get(optionIndex + 1));
     }
 }
