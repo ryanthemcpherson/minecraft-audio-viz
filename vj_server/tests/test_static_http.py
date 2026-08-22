@@ -14,11 +14,15 @@ from typing import Iterator
 import pytest
 
 import vj_server.models as models
+import vj_server.vj_server as vj_server_module
+from preview_tool.backend.server import MultiDirectoryHandler as PreviewMultiDirectoryHandler
+from vj_server import cli as cli_module
 from vj_server.cli import vj_server as modern_cli_main
 from vj_server.models import (
     _REJECTED_STATIC_PATH,
     MultiDirectoryHandler,
     _make_directory_handler,
+    _make_threaded_http_server_class,
     _resolve_static_path,
     _static_path_parts,
     run_http_server,
@@ -83,6 +87,20 @@ def _http_get(address: tuple[str, int], path: str) -> tuple[int, bytes, str | No
         connection.request("GET", path)
         response = connection.getresponse()
         return response.status, response.read(), response.getheader("Location")
+    finally:
+        connection.close()
+
+
+def _http_response(
+    address: tuple[str, int],
+    method: str,
+    path: str,
+) -> tuple[int, bytes, list[tuple[str, str]]]:
+    connection = http.client.HTTPConnection(*address, timeout=5)
+    try:
+        connection.request(method, path)
+        response = connection.getresponse()
+        return response.status, response.read(), response.getheaders()
     finally:
         connection.close()
 
@@ -366,6 +384,158 @@ def test_http_handlers_serve_safe_file(
 
 
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])
+@pytest.mark.parametrize(
+    ("method", "path", "expected_status", "expected_location"),
+    [
+        ("GET", "/preview/app.js", HTTPStatus.OK, None),
+        ("HEAD", "/preview/app.js", HTTPStatus.OK, None),
+        ("GET", "/preview/docs", HTTPStatus.MOVED_PERMANENTLY, "/preview/docs/"),
+        ("GET", "/preview/missing.js", HTTPStatus.NOT_FOUND, None),
+    ],
+)
+def test_http_handlers_disable_static_asset_caching_on_every_response(
+    tmp_path: Path,
+    implementation: str,
+    method: str,
+    path: str,
+    expected_status: HTTPStatus,
+    expected_location: str | None,
+) -> None:
+    """Admin modules must not be combined from different deployment revisions."""
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    (static_root / "app.js").write_text("safe asset", encoding="utf-8")
+    docs = static_root / "docs"
+    docs.mkdir()
+    (docs / "index.html").write_text("safe index", encoding="utf-8")
+    handler_class = _build_handler_class(
+        implementation,
+        {"/preview": str(static_root)},
+    )
+
+    with _running_http_server(handler_class) as address:
+        status, body, headers = _http_response(address, method, path)
+
+    assert status == expected_status
+    assert [value for name, value in headers if name.lower() == "cache-control"] == ["no-store"]
+    assert (
+        next((value for name, value in headers if name.lower() == "location"), None)
+        == expected_location
+    )
+    if method == "HEAD":
+        assert body == b""
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected_status", "expected_location"),
+    [
+        ("GET", "/admin/app.js", HTTPStatus.OK, None),
+        ("HEAD", "/admin/app.js", HTTPStatus.OK, None),
+        ("GET", "/admin/docs", HTTPStatus.MOVED_PERMANENTLY, "/admin/docs/"),
+        ("GET", "/admin/missing.js", HTTPStatus.NOT_FOUND, None),
+    ],
+)
+def test_preview_server_disables_admin_asset_caching_on_every_response(
+    tmp_path: Path,
+    method: str,
+    path: str,
+    expected_status: HTTPStatus,
+    expected_location: str | None,
+) -> None:
+    admin_root = tmp_path / "admin"
+    admin_root.mkdir()
+    (admin_root / "app.js").write_text("safe asset", encoding="utf-8")
+    docs = admin_root / "docs"
+    docs.mkdir()
+    (docs / "index.html").write_text("safe index", encoding="utf-8")
+
+    class _PreviewHandler(PreviewMultiDirectoryHandler):
+        pass
+
+    _PreviewHandler.directory_map = {"/admin": str(admin_root)}
+
+    with _running_http_server(_PreviewHandler) as address:
+        status, body, headers = _http_response(address, method, path)
+
+    assert status == expected_status
+    assert [value for name, value in headers if name.lower() == "cache-control"] == ["no-store"]
+    assert (
+        next((value for name, value in headers if name.lower() == "location"), None)
+        == expected_location
+    )
+    if method == "HEAD":
+        assert body == b""
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize(
+    "request_path",
+    [
+        "/admin/../outside-secret.txt",
+        "/admin/nested/../../outside-secret.txt",
+        "/admin/%2e%2e/outside-secret.txt",
+        "/admin/%2E%2E/outside-secret.txt",
+        "/admin/nested/%2e%2e/%2e%2e/outside-secret.txt",
+        "/admin/%2e%2e%5coutside-secret.txt",
+    ],
+)
+def test_preview_server_rejects_admin_path_traversal_over_http(
+    tmp_path: Path,
+    method: str,
+    request_path: str,
+) -> None:
+    admin_root = tmp_path / "admin"
+    preview_root = tmp_path / "preview"
+    admin_root.mkdir()
+    preview_root.mkdir()
+    (tmp_path / "outside-secret.txt").write_text("secret", encoding="utf-8")
+
+    class _PreviewHandler(PreviewMultiDirectoryHandler):
+        pass
+
+    _PreviewHandler.directory_map = {
+        "/admin": str(admin_root),
+        "/": str(preview_root),
+    }
+
+    with _running_http_server(_PreviewHandler) as address:
+        status, body, headers = _http_response(address, method, request_path)
+
+    assert status == HTTPStatus.NOT_FOUND
+    assert body == b"" if method == "HEAD" else b"secret" not in body
+    assert [value for name, value in headers if name.lower() == "cache-control"] == ["no-store"]
+
+
+def test_preview_server_matches_only_complete_url_prefixes(tmp_path: Path) -> None:
+    admin_root = tmp_path / "admin"
+    preview_root = tmp_path / "preview"
+    (admin_root / "istrator").mkdir(parents=True)
+    preview_root.mkdir()
+    (admin_root / "istrator" / "admin-only.txt").write_text(
+        "must not cross route boundaries",
+        encoding="utf-8",
+    )
+
+    class _PreviewHandler(PreviewMultiDirectoryHandler):
+        pass
+
+    _PreviewHandler.directory_map = {
+        "/admin": str(admin_root),
+        "/": str(preview_root),
+    }
+
+    with _running_http_server(_PreviewHandler) as address:
+        status, body, _ = _http_response(
+            address,
+            "GET",
+            "/administrator/admin-only.txt",
+        )
+
+    assert status == HTTPStatus.NOT_FOUND
+    assert b"route boundaries" not in body
+
+
+@pytest.mark.parametrize("implementation", ["factory", "legacy"])
 def test_http_handlers_redirect_and_serve_safe_directory_index(
     tmp_path: Path,
     implementation: str,
@@ -418,6 +588,15 @@ def test_http_server_defaults_to_loopback() -> None:
     assert signature(run_http_server).parameters["host"].default == "127.0.0.1"
 
 
+def test_http_listener_uses_threaded_requests_with_clean_close_semantics() -> None:
+    server_class = _make_threaded_http_server_class()
+
+    assert issubclass(server_class, socketserver.ThreadingMixIn)
+    assert server_class.allow_reuse_address is True
+    assert server_class.daemon_threads is True
+    assert server_class.block_on_close is True
+
+
 @pytest.mark.parametrize("host", ["", " \t "])
 def test_http_server_rejects_blank_bind_before_opening_socket(
     tmp_path: Path,
@@ -451,6 +630,171 @@ def test_http_server_passes_explicit_wildcard_host_to_bind(
     run_http_server(4321, str(tmp_path), "0.0.0.0")
 
     assert bind_attempts == [("0.0.0.0", 4321)]
+
+
+def test_http_server_wraps_listener_with_supplied_ssl_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_socket = object()
+    wrapped_socket = object()
+    wrap_calls: list[tuple[object, bool]] = []
+
+    class CapturingTCPServer:
+        def __init__(self, server_address, handler_class):
+            self.socket = original_socket
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def serve_forever(self):
+            pass
+
+    class FakeSSLContext:
+        def wrap_socket(self, socket, *, server_side):
+            wrap_calls.append((socket, server_side))
+            return wrapped_socket
+
+    monkeypatch.setattr(models.socketserver, "TCPServer", CapturingTCPServer)
+
+    run_http_server(
+        4321,
+        str(tmp_path),
+        "127.0.0.1",
+        ssl_context=FakeSSLContext(),
+    )
+
+    assert wrap_calls == [(original_socket, True)]
+
+
+def test_http_server_factory_returns_controllable_unstarted_listener(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    serve_calls = 0
+
+    class CapturingTCPServer:
+        def __init__(self, server_address, handler_class):
+            self.server_address = server_address
+            self.handler_class = handler_class
+
+        def serve_forever(self):
+            nonlocal serve_calls
+            serve_calls += 1
+
+    monkeypatch.setattr(
+        models,
+        "_make_threaded_http_server_class",
+        lambda: CapturingTCPServer,
+    )
+
+    server = models.create_http_server(4321, str(tmp_path), "127.0.0.1")
+
+    assert server.server_address == ("127.0.0.1", 4321)
+    assert serve_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("tls_cert", "tls_key"),
+    [("cert.pem", None), (None, "key.pem")],
+)
+def test_vj_server_rejects_incomplete_tls_pair(tls_cert, tls_key) -> None:
+    with pytest.raises(ValueError, match="TLS certificate and key"):
+        VJServer(tls_cert=tls_cert, tls_key=tls_key)
+
+
+def test_vj_server_uses_explicit_project_root(tmp_path: Path) -> None:
+    server = VJServer(project_root=tmp_path)
+
+    assert server.project_root == tmp_path.resolve()
+
+
+def test_modern_cli_propagates_secure_listener_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    auth_file.write_text('{"djs": {}, "vj_operators": {}}', encoding="utf-8")
+    cert_file = tmp_path / "tls.crt"
+    key_file = tmp_path / "tls.key"
+    cert_file.touch()
+    key_file.touch()
+    captured: dict = {}
+
+    class FakeVJServer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def stop(self):
+            pass
+
+    def discard_coroutine(coroutine):
+        coroutine.close()
+
+    monkeypatch.setattr(vj_server_module, "VJServer", FakeVJServer)
+    monkeypatch.setattr(cli_module.asyncio, "run", discard_coroutine)
+    monkeypatch.setattr(cli_module.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--auth-file",
+            str(auth_file),
+            "--http-port",
+            "18443",
+            "--project-root",
+            str(tmp_path),
+            "--tls-cert",
+            str(cert_file),
+            "--tls-key",
+            str(key_file),
+        ],
+    )
+
+    assert modern_cli_main() == 0
+    assert captured["http_port"] == 18443
+    assert captured["project_root"] == tmp_path
+    assert captured["tls_cert"] == cert_file
+    assert captured["tls_key"] == key_file
+
+
+@pytest.mark.asyncio
+async def test_vj_server_passes_tls_context_to_websocket_listeners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ssl_context = object()
+    listener_calls: list[dict] = []
+
+    class FakeWebSocketServer:
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    async def capture_listener(*args, **kwargs):
+        listener_calls.append(kwargs)
+        return FakeWebSocketServer()
+
+    async def no_op():
+        pass
+
+    server = VJServer(http_port=0, metrics_port=None, show_spectrograph=False)
+    server.server_ssl_context = ssl_context
+    server._skip_minecraft = True
+    server._pattern_hot_reload_enabled = False
+    server._init_coordinator = no_op
+    server._browser_heartbeat_loop = no_op
+    server._main_loop = no_op
+    monkeypatch.setattr(vj_server_module, "ws_serve", capture_listener)
+
+    await server.run()
+
+    assert [call["ssl"] for call in listener_calls] == [ssl_context, ssl_context]
 
 
 def test_http_server_does_not_serve_project_files_when_ui_assets_are_missing(

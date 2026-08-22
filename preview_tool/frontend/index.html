@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; form-action 'self'">
     <title>MCAV | 3D Preview</title>
     <link rel="icon" type="image/x-icon" href="mcav.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="mcav-medium.png">
@@ -13,7 +14,24 @@
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to content</a>
-    <div class="app-container">
+    <section id="auth-gate" class="auth-gate" aria-labelledby="auth-title">
+        <div class="auth-card">
+            <img class="auth-logo" src="mcav-medium.png" alt="MCAV">
+            <p class="auth-eyebrow">Secure operator access</p>
+            <h1 id="auth-title">3D Stage Preview</h1>
+            <p class="auth-copy">Use the credentials generated in <code>mcav-vj/FIRST_LOGIN.txt</code>.</p>
+            <form id="auth-form" class="auth-form">
+                <label for="auth-username">Username</label>
+                <input id="auth-username" name="username" type="text" autocomplete="username" required>
+                <label for="auth-password">Password</label>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+                <p id="auth-error" class="auth-error" role="alert" aria-live="polite"></p>
+                <button id="auth-submit" class="auth-submit" type="submit">Open 3D Preview</button>
+            </form>
+            <p class="auth-footnote">Credentials stay in memory for this tab only. On first visit, verify the certificate fingerprint in <code>FIRST_LOGIN.txt</code> before accepting the browser warning.</p>
+        </div>
+    </section>
+    <div id="preview-app" class="app-container" hidden aria-hidden="true">
         <!-- Header -->
         <header class="app-header">
             <div class="header-left">
@@ -29,6 +47,7 @@
                 </div>
             </div>
             <div class="header-right">
+                <button id="btn-logout" class="header-logout" type="button">Sign out</button>
                 <div class="header-stat voice-status-header" id="voice-header-status">
                     <span class="voice-header-dot" id="voice-header-dot"></span>
                     <span class="stat-value" id="voice-header-text">Voice: N/A</span>
@@ -94,14 +113,14 @@
                             <input type="range" id="block-count" min="8" max="64" value="16" step="1" class="slider-input">
                             <span class="slider-value" id="block-count-display">16</span>
                         </div>
-                        <select id="bitmap-pattern-select" class="select-input" style="display:none; margin-top: 8px;">
+                        <select id="bitmap-pattern-select" class="select-input">
                             <option value="bmp_plasma">Plasma</option>
                             <option value="bmp_spectrum">Spectrum Bars</option>
                             <option value="bmp_waveform">Waveform</option>
                             <option value="bmp_vumeter">VU Meter</option>
                             <option value="bmp_spectrogram">Spectrogram</option>
                         </select>
-                        <select id="bitmap-zone-select" class="select-input" style="display:none; margin-top: 8px;">
+                        <select id="bitmap-zone-select" class="select-input">
                             <option value="__all__">All Zones</option>
                         </select>
                     </div>
@@ -335,41 +354,24 @@
     </div>
 
     <!-- DJ info overlay -->
-    <div id="dj-overlay" style="display:none; position:fixed; bottom:20px; left:20px; align-items:center; gap:10px; padding:8px 14px; background:rgba(8,9,13,0.8); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.06); border-radius:8px; z-index:100;">
-        <img id="dj-overlay-avatar" style="width:28px; height:28px; border-radius:50%; object-fit:cover; display:none;" />
-        <span id="dj-overlay-name" style="color:#f5f5f5; font-size:13px; font-weight:500;"></span>
+    <div id="dj-overlay">
+        <img id="dj-overlay-avatar" />
+        <span id="dj-overlay-name"></span>
     </div>
 
     <!-- Beat flash overlay -->
     <div class="beat-flash"></div>
 
     <!-- Three.js and custom scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script>window.THREE || document.write('<script src="js/vendor/three-r128.min.js"><\/script>')</script>
+    <script src="js/vendor/three-r128.min.js"></script>
     <script src="js/particles.js"></script>
     <script src="js/block-indicators.js"></script>
     <script src="js/block-textures.js"></script>
     <script src="js/minecraft-env.js"></script>
     <script src="js/bitmap-preview.js"></script>
-    <script src="js/app.js"></script>
+    <script src="/runtime-config.js"></script>
+    <script type="module" src="js/app.js"></script>
 
-    <!-- Latency dot color coding (CSS-driven, hooks into existing latency display) -->
-    <script>
-    (function() {
-        const dot = document.getElementById('latency-dot');
-        const el = document.getElementById('latency-display');
-        if (!dot || !el) return;
-        const observer = new MutationObserver(function() {
-            const match = el.textContent.match(/([\d.]+)\s*ms/);
-            if (!match) return;
-            const ms = parseFloat(match[1]);
-            dot.classList.remove('latency-good', 'latency-warn', 'latency-bad');
-            if (ms < 20) dot.classList.add('latency-good');
-            else if (ms <= 50) dot.classList.add('latency-warn');
-            else dot.classList.add('latency-bad');
-        });
-        observer.observe(el, { childList: true, characterData: true, subtree: true });
-    })();
-    </script>
+    <script src="js/latency-indicator.js"></script>
 </body>
 </html>

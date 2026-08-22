@@ -9,10 +9,11 @@ import math
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 import msgspec
 import msgspec.json as mjson
+from websockets.exceptions import ConnectionClosed
 
 from vj_server.config import PRESETS as AUDIO_PRESETS
 from vj_server.config import ServerConfig
@@ -24,9 +25,6 @@ from vj_server.models import (
     _json_str,
     _sanitize_name,
 )
-
-if TYPE_CHECKING:
-    import websockets
 
 logger = logging.getLogger("vj_server")
 
@@ -368,7 +366,7 @@ class DJManagerMixin:
                         except asyncio.TimeoutError:
                             # Just a timeout on recv, keep waiting
                             pass
-                        except websockets.exceptions.ConnectionClosed:
+                        except ConnectionClosed:
                             # DJ disconnected while waiting
                             self._pending_djs.pop(dj_id, None)
                             logger.info(
@@ -756,7 +754,7 @@ class DJManagerMixin:
                 except msgspec.DecodeError as e:
                     logger.warning(f"Invalid JSON from DJ {dj.dj_id}: {e}")
 
-        except websockets.exceptions.ConnectionClosed as e:
+        except ConnectionClosed as e:
             dj_name = (
                 self._djs[dj_id].dj_name if dj_id and dj_id in self._djs else dj_id or "unknown"
             )

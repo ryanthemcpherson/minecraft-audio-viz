@@ -1,5 +1,6 @@
 import ConnectCode from './ConnectCode';
 import AudioSourceSelect from './AudioSourceSelect';
+import { getTlsFingerprintFieldState } from '../lib/connectionProfile';
 
 interface AudioSource {
   id: string;
@@ -20,6 +21,9 @@ interface ConnectFormProps {
   onServerHostChange: (host: string) => void;
   serverPort: number;
   onServerPortChange: (port: number) => void;
+  tlsFingerprint: string;
+  onTlsFingerprintChange: (fingerprint: string) => void;
+  isTlsFingerprintValid: boolean;
   error: string | null;
   isConnecting: boolean;
   djName: string;
@@ -39,11 +43,16 @@ export default function ConnectForm({
   onServerHostChange,
   serverPort,
   onServerPortChange,
+  tlsFingerprint,
+  onTlsFingerprintChange,
+  isTlsFingerprintValid,
   error,
   isConnecting,
   djName,
   onConnect,
 }: ConnectFormProps) {
+  const tlsFingerprintFieldState = getTlsFingerprintFieldState(tlsFingerprint);
+
   return (
     <div className="connect-form">
       <div className="connect-row">
@@ -86,12 +95,49 @@ export default function ConnectForm({
         </div>
       )}
 
+      <div className="field-group">
+        <label className="field-label" htmlFor="tls-fingerprint">
+          Server certificate SHA-256 fingerprint
+        </label>
+        <input
+          id="tls-fingerprint"
+          type="text"
+          className="input input-sm"
+          style={{ fontFamily: 'var(--font-mono)' }}
+          value={tlsFingerprint}
+          onChange={e => onTlsFingerprintChange(e.target.value)}
+          placeholder="64 hexadecimal characters"
+          maxLength={95}
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          aria-describedby={
+            tlsFingerprintFieldState.describedBy
+          }
+          aria-invalid={tlsFingerprintFieldState.ariaInvalid}
+        />
+        <div id="tls-fingerprint-help" className="capture-mode-info">
+          Safe to save; never share the server password. Required for a self-signed public endpoint
+          such as wss://IP:25808. Leave blank to use normal platform certificate validation.
+        </div>
+        {!isTlsFingerprintValid && (
+          <div id="tls-fingerprint-error" className="capture-mode-warning" role="alert">
+            {tlsFingerprintFieldState.validationMessage}
+          </div>
+        )}
+      </div>
+
       {error && <div className="error-message" role="alert">{error}</div>}
 
       <button
         className="btn btn-connect full-width"
         onClick={onConnect}
-        disabled={isConnecting || connectCode.length !== 8 || !djName.trim()}
+        disabled={
+          isConnecting ||
+          (!directConnect && connectCode.length !== 8) ||
+          !djName.trim() ||
+          !isTlsFingerprintValid
+        }
       >
         {isConnecting ? 'Connecting...' : 'Connect'}
       </button>

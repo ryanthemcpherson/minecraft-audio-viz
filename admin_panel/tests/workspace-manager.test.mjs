@@ -1,0 +1,330 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  WorkspaceManager,
+  workspaceFromShortcutEvent,
+} from '../js/modules/WorkspaceManager.js';
+
+function fakeNode(workspace) {
+  const attributes = new Map();
+  const listeners = new Map();
+  return {
+    id: '',
+    dataset: { workspace },
+    hidden: false,
+    focused: false,
+    classList: { toggle() {} },
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    getAttribute(name) { return attributes.get(name); },
+    addEventListener(name, listener) { listeners.set(name, listener); },
+    click() { listeners.get('click')?.(); },
+    keydown(key) {
+      const event = {
+        key,
+        preventDefault() { this.defaultPrevented = true; },
+        defaultPrevented: false,
+      };
+      listeners.get('keydown')?.(event);
+      return event;
+    },
+    focus() { this.focused = true; },
+  };
+}
+
+test('activates one workspace and persists only valid names', () => {
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const labels = [{ textContent: '' }];
+  const values = new Map([['mcav-active-workspace', 'invalid']]);
+  const root = {
+    documentElement: { dataset: {} },
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      if (selector === '[data-workspace-label]') return labels;
+      return [];
+    },
+  };
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+
+  const manager = new WorkspaceManager({ root, storage });
+  manager.setup();
+  assert.equal(manager.activeWorkspace, 'live');
+  assert.equal(manager.activate('zones', { focus: true }), true);
+  assert.equal(root.documentElement.dataset.workspace, 'zones');
+  assert.equal(labels[0].textContent, 'Zones');
+  assert.equal(panels.find((panel) => panel.dataset.workspace === 'zones').hidden, false);
+  assert.equal(values.get('mcav-active-workspace'), 'zones');
+  assert.equal(manager.activate('legacy'), false);
+});
+
+test('workspace navigation survives unavailable local storage', () => {
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const root = {
+    documentElement: { dataset: {} },
+    querySelectorAll: (selector) => selector === '[data-workspace-nav]' ? buttons : panels,
+  };
+  const storage = {
+    getItem() { throw new Error('blocked'); },
+    setItem() { throw new Error('blocked'); },
+  };
+  const manager = new WorkspaceManager({ root, storage });
+  assert.doesNotThrow(() => manager.setup());
+  assert.doesNotThrow(() => manager.activate('visuals'));
+  assert.equal(manager.activeWorkspace, 'visuals');
+});
+
+test('workspace navigation survives a throwing window.localStorage getter', () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const root = {
+    documentElement: { dataset: {} },
+    querySelector: () => null,
+    querySelectorAll: (selector) => selector === '[data-workspace-nav]' ? buttons : panels,
+  };
+  const throwingWindow = {};
+  Object.defineProperty(throwingWindow, 'localStorage', {
+    get() { throw new Error('storage access denied'); },
+  });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: throwingWindow });
+
+  try {
+    let manager;
+    assert.doesNotThrow(() => {
+      manager = new WorkspaceManager({ root });
+      manager.setup();
+    });
+    assert.equal(manager.activeWorkspace, 'live');
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else delete globalThis.window;
+  }
+});
+
+test('workspace tabs expose semantics and activate with rail navigation keys', () => {
+  const tablist = fakeNode('');
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const root = {
+    documentElement: { dataset: {} },
+    querySelector: (selector) => selector === '[data-workspace-tablist]' ? tablist : null,
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      return [];
+    },
+  };
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  assert.equal(tablist.getAttribute('role'), 'tablist');
+  assert.equal(tablist.getAttribute('aria-orientation'), 'vertical');
+  assert.equal(buttons[0].getAttribute('role'), 'tab');
+  assert.equal(buttons[0].getAttribute('aria-controls'), 'workspace-live');
+  assert.equal(panels[0].getAttribute('role'), 'tabpanel');
+  assert.equal(panels[0].getAttribute('aria-labelledby'), 'workspace-tab-live');
+
+  assert.equal(buttons[0].keydown('ArrowDown').defaultPrevented, true);
+  assert.equal(manager.activeWorkspace, 'visuals');
+  assert.equal(buttons[1].focused, true);
+  buttons[1].keydown('End');
+  assert.equal(manager.activeWorkspace, 'system');
+  buttons[4].keydown('Home');
+  assert.equal(manager.activeWorkspace, 'live');
+  buttons[0].keydown('ArrowUp');
+  assert.equal(manager.activeWorkspace, 'system');
+  buttons[4].keydown('ArrowRight');
+  assert.equal(manager.activeWorkspace, 'live');
+  buttons[0].keydown('ArrowLeft');
+  assert.equal(manager.activeWorkspace, 'system');
+});
+
+test('tab orientation follows mobile layout and skip link targets the active workspace', () => {
+  const tablist = fakeNode('');
+  const skipLink = fakeNode('');
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  let mediaListener;
+  const media = {
+    matches: false,
+    addEventListener(type, listener) { if (type === 'change') mediaListener = listener; },
+  };
+  const root = {
+    defaultView: { matchMedia: () => media },
+    documentElement: { dataset: {} },
+    querySelector(selector) {
+      if (selector === '[data-workspace-tablist]') return tablist;
+      if (selector === '.skip-link') return skipLink;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      return [];
+    },
+  };
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  assert.equal(tablist.getAttribute('aria-orientation'), 'vertical');
+  assert.equal(skipLink.getAttribute('href'), '#workspace-live');
+  media.matches = true;
+  mediaListener({ matches: true });
+  assert.equal(tablist.getAttribute('aria-orientation'), 'horizontal');
+
+  manager.activate('zones');
+  assert.equal(skipLink.getAttribute('href'), '#workspace-zones');
+  assert.equal(skipLink.textContent, 'Skip to Zones controls');
+});
+
+test('maps Alt+1 through Alt+5 while ignoring editable targets', () => {
+  const target = { tagName: 'DIV', isContentEditable: false };
+  assert.equal(workspaceFromShortcutEvent({ altKey: true, key: '1', target }), 'live');
+  assert.equal(workspaceFromShortcutEvent({ altKey: true, key: '5', target }), 'system');
+  assert.equal(workspaceFromShortcutEvent({ altKey: false, key: '3', target }), null);
+  assert.equal(workspaceFromShortcutEvent({ altKey: true, key: '3', target: { tagName: 'INPUT' } }), null);
+  assert.equal(workspaceFromShortcutEvent({ altKey: true, key: '3', target: { tagName: 'DIV', isContentEditable: true } }), null);
+});
+
+test('moves each marked control surface into its semantic workspace', () => {
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map((workspace) => ({
+    ...fakeNode(workspace),
+    children: [],
+    append(node) { this.children.push(node); },
+  }));
+  const controls = [
+    { dataset: { workspaceDestination: 'live' } },
+    { dataset: { workspaceDestination: 'visuals' } },
+    { dataset: { workspaceDestination: 'system' } },
+  ];
+  const root = {
+    documentElement: { dataset: {} },
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      if (selector === '[data-workspace-destination]') return controls;
+      return [];
+    },
+  };
+
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  assert.deepEqual(panels.find(({ dataset }) => dataset.workspace === 'live').children, [controls[0]]);
+  assert.deepEqual(panels.find(({ dataset }) => dataset.workspace === 'visuals').children, [controls[1]]);
+  assert.deepEqual(panels.find(({ dataset }) => dataset.workspace === 'system').children, [controls[2]]);
+});
+
+test('section index activation opens Visuals and System accordions, focuses, and scrolls', () => {
+  function collapsibleSection(id) {
+    const classes = new Set(['mixer-section', 'collapsible', 'collapsed']);
+    const heading = fakeNode('');
+    const section = {
+      id,
+      hidden: false,
+      classList: {
+        contains: (name) => classes.has(name),
+        remove: (name) => classes.delete(name),
+      },
+      querySelector: (selector) => selector === ':scope > .section-title' ? heading : null,
+      scrollIntoView() { this.scrolled = true; },
+    };
+    heading.click = () => classes.delete('collapsed');
+    return { section, heading };
+  }
+
+  function sectionIndexButton(sectionTarget, focusTarget = '') {
+    const button = fakeNode('');
+    button.dataset.sectionTarget = sectionTarget;
+    button.dataset.focusTarget = focusTarget;
+    return button;
+  }
+
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const visuals = collapsibleSection('ledwall-section');
+  const system = collapsibleSection('system-sync-section');
+  const parityButton = fakeNode('');
+  parityButton.id = 'parity-check-btn';
+  const indexButtons = [
+    sectionIndexButton('ledwall-section'),
+    sectionIndexButton('system-sync-section', 'parity-check-btn'),
+  ];
+  const byId = new Map([
+    ['ledwall-section', visuals.section],
+    ['system-sync-section', system.section],
+    ['parity-check-btn', parityButton],
+  ]);
+  const root = {
+    documentElement: { dataset: {} },
+    getElementById: (id) => byId.get(id) ?? null,
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      if (selector === '[data-section-target]') return indexButtons;
+      return [];
+    },
+  };
+
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+
+  indexButtons[0].click();
+  assert.equal(visuals.section.classList.contains('collapsed'), false);
+  assert.equal(visuals.heading.focused, true);
+  assert.equal(visuals.section.scrolled, true);
+
+  indexButtons[1].click();
+  assert.equal(system.section.classList.contains('collapsed'), false);
+  assert.equal(parityButton.focused, true);
+  assert.equal(system.section.scrolled, true);
+});
+
+test('section index hides an unavailable DJ logo capability until its section becomes visible', () => {
+  let observerCallback;
+  class FakeMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe() {}
+  }
+  const buttons = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const panels = ['live', 'visuals', 'zones', 'djs', 'system'].map(fakeNode);
+  const logoClasses = new Set(['hidden']);
+  const logoSection = {
+    hidden: false,
+    classList: {
+      contains: (name) => logoClasses.has(name),
+      remove: (name) => logoClasses.delete(name),
+    },
+  };
+  const logoIndexButton = fakeNode('');
+  logoIndexButton.dataset.sectionTarget = 'dj-logo-section';
+  const root = {
+    defaultView: { MutationObserver: FakeMutationObserver },
+    documentElement: { dataset: {} },
+    getElementById: (id) => id === 'dj-logo-section' ? logoSection : null,
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '[data-workspace-nav]') return buttons;
+      if (selector === '[data-workspace-panel]') return panels;
+      if (selector === '[data-section-target]') return [logoIndexButton];
+      return [];
+    },
+  };
+
+  const manager = new WorkspaceManager({ root, storage: null });
+  manager.setup();
+  assert.equal(logoIndexButton.hidden, true);
+  assert.equal(logoIndexButton.disabled, true);
+
+  logoClasses.delete('hidden');
+  observerCallback();
+  assert.equal(logoIndexButton.hidden, false);
+  assert.equal(logoIndexButton.disabled, false);
+});

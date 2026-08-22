@@ -44,6 +44,23 @@
     "minecraft_connected": {
       "type": "boolean"
     },
+    "blackout": {
+      "type": "boolean",
+      "description": "Authoritative blackout state."
+    },
+    "freeze": {
+      "type": "boolean",
+      "description": "Authoritative freeze state."
+    },
+    "emergency_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "emergency_epoch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
     "pending_djs": {
       "type": "array",
       "description": "DJs waiting for approval."

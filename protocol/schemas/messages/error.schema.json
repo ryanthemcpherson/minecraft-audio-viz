@@ -19,6 +19,11 @@
     "code": {
       "type": "string",
       "description": "Machine-readable error code (optional)"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     }
   },
   "required": ["type", "message"]

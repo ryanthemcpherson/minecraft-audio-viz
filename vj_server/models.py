@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import socketserver
+import ssl
 import sys
 import time
 import urllib.parse
@@ -675,6 +676,12 @@ class _StaticRequestHandlerMixin:
     _static_path_rejected = False
     _static_path_override: str | None = None
 
+    def end_headers(self) -> None:
+        # The control panel is a set of native ES modules. Reusing one module
+        # across deployments can combine incompatible manager/router versions.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def _reject_static_path(
         self,
         directory_map: dict,
@@ -815,8 +822,35 @@ class MultiDirectoryHandler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRe
         pass
 
 
-def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
-    """Run HTTP server for admin panel."""
+def build_server_ssl_context(
+    cert_path: str | Path,
+    key_path: str | Path,
+) -> ssl.SSLContext:
+    """Build a TLS server context from an existing certificate and key."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    return context
+
+
+def _make_threaded_http_server_class():
+    """Build a reusable threaded listener while retaining testable bind injection."""
+
+    class ReusableThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+        block_on_close = True
+
+    return ReusableThreadingHTTPServer
+
+
+def create_http_server(
+    port: int,
+    directory: str,
+    host: str = "127.0.0.1",
+    ssl_context: ssl.SSLContext | None = None,
+) -> socketserver.TCPServer:
+    """Create a controllable HTTP server without starting its serve loop."""
     host = validate_http_bind_host(host)
 
     # directory is the project root
@@ -830,13 +864,27 @@ def run_http_server(port: int, directory: str, host: str = "127.0.0.1") -> None:
         "/": str(admin_dir),
     }
     handler_cls = _make_directory_handler(dir_map)
+    server_class = _make_threaded_http_server_class()
+    httpd = server_class((host, port), handler_cls)
+    try:
+        if ssl_context is not None:
+            httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+    except BaseException:
+        httpd.server_close()
+        raise
+    return httpd
 
-    # Allow port reuse so restarts don't fail with "Address already in use"
-    class ReusableTCPServer(socketserver.TCPServer):
-        allow_reuse_address = True
+
+def run_http_server(
+    port: int,
+    directory: str,
+    host: str = "127.0.0.1",
+    ssl_context: ssl.SSLContext | None = None,
+) -> None:
+    """Run HTTP server for admin panel."""
 
     try:
-        with ReusableTCPServer((host, port), handler_cls) as httpd:
+        with create_http_server(port, directory, host, ssl_context) as httpd:
             httpd.serve_forever()
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")

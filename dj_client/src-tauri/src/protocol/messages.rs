@@ -297,9 +297,9 @@ pub struct AuthSuccessMessage {
 
 /// Auth error response
 #[derive(Debug, Clone, Deserialize)]
-pub struct AuthErrorMessage {
-    pub error: String,
-}
+// The server-controlled `error` field is intentionally ignored so even a
+// direct Debug of the parsed protocol message cannot expose its contents.
+pub struct AuthErrorMessage {}
 
 /// Status update from server
 #[derive(Debug, Clone, Deserialize)]

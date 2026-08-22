@@ -19,6 +19,31 @@
   /* Typography */
   --mcav-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mcav-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --mcav-font-body: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mcav-font-heading: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --mcav-font-data: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Density and geometry */
+  --mcav-space-1: 0.25rem;
+  --mcav-space-2: 0.5rem;
+  --mcav-space-3: 0.75rem;
+  --mcav-space-4: 1rem;
+  --mcav-space-5: 1.5rem;
+  --mcav-command-height: 3.5rem;
+  --mcav-rail-width: 5rem;
+  --mcav-control-height: 2.75rem;
+  --mcav-radius-sm: 0.375rem;
+  --mcav-radius-md: 0.625rem;
+
+  /* Semantic state */
+  --mcav-state-success: #2fe098;
+  --mcav-state-warning: #ffd166;
+  --mcav-state-danger: #ff6767;
+
+  /* Interaction and motion */
+  --mcav-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --mcav-duration-fast: 120ms;
+  --mcav-focus-ring: 0 0 0 3px rgba(0, 204, 255, 0.35);
 
   /* Shared effects */
   --mcav-glow-cyan: 0 0 30px rgba(0, 204, 255, 0.15);

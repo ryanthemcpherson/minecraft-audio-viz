@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:admin": "vite --open /admin_panel/index.html",
     "dev:preview": "vite --open /preview_tool/frontend/index.html",
+    "test:admin": "node scripts/run-admin-tests.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
