@@ -118,6 +118,17 @@ try {
     )) {
         Write-FixtureFile -RelativePath $relativePath
     }
+    $runtimeLockText = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'runtime-lock.json') -Raw
+    Write-FixtureFile -RelativePath 'release/runtime-lock.json' -Content $runtimeLockText
+    $runtimeLock = $runtimeLockText | ConvertFrom-Json
+    foreach ($architecture in @('linux-amd64', 'linux-arm64')) {
+        foreach ($dependency in $runtimeLock.dependencies) {
+            $distribution = [regex]::Replace([string]$dependency.name, '[-_.]+', '_')
+            $metadataPath = "bin/$architecture/python/lib/python3.12/site-packages/$distribution-$($dependency.version).dist-info/METADATA"
+            $metadata = "Name: $($dependency.name)`nVersion: $($dependency.version)`n"
+            Write-FixtureFile -RelativePath $metadataPath -Content $metadata
+        }
+    }
     Write-ElfFixture -RelativePath 'bin/linux-amd64/python/bin/python3.12' -Machine 62
     Write-ElfFixture -RelativePath 'bin/linux-arm64/python/bin/python3.12' -Machine 183
     Write-FixtureFile -RelativePath 'admin_panel/tests/control.test.mjs'

@@ -49,6 +49,136 @@ function Get-ElfMachine {
     throw "$($Entry.FullName) has an unsupported ELF byte order"
 }
 
+function Get-ZipEntryText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchiveEntry]$Entry
+    )
+
+    $reader = [System.IO.StreamReader]::new($Entry.Open())
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
+
+function Get-NormalizedPackageName {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    return ([regex]::Replace($Name, '[-_.]+', '-')).ToLowerInvariant()
+}
+
+function Get-MetadataField {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Field
+    )
+
+    $match = [regex]::Match($Text, "(?m)^$([regex]::Escape($Field)):\s*(.+?)\r?$")
+    if (-not $match.Success) { return $null }
+    return $match.Groups[1].Value.Trim()
+}
+
+function Assert-PackagedRuntimeClosure {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Entries,
+        [Parameter(Mandatory = $true)]
+        [Collections.Generic.Dictionary[string, System.IO.Compression.ZipArchiveEntry]]$EntriesByName
+    )
+
+    $lockName = 'mcav-vj/release/runtime-lock.json'
+    try {
+        $lock = Get-ZipEntryText -Entry $EntriesByName[$lockName] | ConvertFrom-Json
+    } catch {
+        throw "Invalid packaged runtime lock: $($_.Exception.Message)"
+    }
+    if ($lock.schema_version -ne 1) { throw 'Invalid packaged runtime lock schema_version' }
+    $architectures = @('linux-amd64', 'linux-arm64')
+    $runtimeNames = @($lock.runtimes.PSObject.Properties.Name)
+    if ($runtimeNames.Count -ne 2 -or
+        @($architectures | Where-Object { $runtimeNames -cnotcontains $_ }).Count -gt 0) {
+        throw 'Packaged runtime lock must define exactly linux-amd64 and linux-arm64'
+    }
+
+    $expected = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    $dependencies = @($lock.dependencies)
+    if ($dependencies.Count -eq 0) { throw 'Packaged runtime lock has no dependencies' }
+    foreach ($dependency in $dependencies) {
+        $name = [string]$dependency.name
+        $version = [string]$dependency.version
+        if ([string]::IsNullOrEmpty($name) -or [string]::IsNullOrEmpty($version)) {
+            throw 'Packaged runtime lock dependency name and version must be non-empty'
+        }
+        $normalizedName = Get-NormalizedPackageName -Name $name
+        if ($expected.ContainsKey($normalizedName)) {
+            throw "Duplicate packaged runtime dependency: $name"
+        }
+        $wheelArchitectures = @($dependency.wheels.PSObject.Properties.Name)
+        if ($wheelArchitectures.Count -ne 2 -or
+            @($architectures | Where-Object { $wheelArchitectures -cnotcontains $_ }).Count -gt 0) {
+            throw "Packaged runtime dependency $name must lock exactly both architectures"
+        }
+        foreach ($architecture in $architectures) {
+            $wheel = $dependency.wheels.PSObject.Properties[$architecture].Value
+            if ([string]$wheel.filename -notmatch '\.whl$' -or
+                [string]$wheel.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+                throw "Packaged runtime dependency $name has an invalid $architecture wheel"
+            }
+        }
+        $expected.Add($normalizedName, [pscustomobject]@{ Name = $name; Version = $version })
+    }
+
+    foreach ($architecture in $architectures) {
+        $prefix = "mcav-vj/bin/$architecture/python/lib/python3.12/site-packages/"
+        $distInfoDirectories = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($entry in $Entries) {
+            if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+            $relativePath = $entry.FullName.Substring($prefix.Length)
+            $components = $relativePath.Split([char]'/', [StringSplitOptions]::None)
+            for ($index = 0; $index -lt $components.Count; $index++) {
+                $component = $components[$index]
+                if (-not $component.EndsWith('.dist-info', [StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
+                if ($index -ne 0 -or
+                    -not $component.EndsWith('.dist-info', [StringComparison]::Ordinal)) {
+                    throw "$architecture has noncanonical installed dist-info: $relativePath"
+                }
+                [void]$distInfoDirectories.Add($component)
+            }
+        }
+
+        $installed = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+        foreach ($directory in $distInfoDirectories) {
+            $metadataName = "${prefix}${directory}/METADATA"
+            if (-not $EntriesByName.ContainsKey($metadataName)) {
+                throw "$architecture installed dist-info is missing METADATA: $directory"
+            }
+            $metadataText = Get-ZipEntryText -Entry $EntriesByName[$metadataName]
+            $name = Get-MetadataField -Text $metadataText -Field 'Name'
+            $version = Get-MetadataField -Text $metadataText -Field 'Version'
+            if ([string]::IsNullOrEmpty($name) -or [string]::IsNullOrEmpty($version)) {
+                throw "$architecture installed metadata is incomplete: $metadataName"
+            }
+            $normalizedName = Get-NormalizedPackageName -Name $name
+            if ($installed.ContainsKey($normalizedName)) {
+                throw "$architecture duplicate installed dependency: $name"
+            }
+            $installed.Add($normalizedName, [pscustomobject]@{ Name = $name; Version = $version })
+        }
+
+        $missing = @($expected.Keys | Where-Object { -not $installed.ContainsKey($_) } | Sort-Object)
+        $extra = @($installed.Keys | Where-Object { -not $expected.ContainsKey($_) } | Sort-Object)
+        if ($missing.Count -gt 0) {
+            throw "$architecture missing installed dependencies: $($missing -join ', ')"
+        }
+        if ($extra.Count -gt 0) {
+            throw "$architecture extra installed dependencies: $($extra -join ', ')"
+        }
+        foreach ($normalizedName in $expected.Keys) {
+            if ($installed[$normalizedName].Version -cne $expected[$normalizedName].Version) {
+                throw "$architecture installed $($expected[$normalizedName].Name) version $($installed[$normalizedName].Version) does not match $($expected[$normalizedName].Version)"
+            }
+        }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
     throw "Release archive not found: $Archive"
 }
@@ -59,10 +189,16 @@ $zip = [System.IO.Compression.ZipFile]::OpenRead($resolvedArchive)
 try {
     $entries = @($zip.Entries)
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $caseFoldedNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $entriesByName = [Collections.Generic.Dictionary[string, System.IO.Compression.ZipArchiveEntry]]::new([StringComparer]::Ordinal)
     foreach ($entry in $entries) {
         if (-not $names.Add($entry.FullName)) {
             throw "Duplicate ZIP entries: $($entry.FullName)"
         }
+        if (-not $caseFoldedNames.Add($entry.FullName)) {
+            throw "Case-fold path collision in ZIP: $($entry.FullName)"
+        }
+        $entriesByName.Add($entry.FullName, $entry)
         Assert-CanonicalPath -Path $entry.FullName -Description 'ZIP entry'
         if ([string]::IsNullOrEmpty($entry.Name)) {
             throw "Noncanonical ZIP entry: $($entry.FullName)"
@@ -129,7 +265,7 @@ try {
         'mcav-vj/bin/linux-amd64/python/bin/python3.12',
         'mcav-vj/bin/linux-arm64/python/bin/python3.12'
     )) {
-        $entry = $entries | Where-Object FullName -eq $executableName | Select-Object -First 1
+        $entry = $entriesByName[$executableName]
         $unixMode = ($entry.ExternalAttributes -shr 16) -band 0xFFFF
         if (($unixMode -band 0x49) -eq 0) {
             throw "Executable mode is missing from: $executableName"
@@ -141,7 +277,7 @@ try {
         'mcav-vj/bin/linux-arm64/python/bin/python3.12' = 183
     }
     foreach ($executableName in $expectedElfMachines.Keys) {
-        $entry = $entries | Where-Object FullName -ceq $executableName | Select-Object -First 1
+        $entry = $entriesByName[$executableName]
         $actualMachine = Get-ElfMachine -Entry $entry
         $expectedMachine = $expectedElfMachines[$executableName]
         if ($actualMachine -ne $expectedMachine) {
@@ -150,10 +286,10 @@ try {
         }
     }
 
-    $manifestEntry = $entries | Where-Object FullName -eq 'mcav-vj/MANIFEST.sha256' | Select-Object -First 1
-    $reader = [System.IO.StreamReader]::new($manifestEntry.Open())
-    try { $manifestText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    $manifestEntry = $entriesByName['mcav-vj/MANIFEST.sha256']
+    $manifestText = Get-ZipEntryText -Entry $manifestEntry
     $manifest = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    $caseFoldedManifestPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($line in ($manifestText -split "`r?`n")) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Malformed manifest line: $line" }
@@ -161,6 +297,9 @@ try {
         Assert-CanonicalPath -Path $relativePath -Description 'manifest path'
         if ($manifest.ContainsKey($relativePath)) {
             throw "Duplicate manifest entry: $relativePath"
+        }
+        if (-not $caseFoldedManifestPaths.Add($relativePath)) {
+            throw "Case-fold path collision in manifest: $relativePath"
         }
         $manifest.Add($relativePath, $Matches[1])
     }
@@ -187,6 +326,8 @@ try {
     } finally {
         $sha.Dispose()
     }
+
+    Assert-PackagedRuntimeClosure -Entries $entries -EntriesByName $entriesByName
 
     Write-Host "Verified release: $resolvedArchive"
     Write-Host "Entries: $($entries.Count)"
