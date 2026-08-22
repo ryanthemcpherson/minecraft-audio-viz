@@ -97,11 +97,11 @@ The portable Pterodactyl bundle exposes exactly two public TLS listeners:
 | Loopback only | `8765` | Minecraft renderer |
 | Loopback only | `9001` | Health and Prometheus metrics |
 
-Set `MCAV_PUBLIC_HOST` to the public IP before first start. Administrators verify and import the generated certificate; DJs copy its fingerprint from `FIRST_LOGIN.txt`. Plaintext public DJ connections and trust-on-first-use are prohibited. See the complete [Pterodactyl operator guide](docs/deployment/PTERODACTYL.md) for installation, certificate rotation, and failure recovery.
+Extract the RC2 bundle at the server root, set `MCAV_PUBLIC_HOST` in `mcav-vj/mcav.env`, and leave Paper's startup command unchanged. The plugin owns the bundled VJ sidecar. Administrators verify and import the generated certificate; DJs copy its fingerprint from `FIRST_LOGIN.txt`. Plaintext public DJ connections and trust-on-first-use are prohibited. See the complete [Pterodactyl operator guide](docs/deployment/PTERODACTYL.md) for installation, certificate rotation, and failure recovery.
 
 ### Paper 26.2 release path
 
-**Requirements:** Paper 26.2 (`26.2.build.112-stable` validated), Java 25+, Python 3.11+, `mcav-paper-1.1.0.jar`, and matching VJ server source.
+**Requirements:** Paper 26.2 (`26.2.build.112-stable` validated), Java 25+, and the event `mcav-paper-1.2.0-rc.1.jar` with its matching bundled VJ runtime.
 
 Use the [Paper 26.2 operator guide](docs/PAPER_26_2_INSTALL.md) for backup, installation, first-run secret retrieval, loopback pairing, stage creation, diagnostics, disconnect recovery, clean uninstall, and rollback. The guide treats the pairing secret as local-only data and does not expose the renderer listener to the network.
 
