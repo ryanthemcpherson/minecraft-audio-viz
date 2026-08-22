@@ -25,6 +25,7 @@ from vj_server.web_gateway import (
 
 PUBLIC_ORIGIN = "https://203.0.113.9:8080"
 PNG_BYTES = b"\x89PNG\r\n\x1a\nmcav"
+VENDORED_THREE_BYTES = b"vendored three fixture"
 
 
 async def _recording_browser_handler(socket: AiohttpBrowserSocket) -> None:
@@ -45,6 +46,8 @@ async def gateway_client(tmp_path: Path) -> AsyncIterator[TestClient]:
     (admin_root / "app.js").write_text("export {};", encoding="utf-8")
     (admin_root / "logo.png").write_bytes(PNG_BYTES)
     (preview_root / "index.html").write_text("preview index", encoding="utf-8")
+    (preview_root / "js" / "vendor").mkdir(parents=True)
+    (preview_root / "js" / "vendor" / "three-r128.min.js").write_bytes(VENDORED_THREE_BYTES)
     (tmp_path / "outside-secret.txt").write_text("outside secret", encoding="utf-8")
 
     app = create_unified_web_app(
@@ -107,6 +110,26 @@ async def test_unified_gateway_serves_preview_index(
         assert await response.read() == b""
     else:
         assert await response.read() == b"preview index"
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+async def test_unified_gateway_serves_vendored_three_with_no_store(
+    method: str,
+    gateway_client: TestClient,
+) -> None:
+    response = await gateway_client.request(
+        method,
+        "/preview/js/vendor/three-r128.min.js",
+    )
+
+    assert response.status == 200
+    _assert_no_store(response)
+    assert response.content_type == "text/javascript"
+    if method == "HEAD":
+        assert await response.read() == b""
+        assert response.content_length == len(VENDORED_THREE_BYTES)
+    else:
+        assert await response.read() == VENDORED_THREE_BYTES
 
 
 @pytest.mark.parametrize(

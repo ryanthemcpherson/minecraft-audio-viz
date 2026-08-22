@@ -113,6 +113,8 @@ required = {
     "mcav-vj/release/AudioViz.jar",
     "mcav-vj/release/runtime-lock.json",
     "mcav-vj/admin_panel/runtime-config.js",
+    "mcav-vj/preview_tool/frontend/js/latency-indicator.js",
+    "mcav-vj/preview_tool/frontend/js/vendor/three-r128.min.js",
     "mcav-vj/preview_tool/frontend/runtime-config.js",
     "mcav-vj/vj_server/web_gateway.py",
     "mcav-vj/bin/linux-amd64/audioviz-vj",
