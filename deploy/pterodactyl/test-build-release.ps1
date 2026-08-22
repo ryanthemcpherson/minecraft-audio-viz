@@ -43,6 +43,14 @@ function Write-ElfFixture {
     [IO.File]::WriteAllBytes($path, $header)
 }
 
+function Get-RecordDigest {
+    param([Parameter(Mandatory = $true)][byte[]]$Payload)
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $digest = $sha.ComputeHash($Payload) } finally { $sha.Dispose() }
+    return [Convert]::ToBase64String($digest).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
 function Get-ArchiveNames {
     param([string]$Path)
 
@@ -124,9 +132,26 @@ try {
     foreach ($architecture in @('linux-amd64', 'linux-arm64')) {
         foreach ($dependency in $runtimeLock.dependencies) {
             $distribution = [regex]::Replace([string]$dependency.name, '[-_.]+', '_')
-            $metadataPath = "bin/$architecture/python/lib/python3.12/site-packages/$distribution-$($dependency.version).dist-info/METADATA"
+            $sitePackages = "bin/$architecture/python/lib/python3.12/site-packages"
+            $distInfo = "$distribution-$($dependency.version).dist-info"
+            $metadataRelative = "$distInfo/METADATA"
+            $moduleRelative = "_mcav_fixture_$distribution.py"
+            $recordRelative = "$distInfo/RECORD"
+            $metadataPath = "$sitePackages/$metadataRelative"
+            $modulePath = "$sitePackages/$moduleRelative"
+            $recordPath = "$sitePackages/$recordRelative"
             $metadata = "Name: $($dependency.name)`nVersion: $($dependency.version)`n"
+            $module = "PACKAGE = `"$($dependency.name)`"`n"
+            $metadataBytes = [Text.UTF8Encoding]::new($false).GetBytes($metadata)
+            $moduleBytes = [Text.UTF8Encoding]::new($false).GetBytes($module)
             Write-FixtureFile -RelativePath $metadataPath -Content $metadata
+            Write-FixtureFile -RelativePath $modulePath -Content $module
+            $record = @(
+                "$metadataRelative,sha256=$(Get-RecordDigest -Payload $metadataBytes),$($metadataBytes.Length)"
+                "$moduleRelative,sha256=$(Get-RecordDigest -Payload $moduleBytes),$($moduleBytes.Length)"
+                "$recordRelative,,"
+            ) -join "`n"
+            Write-FixtureFile -RelativePath $recordPath -Content ($record + "`n")
         }
     }
     Write-ElfFixture -RelativePath 'bin/linux-amd64/python/bin/python3.12' -Machine 62

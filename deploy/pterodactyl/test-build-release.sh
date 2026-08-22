@@ -12,6 +12,8 @@ PLUGIN_JAR="$TEMP_ROOT/AudioViz.jar"
 VERSION="26.1-release+test"
 
 python3 - "$RUNTIME_SOURCE" "$SCRIPT_DIR/runtime-lock.json" <<'PY'
+import base64
+import hashlib
 import json
 import re
 import sys
@@ -29,12 +31,34 @@ for architecture, elf_machine in (("linux-amd64", 62), ("linux-arm64", 183)):
     site_packages = binary_path.parents[1] / "lib/python3.12/site-packages"
     for dependency in runtime_lock["dependencies"]:
         distribution = re.sub(r"[-_.]+", "_", dependency["name"])
-        metadata = site_packages / (
-            f"{distribution}-{dependency['version']}.dist-info/METADATA"
-        )
+        dist_info = f"{distribution}-{dependency['version']}.dist-info"
+        metadata_relative = f"{dist_info}/METADATA"
+        module_relative = f"_mcav_fixture_{distribution}.py"
+        record_relative = f"{dist_info}/RECORD"
+        metadata = site_packages / metadata_relative
+        module = site_packages / module_relative
+        metadata_payload = (
+            f"Name: {dependency['name']}\nVersion: {dependency['version']}\n"
+        ).encode()
+        module_payload = f'PACKAGE = "{dependency["name"]}"\n'.encode()
         metadata.parent.mkdir(parents=True, exist_ok=True)
-        metadata.write_text(
-            f"Name: {dependency['name']}\nVersion: {dependency['version']}\n",
+        metadata.write_bytes(metadata_payload)
+        module.write_bytes(module_payload)
+
+        def record_row(relative_path: str, payload: bytes) -> str:
+            digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=")
+            return f"{relative_path},sha256={digest.decode()},{len(payload)}"
+
+        record = site_packages / record_relative
+        record.write_text(
+            "\n".join(
+                (
+                    record_row(metadata_relative, metadata_payload),
+                    record_row(module_relative, module_payload),
+                    f"{record_relative},,",
+                )
+            )
+            + "\n",
             encoding="utf-8",
         )
 PY
