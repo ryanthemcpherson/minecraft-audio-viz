@@ -8,6 +8,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $distRoot = Join-Path $repoRoot 'dist'
 $stagingRoot = Join-Path $distRoot "pterodactyl-$Version-staging"
 $mcavRoot = Join-Path $stagingRoot 'mcav-vj'
+$pluginsRoot = Join-Path $stagingRoot 'plugins'
 $archive = Join-Path $distRoot "mcav-pterodactyl-$Version.zip"
 $checksum = Join-Path $distRoot "mcav-pterodactyl-$Version.sha256"
 
@@ -50,6 +51,8 @@ if (-not $pluginJar) { throw 'Built AudioViz plugin JAR was not found.' }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $mcavRoot 'release') | Out-Null
 Copy-Item -LiteralPath $pluginJar.FullName -Destination (Join-Path $mcavRoot 'release\AudioViz.jar')
+New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null
+Copy-Item -LiteralPath $pluginJar.FullName -Destination (Join-Path $pluginsRoot 'AudioViz.jar')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'plugin-config.default.yml') -Destination (Join-Path $mcavRoot 'release\plugin-config.default.yml')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-lock.json') -Destination (Join-Path $mcavRoot 'release\runtime-lock.json')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'start-mcav.sh') -Destination $mcavRoot
@@ -100,7 +103,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $fileStream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew)
 $zip = [IO.Compression.ZipArchive]::new($fileStream, [IO.Compression.ZipArchiveMode]::Create, $false)
 try {
-    foreach ($file in Get-ChildItem -LiteralPath $mcavRoot -Recurse -File) {
+    foreach ($file in Get-ChildItem -LiteralPath $stagingRoot -Recurse -File) {
         $relative = $file.FullName.Substring($stagingRoot.Length + 1).Replace('\', '/')
         $entry = $zip.CreateEntry($relative, [IO.Compression.CompressionLevel]::Optimal)
         $isExecutable = $relative -eq 'mcav-vj/start-mcav.sh' -or

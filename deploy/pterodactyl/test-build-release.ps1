@@ -128,6 +128,9 @@ try {
     )) {
         Write-FixtureFile -RelativePath $relativePath
     }
+    $installedPlugin = Join-Path $stagingRoot 'plugins\AudioViz.jar'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $installedPlugin) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $mcavRoot 'release\AudioViz.jar') -Destination $installedPlugin
     $runtimeLockText = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'runtime-lock.json') -Raw
     Write-FixtureFile -RelativePath 'release/runtime-lock.json' -Content $runtimeLockText
     $runtimeLock = $runtimeLockText | ConvertFrom-Json

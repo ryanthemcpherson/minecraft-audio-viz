@@ -107,6 +107,7 @@ from pathlib import Path
 archive, version, repository_root_text = sys.argv[1:]
 repository_root = Path(repository_root_text)
 required = {
+    "plugins/AudioViz.jar",
     "mcav-vj/start-mcav.sh",
     "mcav-vj/VERSION",
     "mcav-vj/mcav.env.example",
@@ -166,9 +167,10 @@ with zipfile.ZipFile(archive) as release_zip:
     infos = {entry.filename: entry for entry in release_zip.infolist() if not entry.is_dir()}
     assert required <= infos.keys(), required - infos.keys()
     assert len(infos) == len(set(infos)), "duplicate ZIP entries"
-    assert all(name.startswith("mcav-vj/") for name in infos)
+    assert all(name.startswith("mcav-vj/") or name == "plugins/AudioViz.jar" for name in infos)
     assert release_zip.read("mcav-vj/VERSION").decode() == version
     assert release_zip.read("mcav-vj/release/AudioViz.jar") == b"fixture-plugin"
+    assert release_zip.read("plugins/AudioViz.jar") == b"fixture-plugin"
     assert json.loads(release_zip.read("mcav-vj/release/runtime-lock.json")) == runtime_lock
     environment = release_zip.read("mcav-vj/mcav.env.example").decode("utf-8")
     assert "HTTP_PORT=8080" in environment
@@ -184,7 +186,7 @@ with zipfile.ZipFile(archive) as release_zip:
     payload_names = {
         name.removeprefix("mcav-vj/")
         for name in infos
-        if name != "mcav-vj/MANIFEST.sha256"
+        if name.startswith("mcav-vj/") and name != "mcav-vj/MANIFEST.sha256"
     }
     assert manifest.keys() == payload_names
     for relative_name, expected_digest in manifest.items():

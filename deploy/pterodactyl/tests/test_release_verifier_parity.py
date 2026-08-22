@@ -23,6 +23,7 @@ PYTHON_VERIFIER = DEPLOY_ROOT / "release_archive.py"
 POWERSHELL_VERIFIER = DEPLOY_ROOT / "verify-release.ps1"
 MANIFEST = "mcav-vj/MANIFEST.sha256"
 REQUIRED = {
+    "plugins/AudioViz.jar",
     "mcav-vj/start-mcav.sh",
     "mcav-vj/VERSION",
     "mcav-vj/mcav.env.example",
@@ -101,6 +102,7 @@ def installed_distribution_payloads(architecture: str) -> dict[str, bytes]:
 
 def base_payloads() -> dict[str, bytes]:
     payloads = {name: f"fixture:{name}\n".encode() for name in REQUIRED - {MANIFEST}}
+    payloads["plugins/AudioViz.jar"] = payloads["mcav-vj/release/AudioViz.jar"]
     payloads["mcav-vj/bin/linux-amd64/python/bin/python3.12"] = elf_payload(62)
     payloads["mcav-vj/bin/linux-arm64/python/bin/python3.12"] = elf_payload(183)
     payloads["mcav-vj/release/runtime-lock.json"] = runtime_lock_payload()
@@ -181,7 +183,7 @@ def mutate_runtime_lock(
 def manifest_payload(payloads: dict[str, bytes]) -> bytes:
     rows = []
     for name, payload in sorted(payloads.items()):
-        if name == MANIFEST:
+        if name == MANIFEST or not name.startswith("mcav-vj/"):
             continue
         relative = name.removeprefix("mcav-vj/")
         rows.append(f"{hashlib.sha256(payload).hexdigest()}  {relative}")
@@ -459,6 +461,22 @@ class ReleaseVerifierParityTests(unittest.TestCase):
                     payloads[MANIFEST] = manifest_payload(payloads)
                 archive = self.write_case("missing-" + missing_name.replace("/", "-"), payloads)
                 self.assert_rejected(archive, "required release entr")
+
+    def test_installed_and_release_plugin_jars_must_match(self) -> None:
+        payloads = base_payloads()
+        payloads["plugins/AudioViz.jar"] = b"different plugin"
+        self.assert_rejected(
+            self.write_case("plugin-jar-mismatch", payloads),
+            "plugin jar",
+        )
+
+    def test_plugins_root_rejects_every_other_entry(self) -> None:
+        payloads = base_payloads()
+        payloads["plugins/Other.jar"] = b"unexpected"
+        self.assert_rejected(
+            self.write_case("unexpected-plugin", payloads),
+            "unexpected release entr",
+        )
 
     def test_duplicate_zip_entry_is_rejected(self) -> None:
         payloads = base_payloads()
