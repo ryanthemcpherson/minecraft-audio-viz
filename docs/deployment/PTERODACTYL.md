@@ -1,20 +1,22 @@
-# MCAV 26.1 — Pterodactyl Server Installation
+# MCAV 26.2 Event RC2 — Pterodactyl Server Installation
 
 This package runs the Paper plugin and VJ service together in the existing Java 25 server container. It does not require node access, Docker changes, system Python, npm, or a second Pterodactyl server.
 
 ## Upload
 
-1. Download `mcav-pterodactyl-26.1.zip` and verify its SHA-256 against `mcav-pterodactyl-26.1.zip.sha256`.
+1. Stop Paper, download `mcav-pterodactyl-26.2-event-rc2.zip`, and verify its SHA-256 against the published checksum.
 2. If the Pterodactyl file manager has **Unarchive**, upload the ZIP to the server root and unarchive it there.
-3. If only SFTP is available, extract the ZIP on your computer and upload the resulting `mcav-vj` folder to the SFTP root.
+3. If only SFTP is available, extract the ZIP on your computer and upload both resulting folders to the SFTP root.
 
-The required final path is:
+The required final paths are:
 
 ```text
-/home/container/mcav-vj/start-mcav.sh
+/home/container/plugins/AudioViz.jar
+/home/container/mcav-vj/VERSION
 ```
 
-Do not upload the contents directly into `plugins`. MCAV installs and configures its plugin safely on first start.
+The plugin starts and owns the bundled VJ process automatically. The two copies at
+`plugins/AudioViz.jar` and `mcav-vj/release/AudioViz.jar` are verified as byte-identical.
 
 ## Allocations
 
@@ -47,19 +49,24 @@ Do not use a hostname, private address, brackets around an IPv6 value, or `BROAD
 
 ## Startup command
 
-In Pterodactyl **Startup**, prepend this exact text to the existing full Java command:
+Leave the existing Paper startup command unchanged. Do not add MCAV to custom startup
+flags and do not prepend `start-mcav.sh`.
+
+For example, an existing command remains:
 
 ```text
-bash mcav-vj/start-mcav.sh --
+java -Xms128M -Xmx8G -jar server.jar nogui
 ```
 
-Example:
+Start Paper normally. `AudioViz.jar` bootstraps the bundled runtime asynchronously and
+keeps bootstrap and process I/O away from the Minecraft tick thread.
 
-```text
-bash mcav-vj/start-mcav.sh -- java -Xms128M -Xmx8G -jar server.jar nogui
-```
+### RC1 rollback
 
-Keep every existing Java flag, variable, JAR name, and final argument unchanged after `--`. Then restart once.
+The published `event-2026-08-23-rc1` release remains available. To roll back, stop
+Paper, restore the prior plugin JAR and RC1 `mcav-vj` folder, then use the RC1 wrapper
+startup command documented on that release. Do not mix an RC1 plugin with the RC2
+runtime.
 
 ## Trust the admin certificate
 
