@@ -281,6 +281,12 @@ def generate_certificate(root: Path) -> tuple[Path, Path, str]:
             "/CN=127.0.0.1",
             "-addext",
             "subjectAltName=IP:127.0.0.1,DNS:localhost",
+            "-addext",
+            "basicConstraints=critical,CA:FALSE",
+            "-addext",
+            "keyUsage=critical,digitalSignature,keyEncipherment",
+            "-addext",
+            "extendedKeyUsage=serverAuth",
             "-keyout",
             str(private_key),
             "-out",
@@ -303,8 +309,11 @@ def verify_and_extract(archive: Path, extraction_root: Path) -> Path:
     with zipfile.ZipFile(archive) as release:
         for entry in release.infolist():
             parts = entry.filename.split("/")
+            allowed_payload = (
+                entry.filename.startswith("mcav-vj/") or entry.filename == "plugins/AudioViz.jar"
+            )
             require(
-                entry.filename.startswith("mcav-vj/")
+                allowed_payload
                 and "\\" not in entry.filename
                 and all(part not in {"", ".", ".."} for part in parts),
                 f"unsafe archive entry: {entry.filename}",
@@ -672,7 +681,8 @@ async def run_rust_smoke_executable(
     )
     require(
         process.returncode == 0,
-        f"Rust {mode} smoke exited {process.returncode}: {stderr.strip()}",
+        f"Rust {mode} smoke exited {process.returncode}: "
+        f"stdout={stdout.strip()} stderr={stderr.strip()}",
     )
     output = parse_rust_smoke_output(stdout, expected_mode=mode)
     return {
@@ -692,6 +702,43 @@ async def run_rust_smoke_executable(
     }
 
 
+def validate_recorded_tls_connections(
+    mode: str,
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate the production pin probe and select its application connection."""
+
+    require(mode in {"match", "mismatch"}, "invalid recorded Rust DJ mode")
+    expected_count = 2 if mode == "match" else 1
+    require(
+        len(records) == expected_count,
+        f"Rust {mode} smoke must open "
+        f"{'two TLS connections' if mode == 'match' else 'one TLS connection'}",
+    )
+    probe = records[0]
+    require(
+        not probe["upstream_connected"]
+        and probe["post_tls_application_bytes"] == 0
+        and probe["websocket_upgrade_requests"] == 0
+        and probe["auth_messages"] == 0
+        and probe["audio_messages"] == 0,
+        "certificate pin probe sent application data",
+    )
+    if mode == "mismatch":
+        return probe
+
+    application = records[1]
+    require(application["upstream_connected"], "matching DJ did not reach packaged service")
+    require(
+        application["websocket_upgrade_requests"] == 1,
+        "matching DJ did not send one WebSocket Upgrade",
+    )
+    require(application["auth_messages"] == 1, "matching DJ auth was not observed")
+    require(application["audio_messages"] >= 1, "matching DJ audio was not observed")
+    require(application["parse_errors"] == 0, "matching DJ traffic could not be parsed")
+    return application
+
+
 async def run_recorded_rust_dj(
     executable: Path,
     forwarder: RecordingTlsForwarder,
@@ -707,33 +754,20 @@ async def run_recorded_rust_dj(
         port=DJ_TLS_RECORDER_PORT,
         fingerprint=fingerprint,
     )
-    server = await forwarder.wait_for_record(record_index)
+    expected_count = 2 if mode == "match" else 1
+    records = [
+        await forwarder.wait_for_record(record_index + offset) for offset in range(expected_count)
+    ]
     require(
-        forwarder.record_count == record_index + 1,
+        forwarder.record_count == record_index + expected_count,
         f"Rust {mode} smoke opened an unexpected number of TLS connections",
     )
-    if mode == "match":
-        require(server["upstream_connected"], "matching DJ did not reach packaged service")
-        require(
-            server["websocket_upgrade_requests"] == 1,
-            "matching DJ did not send one WebSocket Upgrade",
-        )
-        require(server["auth_messages"] == 1, "matching DJ auth was not observed")
-        require(server["audio_messages"] >= 1, "matching DJ audio was not observed")
-        require(server["parse_errors"] == 0, "matching DJ traffic could not be parsed")
-    else:
-        require(
-            server["post_tls_application_bytes"] == 0,
-            "mismatching production DJ sent post-TLS application bytes",
-        )
-        require(
-            not server["upstream_connected"]
-            and server["websocket_upgrade_requests"] == 0
-            and server["auth_messages"] == 0
-            and server["audio_messages"] == 0,
-            "mismatching production DJ crossed the pin boundary",
-        )
-    return {"production_client": client, "server_side_recorder": server}
+    application = validate_recorded_tls_connections(mode, records)
+    return {
+        "production_client": client,
+        "pin_probe_recorder": records[0],
+        "server_side_recorder": application,
+    }
 
 
 async def run_recorded_pinned_plaintext(
