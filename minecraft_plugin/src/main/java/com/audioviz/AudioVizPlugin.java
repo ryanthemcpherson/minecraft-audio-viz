@@ -23,6 +23,8 @@ import com.audioviz.gui.MenuManager;
 import com.audioviz.particles.ParticleVisualizationManager;
 import com.audioviz.render.RendererRegistry;
 import com.audioviz.sequence.SequenceManager;
+import com.audioviz.sidecar.VjSidecarLaunchPlan;
+import com.audioviz.sidecar.VjSidecarManager;
 import com.audioviz.stages.StageManager;
 import com.audioviz.stages.StageZonePlacementManager;
 import com.audioviz.voice.VoicechatIntegration;
@@ -37,6 +39,9 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.security.SecureRandom;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 
@@ -46,6 +51,7 @@ public class AudioVizPlugin extends JavaPlugin {
     private ZoneManager zoneManager;
     private EntityPoolManager entityPoolManager;
     private volatile WebSocketStartupManager<VizWebSocketServer> webSocketStartupManager;
+    private volatile VjSidecarManager vjSidecarManager;
     private MenuManager menuManager;
     private ChatInputManager chatInputManager;
     private BeatEventManager beatEventManager;
@@ -203,6 +209,7 @@ public class AudioVizPlugin extends JavaPlugin {
         });
 
         startWebSocketListener(webSocketSecret);
+        startVjSidecar(webSocketSecret, System.getenv(), System.getProperty("os.arch", ""));
 
         getLogger().info("AudioViz plugin enabled!");
     }
@@ -348,8 +355,57 @@ public class AudioVizPlugin extends JavaPlugin {
         return failure.getClass().getSimpleName();
     }
 
+    void startVjSidecar(
+        WebSocketSecretManager.SecretResolution secretResolution,
+        Map<String, String> environment,
+        String architecture
+    ) {
+        if (secretResolution == null) {
+            return;
+        }
+        try {
+            VjSidecarLaunchPlan plan = createVjSidecarLaunchPlan(
+                getDataFolder().toPath(),
+                architecture,
+                environment,
+                secretResolution.secret()
+            );
+            VjSidecarManager manager = createVjSidecarManager(plan);
+            vjSidecarManager = manager;
+            manager.start();
+        } catch (IOException | IllegalArgumentException failure) {
+            getLogger().info("Bundled VJ sidecar not started: " + failure.getMessage());
+        }
+    }
+
+    VjSidecarLaunchPlan createVjSidecarLaunchPlan(
+        Path pluginDataDirectory,
+        String architecture,
+        Map<String, String> environment,
+        String sharedSecret
+    ) throws IOException {
+        return VjSidecarLaunchPlan.create(
+            pluginDataDirectory,
+            architecture,
+            environment,
+            sharedSecret
+        );
+    }
+
+    VjSidecarManager createVjSidecarManager(VjSidecarLaunchPlan plan) {
+        return new VjSidecarManager(
+            plan,
+            message -> getLogger().info("[MCAV VJ] " + message)
+        );
+    }
+
     @Override
     public void onDisable() {
+        VjSidecarManager sidecarManager = vjSidecarManager;
+        if (sidecarManager != null) {
+            sidecarManager.stop();
+        }
+
         // Close the startup boundary first so no candidate can publish, retry,
         // or schedule server tasks while the rest of plugin teardown runs.
         WebSocketStartupManager<VizWebSocketServer> startupManager = webSocketStartupManager;
