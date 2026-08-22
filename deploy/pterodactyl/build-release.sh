@@ -68,6 +68,30 @@ copy_tracked_file() {
   install -m 644 "$REPO_ROOT/$relative_path" "$destination"
 }
 
+TRACKED_FILES="$STAGING_ROOT/tracked-files"
+if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  git -C "$REPO_ROOT" ls-files -z -- \
+    'vj_server/*.py' \
+    admin_panel \
+    preview_tool/frontend \
+    patterns \
+    configs/dj_auth.example.json \
+    configs/scenes \
+    configs/banners > "$TRACKED_FILES"
+elif command -v git.exe > /dev/null && command -v wslpath > /dev/null; then
+  git.exe -C "$(wslpath -w "$REPO_ROOT")" ls-files -z -- \
+    'vj_server/*.py' \
+    admin_panel \
+    preview_tool/frontend \
+    patterns \
+    configs/dj_auth.example.json \
+    configs/scenes \
+    configs/banners > "$TRACKED_FILES"
+else
+  printf 'Unable to enumerate tracked release files from %s\n' "$REPO_ROOT" >&2
+  exit 69
+fi
+
 while IFS= read -r -d '' relative_path; do
   case "$relative_path" in
     */test/*|*/tests/*|*.test.*|*.spec.*)
@@ -80,16 +104,7 @@ while IFS= read -r -d '' relative_path; do
       ;;
   esac
   copy_tracked_file "$relative_path"
-done < <(
-  git -C "$REPO_ROOT" ls-files -z -- \
-    'vj_server/*.py' \
-    admin_panel \
-    preview_tool/frontend \
-    patterns \
-    configs/dj_auth.example.json \
-    configs/scenes \
-    configs/banners
-)
+done < "$TRACKED_FILES"
 
 if [[ -n "$RUNTIME_SOURCE" ]]; then
   mkdir -p "$MCAV_ROOT/bin"

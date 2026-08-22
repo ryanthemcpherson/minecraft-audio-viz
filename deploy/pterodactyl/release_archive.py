@@ -17,22 +17,27 @@ MANIFEST_NAME = "mcav-vj/MANIFEST.sha256"
 REQUIRED_ENTRIES = {
     "mcav-vj/start-mcav.sh",
     "mcav-vj/VERSION",
+    "mcav-vj/mcav.env.example",
     "mcav-vj/bin/linux-amd64/audioviz-vj",
     "mcav-vj/bin/linux-amd64/python/bin/python3.12",
     "mcav-vj/bin/linux-arm64/audioviz-vj",
     "mcav-vj/bin/linux-arm64/python/bin/python3.12",
     "mcav-vj/release/AudioViz.jar",
     "mcav-vj/release/plugin-config.default.yml",
+    "mcav-vj/release/runtime-lock.json",
     "mcav-vj/vj_server/__init__.py",
     "mcav-vj/vj_server/auth.py",
     "mcav-vj/vj_server/cli.py",
     "mcav-vj/vj_server/config.py",
     "mcav-vj/vj_server/patterns.py",
     "mcav-vj/vj_server/vj_server.py",
+    "mcav-vj/vj_server/web_gateway.py",
     "mcav-vj/patterns/lib.lua",
     "mcav-vj/patterns/bars.lua",
     "mcav-vj/admin_panel/index.html",
+    "mcav-vj/admin_panel/runtime-config.js",
     "mcav-vj/preview_tool/frontend/index.html",
+    "mcav-vj/preview_tool/frontend/runtime-config.js",
     MANIFEST_NAME,
 }
 EXECUTABLE_ENTRIES = {
@@ -59,6 +64,18 @@ FORBIDDEN_ENTRIES = {
 
 def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def validate_canonical_path(path: str, description: str) -> None:
+    components = path.split("/")
+    if (
+        not path
+        or "\\" in path
+        or path.startswith("/")
+        or re.match(r"^[A-Za-z]:", path)
+        or any(component in {"", ".", ".."} for component in components)
+    ):
+        raise ValueError(f"Noncanonical {description}: {path}")
 
 
 def write_manifest(release_root: Path) -> None:
@@ -107,6 +124,7 @@ def parse_manifest(payload: bytes) -> dict[str, str]:
         if match is None:
             raise ValueError(f"Malformed manifest line: {line}")
         digest, relative_path = match.groups()
+        validate_canonical_path(relative_path, "manifest path")
         if relative_path in manifest:
             raise ValueError(f"Duplicate manifest entry: {relative_path}")
         manifest[relative_path] = digest
@@ -124,10 +142,14 @@ def read_elf_machine(header: bytes, executable_name: str) -> int:
 
 def verify_archive(archive_path: Path) -> int:
     with zipfile.ZipFile(archive_path) as release_zip:
-        entries = [entry for entry in release_zip.infolist() if not entry.is_dir()]
+        entries = release_zip.infolist()
         names = [entry.filename for entry in entries]
         if len(names) != len(set(names)):
             raise ValueError("Release archive contains duplicate ZIP entries")
+        for entry in entries:
+            validate_canonical_path(entry.filename, "ZIP entry")
+            if entry.is_dir():
+                raise ValueError(f"Noncanonical ZIP entry: {entry.filename}")
         if any(not name.startswith(ARCHIVE_ROOT) for name in names):
             raise ValueError(f"Every release entry must be under {ARCHIVE_ROOT}")
 

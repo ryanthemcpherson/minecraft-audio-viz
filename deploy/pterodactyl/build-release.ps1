@@ -51,6 +51,7 @@ if (-not $pluginJar) { throw 'Built AudioViz plugin JAR was not found.' }
 New-Item -ItemType Directory -Force -Path (Join-Path $mcavRoot 'release') | Out-Null
 Copy-Item -LiteralPath $pluginJar.FullName -Destination (Join-Path $mcavRoot 'release\AudioViz.jar')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'plugin-config.default.yml') -Destination (Join-Path $mcavRoot 'release\plugin-config.default.yml')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-lock.json') -Destination (Join-Path $mcavRoot 'release\runtime-lock.json')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'start-mcav.sh') -Destination $mcavRoot
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'mcav.env.example') -Destination $mcavRoot
 Set-Content -LiteralPath (Join-Path $mcavRoot 'VERSION') -Value $Version -NoNewline
