@@ -173,7 +173,7 @@ with zipfile.ZipFile(archive) as release_zip:
     assert release_zip.read("plugins/AudioViz.jar") == b"fixture-plugin"
     assert json.loads(release_zip.read("mcav-vj/release/runtime-lock.json")) == runtime_lock
     environment = release_zip.read("mcav-vj/mcav.env.example").decode("utf-8")
-    assert "HTTP_PORT=8080" in environment
+    assert "HTTP_PORT=25927" in environment
     assert "VJ_SERVER_PORT=25808" in environment
     assert "UNIFIED_WEB=true" in environment
     for name in executables:
@@ -195,7 +195,7 @@ with zipfile.ZipFile(archive) as release_zip:
 
 deployment = (repository_root / "docs/deployment/PTERODACTYL.md").read_text(encoding="utf-8")
 allocation_section = deployment.split("## Allocations", 1)[1].split("##", 1)[0]
-assert re.findall(r"(?m)^- `(\d+)`", allocation_section) == ["8080", "25808"]
+assert re.findall(r"(?m)^- `(\d+)`", allocation_section) == ["25927", "25808"]
 assert "/ws" in allocation_section
 assert "8766" not in allocation_section
 assert "9000" not in allocation_section

@@ -92,12 +92,12 @@ The portable Pterodactyl bundle exposes exactly two public TLS listeners:
 
 | Scope | Port | Transport and purpose |
 |-|-|-|
-| Public | `8080` | Admin HTTPS, preview HTTPS, and same-origin browser WSS at `/ws` |
+| Public | `25927` | Admin HTTPS, preview HTTPS, and same-origin browser WSS at `/ws` |
 | Public | `25808` | DJ WSS with an explicit SHA-256 certificate pin |
 | Loopback only | `8765` | Minecraft renderer |
 | Loopback only | `9001` | Health and Prometheus metrics |
 
-Extract the RC2 bundle at the server root, set `MCAV_PUBLIC_HOST` in `mcav-vj/mcav.env`, and leave Paper's startup command unchanged. The plugin owns the bundled VJ sidecar. Administrators verify and import the generated certificate; DJs copy its fingerprint from `FIRST_LOGIN.txt`. Plaintext public DJ connections and trust-on-first-use are prohibited. See the complete [Pterodactyl operator guide](docs/deployment/PTERODACTYL.md) for installation, certificate rotation, and failure recovery.
+Extract the RC3 bundle at the server root, set `MCAV_PUBLIC_HOST` in `mcav-vj/mcav.env`, and leave Paper's startup command unchanged. The plugin owns the bundled VJ sidecar. Administrators verify and import the generated certificate; DJs copy its fingerprint from `FIRST_LOGIN.txt`. Plaintext public DJ connections and trust-on-first-use are prohibited. See the complete [Pterodactyl operator guide](docs/deployment/PTERODACTYL.md) for installation, certificate rotation, and failure recovery.
 
 ### Paper 26.2 release path
 
@@ -153,7 +153,7 @@ graph TD
 
 ### Development and legacy network ports
 
-The following diagram and table describe the configurable source-development defaults. They are not the Pterodactyl public topology; the packaged deployment uses only `8080` and `25808` publicly as described above.
+The following diagram and table describe the configurable source-development defaults. They are not the Pterodactyl public topology; the packaged deployment uses only `25927` and `25808` publicly as described above.
 
 ```mermaid
 graph LR

@@ -30,10 +30,10 @@ from scripts.release.paper_harness import (  # noqa: E402
     download_paper,
 )
 
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "scripts" / "release" / "paper_26_2_manifest.json"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "scripts" / "release" / "paper_26_1_2_manifest.json"
 DEFAULT_PAPER_CACHE = REPOSITORY_ROOT / "build" / "cache" / "paper"
 DEFAULT_JAVA_CACHE = Path(tempfile.gettempdir()) / "mcav-java-cache"
-DEFAULT_HTTP_PORT = 8080
+DEFAULT_HTTP_PORT = 25927
 DEFAULT_DJ_PORT = 25808
 DEFAULT_MINECRAFT_PORT = 25586
 DEFAULT_JAVA_CONTAINER_IMAGE = (
