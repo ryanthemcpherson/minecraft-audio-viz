@@ -11,16 +11,21 @@ import java.util.Objects;
 /** Immutable discovery and command model for the bundled VJ sidecar. */
 public final class VjSidecarLaunchPlan {
 
-    private static final int HTTP_PORT = 8080;
-    private static final int DJ_PORT = 25808;
+    private static final int DEFAULT_HTTP_PORT = 8080;
+    private static final int DEFAULT_DJ_PORT = 25808;
     private static final int MINECRAFT_PORT = 8765;
-    private static final int METRICS_PORT = 9001;
+    private static final int DEFAULT_METRICS_PORT = 9001;
+    private static final int DEFAULT_ENTITY_COUNT = 160;
 
     private final Path projectRoot;
     private final Path pluginsDirectory;
     private final Path runtime;
     private final String publicHost;
     private final String releaseVersion;
+    private final int httpPort;
+    private final int djPort;
+    private final int metricsPort;
+    private final int entityCount;
     private final Map<String, String> childEnvironment;
 
     private VjSidecarLaunchPlan(
@@ -29,6 +34,10 @@ public final class VjSidecarLaunchPlan {
         Path runtime,
         String publicHost,
         String releaseVersion,
+        int httpPort,
+        int djPort,
+        int metricsPort,
+        int entityCount,
         String sharedSecret
     ) {
         this.projectRoot = projectRoot;
@@ -36,6 +45,10 @@ public final class VjSidecarLaunchPlan {
         this.runtime = runtime;
         this.publicHost = publicHost;
         this.releaseVersion = releaseVersion;
+        this.httpPort = httpPort;
+        this.djPort = djPort;
+        this.metricsPort = metricsPort;
+        this.entityCount = entityCount;
         this.childEnvironment = Map.of("MINECRAFT_WS_SECRET", sharedSecret);
     }
 
@@ -66,16 +79,43 @@ public final class VjSidecarLaunchPlan {
             throw new IllegalArgumentException("Bundled VJ runtime is missing: " + runtime);
         }
 
-        String publicHost = environment.getOrDefault("MCAV_PUBLIC_HOST", "").strip();
-        if (publicHost.isEmpty()) {
-            publicHost = readEnvironmentFileValue(
-                projectRoot.resolve("mcav.env"),
-                "MCAV_PUBLIC_HOST"
-            );
-        }
+        Path environmentFile = projectRoot.resolve("mcav.env");
+        String publicHost = configuredValue(environment, environmentFile, "MCAV_PUBLIC_HOST", "");
         if (publicHost.isEmpty()) {
             throw new IllegalArgumentException("MCAV_PUBLIC_HOST is not configured");
         }
+        int httpPort = configuredInteger(
+            environment,
+            environmentFile,
+            "HTTP_PORT",
+            DEFAULT_HTTP_PORT,
+            1,
+            65_535
+        );
+        int djPort = configuredInteger(
+            environment,
+            environmentFile,
+            "VJ_SERVER_PORT",
+            DEFAULT_DJ_PORT,
+            1,
+            65_535
+        );
+        int metricsPort = configuredInteger(
+            environment,
+            environmentFile,
+            "METRICS_PORT",
+            DEFAULT_METRICS_PORT,
+            1,
+            65_535
+        );
+        int entityCount = configuredInteger(
+            environment,
+            environmentFile,
+            "ENTITY_COUNT",
+            DEFAULT_ENTITY_COUNT,
+            1,
+            10_000
+        );
         Path versionFile = projectRoot.resolve("VERSION");
         if (!Files.isRegularFile(versionFile)) {
             throw new IllegalArgumentException("Bundled VJ version file is missing: " + versionFile);
@@ -91,8 +131,52 @@ public final class VjSidecarLaunchPlan {
             runtime,
             publicHost,
             releaseVersion,
+            httpPort,
+            djPort,
+            metricsPort,
+            entityCount,
             sharedSecret
         );
+    }
+
+    private static String configuredValue(
+        Map<String, String> environment,
+        Path environmentFile,
+        String key,
+        String defaultValue
+    ) throws IOException {
+        String value = environment.getOrDefault(key, "").strip();
+        if (value.isEmpty()) {
+            value = readEnvironmentFileValue(environmentFile, key);
+        }
+        return value.isEmpty() ? defaultValue : value;
+    }
+
+    private static int configuredInteger(
+        Map<String, String> environment,
+        Path environmentFile,
+        String key,
+        int defaultValue,
+        int minimum,
+        int maximum
+    ) throws IOException {
+        String rawValue = configuredValue(
+            environment,
+            environmentFile,
+            key,
+            Integer.toString(defaultValue)
+        );
+        try {
+            int value = Integer.parseInt(rawValue);
+            if (value < minimum || value > maximum) {
+                throw new IllegalArgumentException(
+                    key + " must be between " + minimum + " and " + maximum
+                );
+            }
+            return value;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(key + " must be an integer", exception);
+        }
     }
 
     private static String readEnvironmentFileValue(Path path, String key) throws IOException {
@@ -121,8 +205,8 @@ public final class VjSidecarLaunchPlan {
             "--plugins-dir", pluginsDirectory.toString(),
             "--release-version", releaseVersion,
             "--public-host", publicHost,
-            "--http-port", Integer.toString(HTTP_PORT),
-            "--port", Integer.toString(DJ_PORT),
+            "--http-port", Integer.toString(httpPort),
+            "--port", Integer.toString(djPort),
             "--unified-web"
         );
     }
@@ -139,15 +223,15 @@ public final class VjSidecarLaunchPlan {
             "--minecraft-port", Integer.toString(MINECRAFT_PORT),
             "--auth-file", identity.resolve("dj_auth.json").toString(),
             "--http-host", publicBindHost,
-            "--http-port", Integer.toString(HTTP_PORT),
+            "--http-port", Integer.toString(httpPort),
             "--dj-host", publicBindHost,
-            "--port", Integer.toString(DJ_PORT),
+            "--port", Integer.toString(djPort),
             "--unified-web",
-            "--public-origin", "https://" + publicAuthority + ":" + HTTP_PORT,
-            "--metrics-port", Integer.toString(METRICS_PORT),
+            "--public-origin", "https://" + publicAuthority + ":" + httpPort,
+            "--metrics-port", Integer.toString(metricsPort),
             "--tls-cert", identity.resolve("tls.crt").toString(),
             "--tls-key", identity.resolve("tls.key").toString(),
-            "--entities", "160",
+            "--entities", Integer.toString(entityCount),
             "--no-spectrograph"
         ));
         return List.copyOf(command);
