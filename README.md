@@ -436,7 +436,7 @@ audioviz-vj
 Defaults:
 - DJ connection port: `ws://localhost:9000`
 - Browser preview: `http://localhost:8080`
-- Admin panel: `http://localhost:8081`
+- Admin panel: `http://localhost:8080`
 
 ### 2) DJs connect using a development DJ Client (each DJ machine)
 
