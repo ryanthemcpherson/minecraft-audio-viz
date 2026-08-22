@@ -805,6 +805,25 @@ class ReleaseVerifierParityTests(unittest.TestCase):
                     "runtime",
                 )
 
+    def test_runtime_lock_top_level_arrays_are_rejected(self) -> None:
+        valid_lock = json.loads(runtime_lock_payload())
+        cases = {
+            "single-object-array": [valid_lock],
+            "empty-array": [],
+            "multiple-object-array": [valid_lock, valid_lock],
+        }
+        for case, lock_root in cases.items():
+            with self.subTest(case=case):
+                payloads = base_payloads()
+                payloads["mcav-vj/release/runtime-lock.json"] = (
+                    json.dumps(lock_root, sort_keys=True) + "\n"
+                ).encode()
+                payloads[MANIFEST] = manifest_payload(payloads)
+                self.assert_rejected(
+                    self.write_case(f"lock-root-{case}", payloads),
+                    "runtime lock",
+                )
+
     def test_forbidden_names_are_case_insensitive_and_cover_test_spec_files(self) -> None:
         invalid_names = (
             "mcav-vj/TeStS/fixture.txt",

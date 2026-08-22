@@ -462,7 +462,8 @@ function Assert-PackagedRuntimeClosure {
 
     $lockName = 'mcav-vj/release/runtime-lock.json'
     try {
-        $lock = Get-ZipEntryText -Entry $EntriesByName[$lockName] | ConvertFrom-Json
+        $lockText = Get-ZipEntryText -Entry $EntriesByName[$lockName]
+        $lock = ConvertFrom-Json -InputObject $lockText -NoEnumerate
     } catch {
         throw "Invalid packaged runtime lock: $($_.Exception.Message)"
     }
