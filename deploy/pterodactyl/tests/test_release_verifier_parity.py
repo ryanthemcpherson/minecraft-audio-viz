@@ -45,6 +45,8 @@ REQUIRED = {
     "mcav-vj/admin_panel/index.html",
     "mcav-vj/admin_panel/runtime-config.js",
     "mcav-vj/preview_tool/frontend/index.html",
+    "mcav-vj/preview_tool/frontend/js/latency-indicator.js",
+    "mcav-vj/preview_tool/frontend/js/vendor/three-r128.min.js",
     "mcav-vj/preview_tool/frontend/runtime-config.js",
     MANIFEST,
 }

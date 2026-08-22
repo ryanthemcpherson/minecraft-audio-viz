@@ -113,6 +113,8 @@ try {
         'admin_panel/index.html',
         'admin_panel/runtime-config.js',
         'preview_tool/frontend/index.html',
+        'preview_tool/frontend/js/latency-indicator.js',
+        'preview_tool/frontend/js/vendor/three-r128.min.js',
         'preview_tool/frontend/runtime-config.js',
         'vj_server/__init__.py',
         'vj_server/auth.py',

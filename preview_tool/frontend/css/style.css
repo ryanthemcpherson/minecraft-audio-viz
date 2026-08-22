@@ -1361,3 +1361,38 @@ body {
     .auth-gate { padding: 14px; }
     .auth-card { padding: 26px 22px; border-radius: 16px; }
 }
+
+#bitmap-pattern-select,
+#bitmap-zone-select {
+    display: none;
+    margin-top: 8px;
+}
+
+#dj-overlay {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    background: rgba(8, 9, 13, 0.8);
+    backdrop-filter: blur(10px);
+}
+
+#dj-overlay-avatar {
+    display: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+#dj-overlay-name {
+    color: #f5f5f5;
+    font-size: 13px;
+    font-weight: 500;
+}
