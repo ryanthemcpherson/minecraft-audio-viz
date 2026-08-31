@@ -52,6 +52,13 @@
             <version>2.13.2</version>
         </dependency>
 
+        <!-- ZIP metadata inspection for fail-closed runtime extraction -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.28.0</version>
+        </dependency>
+
         <!-- Simple Voice Chat API (optional - server must have the mod installed) -->
         <dependency>
             <groupId>de.maxhenkel.voicechat</groupId>
@@ -158,6 +165,18 @@
                                 <relocation>
                                     <pattern>com.google.gson</pattern>
                                     <shadedPattern>com.audioviz.shaded.gson</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons.compress</pattern>
+                                    <shadedPattern>com.audioviz.libs.compress</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons.io</pattern>
+                                    <shadedPattern>com.audioviz.libs.io</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons.lang3</pattern>
+                                    <shadedPattern>com.audioviz.libs.lang3</shadedPattern>
                                 </relocation>
                             </relocations>
                             <minimizeJar>true</minimizeJar>
