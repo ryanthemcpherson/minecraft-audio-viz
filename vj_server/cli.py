@@ -10,6 +10,7 @@ import asyncio
 import os
 import signal
 import sys
+import urllib.parse
 from pathlib import Path
 
 from vj_server.config import validate_http_bind_host
@@ -44,6 +45,22 @@ def validate_hostname(value: str) -> str:
     if not all(c in valid_chars for c in value):
         raise argparse.ArgumentTypeError(f"Invalid characters in hostname: {value}")
     return value
+
+
+def _public_name_from_url(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("MCAV_PUBLIC_URL must be an absolute HTTPS URL without credentials")
+    return (parsed.hostname,)
 
 
 def vj_server():
@@ -83,6 +100,17 @@ Examples:
         "--managed",
         action="store_true",
         help="Use the default unified managed ingress",
+    )
+    parser.add_argument(
+        "--managed-by-paper",
+        action="store_true",
+        help="Run as a Paper-supervised packaged runtime",
+    )
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=(Path(value) if (value := os.environ.get("MCAV_STATE_DIR")) else None),
+        help="Persistent managed identity directory",
     )
     parser.add_argument(
         "--legacy-separate-listeners",
@@ -229,6 +257,8 @@ Examples:
 
     args = parser.parse_args()
 
+    if args.managed_by_paper:
+        args.managed = True
     if args.managed and args.legacy_separate_listeners:
         parser.error("--managed and --legacy-separate-listeners cannot be combined")
 
@@ -261,6 +291,50 @@ Examples:
     # Import and run VJ server
     from vj_server.models import DJAuthConfig
     from vj_server.vj_server import VJServer
+
+    managed_identity = None
+    if args.managed_by_paper:
+        from vj_server.identity import IdentityStore
+
+        renderer_secret = os.environ.get("MCAV_RENDERER_TOKEN")
+        setup_token = os.environ.get("MCAV_SETUP_TOKEN")
+        if args.state_dir is None:
+            parser.error("--state-dir is required with --managed-by-paper")
+        if renderer_secret is None or len(renderer_secret.encode("utf-8")) < 32:
+            parser.error("MCAV_RENDERER_TOKEN is required with --managed-by-paper")
+        if setup_token is None:
+            parser.error("MCAV_SETUP_TOKEN is required with --managed-by-paper")
+        if args.no_auth:
+            parser.error("--no-auth is not permitted with --managed-by-paper")
+        tls_mode = os.environ.get("MCAV_TLS_MODE", "GENERATED").upper()
+        if tls_mode not in {"GENERATED", "PROVIDED"}:
+            parser.error("MCAV_TLS_MODE must be GENERATED or PROVIDED")
+        supplied_certificate = None
+        supplied_private_key = None
+        if tls_mode == "PROVIDED":
+            certificate_value = os.environ.get("MCAV_TLS_CERTIFICATE")
+            key_value = os.environ.get("MCAV_TLS_PRIVATE_KEY")
+            if not certificate_value or not key_value:
+                parser.error("provided TLS mode requires certificate and private key paths")
+            supplied_certificate = Path(certificate_value)
+            supplied_private_key = Path(key_value)
+        try:
+            public_names = _public_name_from_url(os.environ.get("MCAV_PUBLIC_URL"))
+            managed_identity = IdentityStore(
+                args.state_dir,
+                renderer_secret=renderer_secret,
+                public_names=public_names,
+                supplied_certificate=supplied_certificate,
+                supplied_private_key=supplied_private_key,
+                setup_token=setup_token,
+            ).ensure()
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"ERROR: managed identity is unavailable: {error}")
+            return 1
+        args.auth_file = str(managed_identity.auth_path)
+        args.tls_cert = managed_identity.tls.certificate_path
+        args.tls_key = managed_identity.tls.private_key_path
+        args.minecraft_ws_secret = renderer_secret
 
     # Handle --hash-passwords: hash plaintext entries in-place and exit
     if args.hash_passwords:
@@ -344,6 +418,12 @@ Examples:
         public_host=args.public_host or args.http_host,
         public_port=args.public_port if args.public_port is not None else args.http_port,
         legacy_separate_listeners=args.legacy_separate_listeners,
+        setup_manager=managed_identity.setup if managed_identity is not None else None,
+        certificate_fingerprint=(
+            managed_identity.tls.fingerprint
+            if managed_identity is not None and managed_identity.tls.generated
+            else None
+        ),
     )
 
     def signal_handler(sig, frame):

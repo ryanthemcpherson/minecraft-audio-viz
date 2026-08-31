@@ -740,6 +740,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "bcrypt" },
     { name = "better-profanity" },
+    { name = "cryptography" },
     { name = "lupa" },
     { name = "msgspec" },
     { name = "numpy" },
@@ -758,9 +759,6 @@ full = [
 link = [
     { name = "aalink" },
 ]
-release = [
-    { name = "cryptography" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -777,7 +775,7 @@ requires-dist = [
     { name = "aiohttp", specifier = "==3.14.3" },
     { name = "bcrypt", specifier = ">=4.0.0" },
     { name = "better-profanity", specifier = ">=0.7.0" },
-    { name = "cryptography", marker = "extra == 'release'", specifier = "==50.0.1" },
+    { name = "cryptography", specifier = "==50.0.1" },
     { name = "lupa", specifier = ">=1.14" },
     { name = "msgspec", specifier = ">=0.18.0" },
     { name = "numpy", specifier = ">=1.24.0" },

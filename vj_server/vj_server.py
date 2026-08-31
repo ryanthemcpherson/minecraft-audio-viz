@@ -68,6 +68,7 @@ from vj_server.patterns import (
     PatternConfig,
 )
 from vj_server.relay import RelayMixin
+from vj_server.setup import SetupManager
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.stage_manager import StageManagerMixin
 from vj_server.transport import WebsocketsPeer
@@ -114,6 +115,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         public_host: str | None = None,
         public_port: int | None = None,
         legacy_separate_listeners: bool = False,
+        setup_manager: SetupManager | None = None,
+        certificate_fingerprint: str | None = None,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -124,6 +127,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         if self.public_port < 0 or self.public_port > 65_535:
             raise ValueError("public port is outside the supported range")
         self.legacy_separate_listeners = legacy_separate_listeners
+        self.setup_manager = setup_manager
+        self.certificate_fingerprint = certificate_fingerprint
         self.project_root = (
             Path(project_root).resolve()
             if project_root is not None
@@ -1119,6 +1124,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     admin=self._handle_browser_client,
                     preview=self._handle_browser_client,
                 ),
+                certificate_fingerprint=self.certificate_fingerprint,
+                setup_manager=self.setup_manager,
+                setup_complete_handler=self._reload_managed_auth,
             )
             try:
                 await ingress_server.start()
@@ -1239,6 +1247,19 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             # Close public and compatibility listeners.
             await close_started_servers()
             logger.info("VJ server shutdown complete")
+
+    def _reload_managed_auth(self, username: str) -> None:
+        if self.setup_manager is None:
+            return
+        try:
+            auth_data = json.loads(self.setup_manager.auth_path.read_text(encoding="utf-8"))
+            updated = DJAuthConfig.from_dict(auth_data)
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+            logger.error("Could not activate the new managed administrator: %s", error)
+            return
+        self.auth_config.djs = updated.djs
+        self.auth_config.vj_operators = updated.vj_operators
+        logger.info("Activated managed administrator %s", username)
 
     def stop(self):
         """Stop the server."""

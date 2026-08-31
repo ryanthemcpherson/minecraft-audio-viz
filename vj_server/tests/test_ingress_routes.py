@@ -14,6 +14,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from vj_server.ingress.app import IngressServer, _IngressSite, create_ingress_application
 from vj_server.ingress.limits import IngressLimits
 from vj_server.ingress.security import ConnectionLimiter
+from vj_server.setup import SetupManager
 
 
 def create_project(root: Path) -> None:
@@ -99,6 +100,118 @@ async def test_health_is_minimal_and_methods_are_bounded(starting_client: TestCl
     assert set((await response.json()).keys()) == {"status"}
     assert post.status == 405
     assert static_post.status == 405
+
+
+@pytest_asyncio.fixture
+async def setup_client(tmp_path: Path) -> tuple[TestClient, SetupManager, str]:
+    create_project(tmp_path)
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "auth.json").write_text(
+        '{"djs":{},"vj_operators":{}}\n',
+        encoding="utf-8",
+    )
+    setup = SetupManager(state, renderer_secret=b"r" * 32)
+    offer = setup.rotate()
+    app = create_ingress_application(
+        tmp_path,
+        limits=IngressLimits(),
+        health_provider=lambda: True,
+        setup_manager=setup,
+    )
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        yield client, setup, offer.token
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_routes_verify_and_create_admin_without_caching(
+    setup_client: tuple[TestClient, SetupManager, str],
+) -> None:
+    client, setup, token = setup_client
+
+    status = await client.get("/setup/status")
+    verified = await client.post("/setup/verify", json={"token": token})
+    created = await client.post(
+        "/setup/admin",
+        json={
+            "token": token,
+            "username": "VJ_Admin",
+            "password": "correct horse battery",
+        },
+    )
+
+    assert status.status == 200
+    assert await status.json() == {"status": "available"}
+    assert status.headers["Cache-Control"] == "no-store"
+    assert verified.status == 200
+    assert await verified.json() == {"valid": True}
+    assert created.status == 201
+    assert await created.json() == {"status": "complete", "username": "vj_admin"}
+    assert setup.status() == "complete"
+
+
+@pytest.mark.asyncio
+async def test_setup_routes_use_one_generic_invalid_token_response(
+    setup_client: tuple[TestClient, SetupManager, str],
+) -> None:
+    client, setup, _token = setup_client
+    setup.rotate()
+
+    verified = await client.post("/setup/verify", json={"token": "wrong"})
+    created = await client.post(
+        "/setup/admin",
+        json={
+            "token": "wrong",
+            "username": "operator",
+            "password": "correct horse battery",
+        },
+    )
+    malformed = await client.post(
+        "/setup/admin",
+        json={"token": "wrong", "username": "!", "password": "short"},
+    )
+
+    assert verified.status == created.status == malformed.status == 401
+    assert (
+        await verified.json()
+        == await created.json()
+        == await malformed.json()
+        == {"error": "invalid or expired setup token"}
+    )
+    assert verified.headers["Cache-Control"] == "no-store"
+    assert created.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_setup_routes_bound_payload_origin_and_ip_rate(
+    setup_client: tuple[TestClient, SetupManager, str],
+) -> None:
+    client, _setup, token = setup_client
+
+    oversized = await client.post(
+        "/setup/verify",
+        data=b"x" * 4097,
+        headers={"Content-Type": "application/json"},
+    )
+    wrong_origin = await client.post(
+        "/setup/verify",
+        json={"token": token},
+        headers={"Origin": "https://attacker.example"},
+    )
+    accepted = [await client.post("/setup/verify", json={"token": token}) for _ in range(10)]
+    limited = await client.post("/setup/verify", json={"token": token})
+
+    assert oversized.status == 413
+    assert oversized.headers["Cache-Control"] == "no-store"
+    assert wrong_origin.status == 403
+    assert wrong_origin.headers["Cache-Control"] == "no-store"
+    assert all(response.status == 200 for response in accepted)
+    assert limited.status == 429
+    assert limited.headers["Cache-Control"] == "no-store"
 
 
 @pytest.mark.asyncio

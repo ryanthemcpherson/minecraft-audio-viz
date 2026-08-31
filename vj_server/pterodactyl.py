@@ -8,7 +8,6 @@ import os
 import re
 import secrets
 import shutil
-import ssl
 import subprocess  # nosec B404 - fixed OpenSSL argument vectors; shell execution is never used
 import tempfile
 import zipfile
@@ -18,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from vj_server.auth import hash_password
+from vj_server.tls import TlsIdentityError, TlsManager
 
 
 class BootstrapError(RuntimeError):
@@ -163,21 +163,24 @@ def _validate_existing_identity(paths: BootstrapPaths) -> str:
                 if not str(entry.get("key_hash", "")).startswith("bcrypt:"):
                     raise ValueError(f"{section_name} contains a non-bcrypt credential")
 
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(paths.tls_cert, paths.tls_key)
+        TlsManager(
+            paths.state_dir,
+            supplied_certificate=paths.tls_cert,
+            supplied_private_key=paths.tls_key,
+        ).ensure()
         login_text = paths.first_login.read_text(encoding="utf-8")
         for field in ("ADMIN_USERNAME=", "ADMIN_PASSWORD=", "DJ_USERNAME=", "DJ_PASSWORD="):
             if field not in login_text:
                 raise ValueError(f"{field[:-1]} is missing")
         return secret_match.group(1)
-    except (OSError, ValueError, TypeError, json.JSONDecodeError, ssl.SSLError) as exc:
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, TlsIdentityError) as exc:
         raise BootstrapError(f"Invalid deployment identity at {paths.state_dir}: {exc}") from exc
 
 
 def _create_identity(
     paths: BootstrapPaths,
     release_version: str,
-    command_runner: CommandRunner,
+    _command_runner: CommandRunner,
 ) -> str:
     shared_secret = secrets.token_urlsafe(32)
     admin_username = f"mcav-admin-{secrets.token_hex(3)}"
@@ -208,48 +211,13 @@ def _create_identity(
         staged_key = staging / "tls.key"
         staged_cert = staging / "tls.crt"
         try:
-            command_runner(
-                [
-                    "openssl",
-                    "req",
-                    "-x509",
-                    "-newkey",
-                    "ec",
-                    "-pkeyopt",
-                    "ec_paramgen_curve:P-256",
-                    "-sha256",
-                    "-days",
-                    "397",
-                    "-nodes",
-                    "-subj",
-                    "/CN=MCAV Control Center",
-                    "-addext",
-                    "subjectAltName=DNS:localhost,IP:127.0.0.1",
-                    "-keyout",
-                    str(staged_key),
-                    "-out",
-                    str(staged_cert),
-                ]
-            )
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(staged_cert, staged_key)
-            fingerprint_output = command_runner(
-                [
-                    "openssl",
-                    "x509",
-                    "-fingerprint",
-                    "-sha256",
-                    "-noout",
-                    "-in",
-                    str(staged_cert),
-                ]
-            ).stdout.strip()
-        except (OSError, subprocess.SubprocessError, ssl.SSLError) as exc:
+            tls_identity = TlsManager(staging).ensure()
+        except (OSError, TlsIdentityError) as exc:
             raise BootstrapError(
                 f"TLS identity generation failed in {paths.state_dir}: {exc}"
             ) from exc
 
-        fingerprint = fingerprint_output.split("=", 1)[-1]
+        fingerprint = tls_identity.fingerprint
         first_login = (
             "MCAV FIRST LOGIN - KEEP THIS FILE PRIVATE\n"
             f"RELEASE={release_version}\n"

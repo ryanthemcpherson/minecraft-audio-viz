@@ -69,6 +69,7 @@ public final class PaperRuntimeManager {
     private static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(5);
     private static final Duration NORMAL_TERMINATION = Duration.ofSeconds(2);
     private static final Duration EXECUTOR_STOP_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration SETUP_TOKEN_LIFETIME = Duration.ofMinutes(30);
     private static final int SECRET_BYTES = 32;
     private static final int MINIMUM_SECRET_CHARACTERS = 32;
     private static final int MAXIMUM_SECRET_CHARACTERS = 1_024;
@@ -96,6 +97,7 @@ public final class PaperRuntimeManager {
         SupervisorState.DISABLED
     );
     private final AtomicReference<CancellationToken> activeInstall = new AtomicReference<>();
+    private final AtomicReference<SetupSession> setupSession = new AtomicReference<>();
     private final AtomicLong operationGeneration = new AtomicLong();
     private final AtomicLong expectedControlGeneration = new AtomicLong();
     private final AtomicBoolean started = new AtomicBoolean();
@@ -468,6 +470,18 @@ public final class PaperRuntimeManager {
         return published.get();
     }
 
+    /**
+     * Returns the short-lived setup URL only to an explicitly authorized command surface.
+     * The value is kept in memory and is never added to status, diagnostics, or logs.
+     */
+    public Optional<String> setupUrlForAuthorizedCommand() {
+        SetupSession session = setupSession.get();
+        if (session == null || clock.instant().isAfter(session.expiresAt())) {
+            return Optional.empty();
+        }
+        return Optional.of(session.url());
+    }
+
     public Optional<RuntimeControlMessageHandler> runtimeControlHandler() {
         return Optional.ofNullable(controlHandler);
     }
@@ -482,6 +496,7 @@ public final class PaperRuntimeManager {
             if (!enabled || !stopped.compareAndSet(false, true)) {
                 return;
             }
+            setupSession.set(null);
             operationGeneration.incrementAndGet();
             CancellationToken token = activeInstall.getAndSet(null);
             if (token != null) {
@@ -664,7 +679,7 @@ public final class PaperRuntimeManager {
         }
     }
 
-    private RuntimeLaunch createLaunch(
+    RuntimeLaunch createLaunch(
         InstalledRuntime runtime,
         long generation,
         String nonce,
@@ -673,8 +688,12 @@ public final class PaperRuntimeManager {
         int rendererPort
     ) {
         Map<String, String> environment = new LinkedHashMap<>();
+        String setupToken = newNonce();
+        Instant setupExpiresAt = clock.instant().plus(SETUP_TOKEN_LIFETIME);
+        setupSession.set(new SetupSession(setupUrl(setupToken), setupExpiresAt));
         environment.put("MCAV_RENDERER_URL", rendererUrl(rendererHost, rendererPort));
         environment.put("MCAV_RENDERER_TOKEN", rendererSecret);
+        environment.put("MCAV_SETUP_TOKEN", setupToken);
         environment.put("MCAV_LAUNCH_NONCE", nonce);
         environment.put("MCAV_LAUNCH_GENERATION", Long.toString(generation));
         environment.put("MCAV_RUNTIME_API", Integer.toString(descriptor.runtimeApi()));
@@ -1064,6 +1083,16 @@ public final class PaperRuntimeManager {
         return "ws://" + renderedHost + ":" + port;
     }
 
+    private String setupUrl(String token) {
+        String base = config.publicUrl()
+            .map(URI::toString)
+            .orElse("https://YOUR_SERVER_ADDRESS:" + config.publicPort() + "/");
+        if (!base.endsWith("/")) {
+            base += "/";
+        }
+        return base + "setup/#token=" + token;
+    }
+
     private static ReleaseDescriptor descriptorForChannel(
         RuntimeConfig config,
         ReleaseDescriptor descriptor
@@ -1157,6 +1186,18 @@ public final class PaperRuntimeManager {
         return "HEALTHY".equals(reasonCode) ||
             "HEALTH_RECOVERED".equals(reasonCode) ||
             "HEALTH_FAILED".equals(reasonCode);
+    }
+
+    private record SetupSession(String url, Instant expiresAt) {
+        private SetupSession {
+            Objects.requireNonNull(url, "url");
+            Objects.requireNonNull(expiresAt, "expiresAt");
+        }
+
+        @Override
+        public String toString() {
+            return "SetupSession[expiresAt=" + expiresAt + "]";
+        }
     }
 
     private static Duration requirePositive(Duration value, String name) {

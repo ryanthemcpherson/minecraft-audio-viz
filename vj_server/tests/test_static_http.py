@@ -16,6 +16,7 @@ import pytest
 import vj_server.models as models
 import vj_server.vj_server as vj_server_module
 from vj_server import cli as cli_module
+from vj_server import identity as identity_module
 from vj_server.cli import vj_server as modern_cli_main
 from vj_server.models import (
     _REJECTED_STATIC_PATH,
@@ -617,6 +618,96 @@ def test_modern_cli_honors_legacy_listener_environment_setting(
 
     assert modern_cli_main() == 0
     assert captured["legacy_separate_listeners"] is True
+
+
+@pytest.mark.parametrize(
+    ("tls_mode", "expected_fingerprint"),
+    [("GENERATED", "A" * 64), ("PROVIDED", None)],
+)
+def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tls_mode: str,
+    expected_fingerprint: str | None,
+) -> None:
+    captured: dict = {}
+    state_directory = tmp_path / "state"
+    certificate_path = state_directory / "tls.crt"
+    key_path = state_directory / "tls.key"
+    auth_path = state_directory / "auth.json"
+    setup_manager = object()
+
+    class FakeIdentityStore:
+        def __init__(self, directory, **kwargs):
+            captured["identity_directory"] = directory
+            captured["identity_options"] = kwargs
+
+        def ensure(self):
+            state_directory.mkdir()
+            auth_path.write_text('{"djs":{},"vj_operators":{}}\n', encoding="utf-8")
+            return type(
+                "IdentityState",
+                (),
+                {
+                    "auth_path": auth_path,
+                    "setup": setup_manager,
+                    "tls": type(
+                        "TlsIdentity",
+                        (),
+                        {
+                            "certificate_path": certificate_path,
+                            "private_key_path": key_path,
+                            "fingerprint": "A" * 64,
+                            "generated": tls_mode == "GENERATED",
+                        },
+                    )(),
+                },
+            )()
+
+    class FakeVJServer:
+        def __init__(self, **kwargs):
+            captured["server"] = kwargs
+
+        def stop(self):
+            pass
+
+    def discard_coroutine(coroutine):
+        coroutine.close()
+
+    monkeypatch.setattr(identity_module, "IdentityStore", FakeIdentityStore)
+    monkeypatch.setattr(vj_server_module, "VJServer", FakeVJServer)
+    monkeypatch.setattr(cli_module.asyncio, "run", discard_coroutine)
+    monkeypatch.setattr(cli_module.signal, "signal", lambda *args: None)
+    monkeypatch.setenv("MCAV_RENDERER_TOKEN", "r" * 32)
+    monkeypatch.setenv("MCAV_SETUP_TOKEN", "A" * 43)
+    monkeypatch.setenv("MCAV_PUBLIC_URL", "https://panel.example.test:8443/")
+    monkeypatch.setenv("MCAV_TLS_MODE", tls_mode)
+    if tls_mode == "PROVIDED":
+        monkeypatch.setenv("MCAV_TLS_CERTIFICATE", str(certificate_path))
+        monkeypatch.setenv("MCAV_TLS_PRIVATE_KEY", str(key_path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--managed-by-paper",
+            "--state-dir",
+            str(state_directory),
+            "--project-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert modern_cli_main() == 0
+    assert captured["identity_directory"] == state_directory
+    assert captured["identity_options"]["renderer_secret"] == "r" * 32
+    assert captured["identity_options"]["setup_token"] == "A" * 43
+    assert captured["identity_options"]["public_names"] == ("panel.example.test",)
+    assert captured["server"]["minecraft_ws_secret"] == "r" * 32
+    assert captured["server"]["tls_cert"] == certificate_path
+    assert captured["server"]["tls_key"] == key_path
+    assert captured["server"]["setup_manager"] is setup_manager
+    assert captured["server"]["certificate_fingerprint"] == expected_fingerprint
 
 
 @pytest.mark.asyncio

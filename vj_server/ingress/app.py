@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import ssl
 import weakref
@@ -24,6 +25,7 @@ from vj_server.ingress.security import (
     security_headers_middleware,
 )
 from vj_server.ingress.static import static_response
+from vj_server.setup import InvalidSetupToken, SetupManager, SetupValidationError
 from vj_server.transport import (
     AiohttpPeer,
     PeerClosed,
@@ -32,6 +34,7 @@ from vj_server.transport import (
 )
 
 PeerHandler = Callable[[WebSocketPeer], Awaitable[None]]
+SetupCompleteHandler = Callable[[str], Awaitable[None] | None]
 logger = logging.getLogger("vj_server.ingress")
 
 
@@ -40,6 +43,39 @@ class WebSocketHandlers:
     dj: PeerHandler
     admin: PeerHandler
     preview: PeerHandler
+
+
+class _SetupRequestLimiter:
+    MAX_TRACKED_ADDRESSES = 4096
+
+    def __init__(self, maximum: int = 10, window_seconds: float = 60.0) -> None:
+        self._maximum = maximum
+        self._window_seconds = window_seconds
+        self._attempts: dict[str, deque[float]] = {}
+
+    def accept(self, remote_address: str) -> bool:
+        now = asyncio.get_running_loop().time()
+        cutoff = now - self._window_seconds
+        if (
+            remote_address not in self._attempts
+            and len(self._attempts) >= self.MAX_TRACKED_ADDRESSES
+        ):
+            expired = [
+                address
+                for address, attempts in self._attempts.items()
+                if not attempts or attempts[-1] <= cutoff
+            ]
+            for address in expired:
+                self._attempts.pop(address, None)
+            if len(self._attempts) >= self.MAX_TRACKED_ADDRESSES:
+                return False
+        attempts = self._attempts.setdefault(remote_address, deque())
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        if len(attempts) >= self._maximum:
+            return False
+        attempts.append(now)
+        return True
 
 
 class _RoutePeer:
@@ -464,12 +500,15 @@ def create_ingress_application(
     secure_transport: bool = False,
     websocket_handlers: WebSocketHandlers | None = None,
     browser_origins: tuple[str, ...] = (),
+    setup_manager: SetupManager | None = None,
+    setup_complete_handler: SetupCompleteHandler | None = None,
 ) -> web.Application:
     root = project_root.absolute()
     admin_root = root / "admin_panel"
     preview_root = root / "preview_tool" / "frontend"
     asset_root = root / "assets"
     limiter = ConnectionLimiter(limits.max_connections)
+    setup_limiter = _SetupRequestLimiter()
 
     @web.middleware
     async def connection_limit(
@@ -480,6 +519,21 @@ def create_ingress_application(
             if not accepted:
                 return web.json_response({"status": "busy"}, status=503)
             return await handler(request)
+
+    @web.middleware
+    async def setup_no_store(
+        request: web.Request,
+        handler: web.RequestHandler,
+    ) -> web.StreamResponse:
+        try:
+            response = await handler(request)
+        except web.HTTPException as response:
+            if request.path.startswith("/setup/"):
+                response.headers["Cache-Control"] = "no-store"
+            raise
+        if request.path.startswith("/setup/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     async def health(_request: web.Request) -> web.Response:
         if health_provider():
@@ -495,6 +549,50 @@ def create_ingress_application(
             content_type="application/javascript",
             headers={"Cache-Control": "no-store"},
         )
+
+    def setup_response(payload: dict[str, Any], *, status: int = 200) -> web.Response:
+        return web.json_response(
+            payload,
+            status=status,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def setup_status(_request: web.Request) -> web.Response:
+        assert setup_manager is not None
+        return setup_response({"status": await setup_manager.status_async()})
+
+    async def setup_verify(request: web.Request) -> web.Response:
+        assert setup_manager is not None
+        await _validate_setup_request(request, secure_transport, browser_origins)
+        payload = await _read_setup_json(request)
+        if not setup_limiter.accept(request.remote or "unknown"):
+            return setup_response({"error": "setup request limit exceeded"}, status=429)
+        token = payload.get("token")
+        if not isinstance(token, str) or not await setup_manager.verify_async(token):
+            return setup_response({"error": "invalid or expired setup token"}, status=401)
+        return setup_response({"valid": True})
+
+    async def setup_admin(request: web.Request) -> web.Response:
+        assert setup_manager is not None
+        await _validate_setup_request(request, secure_transport, browser_origins)
+        payload = await _read_setup_json(request)
+        if not setup_limiter.accept(request.remote or "unknown"):
+            return setup_response({"error": "setup request limit exceeded"}, status=429)
+        try:
+            username = await setup_manager.create_admin(
+                payload.get("token"),
+                payload.get("username"),
+                payload.get("password"),
+            )
+        except InvalidSetupToken:
+            return setup_response({"error": "invalid or expired setup token"}, status=401)
+        except SetupValidationError as error:
+            return setup_response({"error": str(error)}, status=400)
+        if setup_complete_handler is not None:
+            completed = setup_complete_handler(username)
+            if completed is not None:
+                await completed
+        return setup_response({"status": "complete", "username": username}, status=201)
 
     async def admin_asset(request: web.Request) -> web.Response:
         raw_tail = _raw_tail(request, "/") or "index.html"
@@ -512,12 +610,17 @@ def create_ingress_application(
         client_max_size=limits.max_request_body_bytes,
         middlewares=[
             security_headers_middleware(secure_transport=secure_transport),
+            setup_no_store,
             connection_limit,
         ],
     )
     app.router.add_get("/healthz", health)
     app.router.add_get("/preview", preview_redirect)
     app.router.add_get("/mcav-runtime-config.js", runtime_config)
+    if setup_manager is not None:
+        app.router.add_get("/setup/status", setup_status)
+        app.router.add_post("/setup/verify", setup_verify)
+        app.router.add_post("/setup/admin", setup_admin)
     if websocket_handlers is not None:
         app.router.add_routes(
             _websocket_routes(
@@ -547,6 +650,8 @@ class IngressServer:
         certificate_fingerprint: str | None = None,
         websocket_handlers: WebSocketHandlers | None = None,
         browser_origins: tuple[str, ...] = (),
+        setup_manager: SetupManager | None = None,
+        setup_complete_handler: SetupCompleteHandler | None = None,
     ) -> None:
         if not host or not host.strip():
             raise ValueError("ingress host is required")
@@ -571,6 +676,8 @@ class IngressServer:
             secure_transport=self._ssl_context is not None,
             websocket_handlers=websocket_handlers,
             browser_origins=browser_origins,
+            setup_manager=setup_manager,
+            setup_complete_handler=setup_complete_handler,
         )
 
     @property
@@ -647,6 +754,39 @@ class IngressServer:
             self._bound_address = None
 
 
+async def _validate_setup_request(
+    request: web.Request,
+    secure_transport: bool,
+    browser_origins: tuple[str, ...],
+) -> None:
+    origin = request.headers.get("Origin")
+    if origin is not None and not browser_origin_allowed(
+        origin,
+        request.host,
+        secure_transport=secure_transport,
+        allowed_origins=browser_origins,
+    ):
+        raise web.HTTPForbidden(text="setup request origin rejected")
+
+
+async def _read_setup_json(request: web.Request) -> dict[str, Any]:
+    maximum_size = 4096
+    if request.content_length is not None and request.content_length > maximum_size:
+        raise web.HTTPRequestEntityTooLarge(
+            max_size=maximum_size, actual_size=request.content_length
+        )
+    content = await request.content.read(maximum_size + 1)
+    if len(content) > maximum_size:
+        raise web.HTTPRequestEntityTooLarge(max_size=maximum_size, actual_size=len(content))
+    try:
+        value = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise web.HTTPBadRequest(text="invalid setup request") from error
+    if not isinstance(value, dict):
+        raise web.HTTPBadRequest(text="invalid setup request")
+    return value
+
+
 def _raw_tail(request: web.Request, prefix: str) -> str:
     raw_path = request.raw_path.split("?", 1)[0]
     if not raw_path.startswith(prefix):
@@ -668,9 +808,9 @@ def _site_address(site: web.TCPSite) -> tuple[str, int]:
 def _fingerprint(value: str | None) -> str | None:
     if value is None:
         return None
-    normalized = value.replace(":", "").lower()
+    normalized = value.replace(":", "").upper()
     if len(normalized) != 64 or any(
-        character not in "0123456789abcdef" for character in normalized
+        character not in "0123456789ABCDEF" for character in normalized
     ):
         raise ValueError("certificate fingerprint must be SHA-256 hex")
     return normalized

@@ -8,9 +8,11 @@ import com.audioviz.runtime.release.ReleaseDescriptor;
 import com.audioviz.runtime.release.RuntimePlatform;
 import com.audioviz.runtime.store.RuntimeState;
 import com.audioviz.runtime.store.RuntimeStore;
+import com.audioviz.runtime.store.RuntimePaths;
 import com.audioviz.runtime.store.RuntimeStore.InstalledRuntime;
 import com.audioviz.runtime.store.RuntimeVersionId;
 import com.audioviz.runtime.supervisor.RuntimeHealth;
+import com.audioviz.runtime.supervisor.RuntimeLaunch;
 import com.audioviz.runtime.supervisor.RuntimeReady;
 import com.audioviz.runtime.supervisor.RuntimeSupervisor;
 import com.audioviz.runtime.supervisor.SupervisorState;
@@ -500,6 +502,43 @@ class PaperRuntimeManagerTest {
         } finally {
             second.stop();
         }
+    }
+
+    @Test
+    void launchProvidesFreshSetupTokenWithoutPublishingItInStatus() throws Exception {
+        RuntimePaths paths = RuntimePaths.create(temporaryDirectory.resolve("managed-runtime"));
+        RuntimeLaunch first = manager.createLaunch(
+            runtime("1.2.0", 12),
+            7,
+            NONCE,
+            paths,
+            "127.0.0.1",
+            8765
+        );
+        String firstToken = first.environment().get("MCAV_SETUP_TOKEN");
+        String setupUrl = manager.setupUrlForAuthorizedCommand().orElseThrow();
+
+        assertEquals(43, firstToken.length());
+        assertTrue(firstToken.matches("[A-Za-z0-9_-]{43}"));
+        assertTrue(setupUrl.endsWith("/setup/#token=" + firstToken));
+        assertFalse(first.toString().contains(firstToken));
+        assertFalse(manager.status().toString().contains(firstToken));
+
+        RuntimeLaunch second = manager.createLaunch(
+            runtime("1.2.0", 12),
+            8,
+            "b".repeat(43),
+            paths,
+            "127.0.0.1",
+            8765
+        );
+        String secondToken = second.environment().get("MCAV_SETUP_TOKEN");
+
+        assertNotEquals(firstToken, secondToken);
+        assertTrue(manager.setupUrlForAuthorizedCommand().orElseThrow().endsWith(secondToken));
+
+        manager.stop();
+        assertTrue(manager.setupUrlForAuthorizedCommand().isEmpty());
     }
 
     @Test
