@@ -4,6 +4,11 @@ import com.audioviz.AudioVizPlugin;
 import com.audioviz.connection.ConnectionStateListener;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
+import com.audioviz.runtime.control.RuntimeControlChannel;
+import com.audioviz.runtime.control.RuntimeControlChannel.ExpectedRuntime;
+import com.audioviz.runtime.control.RuntimeControlMessageHandler;
+import com.audioviz.runtime.supervisor.RuntimeHealth;
+import com.audioviz.runtime.supervisor.RuntimeReady;
 import com.audioviz.zones.ZoneManager;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -42,6 +47,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class VizWebSocketServerRoutingTest {
+
+    private static final String RUNTIME_NONCE =
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     private AudioVizPlugin plugin;
     private MessageHandler messageHandler;
@@ -231,6 +239,54 @@ class VizWebSocketServerRoutingTest {
         }
     }
 
+    @Test
+    void authenticatedRuntimeControlBypassesGeneralAndTickRouting() throws Exception {
+        MessageQueue queue = new MessageQueue(plugin, messageHandler);
+        VizWebSocketServer server = newServer(queue);
+        List<RuntimeReady> ready = new CopyOnWriteArrayList<>();
+        List<RuntimeHealth> health = new CopyOnWriteArrayList<>();
+        List<Long> disconnects = new CopyOnWriteArrayList<>();
+        RuntimeControlChannel channel = new RuntimeControlChannel(
+            ready::add,
+            health::add,
+            disconnects::add
+        );
+        channel.expect(new ExpectedRuntime(42, RUNTIME_NONCE, "1.2.0", 1));
+        server.setRuntimeControlMessageHandler(new RuntimeControlMessageHandler(channel));
+        try {
+            openActiveClient(server);
+
+            server.onMessage(connection, runtimeReadyMessage());
+            server.onMessage(connection, runtimeHealthMessage(1));
+
+            assertEquals(1, ready.size());
+            assertEquals(1, health.size());
+            assertEquals(0, queueSize(queue));
+            verifyNoInteractions(messageHandler);
+
+            server.onClose(connection, 1000, "closed", true);
+            assertEquals(List.of(42L), disconnects);
+        } finally {
+            queue.stop();
+        }
+    }
+
+    @Test
+    void runtimeControlIsDroppedWhenNoLaunchIsExpected() throws Exception {
+        MessageQueue queue = new MessageQueue(plugin, messageHandler);
+        VizWebSocketServer server = newServer(queue);
+        try {
+            openActiveClient(server);
+
+            server.onMessage(connection, runtimeReadyMessage());
+
+            assertEquals(0, queueSize(queue));
+            verifyNoInteractions(messageHandler);
+        } finally {
+            queue.stop();
+        }
+    }
+
     private VizWebSocketServer newServer(MessageQueue queue) {
         return new VizWebSocketServer(
             plugin,
@@ -283,6 +339,35 @@ class VizWebSocketServerRoutingTest {
     private static String whitespaceMessage(String type) {
         return "{\n  \"type\" \t:\r\n \"" + type
             + "\",\n  \"zone\" : \"main\"\n}";
+    }
+
+    private static String runtimeReadyMessage() {
+        return "{" +
+            "\"type\":\"runtime_ready\"," +
+            "\"release_version\":\"1.2.0\"," +
+            "\"runtime_api\":1," +
+            "\"generation\":42," +
+            "\"launch_nonce\":\"" + RUNTIME_NONCE + "\"," +
+            "\"pid\":1234," +
+            "\"capabilities\":[\"unified-ingress.v1\"]" +
+            "}";
+    }
+
+    private static String runtimeHealthMessage(long sequence) {
+        return "{" +
+            "\"type\":\"runtime_health\"," +
+            "\"generation\":42," +
+            "\"launch_nonce\":\"" + RUNTIME_NONCE + "\"," +
+            "\"sequence\":" + sequence + "," +
+            "\"process_alive\":true," +
+            "\"renderer_connected\":true," +
+            "\"ingress_healthy\":true," +
+            "\"event_loop_healthy\":true," +
+            "\"render_loop_healthy\":true," +
+            "\"last_render_age_ms\":10," +
+            "\"ingress_queue_depth\":0," +
+            "\"render_queue_depth\":0" +
+            "}";
     }
 
     private static void awaitQueueSize(MessageQueue queue, int expectedSize) {

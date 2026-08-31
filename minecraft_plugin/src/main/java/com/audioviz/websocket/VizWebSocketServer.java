@@ -3,6 +3,7 @@ package com.audioviz.websocket;
 import com.audioviz.AudioVizPlugin;
 import com.audioviz.protocol.MessageHandler;
 import com.audioviz.protocol.MessageQueue;
+import com.audioviz.runtime.control.RuntimeControlMessageHandler;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -18,6 +19,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -54,6 +56,7 @@ public class VizWebSocketServer extends WebSocketServer {
     // Enable async processing for high-frequency messages
     private volatile boolean asyncEnabled = true;
     private volatile boolean acceptingMessages = true;
+    private volatile RuntimeControlMessageHandler runtimeControlMessageHandler;
 
     // Heartbeat task for connection health monitoring
     private BukkitTask heartbeatTask;
@@ -264,6 +267,11 @@ public class VizWebSocketServer extends WebSocketServer {
             return;
         }
 
+        RuntimeControlMessageHandler controlHandler = runtimeControlMessageHandler;
+        if (controlHandler != null) {
+            controlHandler.disconnected(conn);
+        }
+
         totalDisconnections.incrementAndGet();
         lifecycleActiveClients = Math.max(0, lifecycleActiveClients - 1);
 
@@ -319,6 +327,22 @@ public class VizWebSocketServer extends WebSocketServer {
             if (clientInfo == null || closeInactiveClient(conn, clientInfo)) {
                 conn.close(4001, "Authentication failed");
             }
+            return;
+        }
+
+        RuntimeControlMessageHandler controlHandler = runtimeControlMessageHandler;
+        if (controlHandler != null) {
+            RuntimeControlMessageHandler.HandleResult controlResult = controlHandler.handle(
+                conn,
+                true,
+                false,
+                message,
+                payload -> sendToActiveClient(conn, clientInfo, payload)
+            );
+            if (controlResult != RuntimeControlMessageHandler.HandleResult.NOT_CONTROL) {
+                return;
+            }
+        } else if (RuntimeControlMessageHandler.isRuntimeControlMessage(message)) {
             return;
         }
 
@@ -941,6 +965,10 @@ public class VizWebSocketServer extends WebSocketServer {
      */
     public void setAsyncEnabled(boolean enabled) {
         this.asyncEnabled = enabled;
+    }
+
+    public void setRuntimeControlMessageHandler(RuntimeControlMessageHandler handler) {
+        runtimeControlMessageHandler = Objects.requireNonNull(handler, "handler");
     }
 
     /**

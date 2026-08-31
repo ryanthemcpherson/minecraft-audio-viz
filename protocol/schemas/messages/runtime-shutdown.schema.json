@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-shutdown.schema.json",
+  "title": "RuntimeShutdownMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "runtime_shutdown" },
+    "v": { "const": "1.0.0" },
+    "generation": { "type": "integer", "minimum": 1 },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Z_]+$"
+    }
+  },
+  "required": ["type", "generation", "reason"]
+}

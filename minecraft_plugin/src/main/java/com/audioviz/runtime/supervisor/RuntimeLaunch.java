@@ -19,7 +19,6 @@ public record RuntimeLaunch(
     int runtimeApi
 ) {
     private static final int MAX_HOST_LENGTH = 253;
-    private static final int MAX_NONCE_LENGTH = 128;
 
     public RuntimeLaunch {
         Objects.requireNonNull(version, "version");
@@ -36,11 +35,7 @@ public record RuntimeLaunch(
             throw new IllegalArgumentException("invalid public port");
         }
         environment = copyEnvironment(environment);
-        if (
-            launchNonce == null ||
-            launchNonce.length() < 16 ||
-            launchNonce.length() > MAX_NONCE_LENGTH
-        ) {
+        if (!RuntimeReady.isValidLaunchNonce(launchNonce)) {
             throw new IllegalArgumentException("invalid launch nonce");
         }
         if (generation <= 0 || runtimeApi <= 0) {

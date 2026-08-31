@@ -17,7 +17,7 @@ public record RuntimeHealth(
         if (generation <= 0 || sequence < 0) {
             throw new IllegalArgumentException("invalid health identity");
         }
-        if (launchNonce == null || launchNonce.length() < 16 || launchNonce.length() > 128) {
+        if (!RuntimeReady.isValidLaunchNonce(launchNonce)) {
             throw new IllegalArgumentException("invalid health nonce");
         }
         if (

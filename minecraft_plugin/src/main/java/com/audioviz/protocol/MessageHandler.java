@@ -176,6 +176,8 @@ public class MessageHandler {
             case "get_voice_status" -> handleGetVoiceStatus();
             // Parity check
             case "query_zone_status" -> handleQueryZoneStatus();
+            case "runtime_ready", "runtime_health", "runtime_shutdown",
+                "runtime_performance" -> null;
             default -> createError("Unknown message type: " + type);
         };
     }

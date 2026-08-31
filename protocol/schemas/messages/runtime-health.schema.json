@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-health.schema.json",
+  "title": "RuntimeHealthMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "runtime_health" },
+    "v": { "const": "1.0.0" },
+    "generation": { "type": "integer", "minimum": 1 },
+    "launch_nonce": {
+      "type": "string",
+      "minLength": 43,
+      "maxLength": 43,
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "process_alive": { "type": "boolean" },
+    "renderer_connected": { "type": "boolean" },
+    "ingress_healthy": { "type": "boolean" },
+    "event_loop_healthy": { "type": "boolean" },
+    "render_loop_healthy": { "type": "boolean" },
+    "last_render_age_ms": { "type": "integer", "minimum": 0, "maximum": 60000 },
+    "ingress_queue_depth": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "render_queue_depth": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+  },
+  "required": [
+    "type",
+    "generation",
+    "launch_nonce",
+    "sequence",
+    "process_alive",
+    "renderer_connected",
+    "ingress_healthy",
+    "event_loop_healthy",
+    "render_loop_healthy",
+    "last_render_age_ms",
+    "ingress_queue_depth",
+    "render_queue_depth"
+  ]
+}

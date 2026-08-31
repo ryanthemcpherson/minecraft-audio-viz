@@ -18,13 +18,30 @@ public record RuntimeReady(
         if (runtimeApi <= 0 || generation <= 0 || pid <= 0) {
             throw new IllegalArgumentException("invalid runtime readiness identity");
         }
-        if (launchNonce == null || launchNonce.length() < 16 || launchNonce.length() > 128) {
+        if (!isValidLaunchNonce(launchNonce)) {
             throw new IllegalArgumentException("invalid launch nonce");
         }
         capabilities = Set.copyOf(Objects.requireNonNull(capabilities, "capabilities"));
         if (capabilities.size() > 32 || capabilities.stream().anyMatch(RuntimeReady::invalidCapability)) {
             throw new IllegalArgumentException("invalid runtime capabilities");
         }
+    }
+
+    public static boolean isValidLaunchNonce(String value) {
+        if (value == null || value.length() != 43) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            boolean allowed = (character >= 'a' && character <= 'z') ||
+                (character >= 'A' && character <= 'Z') ||
+                (character >= '0' && character <= '9') ||
+                character == '_' || character == '-';
+            if (!allowed) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
