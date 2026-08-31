@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcav.live/schemas/releases/runtime-manifest-v1.schema.json",
+  "title": "MCAV Runtime Release Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generation",
+    "release_version",
+    "runtime_api_min",
+    "runtime_api_max",
+    "published_at",
+    "expires_at",
+    "signing_key_id",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "generation": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+    "release_version": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 64,
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "runtime_api_min": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "runtime_api_max": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "published_at": { "type": "string", "format": "date-time", "maxLength": 32 },
+    "expires_at": { "type": "string", "format": "date-time", "maxLength": 32 },
+    "signing_key_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]*$"
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linux-x86_64", "linux-aarch64", "windows-x86_64"],
+      "properties": {
+        "linux-x86_64": { "$ref": "#/$defs/artifact" },
+        "linux-aarch64": { "$ref": "#/$defs/artifact" },
+        "windows-x86_64": { "$ref": "#/$defs/artifact" }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "archive_size",
+        "uncompressed_size",
+        "sha256",
+        "entrypoint",
+        "files_manifest_sha256"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https://"
+        },
+        "archive_size": { "type": "integer", "minimum": 1, "maximum": 1073741824 },
+        "uncompressed_size": { "type": "integer", "minimum": 1, "maximum": 2147483648 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "entrypoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[0-9A-Za-z._-]+(?:/[0-9A-Za-z._-]+)*$"
+        },
+        "files_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

@@ -34,5 +34,8 @@
     "particle_spawn": "types/particle-spawn.schema.json",
     "renderer_backend": "types/renderer-backend.schema.json",
     "hologram_config": "types/hologram-config.schema.json"
+  },
+  "releases": {
+    "runtime_manifest_v1": "releases/runtime-manifest-v1.schema.json"
   }
 }
