@@ -16,6 +16,13 @@
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <paper.version>1.21.11-R0.1-SNAPSHOT</paper.version>
+        <runtime.api>1</runtime.api>
+        <runtime.manifest.url>development-disabled</runtime.manifest.url>
+        <runtime.minimum.generation>1</runtime.minimum.generation>
+        <runtime.signing.key.id>test-only-development</runtime.signing.key.id>
+        <runtime.signing.public.key>development-disabled</runtime.signing.public.key>
+        <runtime.allowed.hosts>development-disabled</runtime.allowed.hosts>
+        <runtime.release.mode>false</runtime.release.mode>
     </properties>
 
     <repositories>
@@ -274,4 +281,59 @@
             </resource>
         </resources>
     </build>
+
+    <profiles>
+        <profile>
+            <id>production-release</id>
+            <properties>
+                <runtime.release.mode>true</runtime.release.mode>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <version>3.6.3</version>
+                        <executions>
+                            <execution>
+                                <id>require-production-runtime-trust</id>
+                                <phase>validate</phase>
+                                <goals>
+                                    <goal>enforce</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <requireProperty>
+                                            <property>runtime.release.mode</property>
+                                            <regex>true</regex>
+                                        </requireProperty>
+                                        <requireProperty>
+                                            <property>runtime.manifest.url</property>
+                                            <regex>https://.+</regex>
+                                        </requireProperty>
+                                        <requireProperty>
+                                            <property>runtime.minimum.generation</property>
+                                            <regex>[1-9][0-9]*</regex>
+                                        </requireProperty>
+                                        <requireProperty>
+                                            <property>runtime.signing.key.id</property>
+                                            <regex>(?!test-only-)[A-Za-z0-9._-]{1,64}</regex>
+                                        </requireProperty>
+                                        <requireProperty>
+                                            <property>runtime.signing.public.key</property>
+                                            <regex>[A-Za-z0-9+/=]{40,4096}</regex>
+                                        </requireProperty>
+                                        <requireProperty>
+                                            <property>runtime.allowed.hosts</property>
+                                            <regex>[A-Za-z0-9.,-]{1,2048}</regex>
+                                        </requireProperty>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

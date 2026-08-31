@@ -12,6 +12,23 @@ websocket:
 # it never permits a plaintext non-loopback listener.
 ws-secret: ""
 
+# Managed VJ runtime. Development builds keep remote installation disabled in the
+# embedded release descriptor even when this switch is true.
+runtime:
+  enabled: true
+  channel: stable
+  install-on-start: true
+  public-port: 8080
+  public-host: "0.0.0.0"
+  public-url: ""
+  readiness-timeout-seconds: 30
+  resource-profile: auto
+  retain-versions: 3
+  tls:
+    mode: generated
+    certificate: ""
+    private-key: ""
+
 # Default visualization settings
 defaults:
   # Default entity count when initializing pools (covers all pattern recommendations)
@@ -38,6 +55,11 @@ bitmap:
 
 # Performance settings
 performance:
+  profile: balanced
+  entity-budget: 160
+  target-render-fps: 20
+  tps-load-shedding: true
+
   # Maximum entities per zone (block displays for Lua patterns)
   max_entities_per_zone: 256
 
