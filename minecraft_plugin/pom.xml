@@ -195,6 +195,8 @@
                     <effort>Max</effort>
                     <threshold>Medium</threshold>
                     <failOnError>true</failOnError>
+                    <!-- Preserve existing debt while making every new finding build-blocking. -->
+                    <excludeBugsFile>${project.basedir}/spotbugs-baseline.xml</excludeBugsFile>
                     <plugins>
                         <plugin>
                             <groupId>com.h3xstream.findsecbugs</groupId>
