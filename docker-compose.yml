@@ -15,6 +15,7 @@ services:
       - phase0-quarantined
     build: .
     container_name: audioviz-vj
+    command: ["--legacy-separate-listeners"]
     restart: unless-stopped
     ports:
       - "9000:9000"   # DJ WebSocket connections

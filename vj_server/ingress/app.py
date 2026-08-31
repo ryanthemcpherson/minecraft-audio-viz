@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import ssl
 import weakref
-from collections.abc import Callable, Iterable
+from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +16,103 @@ from aiohttp import web
 from aiohttp.web_protocol import RequestHandler
 from aiohttp.web_server import Server
 
-from vj_server.ingress.limits import IngressLimits
+from vj_server.ingress.limits import IngressLimits, RouteLimits
 from vj_server.ingress.security import (
     ConnectionLimiter,
+    browser_origin_allowed,
     require_tls_policy,
     security_headers_middleware,
 )
 from vj_server.ingress.static import static_response
+from vj_server.transport import (
+    AiohttpPeer,
+    PeerClosed,
+    PeerProtocolError,
+    WebSocketPeer,
+)
+
+PeerHandler = Callable[[WebSocketPeer], Awaitable[None]]
+logger = logging.getLogger("vj_server.ingress")
+
+
+@dataclass(frozen=True, slots=True)
+class WebSocketHandlers:
+    dj: PeerHandler
+    admin: PeerHandler
+    preview: PeerHandler
+
+
+class _RoutePeer:
+    def __init__(
+        self,
+        peer: AiohttpPeer,
+        limits: RouteLimits,
+        *,
+        text_only: bool,
+    ) -> None:
+        self._peer = peer
+        self._limits = limits
+        self._text_only = text_only
+        self._started = asyncio.get_running_loop().time()
+        self._message_times: deque[float] = deque()
+
+    @property
+    def remote_address(self) -> tuple[str, int] | None:
+        return self._peer.remote_address
+
+    @property
+    def request_headers(self) -> Mapping[str, str]:
+        return self._peer.request_headers
+
+    @property
+    def closed(self) -> bool:
+        return self._peer.closed
+
+    @property
+    def auth_attempt_limit(self) -> int:
+        return self._limits.max_auth_attempts
+
+    async def recv(self) -> str | bytes:
+        loop = asyncio.get_running_loop()
+        remaining_lifetime = self._limits.lifetime_seconds - (loop.time() - self._started)
+        timeout = min(self._limits.idle_timeout_seconds, remaining_lifetime)
+        if timeout <= 0:
+            await self.close(1008, "Route lifetime exceeded")
+            raise PeerClosed(1008)
+        try:
+            message = await asyncio.wait_for(self._peer.recv(), timeout=timeout)
+        except asyncio.TimeoutError:
+            await self.close(1008, "Route timeout")
+            raise PeerClosed(1008) from None
+        if self._text_only and isinstance(message, bytes):
+            await self.close(1003, "Text messages required")
+            raise PeerProtocolError("Binary message rejected by route policy")
+        now = loop.time()
+        while self._message_times and self._message_times[0] <= now - 1.0:
+            self._message_times.popleft()
+        if len(self._message_times) >= self._limits.messages_per_second:
+            await self.close(1008, "Message rate exceeded")
+            raise PeerProtocolError("WebSocket message rate exceeds route limit")
+        self._message_times.append(now)
+        return message
+
+    async def send(self, message: str | bytes) -> None:
+        await self._peer.send(message)
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        await self._peer.close(code, reason)
+
+    def __aiter__(self) -> AsyncIterator[str | bytes]:
+        return self._messages()
+
+    async def _messages(self) -> AsyncIterator[str | bytes]:
+        while True:
+            try:
+                yield await self.recv()
+            except PeerClosed as error:
+                if error.code in {1000, 1001}:
+                    return
+                raise
 
 
 class _ConnectionReservation:
@@ -259,6 +352,109 @@ class _IngressSite(web.TCPSite):
             self._bound_port = self._port
 
 
+def _websocket_routes(
+    handlers: WebSocketHandlers,
+    limits: IngressLimits,
+    *,
+    secure_transport: bool,
+    browser_origins: tuple[str, ...],
+) -> list[web.AbstractRouteDef]:
+    return [
+        web.get(
+            "/ws/dj",
+            _websocket_route(
+                "dj",
+                handlers.dj,
+                limits.dj,
+                secure_transport=secure_transport,
+                browser_origins=browser_origins,
+                require_browser_origin=False,
+            ),
+        ),
+        web.get(
+            "/ws/admin",
+            _websocket_route(
+                "admin",
+                handlers.admin,
+                limits.admin,
+                secure_transport=secure_transport,
+                browser_origins=browser_origins,
+                require_browser_origin=True,
+            ),
+        ),
+        web.get(
+            "/ws/preview",
+            _websocket_route(
+                "preview",
+                handlers.preview,
+                limits.preview,
+                secure_transport=secure_transport,
+                browser_origins=browser_origins,
+                require_browser_origin=True,
+            ),
+        ),
+    ]
+
+
+def _websocket_route(
+    route_name: str,
+    handler: PeerHandler,
+    route_limits: RouteLimits,
+    *,
+    secure_transport: bool,
+    browser_origins: tuple[str, ...],
+    require_browser_origin: bool,
+) -> Callable[[web.Request], Awaitable[web.StreamResponse]]:
+    limiter = ConnectionLimiter(route_limits.max_connections)
+
+    async def route(request: web.Request) -> web.StreamResponse:
+        if require_browser_origin and not browser_origin_allowed(
+            request.headers.get("Origin"),
+            request.host,
+            secure_transport=secure_transport,
+            allowed_origins=browser_origins,
+        ):
+            raise web.HTTPForbidden(text="WebSocket origin rejected")
+        async with limiter.reserve() as accepted:
+            if not accepted:
+                raise web.HTTPServiceUnavailable(text="WebSocket route busy")
+            websocket = web.WebSocketResponse(
+                max_msg_size=route_limits.max_message_bytes,
+                heartbeat=None,
+                autoclose=True,
+                autoping=True,
+            )
+            await websocket.prepare(request)
+            peer = _RoutePeer(
+                AiohttpPeer(
+                    websocket,
+                    request,
+                    max_message_bytes=route_limits.max_message_bytes,
+                ),
+                route_limits,
+                text_only=True,
+            )
+            try:
+                await handler(peer)
+            except (PeerClosed, PeerProtocolError):
+                pass
+            except Exception as error:
+                logger.error(
+                    "WebSocket route handler failed: route=%s error_type=%s",
+                    route_name,
+                    type(error).__name__,
+                )
+                if not peer.closed:
+                    await peer.close(1011, "Route handler failed")
+            finally:
+                if not peer.closed:
+                    await peer.close()
+            return websocket
+
+    route.__name__ = f"{route_name}_websocket"
+    return route
+
+
 def create_ingress_application(
     project_root: Path,
     *,
@@ -266,6 +462,8 @@ def create_ingress_application(
     health_provider: Callable[[], bool],
     extra_routes: Iterable[web.AbstractRouteDef] = (),
     secure_transport: bool = False,
+    websocket_handlers: WebSocketHandlers | None = None,
+    browser_origins: tuple[str, ...] = (),
 ) -> web.Application:
     root = project_root.absolute()
     admin_root = root / "admin_panel"
@@ -291,6 +489,13 @@ def create_ingress_application(
     async def preview_redirect(_request: web.Request) -> web.Response:
         raise web.HTTPPermanentRedirect(location="/preview/")
 
+    async def runtime_config(_request: web.Request) -> web.Response:
+        return web.Response(
+            text="window.__MCAV_LEGACY_WS_PORT__ = null;\n",
+            content_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
+
     async def admin_asset(request: web.Request) -> web.Response:
         raw_tail = _raw_tail(request, "/") or "index.html"
         return await static_response(request, admin_root, raw_tail, limits)
@@ -312,6 +517,16 @@ def create_ingress_application(
     )
     app.router.add_get("/healthz", health)
     app.router.add_get("/preview", preview_redirect)
+    app.router.add_get("/mcav-runtime-config.js", runtime_config)
+    if websocket_handlers is not None:
+        app.router.add_routes(
+            _websocket_routes(
+                websocket_handlers,
+                limits,
+                secure_transport=secure_transport,
+                browser_origins=browser_origins,
+            )
+        )
     app.router.add_routes(list(extra_routes))
     app.router.add_get("/preview/{tail:.*}", preview_asset)
     app.router.add_get("/assets/{tail:.*}", shared_asset)
@@ -330,6 +545,8 @@ class IngressServer:
         allow_insecure_loopback: bool = False,
         limits: IngressLimits | None = None,
         certificate_fingerprint: str | None = None,
+        websocket_handlers: WebSocketHandlers | None = None,
+        browser_origins: tuple[str, ...] = (),
     ) -> None:
         if not host or not host.strip():
             raise ValueError("ingress host is required")
@@ -352,6 +569,8 @@ class IngressServer:
             limits=self._limits,
             health_provider=lambda: self._healthy,
             secure_transport=self._ssl_context is not None,
+            websocket_handlers=websocket_handlers,
+            browser_origins=browser_origins,
         )
 
     @property
@@ -414,6 +633,16 @@ class IngressServer:
                 return
             await runner.cleanup()
             self._runner = None
+            self._site = None
+            self._bound_address = None
+
+    async def stop_accepting(self) -> None:
+        async with self._lifecycle_lock:
+            self._healthy = False
+            site = self._site
+            if site is None:
+                return
+            await site.stop()
             self._site = None
             self._bound_address = None
 

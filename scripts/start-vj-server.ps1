@@ -14,7 +14,7 @@ Write-Host "=========================" -ForegroundColor Magenta
 Write-Host ""
 
 # Build argument list
-$arguments = @("--port", $DJPort, "--minecraft-host", $MinecraftHost, "--minecraft-port", $MinecraftPort, "--broadcast-port", $BrowserPort)
+$arguments = @("--legacy-separate-listeners", "--port", $DJPort, "--minecraft-host", $MinecraftHost, "--minecraft-port", $MinecraftPort, "--broadcast-port", $BrowserPort)
 
 if ($NoAuth) {
     $arguments += "--no-auth"

@@ -49,8 +49,15 @@ class RelayMixin:
             return str(remote_address[0])
         return "unknown"
 
-    def _browser_auth_is_rate_limited(self, remote_ip: str, now: float | None = None) -> bool:
+    def _browser_auth_is_rate_limited(
+        self,
+        remote_ip: str,
+        now: float | None = None,
+        *,
+        max_attempts: int | None = None,
+    ) -> bool:
         current_time = time.monotonic() if now is None else now
+        attempt_limit = self._browser_auth_rate_limit_max if max_attempts is None else max_attempts
         cutoff = current_time - self._browser_auth_rate_limit_window
         recent_attempts = [
             attempt
@@ -61,7 +68,7 @@ class RelayMixin:
             self._browser_auth_attempts[remote_ip] = recent_attempts
         else:
             self._browser_auth_attempts.pop(remote_ip, None)
-        return len(recent_attempts) >= self._browser_auth_rate_limit_max
+        return len(recent_attempts) >= attempt_limit
 
     def _record_browser_auth_failure(self, remote_ip: str, now: float | None = None) -> None:
         current_time = time.monotonic() if now is None else now
@@ -94,12 +101,28 @@ class RelayMixin:
                 raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                 auth_data = mjson.decode(raw)
                 if auth_data.get("type") != "vj_auth":
+                    await websocket.send(
+                        _json_str(
+                            {
+                                "type": "auth_error",
+                                "error": "authentication required",
+                            }
+                        )
+                    )
                     await websocket.close(4003, "Expected vj_auth message")
                     return
                 username = auth_data.get("username")
                 password = auth_data.get("password", "")
                 remote_ip = self._browser_remote_ip(websocket)
-                if self._browser_auth_is_rate_limited(remote_ip):
+                auth_attempt_limit = getattr(
+                    websocket,
+                    "auth_attempt_limit",
+                    self._browser_auth_rate_limit_max,
+                )
+                if self._browser_auth_is_rate_limited(
+                    remote_ip,
+                    max_attempts=auth_attempt_limit,
+                ):
                     logger.warning(
                         "Browser VJ auth rate limited from %s",
                         websocket.remote_address,

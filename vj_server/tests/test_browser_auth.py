@@ -104,3 +104,16 @@ async def test_sixth_failed_login_from_ip_is_rate_limited():
         "type": "auth_error",
         "error": "Invalid username or password",
     }
+
+
+@pytest.mark.asyncio
+async def test_command_before_authentication_receives_no_state():
+    relay = AuthRelay()
+    websocket = AuthWebSocket({"type": "get_zones"})
+
+    await relay._handle_browser_client(websocket)
+
+    assert [mjson.decode(message) for message in websocket.sent] == [
+        {"type": "auth_error", "error": "authentication required"}
+    ]
+    assert websocket.close_code == 4003

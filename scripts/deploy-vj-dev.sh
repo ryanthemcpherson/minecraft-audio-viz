@@ -74,7 +74,7 @@ fi
 echo ">> Restarting VJ server..."
 tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
 tmux new-session -d -s "$TMUX_SESSION" \
-  "cd '$PROJECT_DIR' && exec .venv/bin/python -m vj_server.cli --no-auth --port '$DJ_PORT' --broadcast-port '$BROADCAST_PORT' --minecraft-host '$MC_HOST' --minecraft-port '$MC_PORT' --metrics-port '$METRICS_PORT'"
+  "cd '$PROJECT_DIR' && exec .venv/bin/python -m vj_server.cli --legacy-separate-listeners --no-auth --port '$DJ_PORT' --broadcast-port '$BROADCAST_PORT' --minecraft-host '$MC_HOST' --minecraft-port '$MC_PORT' --metrics-port '$METRICS_PORT'"
 
 VJ_PID="$(tmux display-message -p -t "$TMUX_SESSION":0.0 '#{pane_pid}' 2>/dev/null || true)"
 if [[ ! "$VJ_PID" =~ ^[0-9]+$ ]]; then

@@ -188,7 +188,7 @@ if [ "$MOD_ONLY" = false ]; then
         fi
 
         # Start fresh VJ server in background
-        ssh "$SSH_TARGET" "cd '${REMOTE_PROJECT}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
+        ssh "$SSH_TARGET" "cd '${REMOTE_PROJECT}' && nohup .venv/bin/python -m vj_server.cli --legacy-separate-listeners --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
         sleep 3
 
         # Verify it started

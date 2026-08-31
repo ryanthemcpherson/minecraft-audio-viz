@@ -31,7 +31,7 @@ try {
         Pop-Location
     }
     $coordProc = Start-Process -FilePath python -ArgumentList "-m uvicorn app.main:app --host 127.0.0.1 --port $CoordinatorPort" -WorkingDirectory (Join-Path $root "coordinator") -RedirectStandardOutput $coordOut -RedirectStandardError $coordErr -PassThru
-    $vjProc = Start-Process -FilePath python -ArgumentList "-m vj_server.cli --no-auth --no-spectrograph --port $VjPort --broadcast-port $VjBroadcastPort --metrics-port $VjMetricsPort --minecraft-host 127.0.0.1 --minecraft-port 18765" -WorkingDirectory $root -RedirectStandardOutput $vjOut -RedirectStandardError $vjErr -PassThru
+    $vjProc = Start-Process -FilePath python -ArgumentList "-m vj_server.cli --legacy-separate-listeners --no-auth --no-spectrograph --port $VjPort --broadcast-port $VjBroadcastPort --metrics-port $VjMetricsPort --minecraft-host 127.0.0.1 --minecraft-port 18765" -WorkingDirectory $root -RedirectStandardOutput $vjOut -RedirectStandardError $vjErr -PassThru
     $siteProc = Start-Process -FilePath npm -ArgumentList "run start -- --port $SitePort --hostname 127.0.0.1" -WorkingDirectory (Join-Path $root "site") -RedirectStandardOutput $siteOut -RedirectStandardError $siteErr -PassThru
 
     Start-Sleep -Seconds 10

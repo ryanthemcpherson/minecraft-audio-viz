@@ -725,13 +725,37 @@ class _StaticRequestHandlerMixin:
             self._static_path_override = None
 
 
-def _make_directory_handler(directory_map: dict):
+def _make_directory_handler(
+    directory_map: dict,
+    *,
+    legacy_ws_port: int | None = None,
+):
     """Create a handler class with its own directory_map to avoid shared mutable state."""
+    if legacy_ws_port is not None and not 1 <= legacy_ws_port <= 65_535:
+        raise ValueError("legacy WebSocket port is outside the supported range")
+    runtime_config = (
+        f"window.__MCAV_LEGACY_WS_PORT__ = {legacy_ws_port};\n".encode()
+        if legacy_ws_port is not None
+        else None
+    )
 
     class _Handler(_StaticRequestHandlerMixin, http.server.SimpleHTTPRequestHandler):
         """HTTP handler that serves from multiple directories."""
 
         _directory_map = directory_map
+
+        def do_GET(self) -> None:
+            request_path = urllib.parse.urlsplit(self.path).path
+            if request_path == "/mcav-runtime-config.js" and runtime_config is not None:
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(runtime_config)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(runtime_config)
+                return
+            super().do_GET()
 
         def _safe_join(self, base: str, path: str) -> str:
             resolved_path = _resolve_static_path(base, path)
@@ -831,6 +855,7 @@ def run_http_server(
     directory: str,
     host: str = "127.0.0.1",
     ssl_context: ssl.SSLContext | None = None,
+    legacy_ws_port: int | None = None,
 ) -> None:
     """Run HTTP server for admin panel."""
     host = validate_http_bind_host(host)
@@ -845,7 +870,7 @@ def run_http_server(
         "/preview": str(frontend_dir),
         "/": str(admin_dir),
     }
-    handler_cls = _make_directory_handler(dir_map)
+    handler_cls = _make_directory_handler(dir_map, legacy_ws_port=legacy_ws_port)
 
     # Allow port reuse so restarts don't fail with "Address already in use"
     class ReusableTCPServer(socketserver.TCPServer):
@@ -859,3 +884,35 @@ def run_http_server(
     except OSError as e:
         logger.error(f"HTTP server failed to start on port {port}: {e}")
         logger.error("Another instance may be running. Kill it or use a different port.")
+
+
+def create_http_server(
+    port: int,
+    directory: str,
+    host: str = "127.0.0.1",
+    ssl_context: ssl.SSLContext | None = None,
+    legacy_ws_port: int | None = None,
+) -> socketserver.TCPServer:
+    """Create an owned legacy static server for lifecycle-managed callers."""
+    host = validate_http_bind_host(host)
+    project_root = Path(directory)
+    handler_cls = _make_directory_handler(
+        {
+            "/preview": str(project_root / "preview_tool" / "frontend"),
+            "/": str(project_root / "admin_panel"),
+        },
+        legacy_ws_port=legacy_ws_port,
+    )
+
+    class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    httpd = ReusableThreadingTCPServer((host, port), handler_cls)
+    if ssl_context is not None:
+        try:
+            httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+        except BaseException:
+            httpd.server_close()
+            raise
+    return httpd

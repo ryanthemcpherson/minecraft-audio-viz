@@ -15,3 +15,16 @@ test('preview authenticates with an in-memory username and password', () => {
 test('preview selects secure WebSockets on HTTPS pages', () => {
     assert.match(source, /location\.protocol\s*===\s*['"]https:['"][\s\S]*['"]wss['"]/);
 });
+
+test('preview uses the same-origin preview route by default', () => {
+    assert.match(source, /location\.host[\s\S]*\/ws\/preview/);
+    assert.doesNotMatch(source, /wsPort:[^\n]*\|\|\s*8766/);
+});
+
+test('preview consumes the server-provided legacy port when present', () => {
+    assert.match(source, /__MCAV_LEGACY_WS_PORT__/);
+});
+
+test('preview responds to server heartbeats', () => {
+    assert.match(source, /data\.type\s*===\s*['"]ping['"][\s\S]*type:\s*['"]pong['"]/);
+});

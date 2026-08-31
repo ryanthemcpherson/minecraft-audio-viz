@@ -207,6 +207,10 @@ class TestAuthRateLimit:
             self.mgr._check_auth_rate_limit("1.2.3.4")
         assert self.mgr._check_auth_rate_limit("1.2.3.4") is True
 
+    def test_respects_route_specific_attempt_limit(self):
+        assert self.mgr._check_auth_rate_limit("1.2.3.4", max_attempts=1) is False
+        assert self.mgr._check_auth_rate_limit("1.2.3.4", max_attempts=1) is True
+
     def test_different_ips_independent(self):
         for _ in range(3):
             self.mgr._check_auth_rate_limit("1.1.1.1")

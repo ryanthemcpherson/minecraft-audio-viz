@@ -68,6 +68,30 @@ Examples:
 
     # VJ Server settings
     parser.add_argument(
+        "--public-host",
+        type=validate_hostname,
+        default=os.environ.get("MCAV_PUBLIC_HOST"),
+        help="Unified HTTPS/WSS bind host (default: --http-host)",
+    )
+    parser.add_argument(
+        "--public-port",
+        type=validate_port,
+        default=(int(value) if (value := os.environ.get("MCAV_PUBLIC_PORT")) is not None else None),
+        help="Unified HTTPS/WSS port (default: --http-port)",
+    )
+    parser.add_argument(
+        "--managed",
+        action="store_true",
+        help="Use the default unified managed ingress",
+    )
+    parser.add_argument(
+        "--legacy-separate-listeners",
+        action="store_true",
+        default=os.environ.get("MCAV_LEGACY_SEPARATE_LISTENERS", "").lower()
+        in ("1", "true", "yes"),
+        help="Use deprecated separate DJ, browser, and HTTP listeners",
+    )
+    parser.add_argument(
         "--port",
         "-p",
         type=validate_port,
@@ -205,6 +229,9 @@ Examples:
 
     args = parser.parse_args()
 
+    if args.managed and args.legacy_separate_listeners:
+        parser.error("--managed and --legacy-separate-listeners cannot be combined")
+
     if args.bootstrap_pterodactyl:
         from vj_server.pterodactyl import BootstrapError, BootstrapPaths, bootstrap_pterodactyl
 
@@ -314,6 +341,9 @@ Examples:
         visual_delay_ms=args.visual_delay_ms,
         visual_delay_mode=args.visual_delay_mode,
         enable_link=args.enable_link,
+        public_host=args.public_host or args.http_host,
+        public_port=args.public_port if args.public_port is not None else args.http_port,
+        legacy_separate_listeners=args.legacy_separate_listeners,
     )
 
     def signal_handler(sig, frame):

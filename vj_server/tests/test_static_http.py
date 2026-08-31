@@ -367,6 +367,21 @@ def test_http_handlers_serve_safe_file(
     assert body == b"safe asset"
 
 
+def test_legacy_http_handler_serves_browser_runtime_config(tmp_path: Path) -> None:
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    handler_class = _make_directory_handler(
+        {"/": str(static_root)},
+        legacy_ws_port=8766,
+    )
+
+    with _running_http_server(handler_class) as address:
+        status, body, _ = _http_get(address, "/mcav-runtime-config.js")
+
+    assert status == HTTPStatus.OK
+    assert body == b"window.__MCAV_LEGACY_WS_PORT__ = 8766;\n"
+
+
 @pytest.mark.parametrize("implementation", ["factory", "legacy"])
 def test_http_handlers_redirect_and_serve_safe_directory_index(
     tmp_path: Path,
@@ -553,9 +568,107 @@ def test_modern_cli_propagates_secure_listener_options(
 
     assert modern_cli_main() == 0
     assert captured["http_port"] == 18443
+    assert captured["public_port"] == 18443
+    assert captured["public_host"] == "127.0.0.1"
     assert captured["project_root"] == tmp_path
     assert captured["tls_cert"] == cert_file
     assert captured["tls_key"] == key_file
+
+
+def test_modern_cli_rejects_managed_and_legacy_listener_modes_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--managed",
+            "--legacy-separate-listeners",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        modern_cli_main()
+
+    assert error.value.code == 2
+
+
+def test_modern_cli_honors_legacy_listener_environment_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class FakeVJServer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def stop(self):
+            pass
+
+    def discard_coroutine(coroutine):
+        coroutine.close()
+
+    monkeypatch.setattr(vj_server_module, "VJServer", FakeVJServer)
+    monkeypatch.setattr(cli_module.asyncio, "run", discard_coroutine)
+    monkeypatch.setattr(cli_module.signal, "signal", lambda *args: None)
+    monkeypatch.setenv("MCAV_LEGACY_SEPARATE_LISTENERS", "true")
+    monkeypatch.setattr(sys, "argv", ["audioviz-vj", "--no-auth"])
+
+    assert modern_cli_main() == 0
+    assert captured["legacy_separate_listeners"] is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_cli_explicitly_preserves_separate_listeners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class FakeVJServer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self._pattern_hot_reload_enabled = True
+            self._skip_minecraft = False
+
+        async def run(self):
+            return None
+
+        async def cleanup(self):
+            return None
+
+        def stop(self):
+            return None
+
+    monkeypatch.setattr(vj_server_module, "VJServer", FakeVJServer)
+    monkeypatch.setattr(vj_server_module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["vj_server.py", "--no-auth", "--no-minecraft"],
+    )
+
+    await legacy_main()
+
+    assert captured["legacy_separate_listeners"] is True
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "scripts/start-vj-server.ps1",
+        "scripts/runtime_compat_smoke.ps1",
+        "scripts/deploy-vj-dev.sh",
+        "scripts/deploy-plugin.sh",
+        "scripts/deploy-plugin.ps1",
+        "scripts/deploy-paper.sh",
+    ],
+)
+def test_legacy_port_callers_select_compatibility_mode(relative_path: str) -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    source = (repository_root / relative_path).read_text(encoding="utf-8")
+
+    assert "--legacy-separate-listeners" in source
 
 
 @pytest.mark.asyncio
@@ -579,7 +692,12 @@ async def test_vj_server_passes_tls_context_to_browser_listener(
     async def no_op():
         pass
 
-    server = VJServer(http_port=0, metrics_port=None, show_spectrograph=False)
+    server = VJServer(
+        http_port=0,
+        metrics_port=None,
+        show_spectrograph=False,
+        legacy_separate_listeners=True,
+    )
     server.server_ssl_context = ssl_context
     server._skip_minecraft = True
     server._pattern_hot_reload_enabled = False

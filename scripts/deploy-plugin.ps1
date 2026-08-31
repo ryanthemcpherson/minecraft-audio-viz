@@ -181,7 +181,7 @@ if (-not $ModOnly) {
         }
 
         # Start fresh VJ server
-        ssh $SshTarget "cd '${RemoteProject}' && nohup .venv/bin/python -m vj_server.cli --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
+        ssh $SshTarget "cd '${RemoteProject}' && nohup .venv/bin/python -m vj_server.cli --legacy-separate-listeners --no-auth --minecraft-host 127.0.0.1 > /tmp/vj_server.log 2>&1 &"
         Start-Sleep -Seconds 3
 
         # Verify

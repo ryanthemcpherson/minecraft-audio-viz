@@ -3,10 +3,15 @@
  * Professional Three.js visualization with particles and block indicators
  */
 
-// Configuration — port can be overridden via ?port=XXXX URL parameter
+// Configuration — ?port=XXXX preserves the legacy separate-listener mode.
 const _urlParams = new URLSearchParams(window.location.search);
+const _requestedWsPort = Number.parseInt(_urlParams.get('port'), 10);
+const _configuredWsPort = Number(window.__MCAV_LEGACY_WS_PORT__);
+const _selectedWsPort = Number.isInteger(_requestedWsPort) ? _requestedWsPort : _configuredWsPort;
 const CONFIG = {
-    wsPort: parseInt(_urlParams.get('port'), 10) || 8766,
+    legacyWsPort: Number.isInteger(_selectedWsPort) && _selectedWsPort > 0 && _selectedWsPort <= 65535
+        ? _selectedWsPort
+        : null,
     entityCount: 16,
     gridSize: 4,
     blockSize: 0.8,
@@ -661,7 +666,11 @@ function connectWebSocket() {
     try {
         const wsHost = window.location.hostname || 'localhost';
         const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        ws = new WebSocket(`${wsScheme}://${wsHost}:${CONFIG.wsPort}`);
+        const wsAuthority = CONFIG.legacyWsPort === null
+            ? (window.location.host || wsHost)
+            : `${wsHost}:${CONFIG.legacyWsPort}`;
+        const wsPath = CONFIG.legacyWsPort === null ? '/ws/preview' : '';
+        ws = new WebSocket(`${wsScheme}://${wsAuthority}${wsPath}`);
 
         ws.onopen = () => {
             if (statusText) statusText.textContent = 'Authenticating…';
@@ -693,6 +702,9 @@ function connectWebSocket() {
                     hidePreviewLogin();
                     ws.send(JSON.stringify({ type: 'get_zones' }));
                     ws.send(JSON.stringify({ type: 'get_stages' }));
+                    return;
+                } else if (data.type === 'ping') {
+                    ws.send(JSON.stringify({ type: 'pong' }));
                     return;
                 }
                 if (data.type === 'audio' || data.type === 'state') {

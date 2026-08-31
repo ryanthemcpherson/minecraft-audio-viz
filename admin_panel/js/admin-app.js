@@ -14,10 +14,16 @@ class AdminApp {
         // WebSocket connection - use same host as the page was served from
         const wsHost = window.location.hostname || 'localhost';
         const urlParams = new URLSearchParams(window.location.search);
-        const wsPort = parseInt(urlParams.get('port'), 10) || 8766;
+        const requestedPort = Number.parseInt(urlParams.get('port'), 10);
+        const configuredPort = Number(window.__MCAV_LEGACY_WS_PORT__);
+        const selectedPort = Number.isInteger(requestedPort) ? requestedPort : configuredPort;
+        const legacyWsPort = Number.isInteger(selectedPort) && selectedPort > 0 && selectedPort <= 65535
+            ? selectedPort
+            : undefined;
         this.ws = new WebSocketService({
             host: wsHost,
-            port: wsPort,
+            pageHost: window.location.host,
+            port: legacyWsPort,
             pageProtocol: window.location.protocol,
             username: options.username || '',
             password: options.password || '',

@@ -222,6 +222,9 @@ class ServerConfig:
     preview_port: int = 8766
     http_host: str = "127.0.0.1"
     http_port: int = 8080
+    public_host: str = "127.0.0.1"
+    public_port: int = 8080
+    legacy_separate_listeners: bool = False
 
     # Authentication
     dj_auth_file: Optional[str] = "configs/dj_auth.json"
@@ -234,6 +237,7 @@ class ServerConfig:
 
     def __post_init__(self) -> None:
         self.http_host = validate_http_bind_host(self.http_host)
+        self.public_host = validate_http_bind_host(self.public_host)
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -246,6 +250,18 @@ class ServerConfig:
             preview_port=int(os.environ.get("PREVIEW_PORT", "8766")),
             http_host=os.environ.get("HTTP_HOST", "127.0.0.1"),
             http_port=int(os.environ.get("HTTP_PORT", "8080")),
+            public_host=os.environ.get(
+                "MCAV_PUBLIC_HOST",
+                os.environ.get("HTTP_HOST", "127.0.0.1"),
+            ),
+            public_port=int(
+                os.environ.get("MCAV_PUBLIC_PORT", os.environ.get("HTTP_PORT", "8080"))
+            ),
+            legacy_separate_listeners=os.environ.get(
+                "MCAV_LEGACY_SEPARATE_LISTENERS",
+                "",
+            ).lower()
+            in {"1", "true", "yes"},
             dj_auth_file=os.environ.get("DJ_AUTH_FILE", "configs/dj_auth.json"),
             coordinator_url=os.environ.get("COORDINATOR_URL"),
             coordinator_api_key=os.environ.get("COORDINATOR_API_KEY"),

@@ -195,10 +195,11 @@ class DJManagerMixin:
             except Exception:
                 pass
 
-    def _check_auth_rate_limit(self, ip: str) -> bool:
+    def _check_auth_rate_limit(self, ip: str, *, max_attempts: int | None = None) -> bool:
         """Check if an IP has exceeded the auth rate limit. Returns True if rate limited."""
         now = time.time()
         window = self._auth_rate_limit_window
+        attempt_limit = self._auth_rate_limit_max if max_attempts is None else max_attempts
 
         # Periodic cleanup: by size threshold or every 60 seconds
         if len(self._auth_attempts) > 50 or (now - self._auth_last_cleanup) >= 60.0:
@@ -219,7 +220,7 @@ class DJManagerMixin:
         self._auth_attempts[ip] = [t for t in attempts if t > now - window]
         attempts = self._auth_attempts[ip]
 
-        if len(attempts) >= self._auth_rate_limit_max:
+        if len(attempts) >= attempt_limit:
             return True  # rate limited
 
         # Record this attempt
@@ -248,7 +249,15 @@ class DJManagerMixin:
 
             # Rate limit auth attempts per IP
             client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
-            if self._check_auth_rate_limit(client_ip):
+            auth_attempt_limit = getattr(
+                websocket,
+                "auth_attempt_limit",
+                self._auth_rate_limit_max,
+            )
+            if self._check_auth_rate_limit(
+                client_ip,
+                max_attempts=auth_attempt_limit,
+            ):
                 logger.warning("Auth rate limited for IP %s", client_ip)
                 await websocket.close(4029, "Too many auth attempts, try again later")
                 return

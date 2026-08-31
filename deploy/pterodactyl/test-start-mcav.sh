@@ -69,6 +69,7 @@ test_exact_paper_arguments_and_secure_vj_flags() {
   grep -Fx -- '--tls-cert' "$fixture/vj.args" >/dev/null || fail 'TLS certificate flag missing'
   grep -Fx -- '--tls-key' "$fixture/vj.args" >/dev/null || fail 'TLS key flag missing'
   grep -Fx -- '--http-host' "$fixture/vj.args" >/dev/null || fail 'HTTP bind flag missing'
+  grep -Fx -- '--legacy-separate-listeners' "$fixture/vj.args" >/dev/null || fail 'legacy compatibility flag missing'
   ! grep -Fx -- '--no-auth' "$fixture/vj.args" >/dev/null || fail 'insecure --no-auth present'
 }
 

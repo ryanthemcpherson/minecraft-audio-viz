@@ -131,6 +131,24 @@ class TestServerConfig:
     def test_http_host_defaults_to_loopback(self):
         assert ServerConfig().http_host == "127.0.0.1"
 
+    def test_public_ingress_defaults_to_loopback(self):
+        config = ServerConfig()
+
+        assert config.public_host == "127.0.0.1"
+        assert config.public_port == 8080
+        assert config.legacy_separate_listeners is False
+
+    def test_public_ingress_loads_from_environment(self, monkeypatch):
+        monkeypatch.setenv("MCAV_PUBLIC_HOST", "0.0.0.0")
+        monkeypatch.setenv("MCAV_PUBLIC_PORT", "18443")
+        monkeypatch.setenv("MCAV_LEGACY_SEPARATE_LISTENERS", "true")
+
+        config = ServerConfig.from_env()
+
+        assert config.public_host == "0.0.0.0"
+        assert config.public_port == 18443
+        assert config.legacy_separate_listeners is True
+
     def test_http_host_allows_explicit_non_loopback(self, monkeypatch):
         monkeypatch.setenv("HTTP_HOST", "0.0.0.0")
         assert ServerConfig.from_env().http_host == "0.0.0.0"

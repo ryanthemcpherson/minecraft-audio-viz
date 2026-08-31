@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from aiohttp import web
+from yarl import URL
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
@@ -69,6 +70,48 @@ def is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
+
+
+def browser_origin_allowed(
+    origin: str | None,
+    request_host: str,
+    *,
+    secure_transport: bool,
+    allowed_origins: tuple[str, ...] = (),
+) -> bool:
+    candidate_origin = _normalized_http_origin(origin)
+    expected_origin = _normalized_http_origin(
+        f"{'https' if secure_transport else 'http'}://{request_host}"
+    )
+    if candidate_origin is None or expected_origin is None:
+        return False
+    if candidate_origin == expected_origin:
+        return True
+    for allowed in allowed_origins:
+        if candidate_origin == _normalized_http_origin(allowed):
+            return True
+    return False
+
+
+def _normalized_http_origin(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        candidate = URL(value)
+        if (
+            candidate.scheme not in {"http", "https"}
+            or not candidate.is_absolute()
+            or candidate.host is None
+            or candidate.user is not None
+            or candidate.password is not None
+            or candidate.query_string
+            or candidate.fragment
+            or candidate.path not in {"", "/"}
+        ):
+            return None
+        return str(candidate.origin())
+    except ValueError:
+        return None
 
 
 def security_headers(*, secure_transport: bool) -> dict[str, str]:

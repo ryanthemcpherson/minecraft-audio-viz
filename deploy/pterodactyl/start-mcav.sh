@@ -99,6 +99,7 @@ MINECRAFT_WS_SECRET="$shared_secret" "$runtime" \
   --metrics-port "$metrics_port" \
   --tls-cert "$MCAV_ROOT/state/tls.crt" \
   --tls-key "$MCAV_ROOT/state/tls.key" \
+  --legacy-separate-listeners \
   --entities "$entity_count" \
   --no-spectrograph &
 vj_pid=$!

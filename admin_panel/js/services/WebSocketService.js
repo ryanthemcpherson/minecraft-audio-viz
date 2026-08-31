@@ -7,11 +7,15 @@ export class WebSocketService extends EventTarget {
     constructor(options = {}) {
         super();
 
-        this.host = options.host || 'localhost';
-        this.port = options.port || 8766;
+        this.pageProtocol = options.pageProtocol || globalThis.location?.protocol || 'http:';
+        this.pageHost = options.pageHost || globalThis.location?.host || '';
+        this.host = options.host || globalThis.location?.hostname || 'localhost';
+        this.port = Number.isInteger(options.port) && options.port > 0 && options.port <= 65535
+            ? options.port
+            : null;
+        this.path = options.path ?? (this.port === null ? '/ws/admin' : '');
         this.username = options.username || '';
         this.password = options.password || '';
-        this.pageProtocol = options.pageProtocol || globalThis.location?.protocol || 'http:';
         this.reconnectInterval = options.reconnectInterval || 1000;
         this.maxReconnectAttempts = options.maxReconnectAttempts || 50;
 
@@ -68,7 +72,11 @@ export class WebSocketService extends EventTarget {
         this.shouldReconnect = true;
 
         const scheme = this.pageProtocol === 'https:' ? 'wss' : 'ws';
-        const url = `${scheme}://${this.host}:${this.port}`;
+        const authority = this.port === null
+            ? (this.pageHost || this.host)
+            : `${this.host}:${this.port}`;
+        const path = !this.path || this.path.startsWith('/') ? this.path : `/${this.path}`;
+        const url = `${scheme}://${authority}${path}`;
         console.log(`[WS] Connecting to ${url}...`);
 
         this._emit('connecting', {
