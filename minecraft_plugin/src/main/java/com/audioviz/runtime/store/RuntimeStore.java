@@ -248,6 +248,10 @@ public final class RuntimeStore {
         return prune(retainVersions, Set.of());
     }
 
+    public void discardStaging(Path staging) throws RuntimeStoreException {
+        stateStore.deleteStaging(staging);
+    }
+
     public int prune(int retainVersions, Set<RuntimeVersionId> pinned)
         throws RuntimeStoreException {
         if (retainVersions < 0) {

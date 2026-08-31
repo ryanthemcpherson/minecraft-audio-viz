@@ -75,7 +75,7 @@ public final class RuntimeHttpSource {
         );
     }
 
-    RuntimeHttpSource(
+    public RuntimeHttpSource(
         Transport transport,
         Path downloadDirectory,
         Duration requestTimeout,
@@ -103,7 +103,7 @@ public final class RuntimeHttpSource {
 
     public record DownloadResult(long bytesWritten, String sha256) {}
 
-    private record JdkTransport(HttpClient client) implements Transport {
+    record JdkTransport(HttpClient client) implements Transport {
         @Override
         public HttpResponse<InputStream> execute(URI uri, Duration timeout)
             throws IOException, InterruptedException {
@@ -119,8 +119,23 @@ public final class RuntimeHttpSource {
 
     public byte[] fetchBytes(URI uri, int maximumBytes, Set<String> allowedHosts)
         throws RuntimeDownloadException {
+        return fetchBytes(uri, maximumBytes, allowedHosts, () -> false);
+    }
+
+    public byte[] fetchBytes(
+        URI uri,
+        int maximumBytes,
+        Set<String> allowedHosts,
+        CancellationToken cancellationToken
+    ) throws RuntimeDownloadException {
         if (maximumBytes <= 0) {
             throw failure(INVALID_EXPECTATION);
+        }
+        if (cancellationToken == null) {
+            throw failure(INVALID_EXPECTATION);
+        }
+        if (cancellationToken.isCancelled()) {
+            throw failure(CANCELLED);
         }
         HttpResponse<InputStream> response = openFinalResponse(uri, allowedHosts);
         try (InputStream input = response.body()) {
@@ -135,6 +150,9 @@ public final class RuntimeHttpSource {
             byte[] buffer = new byte[BUFFER_SIZE];
             long total = 0;
             while (true) {
+                if (cancellationToken.isCancelled()) {
+                    throw failure(CANCELLED);
+                }
                 int read;
                 try {
                     read = input.read(

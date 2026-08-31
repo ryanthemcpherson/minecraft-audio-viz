@@ -1,6 +1,7 @@
 package com.audioviz.runtime.store;
 
 import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.INVALID_STATE;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.PATH_ESCAPE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -96,6 +97,104 @@ class AtomicStateStoreTest {
             () -> store.readState(paths.currentState())
         );
         assertEquals(INVALID_STATE, oversized.reason());
+
+        Files.write(paths.currentState(), new byte[0]);
+        RuntimeStoreException empty = assertThrows(
+            RuntimeStoreException.class,
+            () -> store.readState(paths.currentState())
+        );
+        assertEquals(INVALID_STATE, empty.reason());
+
+        Files.delete(paths.currentState());
+        Files.createDirectory(paths.currentState());
+        RuntimeStoreException directory = assertThrows(
+            RuntimeStoreException.class,
+            () -> store.readState(paths.currentState())
+        );
+        assertEquals(INVALID_STATE, directory.reason());
+    }
+
+    @Test
+    void rejectsMalformedStateFieldValues() throws Exception {
+        String valid = stateJson("1.2.0");
+        String[] invalid = {
+            "[]",
+            valid.replace("\"schema_version\":1", "\"schema_version\":2"),
+            valid.replace("\"id\":{", "\"id\":[] ,\"ignored\":{"),
+            valid.replace(",\"platform\":\"linux-x86_64\"", ""),
+            valid.replace("\"release_version\":\"1.2.0\"", "\"release_version\":\"\""),
+            valid.replace("\"release_version\":\"1.2.0\"", "\"release_version\":\"" + "a".repeat(65) + "\""),
+            valid.replace("\"manifest_generation\":12", "\"manifest_generation\":-1"),
+            valid.replace("\"manifest_generation\":12", "\"manifest_generation\":1.5"),
+            valid.replace("\"manifest_generation\":12", "\"manifest_generation\":01"),
+            valid.replace("\"manifest_generation\":12", "\"manifest_generation\":999999999999999999999"),
+            valid.replace("\"runtime_api\":1", "\"runtime_api\":0"),
+            valid.replace("\"runtime_api\":1", "\"runtime_api\":\"1\""),
+            valid.replace("\"runtime_api\":1", "\"runtime_api\":2147483648"),
+            valid.replace("\"archive_sha256\":\"" + ARCHIVE_DIGEST + "\"", "\"archive_sha256\":\"A" + "a".repeat(63) + "\""),
+            valid.replace("\"archive_sha256\":\"" + ARCHIVE_DIGEST + "\"", "\"archive_sha256\":\":" + "a".repeat(63) + "\""),
+            valid.replace("\"archive_sha256\":\"" + ARCHIVE_DIGEST + "\"", "\"archive_sha256\":\"g" + "a".repeat(63) + "\""),
+            valid.replace("\"files_manifest_sha256\":\"" + FILES_DIGEST + "\"", "\"files_manifest_sha256\":\"short\""),
+            valid.replace("\"activated_at\":\"2026-08-31T12:00:00Z\"", "\"activated_at\":\"2026-08-31T12:00:00.000Z\""),
+            valid.replace("\"activated_at\":\"2026-08-31T12:00:00Z\"", "\"activated_at\":\"not-an-instant\""),
+            valid.replace("\"health\":\"candidate\"", "\"health\":\"unknown\""),
+            valid.replace("\"health\":\"candidate\"", "\"health\":\"\""),
+            valid.replace("\"platform\":\"linux-x86_64\"", "\"platform\":\"solaris\""),
+            valid.replace("\"platform\":\"linux-x86_64\"", "\"platform\":1"),
+            valid.replace("\"id\":{", "\"id\":{\"extra\":1,"),
+            valid.replace(",\"health\":\"candidate\"", "")
+        };
+
+        for (String document : invalid) {
+            Files.writeString(paths.currentState(), document, StandardCharsets.UTF_8);
+            RuntimeStoreException failure = assertThrows(
+                RuntimeStoreException.class,
+                () -> store.readState(paths.currentState())
+            );
+            assertEquals(INVALID_STATE, failure.reason());
+        }
+    }
+
+    @Test
+    void rejectsMalformedTransactionFieldValues() throws Exception {
+        RuntimeState candidate = state("1.2.0", 12, HealthState.CANDIDATE);
+        RuntimeTransaction transaction = new RuntimeTransaction(
+            1,
+            UUID.fromString("abcdef00-0000-0000-0000-000000000012"),
+            TransactionPhase.CANDIDATE_ACTIVE,
+            null,
+            candidate,
+            null
+        );
+        store.writeTransaction(transaction);
+        String valid = Files.readString(paths.transactionJournal());
+        String[] invalid = {
+            "[]",
+            valid.replace("\"schema_version\":1", "\"schema_version\":2"),
+            valid.replace("abcdef00-", "ABCDEF00-"),
+            valid.replace("abcdef00-0000-0000-0000-000000000012", "not-a-uuid"),
+            valid.replace("\"candidate_active\"", "\"unknown\""),
+            valid.replace("\"source_staging_id\":null", "\"source_staging_id\":\"stage-bad\""),
+            valid.replace("\"source_staging_id\":null", "\"source_staging_id\":true"),
+            valid.replace("\"candidate\":{", "\"candidate\":[] ,\"ignored\":{"),
+            valid.replace("\"candidate\":{", "\"candidate\":null,\"discarded\":{") ,
+            valid.replace("\"previous\":null", "\"previous\":{}"),
+            valid.replace("\"previous\":null", "\"previous\":[]"),
+            valid.replace("\"phase\":\"candidate_active\"", "\"phase\":\"candidate_active\",\"phase\":\"candidate_active\""),
+            valid.replace("\"schema_version\":1", "\"unknown\":1,\"schema_version\":1"),
+            valid.replace("\"source_staging_id\":null,", ""),
+            valid.replace(",\"previous\":null", ""),
+            valid + "{}"
+        };
+
+        for (String document : invalid) {
+            Files.writeString(paths.transactionJournal(), document, StandardCharsets.UTF_8);
+            RuntimeStoreException failure = assertThrows(
+                RuntimeStoreException.class,
+                store::readTransaction
+            );
+            assertEquals(INVALID_STATE, failure.reason());
+        }
     }
 
     @Test
@@ -157,6 +256,20 @@ class AtomicStateStoreTest {
     }
 
     @Test
+    void nonAtomicFallbackCanCreateANewStateWithoutJournal() throws Exception {
+        RuntimeState candidate = state("1.2.0", 12, HealthState.CANDIDATE);
+
+        unsupportedAtomicMoves().writeState(
+            paths.currentState(),
+            candidate,
+            Boundary.CURRENT_TEMP_WRITE,
+            Boundary.CURRENT_REPLACE
+        );
+
+        assertEquals(candidate, store.readState(paths.currentState()).orElseThrow());
+    }
+
+    @Test
     void journalAllowsRecoverableFallbackWhenAtomicReplaceIsUnavailable() throws Exception {
         RuntimeState previous = state("1.1.0", 11, HealthState.HEALTHY);
         RuntimeState candidate = state("1.2.0", 12, HealthState.CANDIDATE);
@@ -207,6 +320,55 @@ class AtomicStateStoreTest {
         );
 
         assertEquals(INVALID_STATE, failure.reason());
+    }
+
+    @Test
+    void rejectsUnownedStateMoveAndDeleteTargets() throws Exception {
+        RuntimeState candidate = state("1.2.0", 12, HealthState.CANDIDATE);
+        Path outside = temp.resolve("outside.json");
+        assertReason(PATH_ESCAPE, () -> store.readState(outside));
+        assertReason(
+            PATH_ESCAPE,
+            () -> store.writeState(
+                outside,
+                candidate,
+                Boundary.CURRENT_TEMP_WRITE,
+                Boundary.CURRENT_REPLACE
+            )
+        );
+        assertReason(
+            PATH_ESCAPE,
+            () -> store.moveVersion(
+                temp.resolve("outside-stage"),
+                paths.versions().resolve("1.2.0--linux-x86_64")
+            )
+        );
+        assertReason(
+            PATH_ESCAPE,
+            () -> store.moveVersion(
+                paths.staging().resolve("missing"),
+                paths.versions().resolve("1.2.0--linux-x86_64")
+            )
+        );
+
+        Path missingStaging = paths.staging().resolve("missing-delete");
+        store.deleteStaging(missingStaging);
+        Path stagingFile = Files.writeString(paths.staging().resolve("file"), "file");
+        assertReason(PATH_ESCAPE, () -> store.deleteStaging(stagingFile));
+        assertReason(PATH_ESCAPE, () -> store.deleteVersion(temp.resolve("outside-version")));
+    }
+
+    private static void assertReason(
+        RuntimeStoreException.FailureReason reason,
+        ThrowingStoreOperation operation
+    ) {
+        RuntimeStoreException failure = assertThrows(RuntimeStoreException.class, operation::run);
+        assertEquals(reason, failure.reason());
+    }
+
+    @FunctionalInterface
+    private interface ThrowingStoreOperation {
+        void run() throws Exception;
     }
 
     private AtomicStateStore unsupportedAtomicMoves() {

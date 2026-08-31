@@ -38,6 +38,7 @@ public final class RuntimeStoreException extends Exception {
         INVALID_RUNTIME,
         NOT_CANDIDATE,
         RETENTION_INVALID,
+        CANCELLED,
         IO_FAILURE
     }
 

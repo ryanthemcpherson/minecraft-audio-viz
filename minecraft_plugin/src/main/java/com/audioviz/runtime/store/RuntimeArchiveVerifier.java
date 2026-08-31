@@ -102,6 +102,11 @@ public final class RuntimeArchiveVerifier {
     private final RuntimeLimits limits;
     private final RuntimePaths paths;
 
+    @FunctionalInterface
+    public interface CancellationToken {
+        boolean isCancelled();
+    }
+
     public RuntimeArchiveVerifier(RuntimeLimits limits, RuntimePaths paths) {
         this.limits = Objects.requireNonNull(limits, "limits");
         this.paths = Objects.requireNonNull(paths, "paths");
@@ -113,14 +118,26 @@ public final class RuntimeArchiveVerifier {
         RuntimeArtifact artifact,
         RuntimePlatform platform
     ) throws RuntimeStoreException {
+        return extract(archive, uniqueStaging, artifact, platform, () -> false);
+    }
+
+    public VerifiedRuntimeLayout extract(
+        Path archive,
+        Path uniqueStaging,
+        RuntimeArtifact artifact,
+        RuntimePlatform platform,
+        CancellationToken cancellationToken
+    ) throws RuntimeStoreException {
         Objects.requireNonNull(artifact, "artifact");
         Objects.requireNonNull(platform, "platform");
+        Objects.requireNonNull(cancellationToken, "cancellationToken");
+        checkCancelled(cancellationToken);
         if (artifact.platform() != platform) {
             throw failure(PLATFORM_MISMATCH);
         }
         Path validatedArchive = validateArchivePath(archive, artifact);
         Path validatedStaging = validateStagingPath(uniqueStaging);
-        verifyArchiveDigest(validatedArchive, artifact.sha256());
+        verifyArchiveDigest(validatedArchive, artifact.sha256(), cancellationToken);
 
         try (ZipFile zip = ZipFile.builder()
             .setPath(validatedArchive)
@@ -128,8 +145,12 @@ public final class RuntimeArchiveVerifier {
             .setUseUnicodeExtraFields(false)
             .setIgnoreLocalFileHeader(false)
             .get()) {
-            ArchiveIndex index = inspectCentralDirectory(zip, artifact);
-            byte[] filesManifestBytes = readFilesManifest(zip, index.filesManifestEntry());
+            ArchiveIndex index = inspectCentralDirectory(zip, artifact, cancellationToken);
+            byte[] filesManifestBytes = readFilesManifest(
+                zip,
+                index.filesManifestEntry(),
+                cancellationToken
+            );
             verifyDigest(
                 filesManifestBytes,
                 artifact.filesManifestSha256(),
@@ -143,7 +164,8 @@ public final class RuntimeArchiveVerifier {
                 packagedFiles,
                 filesManifestBytes,
                 artifact.entrypoint(),
-                validatedStaging
+                validatedStaging,
+                cancellationToken
             );
             Path entrypoint = resolveUnder(validatedStaging, artifact.entrypoint());
             return new VerifiedRuntimeLayout(
@@ -381,12 +403,17 @@ public final class RuntimeArchiveVerifier {
         return normalized;
     }
 
-    private void verifyArchiveDigest(Path archive, String expectedSha256)
+    private void verifyArchiveDigest(
+        Path archive,
+        String expectedSha256,
+        CancellationToken cancellationToken
+    )
         throws RuntimeStoreException {
         MessageDigest digest = sha256Digest();
         byte[] buffer = new byte[16 * 1024];
         try (InputStream input = Files.newInputStream(archive, StandardOpenOption.READ)) {
             while (true) {
+                checkCancelled(cancellationToken);
                 int read = input.read(buffer);
                 if (read < 0) {
                     break;
@@ -407,7 +434,11 @@ public final class RuntimeArchiveVerifier {
         }
     }
 
-    private ArchiveIndex inspectCentralDirectory(ZipFile zip, RuntimeArtifact artifact)
+    private ArchiveIndex inspectCentralDirectory(
+        ZipFile zip,
+        RuntimeArtifact artifact,
+        CancellationToken cancellationToken
+    )
         throws RuntimeStoreException {
         Enumeration<ZipArchiveEntry> entries = zip.getEntries();
         Map<String, ZipArchiveEntry> members = new LinkedHashMap<>();
@@ -416,6 +447,7 @@ public final class RuntimeArchiveVerifier {
         long totalUncompressed = 0;
         int count = 0;
         while (entries.hasMoreElements()) {
+            checkCancelled(cancellationToken);
             ZipArchiveEntry entry = entries.nextElement();
             count++;
             if (count > limits.maximumArchiveMembers()) {
@@ -501,10 +533,19 @@ public final class RuntimeArchiveVerifier {
         }
     }
 
-    private byte[] readFilesManifest(ZipFile zip, ZipArchiveEntry entry)
+    private byte[] readFilesManifest(
+        ZipFile zip,
+        ZipArchiveEntry entry,
+        CancellationToken cancellationToken
+    )
         throws RuntimeStoreException {
         try (InputStream input = zip.getInputStream(entry)) {
-            return readBounded(input, limits.maximumManifestBytes(), entry.getSize());
+            return readBounded(
+                input,
+                limits.maximumManifestBytes(),
+                entry.getSize(),
+                cancellationToken
+            );
         } catch (RuntimeStoreException error) {
             throw error;
         } catch (IOException error) {
@@ -547,11 +588,13 @@ public final class RuntimeArchiveVerifier {
         Map<String, PackagedFile> packagedFiles,
         byte[] filesManifestBytes,
         String entrypoint,
-        Path staging
+        Path staging,
+        CancellationToken cancellationToken
     ) throws RuntimeStoreException {
         List<Path> created = new ArrayList<>();
         RuntimeStoreException primaryFailure = null;
         try {
+            checkCancelled(cancellationToken);
             Files.createDirectory(staging);
             created.add(staging);
             boolean posix = Files.getFileStore(staging)
@@ -564,11 +607,20 @@ public final class RuntimeArchiveVerifier {
                 .sorted(Comparator.comparing(PackagedFile::path))
                 .toList();
             for (PackagedFile file : sortedFiles) {
+                checkCancelled(cancellationToken);
                 Path destination = resolveUnder(staging, file.path());
                 createOwnedParents(staging, destination.getParent(), created, posix);
                 created.add(destination);
-                extractFile(zip, members.get(file.path()), file, destination, posix);
+                extractFile(
+                    zip,
+                    members.get(file.path()),
+                    file,
+                    destination,
+                    posix,
+                    cancellationToken
+                );
             }
+            checkCancelled(cancellationToken);
             Path manifestDestination = resolveUnder(staging, FILES_MANIFEST_PATH);
             created.add(manifestDestination);
             writeForcedFile(manifestDestination, filesManifestBytes, false, posix);
@@ -594,7 +646,8 @@ public final class RuntimeArchiveVerifier {
         ZipArchiveEntry entry,
         PackagedFile file,
         Path destination,
-        boolean posix
+        boolean posix,
+        CancellationToken cancellationToken
     ) throws IOException, RuntimeStoreException {
         MessageDigest digest = sha256Digest();
         long total = 0;
@@ -608,6 +661,7 @@ public final class RuntimeArchiveVerifier {
             )
         ) {
             while (true) {
+                checkCancelled(cancellationToken);
                 int read;
                 try {
                     read = input.read(buffer, 0, boundedReadLength(file.size(), total, buffer.length));
@@ -720,12 +774,23 @@ public final class RuntimeArchiveVerifier {
 
     private static byte[] readBounded(InputStream input, int maximumBytes, long expectedBytes)
         throws IOException, RuntimeStoreException {
+        return readBounded(input, maximumBytes, expectedBytes, () -> false);
+    }
+
+    private static byte[] readBounded(
+        InputStream input,
+        int maximumBytes,
+        long expectedBytes,
+        CancellationToken cancellationToken
+    )
+        throws IOException, RuntimeStoreException {
         ByteArrayOutputStream output = new ByteArrayOutputStream(
             Math.min(maximumBytes, 16 * 1024)
         );
         byte[] buffer = new byte[16 * 1024];
         long total = 0;
         while (true) {
+            checkCancelled(cancellationToken);
             int read = input.read(buffer, 0, boundedReadLength(maximumBytes, total, buffer.length));
             if (read < 0) {
                 break;
@@ -743,6 +808,13 @@ public final class RuntimeArchiveVerifier {
             throw failure(MEMBER_SIZE_MISMATCH);
         }
         return output.toByteArray();
+    }
+
+    private static void checkCancelled(CancellationToken cancellationToken)
+        throws RuntimeStoreException {
+        if (cancellationToken.isCancelled()) {
+            throw failure(RuntimeStoreException.FailureReason.CANCELLED);
+        }
     }
 
     private static int boundedReadLength(long maximumBytes, long bytesRead, int bufferLength) {

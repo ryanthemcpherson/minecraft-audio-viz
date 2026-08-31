@@ -12,6 +12,7 @@ import static com.audioviz.runtime.release.ManifestVerificationException.Failure
 import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.MALFORMED_JSON;
 import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.MALFORMED_SIGNATURE;
 import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.MANIFEST_TOO_LARGE;
+import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.MISSING_FIELD;
 import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.MISSING_PLATFORM;
 import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.NOT_YET_VALID;
 import static com.audioviz.runtime.release.ManifestVerificationException.FailureReason.OUT_OF_RANGE;
@@ -21,6 +22,7 @@ import static com.audioviz.runtime.release.ManifestVerificationException.Failure
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.audioviz.runtime.RuntimeLimits;
@@ -236,6 +238,73 @@ class RuntimeManifestVerifierTest {
         );
     }
 
+    @Test
+    void acceptsSupportedVersionAndEntrypointCharacters() throws Exception {
+        String payloadText = validJson()
+            .replace("\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.3-A9.alpha-beta\"");
+        byte[] payload = replaceFirst(payloadText, "bin/audioviz-vj", "Bin/a_1-v2.3");
+
+        RuntimeManifest manifest = verifier.verify(
+            payload,
+            signedEnvelope(payload, KEY_ID, "Ed25519"),
+            descriptor(1, 1),
+            NOW
+        );
+
+        assertEquals("1.2.3-A9.alpha-beta", manifest.releaseVersion());
+        assertNotNull(manifest.artifacts().get(RuntimePlatform.LINUX_X86_64));
+    }
+
+    @Test
+    void rejectsInvalidTopLevelInputsAndEnvelopeBounds() {
+        assertReason(MANIFEST_TOO_LARGE, null, validEnvelope, descriptor(1, 1), NOW);
+        assertReason(MANIFEST_TOO_LARGE, new byte[0], validEnvelope, descriptor(1, 1), NOW);
+        assertReason(
+            ManifestVerificationException.FailureReason.ENVELOPE_TOO_LARGE,
+            validManifest,
+            null,
+            descriptor(1, 1),
+            NOW
+        );
+        assertReason(
+            ManifestVerificationException.FailureReason.ENVELOPE_TOO_LARGE,
+            validManifest,
+            new byte[RuntimeLimits.releaseDefaults().maximumSignatureEnvelopeBytes() + 1],
+            descriptor(1, 1),
+            NOW
+        );
+        assertThrows(NullPointerException.class, () -> verifier.verify(validManifest, validEnvelope, null, NOW));
+        assertThrows(
+            NullPointerException.class,
+            () -> verifier.verify(validManifest, validEnvelope, descriptor(1, 1), null)
+        );
+    }
+
+    @Test
+    void rejectsInvalidReleaseDescriptors() {
+        URI manifestUri = URI.create("https://releases.mcav.live/runtime/manifest-v1.json");
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ReleaseDescriptor(manifestUri, Map.of(KEY_ID, publicKey), Set.of("host"), 0, 1)
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ReleaseDescriptor(manifestUri, Map.of(KEY_ID, publicKey), Set.of("host"), 1, 0)
+        );
+        assertThrows(
+            NullPointerException.class,
+            () -> new ReleaseDescriptor(null, Map.of(KEY_ID, publicKey), Set.of("host"), 1, 1)
+        );
+        assertThrows(
+            NullPointerException.class,
+            () -> new ReleaseDescriptor(manifestUri, null, Set.of("host"), 1, 1)
+        );
+        assertThrows(
+            NullPointerException.class,
+            () -> new ReleaseDescriptor(manifestUri, Map.of(KEY_ID, publicKey), null, 1, 1)
+        );
+    }
+
     private void assertReason(
         ManifestVerificationException.FailureReason reason,
         byte[] payload,
@@ -263,20 +332,49 @@ class RuntimeManifestVerifierTest {
             ),
             Arguments.of("unknown field", ("{\"surprise\":true," + valid.substring(1)).getBytes(StandardCharsets.UTF_8), UNKNOWN_FIELD),
             Arguments.of("trailing JSON", (valid + "{}\n").getBytes(StandardCharsets.UTF_8), MALFORMED_JSON),
+            Arguments.of("root array", "[]".getBytes(StandardCharsets.UTF_8), INVALID_TYPE),
             Arguments.of("invalid UTF-8", invalidUtf8, INVALID_UTF8),
+            Arguments.of("missing root field", replace(valid, "\"schema_version\":1,", ""), MISSING_FIELD),
             Arguments.of("float integer", replace(valid, "\"generation\":1", "\"generation\":1.5"), INVALID_TYPE),
+            Arguments.of("string integer", replace(valid, "\"generation\":1", "\"generation\":\"1\""), INVALID_TYPE),
+            Arguments.of("integer overflow", replace(valid, "\"generation\":1", "\"generation\":999999999999999999999"), OUT_OF_RANGE),
+            Arguments.of("zero generation", replace(valid, "\"generation\":1", "\"generation\":0"), OUT_OF_RANGE),
+            Arguments.of("reversed API range", replace(valid, "\"runtime_api_min\":1", "\"runtime_api_min\":2"), OUT_OF_RANGE),
             Arguments.of("negative size", replaceFirst(valid, "\"archive_size\":4096", "\"archive_size\":-1"), OUT_OF_RANGE),
             Arguments.of("schema-oversized archive", replaceFirst(valid, "\"archive_size\":4096", "\"archive_size\":1073741825"), OUT_OF_RANGE),
             Arguments.of("schema-oversized extraction", replaceFirst(valid, "\"uncompressed_size\":8192", "\"uncompressed_size\":2147483649"), OUT_OF_RANGE),
             Arguments.of("schema-oversized version", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.3-" + "a".repeat(59) + "\""), OUT_OF_RANGE),
             Arguments.of("schema-oversized key ID", replace(valid, "\"signing_key_id\":\"test-only-2026\"", "\"signing_key_id\":\"a" + "b".repeat(64) + "\""), OUT_OF_RANGE),
             Arguments.of("malformed version", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2\""), INVALID_TYPE),
+            Arguments.of("version missing major", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\".2.3\""), INVALID_TYPE),
+            Arguments.of("version missing minor", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1..3\""), INVALID_TYPE),
+            Arguments.of("version missing patch", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.\""), INVALID_TYPE),
+            Arguments.of("version extra core", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.3.4\""), INVALID_TYPE),
+            Arguments.of("version nonnumeric major", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"a.2.3\""), INVALID_TYPE),
+            Arguments.of("version nonnumeric minor", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.a.3\""), INVALID_TYPE),
+            Arguments.of("version nonnumeric patch", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.a\""), INVALID_TYPE),
+            Arguments.of("version empty prerelease", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.3-\""), INVALID_TYPE),
+            Arguments.of("version bad prerelease", replace(valid, "\"release_version\":\"1.2.0\"", "\"release_version\":\"1.2.3-bad_\""), INVALID_TYPE),
             Arguments.of("empty entrypoint segment", replaceFirst(valid, "bin/audioviz-vj", "bin//audioviz-vj"), INVALID_TYPE),
+            Arguments.of("leading entrypoint separator", replaceFirst(valid, "bin/audioviz-vj", "/bin/audioviz-vj"), INVALID_TYPE),
+            Arguments.of("trailing entrypoint separator", replaceFirst(valid, "bin/audioviz-vj", "bin/audioviz-vj/"), INVALID_TYPE),
+            Arguments.of("bad entrypoint character", replaceFirst(valid, "bin/audioviz-vj", "bin/audioviz+vj"), INVALID_TYPE),
+            Arguments.of("artifact array", replaceFirst(valid, "\"linux-x86_64\":{", "\"linux-x86_64\":[{"), INVALID_TYPE),
+            Arguments.of("missing artifact field", replaceFirst(valid, "\"archive_size\":4096,", ""), MISSING_FIELD),
+            Arguments.of("unknown artifact field", replaceFirst(valid, "\"archive_size\":4096", "\"surprise\":1,\"archive_size\":4096"), UNKNOWN_FIELD),
+            Arguments.of("duplicate artifact field", replaceFirst(valid, "\"archive_size\":4096", "\"archive_size\":4096,\"archive_size\":4096"), DUPLICATE_FIELD),
+            Arguments.of("unknown platform", replaceFirst(valid, "\"linux-x86_64\"", "\"freebsd-x86_64\""), UNKNOWN_FIELD),
+            Arguments.of("bad digest", replaceFirst(valid, "\"sha256\":\"", "\"sha256\":\"g"), OUT_OF_RANGE),
             Arguments.of("bad timestamp", replace(valid, "2026-09-30T00:00:00Z", "September 30"), INVALID_TYPE),
+            Arguments.of("invalid calendar timestamp", replace(valid, "2026-09-30T00:00:00Z", "2026-02-30T00:00:00Z"), INVALID_TYPE),
             Arguments.of("missing platform", withoutWindows.getBytes(StandardCharsets.UTF_8), MISSING_PLATFORM),
             Arguments.of("HTTP URL", replaceFirst(valid, "https://", "http://"), INVALID_URL),
             Arguments.of("URL userinfo", replaceFirst(valid, "https://", "https://user@"), INVALID_URL),
-            Arguments.of("URL fragment", replaceFirst(valid, "linux-aarch64.zip", "linux-aarch64.zip#fragment"), INVALID_URL)
+            Arguments.of("URL query", replaceFirst(valid, "linux-aarch64.zip", "linux-aarch64.zip?x=1"), INVALID_URL),
+            Arguments.of("URL fragment", replaceFirst(valid, "linux-aarch64.zip", "linux-aarch64.zip#fragment"), INVALID_URL),
+            Arguments.of("URL missing host", replaceFirst(valid, "https://releases.mcav.live", "https:/"), INVALID_URL),
+            Arguments.of("URL untrusted host", replaceFirst(valid, "releases.mcav.live", "example.com"), INVALID_URL),
+            Arguments.of("malformed URL", replaceFirst(valid, "https://releases.mcav.live", "https://["), INVALID_URL)
         );
     }
 

@@ -26,6 +26,7 @@ import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.TOO
 import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.TOTAL_TOO_LARGE;
 import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.UNDECLARED_MEMBER;
 import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.UNSUPPORTED_COMPRESSION;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.VERSION_CORRUPT;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -75,11 +76,12 @@ class RuntimeArchiveVerifierTest {
     Path temp;
 
     private RuntimeArchiveVerifier verifier;
+    private RuntimePaths paths;
     private Path archives;
 
     @BeforeEach
     void setUp() throws Exception {
-        RuntimePaths paths = RuntimePaths.create(temp.resolve("runtime"));
+        paths = RuntimePaths.create(temp.resolve("runtime"));
         archives = paths.downloads();
         verifier = new RuntimeArchiveVerifier(RuntimeLimits.releaseDefaults(), paths);
     }
@@ -107,6 +109,31 @@ class RuntimeArchiveVerifierTest {
         assertArrayEquals(EXECUTABLE, Files.readAllBytes(layout.entrypoint()));
         assertTrue(Files.isRegularFile(staging.resolve("files.json")));
         assertEquals(fixture.artifact().filesManifestSha256(), layout.filesManifestSha256());
+    }
+
+    @Test
+    void cancellationAfterStagingCreationRemovesEveryCreatedPath() throws Exception {
+        ArchiveFixture fixture = archive(
+            List.of(
+                file(ENTRYPOINT, EXECUTABLE, true),
+                file("patterns/default.lua", "return {}\n".getBytes(StandardCharsets.UTF_8), false)
+            )
+        );
+        Path staging = temp.resolve("runtime/staging/cancelled-candidate");
+
+        RuntimeStoreException failure = assertThrows(
+            RuntimeStoreException.class,
+            () -> verifier.extract(
+                fixture.path(),
+                staging,
+                fixture.artifact(),
+                PLATFORM,
+                () -> Files.exists(staging)
+            )
+        );
+
+        assertEquals(RuntimeStoreException.FailureReason.CANCELLED, failure.reason());
+        assertFalse(Files.exists(staging));
     }
 
     @Test
@@ -151,7 +178,18 @@ class RuntimeArchiveVerifierTest {
         "bin//tool",
         "bin/NUL.txt",
         "bin/COM1",
+        "bin/PRN.txt",
+        "bin/AUX",
+        "bin/CLOCK$",
+        "bin/LPT9.log",
         "bin/file:stream",
+        "bin/less<than",
+        "bin/greater>than",
+        "bin/quote\"name",
+        "bin/pipe|name",
+        "bin/question?name",
+        "bin/star*name",
+        "bin/deletechar",
         "bin/trailing.",
         "bin/trailing ",
         "bin/nul\u0000byte",
@@ -188,6 +226,19 @@ class RuntimeArchiveVerifierTest {
                 file(ENTRYPOINT, EXECUTABLE, true),
                 file("assets", new byte[]{1}, false),
                 file("assets/two.txt", new byte[]{2}, false)
+            )
+        );
+
+        assertRejectedWithoutEscape(fixture, PATH_COLLISION);
+    }
+
+    @Test
+    void rejectsFileThatReusesAnExistingDirectoryPath() throws Exception {
+        ArchiveFixture fixture = archive(
+            List.of(
+                file(ENTRYPOINT, EXECUTABLE, true),
+                file("assets/two.txt", new byte[]{2}, false),
+                file("assets", new byte[]{1}, false)
             )
         );
 
@@ -325,9 +376,43 @@ class RuntimeArchiveVerifierTest {
 
     @Test
     void rejectsFilesManifestUnknownTypesAndInvalidUtf8() throws Exception {
+        String valid = new String(
+            filesManifest(List.of(file(ENTRYPOINT, EXECUTABLE, true))),
+            StandardCharsets.UTF_8
+        );
+        String digest = sha256(EXECUTABLE);
         List<byte[]> invalidManifests = List.of(
+            "[]".getBytes(StandardCharsets.UTF_8),
             "{\"files\":[],\"schema_version\":1,\"unknown\":true}\n"
                 .getBytes(StandardCharsets.UTF_8),
+            "{\"schema_version\":1}\n".getBytes(StandardCharsets.UTF_8),
+            "{\"files\":[]}\n".getBytes(StandardCharsets.UTF_8),
+            "{\"files\":{},\"schema_version\":1}\n".getBytes(StandardCharsets.UTF_8),
+            "{\"files\":[[]],\"schema_version\":1}\n".getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"executable\":true,", "").getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"executable\":true", "\"executable\":true,\"unknown\":1")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"executable\":true", "\"executable\":true,\"executable\":true")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace(ENTRYPOINT, "").getBytes(StandardCharsets.UTF_8),
+            valid.replace(ENTRYPOINT, "a".repeat(RuntimeLimits.releaseDefaults().maximumMemberPathBytes() + 1))
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"size\":" + EXECUTABLE.length, "\"size\":\"" + EXECUTABLE.length + "\"")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"size\":" + EXECUTABLE.length, "\"size\":-1")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"size\":" + EXECUTABLE.length, "\"size\":01")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"size\":" + EXECUTABLE.length, "\"size\":999999999999999999999")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace(digest, "short").getBytes(StandardCharsets.UTF_8),
+            valid.replace(digest, "A" + digest.substring(1)).getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"executable\":true", "\"executable\":\"true\"")
+                .getBytes(StandardCharsets.UTF_8),
+            valid.replace(ENTRYPOINT, "files.json").getBytes(StandardCharsets.UTF_8),
+            valid.replace("\"schema_version\":1", "\"schema_version\":0")
+                .getBytes(StandardCharsets.UTF_8),
+            (valid + "{}").getBytes(StandardCharsets.UTF_8),
             ("{\"files\":[{\"executable\":true,\"path\":\"bin/audioviz-vj\","
                 + "\"sha256\":\"" + sha256(EXECUTABLE) + "\",\"size\":1.5}],"
                 + "\"schema_version\":1}\n").getBytes(StandardCharsets.UTF_8),
@@ -392,6 +477,154 @@ class RuntimeArchiveVerifierTest {
     }
 
     @Test
+    void rejectsNullMissingEmptyAndMalformedDigestArchives() throws Exception {
+        ArchiveFixture fixture = archive(List.of(file(ENTRYPOINT, EXECUTABLE, true)));
+        Path staging = paths.staging().resolve("archive-boundary");
+        assertStoreFailure(
+            ARCHIVE_NOT_FOUND,
+            () -> verifier.extract(null, staging, fixture.artifact(), PLATFORM)
+        );
+        assertStoreFailure(
+            ARCHIVE_NOT_FOUND,
+            () -> verifier.extract(
+                paths.downloads().resolve("missing.zip"),
+                staging,
+                fixture.artifact(),
+                PLATFORM
+            )
+        );
+
+        Path emptyArchive = Files.write(paths.downloads().resolve("empty.zip"), new byte[0]);
+        RuntimeArtifact emptyArtifact = copyArtifact(
+            fixture.artifact(),
+            0,
+            0,
+            sha256(new byte[0]),
+            fixture.artifact().entrypoint(),
+            fixture.artifact().filesManifestSha256()
+        );
+        assertStoreFailure(
+            ARCHIVE_SIZE_MISMATCH,
+            () -> verifier.extract(emptyArchive, staging, emptyArtifact, PLATFORM)
+        );
+
+        for (String digest : List.of("short", "g".repeat(64))) {
+            RuntimeArtifact malformed = copyArtifact(
+                fixture.artifact(),
+                fixture.artifact().archiveSize(),
+                fixture.artifact().uncompressedSize(),
+                digest,
+                fixture.artifact().entrypoint(),
+                fixture.artifact().filesManifestSha256()
+            );
+            assertStoreFailure(
+                ARCHIVE_DIGEST_MISMATCH,
+                () -> verifier.extract(fixture.path(), staging, malformed, PLATFORM)
+            );
+        }
+    }
+
+    @Test
+    void rejectsInvalidStagingLocationsAndUncompressedInventorySize() throws Exception {
+        ArchiveFixture fixture = archive(List.of(file(ENTRYPOINT, EXECUTABLE, true)));
+        assertStoreFailure(
+            STAGING_NOT_UNIQUE,
+            () -> verifier.extract(fixture.path(), null, fixture.artifact(), PLATFORM)
+        );
+        assertStoreFailure(
+            STAGING_NOT_UNIQUE,
+            () -> verifier.extract(
+                fixture.path(),
+                temp.resolve("outside-stage"),
+                fixture.artifact(),
+                PLATFORM
+            )
+        );
+
+        RuntimeArtifact wrongTotal = copyArtifact(
+            fixture.artifact(),
+            fixture.artifact().archiveSize(),
+            fixture.artifact().uncompressedSize() + 1,
+            fixture.artifact().sha256(),
+            fixture.artifact().entrypoint(),
+            fixture.artifact().filesManifestSha256()
+        );
+        assertStoreFailure(
+            ARCHIVE_SIZE_MISMATCH,
+            () -> verifier.extract(
+                fixture.path(),
+                paths.staging().resolve("wrong-total"),
+                wrongTotal,
+                PLATFORM
+            )
+        );
+    }
+
+    @Test
+    void rejectsManifestDeclaredOversizeAndNonExecutableEntrypoint() throws Exception {
+        String digest = sha256(EXECUTABLE);
+        byte[] schemaTooLarge = ("{\"files\":[],\"schema_version\":2}\n")
+            .getBytes(StandardCharsets.UTF_8);
+        ArchiveFixture schemaFixture = archiveWithFilesManifest(
+            List.of(file(ENTRYPOINT, EXECUTABLE, true)),
+            schemaTooLarge,
+            ENTRYPOINT
+        );
+        assertRejectedWithoutEscape(schemaFixture, MEMBER_TOO_LARGE);
+
+        byte[] sizeTooLarge = ("{\"files\":[{\"executable\":true,\"path\":\"" +
+            ENTRYPOINT + "\",\"sha256\":\"" + digest + "\",\"size\":" +
+            (RuntimeLimits.releaseDefaults().maximumMemberBytes() + 1) +
+            "}],\"schema_version\":1}\n").getBytes(StandardCharsets.UTF_8);
+        ArchiveFixture sizeFixture = archiveWithFilesManifest(
+            List.of(file(ENTRYPOINT, EXECUTABLE, true)),
+            sizeTooLarge,
+            ENTRYPOINT
+        );
+        assertRejectedWithoutEscape(sizeFixture, MEMBER_TOO_LARGE);
+
+        ArchiveFixture nonExecutable = archive(
+            List.of(file(ENTRYPOINT, EXECUTABLE, false))
+        );
+        assertRejectedWithoutEscape(nonExecutable, ENTRYPOINT_INVALID);
+    }
+
+    @Test
+    void rejectsTooManyFilesDeclaredWithinAValidCentralDirectoryLimit() throws Exception {
+        ArchiveFile entrypoint = file(ENTRYPOINT, EXECUTABLE, true);
+        ArchiveFile missing = file("patterns/missing.lua", new byte[]{1}, false);
+        byte[] manifest = filesManifest(List.of(entrypoint, missing));
+        ArchiveFixture fixture = archiveWithFilesManifest(
+            List.of(entrypoint),
+            manifest,
+            ENTRYPOINT
+        );
+        RuntimePaths strictPaths = RuntimePaths.create(temp.resolve("declared-limit-runtime"));
+        Path strictArchive = strictPaths.downloads().resolve("fixture.zip");
+        Files.copy(fixture.path(), strictArchive);
+        RuntimeLimits defaults = RuntimeLimits.releaseDefaults();
+        RuntimeArchiveVerifier strict = new RuntimeArchiveVerifier(
+            limits(
+                2,
+                defaults.maximumMemberBytes(),
+                defaults.maximumExtractedBytes(),
+                defaults.maximumCompressionRatio()
+            ),
+            strictPaths
+        );
+
+        assertStoreFailure(
+            TOO_MANY_MEMBERS,
+            () -> strict.extract(
+                strictArchive,
+                strictPaths.staging().resolve("candidate"),
+                fixture.artifact(),
+                PLATFORM
+            )
+        );
+    }
+
+    @Test
     void existingStagingDirectoryIsNeverReusedOrRemoved() throws Exception {
         ArchiveFixture fixture = archive(List.of(file(ENTRYPOINT, EXECUTABLE, true)));
         Path staging = temp.resolve("runtime/staging/existing");
@@ -436,6 +669,169 @@ class RuntimeArchiveVerifierTest {
             );
             assertEquals(INVALID_MEMBER_PATH, failure.reason());
         }
+    }
+
+    @Test
+    void acceptsNonReservedWindowsDeviceLookalikes() throws Exception {
+        assertEquals(
+            "bin/COM0",
+            RuntimeArchiveVerifier.normalizeMemberPath(
+                "bin/COM0",
+                RuntimeLimits.releaseDefaults()
+            )
+        );
+        assertEquals(
+            "bin/LPT0",
+            RuntimeArchiveVerifier.normalizeMemberPath(
+                "bin/LPT0",
+                RuntimeLimits.releaseDefaults()
+            )
+        );
+        assertEquals(
+            "bin/COMA",
+            RuntimeArchiveVerifier.normalizeMemberPath(
+                "bin/COMA",
+                RuntimeLimits.releaseDefaults()
+            )
+        );
+        assertStoreFailure(
+            INVALID_MEMBER_PATH,
+            () -> RuntimeArchiveVerifier.normalizeMemberPath(
+                "bin/\ud800",
+                RuntimeLimits.releaseDefaults()
+            )
+        );
+        assertStoreFailure(
+            INVALID_MEMBER_PATH,
+            () -> RuntimeArchiveVerifier.normalizeMemberPath(
+                null,
+                RuntimeLimits.releaseDefaults()
+            )
+        );
+        assertStoreFailure(
+            INVALID_MEMBER_PATH,
+            () -> RuntimeArchiveVerifier.normalizeMemberPath(
+                "a".repeat(RuntimeLimits.releaseDefaults().maximumMemberPathBytes() + 1),
+                RuntimeLimits.releaseDefaults()
+            )
+        );
+    }
+
+    @Test
+    void extractedLayoutRejectsInvalidRootsAndManifestFiles() throws Exception {
+        assertStoreFailure(VERSION_CORRUPT, () -> verifier.verifyStaging(null, "a".repeat(64)));
+
+        Path outside = Files.createDirectory(temp.resolve("outside"));
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(outside, "a".repeat(64))
+        );
+
+        Path rootFile = Files.writeString(paths.staging().resolve("root-file"), "file");
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(rootFile, "a".repeat(64))
+        );
+
+        Path missingManifest = Files.createDirectory(paths.staging().resolve("missing-manifest"));
+        assertStoreFailure(
+            FILES_MANIFEST_MISSING,
+            () -> verifier.verifyStaging(missingManifest, "a".repeat(64))
+        );
+
+        Path manifestDirectory = Files.createDirectory(paths.staging().resolve("manifest-directory"));
+        Files.createDirectory(manifestDirectory.resolve("files.json"));
+        assertStoreFailure(
+            FILES_MANIFEST_MISSING,
+            () -> verifier.verifyStaging(manifestDirectory, "a".repeat(64))
+        );
+
+        Path emptyManifest = Files.createDirectory(paths.staging().resolve("empty-manifest"));
+        Files.write(emptyManifest.resolve("files.json"), new byte[0]);
+        assertStoreFailure(
+            FILES_MANIFEST_INVALID,
+            () -> verifier.verifyStaging(emptyManifest, sha256(new byte[0]))
+        );
+
+        Path oversizedManifest = Files.createDirectory(paths.staging().resolve("oversized-manifest"));
+        byte[] oversized = new byte[RuntimeLimits.releaseDefaults().maximumManifestBytes() + 1];
+        Files.write(oversizedManifest.resolve("files.json"), oversized);
+        assertStoreFailure(
+            FILES_MANIFEST_INVALID,
+            () -> verifier.verifyStaging(oversizedManifest, sha256(oversized))
+        );
+    }
+
+    @Test
+    void extractedLayoutRejectsEntrypointAndInventoryMutations() throws Exception {
+        VerifiedRuntimeLayout noEntrypoint = extractStandard("no-entrypoint");
+        byte[] noEntrypointManifest = new String(
+            noEntrypoint.filesManifestBytes(),
+            StandardCharsets.UTF_8
+        ).replace("\"executable\":true", "\"executable\":false")
+            .getBytes(StandardCharsets.UTF_8);
+        Files.write(noEntrypoint.root().resolve("files.json"), noEntrypointManifest);
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(noEntrypoint.root(), sha256(noEntrypointManifest))
+        );
+
+        VerifiedRuntimeLayout multipleEntrypoints = extractStandard("multiple-entrypoints");
+        byte[] multipleManifest = new String(
+            multipleEntrypoints.filesManifestBytes(),
+            StandardCharsets.UTF_8
+        ).replaceFirst("\"executable\":false", "\"executable\":true")
+            .getBytes(StandardCharsets.UTF_8);
+        Files.write(multipleEntrypoints.root().resolve("files.json"), multipleManifest);
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(multipleEntrypoints.root(), sha256(multipleManifest))
+        );
+
+        VerifiedRuntimeLayout missingFile = extractStandard("missing-file");
+        Files.delete(missingFile.entrypoint());
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(missingFile.root(), missingFile.filesManifestSha256())
+        );
+
+        VerifiedRuntimeLayout oversizedFile = extractStandard("oversized-file");
+        Files.write(oversizedFile.entrypoint(), new byte[]{1}, StandardOpenOption.APPEND);
+        assertStoreFailure(
+            MEMBER_SIZE_MISMATCH,
+            () -> verifier.verifyStaging(oversizedFile.root(), oversizedFile.filesManifestSha256())
+        );
+
+        VerifiedRuntimeLayout badDigest = extractStandard("bad-digest");
+        byte[] replacement = Files.readAllBytes(badDigest.entrypoint());
+        replacement[0] ^= 1;
+        Files.write(badDigest.entrypoint(), replacement);
+        assertStoreFailure(
+            MEMBER_DIGEST_MISMATCH,
+            () -> verifier.verifyStaging(badDigest.root(), badDigest.filesManifestSha256())
+        );
+
+        VerifiedRuntimeLayout extraDirectory = extractStandard("extra-directory");
+        Files.createDirectory(extraDirectory.root().resolve("unexpected"));
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(extraDirectory.root(), extraDirectory.filesManifestSha256())
+        );
+
+        VerifiedRuntimeLayout parentFile = extractStandard("parent-file");
+        Files.delete(parentFile.entrypoint());
+        Files.delete(parentFile.root().resolve("bin"));
+        Files.writeString(parentFile.root().resolve("bin"), "not-a-directory");
+        assertStoreFailure(
+            VERSION_CORRUPT,
+            () -> verifier.verifyStaging(parentFile.root(), parentFile.filesManifestSha256())
+        );
+
+        VerifiedRuntimeLayout nullDigest = extractStandard("null-digest");
+        assertStoreFailure(
+            FILES_MANIFEST_DIGEST,
+            () -> verifier.verifyStaging(nullDigest.root(), null)
+        );
     }
 
     @Test
@@ -608,6 +1004,24 @@ class RuntimeArchiveVerifierTest {
             IllegalArgumentException.class,
             () -> RuntimeVersionId.of("a".repeat(65), PLATFORM)
         );
+        for (String invalid : List.of("", ".hidden", "_hidden", "-hidden", "a/b", "a+b")) {
+            assertThrows(
+                IllegalArgumentException.class,
+                () -> RuntimeVersionId.of(invalid, PLATFORM)
+            );
+        }
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> RuntimeVersionId.of(null, PLATFORM)
+        );
+        assertThrows(
+            NullPointerException.class,
+            () -> RuntimeVersionId.of("1.2.0", null)
+        );
+        assertEquals(
+            "A1_b-2.3--linux-x86_64",
+            RuntimeVersionId.of("A1_b-2.3", PLATFORM).directoryName()
+        );
     }
 
     @Test
@@ -730,6 +1144,32 @@ class RuntimeArchiveVerifierTest {
             archive,
             artifact(archive, uncompressedSize, sha256(filesManifest), entrypoint)
         );
+    }
+
+    private VerifiedRuntimeLayout extractStandard(String name) throws Exception {
+        ArchiveFixture fixture = archive(List.of(
+            file(ENTRYPOINT, EXECUTABLE, true),
+            file("patterns/default.lua", "return {}\n".getBytes(StandardCharsets.UTF_8), false)
+        ));
+        return verifier.extract(
+            fixture.path(),
+            paths.staging().resolve(name),
+            fixture.artifact(),
+            PLATFORM
+        );
+    }
+
+    private static void assertStoreFailure(
+        RuntimeStoreException.FailureReason reason,
+        ThrowingStoreOperation operation
+    ) {
+        RuntimeStoreException failure = assertThrows(RuntimeStoreException.class, operation::run);
+        assertEquals(reason, failure.reason());
+    }
+
+    @FunctionalInterface
+    private interface ThrowingStoreOperation {
+        void run() throws Exception;
     }
 
     private static void writeArchive(
@@ -958,6 +1398,25 @@ class RuntimeArchiveVerifierTest {
             archiveBytes.length,
             uncompressedSize,
             sha256(archiveBytes),
+            entrypoint,
+            filesManifestDigest
+        );
+    }
+
+    private static RuntimeArtifact copyArtifact(
+        RuntimeArtifact source,
+        long archiveSize,
+        long uncompressedSize,
+        String archiveDigest,
+        String entrypoint,
+        String filesManifestDigest
+    ) {
+        return new RuntimeArtifact(
+            source.platform(),
+            source.url(),
+            archiveSize,
+            uncompressedSize,
+            archiveDigest,
             entrypoint,
             filesManifestDigest
         );

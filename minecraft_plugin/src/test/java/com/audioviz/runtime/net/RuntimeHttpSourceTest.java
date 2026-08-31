@@ -130,12 +130,220 @@ class RuntimeHttpSourceTest {
     }
 
     @Test
+    void boundedFetchHonorsCancellationBeforeReadingResponseBody() {
+        respond("/cancelled-manifest", 200, new byte[32], Map.of());
+        AtomicInteger checks = new AtomicInteger();
+
+        assertFailure(
+            CANCELLED,
+            () -> source.fetchBytes(
+                policyUri("/cancelled-manifest"),
+                32,
+                ALLOWED_HOSTS,
+                () -> checks.incrementAndGet() > 1
+            )
+        );
+    }
+
+    @Test
     void boundedFetchRejectsChunkedOversize() {
         respondChunked("/large-manifest", 200, new byte[21], Map.of());
 
         assertFailure(
             OVERSIZED,
             () -> source.fetchBytes(policyUri("/large-manifest"), 20, ALLOWED_HOSTS)
+        );
+    }
+
+    @Test
+    void constructorRejectsInvalidDependenciesAndLimits() {
+        Transport transport = (uri, timeout) -> {
+            throw new AssertionError("not called");
+        };
+        Path downloads = temp.resolve("constructor-downloads");
+
+        assertThrows(NullPointerException.class, () -> new RuntimeHttpSource(null, downloads, Duration.ofSeconds(1), 1));
+        assertThrows(NullPointerException.class, () -> new RuntimeHttpSource(transport, null, Duration.ofSeconds(1), 1));
+        assertThrows(NullPointerException.class, () -> new RuntimeHttpSource(transport, downloads, null, 1));
+        assertThrows(IllegalArgumentException.class, () -> new RuntimeHttpSource(transport, downloads, Duration.ZERO, 1));
+        assertThrows(IllegalArgumentException.class, () -> new RuntimeHttpSource(transport, downloads, Duration.ofSeconds(-1), 1));
+        assertThrows(IllegalArgumentException.class, () -> new RuntimeHttpSource(transport, downloads, Duration.ofSeconds(1), -1));
+        assertThrows(IllegalArgumentException.class, () -> new RuntimeHttpSource(transport, temp.getRoot(), Duration.ofSeconds(1), 1));
+        new RuntimeHttpSource(Runnable::run, downloads);
+    }
+
+    @Test
+    void jdkTransportExecutesRequestWithConfiguredClient() throws Exception {
+        byte[] payload = "jdk transport".getBytes(StandardCharsets.UTF_8);
+        respond("/jdk-transport", 200, payload, Map.of());
+        RuntimeHttpSource.JdkTransport transport = new RuntimeHttpSource.JdkTransport(
+            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()
+        );
+
+        HttpResponse<InputStream> response = transport.execute(
+            localOrigin.resolve("/jdk-transport"),
+            Duration.ofSeconds(1)
+        );
+
+        try (InputStream body = response.body()) {
+            assertArrayEquals(payload, body.readAllBytes());
+        }
+    }
+
+    @Test
+    void rejectsMalformedResponseHeaders() {
+        List<Map<String, List<String>>> invalidHeaders = List.of(
+            Map.of("Content-Length", List.of("1", "1")),
+            Map.of("Content-Length", List.of("-1")),
+            Map.of("Content-Length", List.of("not-a-number")),
+            Map.of("Content-Encoding", List.of("gzip")),
+            Map.of("Content-Encoding", List.of("identity", "gzip"))
+        );
+
+        for (Map<String, List<String>> headers : invalidHeaders) {
+            RuntimeHttpSource invalid = sourceWithResponse(200, new byte[]{1}, headers);
+            assertFailure(
+                RuntimeDownloadException.FailureReason.INVALID_CONTENT_LENGTH,
+                () -> invalid.fetchBytes(policyUri("/headers"), 1, ALLOWED_HOSTS)
+            );
+        }
+    }
+
+    @Test
+    void mapsNullIoAndInterruptedTransportFailures() {
+        RuntimeHttpSource nullResponse = sourceWithTransport((uri, timeout) -> null);
+        assertFailure(IO_FAILURE, () -> nullResponse.fetchBytes(policyUri("/null"), 1, ALLOWED_HOSTS));
+
+        RuntimeHttpSource nullBody = sourceWithTransport((uri, timeout) ->
+            mockedResponse(200, (InputStream) null, Map.of()));
+        assertFailure(IO_FAILURE, () -> nullBody.fetchBytes(policyUri("/null-body"), 1, ALLOWED_HOSTS));
+
+        RuntimeHttpSource ioFailure = sourceWithTransport((uri, timeout) -> {
+            throw new IOException("injected");
+        });
+        assertFailure(IO_FAILURE, () -> ioFailure.fetchBytes(policyUri("/io"), 1, ALLOWED_HOSTS));
+
+        RuntimeHttpSource interrupted = sourceWithTransport((uri, timeout) -> {
+            throw new InterruptedException("injected");
+        });
+        assertFailure(
+            RuntimeDownloadException.FailureReason.INTERRUPTED,
+            () -> interrupted.fetchBytes(policyUri("/interrupted"), 1, ALLOWED_HOSTS)
+        );
+        assertTrue(Thread.interrupted());
+    }
+
+    @Test
+    void rejectsInvalidFetchExpectationsAndHosts() {
+        assertFailure(INVALID_EXPECTATION, () -> source.fetchBytes(policyUri("/none"), 0, ALLOWED_HOSTS));
+        assertFailure(INVALID_EXPECTATION, () -> source.fetchBytes(policyUri("/none"), 1, ALLOWED_HOSTS, null));
+        assertFailure(CANCELLED, () -> source.fetchBytes(policyUri("/none"), 1, ALLOWED_HOSTS, () -> true));
+        assertFailure(INVALID_EXPECTATION, () -> source.fetchBytes(policyUri("/none"), 1, null));
+        assertFailure(INVALID_EXPECTATION, () -> source.fetchBytes(policyUri("/none"), 1, Set.of()));
+        assertFailure(INVALID_URI, () -> source.fetchBytes(policyUri("/none"), 1, Set.of("")));
+        assertFailure(INVALID_URI, () -> source.fetchBytes(policyUri("/none"), 1, Set.of("bad host")));
+        assertFailure(INVALID_URI, () -> source.fetchBytes(null, 1, ALLOWED_HOSTS));
+        assertFailure(INVALID_URI, () -> source.fetchBytes(URI.create("relative"), 1, ALLOWED_HOSTS));
+        assertFailure(INVALID_URI, () -> source.fetchBytes(URI.create("mailto:user@example.com"), 1, ALLOWED_HOSTS));
+        assertFailure(INVALID_URI, () -> source.fetchBytes(policyUri("/none"), 1, Set.of("example.com.")));
+    }
+
+    @Test
+    void fetchMapsBodyReadAndCloseFailures() {
+        InputStream zeroRead = new ByteArrayInputStream(new byte[]{1}) {
+            @Override
+            public synchronized int read(byte[] target, int offset, int length) {
+                return 0;
+            }
+        };
+        assertFailure(
+            IO_FAILURE,
+            () -> sourceWithTransport((uri, timeout) -> mockedResponse(200, zeroRead, Map.of()))
+                .fetchBytes(policyUri("/zero"), 1, ALLOWED_HOSTS)
+        );
+
+        InputStream declaredReadFailure = new ByteArrayInputStream(new byte[]{1}) {
+            @Override
+            public synchronized int read(byte[] target, int offset, int length) throws RuntimeException {
+                throw new RuntimeException(new IOException("injected read failure"));
+            }
+        };
+        InputStream translatedDeclaredFailure = translatingFailure(declaredReadFailure);
+        assertFailure(
+            TRUNCATED,
+            () -> sourceWithTransport((uri, timeout) -> mockedResponse(
+                200,
+                translatedDeclaredFailure,
+                Map.of("Content-Length", List.of("1"))
+            )).fetchBytes(policyUri("/truncated"), 1, ALLOWED_HOSTS)
+        );
+
+        InputStream unknownLengthFailure = translatingFailure(declaredReadFailure);
+        assertFailure(
+            IO_FAILURE,
+            () -> sourceWithTransport((uri, timeout) -> mockedResponse(200, unknownLengthFailure, Map.of()))
+                .fetchBytes(policyUri("/io"), 1, ALLOWED_HOSTS)
+        );
+
+        InputStream closeFailure = new ByteArrayInputStream(new byte[]{1}) {
+            @Override
+            public void close() throws IOException {
+                throw new IOException("injected close failure");
+            }
+        };
+        assertFailure(
+            IO_FAILURE,
+            () -> sourceWithTransport((uri, timeout) -> mockedResponse(200, closeFailure, Map.of()))
+                .fetchBytes(policyUri("/close"), 1, ALLOWED_HOSTS)
+        );
+    }
+
+    @Test
+    void rejectedResponseCloseFailureIsReported() {
+        InputStream closeFailure = new ByteArrayInputStream(new byte[0]) {
+            @Override
+            public void close() throws IOException {
+                throw new IOException("injected rejected-body close failure");
+            }
+        };
+        assertFailure(
+            IO_FAILURE,
+            () -> sourceWithTransport((uri, timeout) -> mockedResponse(503, closeFailure, Map.of()))
+                .fetchBytes(policyUri("/rejected"), 1, ALLOWED_HOSTS)
+        );
+    }
+
+    @Test
+    void recognizesEverySupportedRedirectStatus() throws Exception {
+        for (int status : new int[]{301, 303, 307, 308}) {
+            RuntimeHttpSource redirected = sourceWithTransport(new Transport() {
+                private int request;
+
+                @Override
+                public HttpResponse<InputStream> execute(URI uri, Duration timeout) {
+                    request++;
+                    return request == 1
+                        ? mockedResponse(status, new byte[0], Map.of("Location", List.of("/final")))
+                        : mockedResponse(200, new byte[]{1}, Map.of("Content-Length", List.of("1")));
+                }
+            });
+            assertArrayEquals(
+                new byte[]{1},
+                redirected.fetchBytes(policyUri("/redirect"), 1, ALLOWED_HOSTS)
+            );
+        }
+    }
+
+    @Test
+    void rejectsMalformedRedirectLocation() {
+        RuntimeHttpSource invalid = sourceWithResponse(
+            302,
+            new byte[0],
+            Map.of("Location", List.of("http://[invalid"))
+        );
+        assertFailure(
+            INVALID_URI,
+            () -> invalid.fetchBytes(policyUri("/redirect"), 1, ALLOWED_HOSTS)
         );
     }
 
@@ -380,6 +588,52 @@ class RuntimeHttpSourceTest {
         assertNoPartFiles(destination);
     }
 
+    @Test
+    void downloadValidatesEachExpectationAndImmediateCancellation() throws Exception {
+        Path destination = temp.resolve("downloads/candidate.zip");
+        String digest = sha256(new byte[]{1});
+
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), null, 1, digest, ALLOWED_HOSTS, NEVER_CANCEL));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), destination, 0, digest, ALLOWED_HOSTS, NEVER_CANCEL));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), destination, 1, null, ALLOWED_HOSTS, NEVER_CANCEL));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), destination, 1, "abc", ALLOWED_HOSTS, NEVER_CANCEL));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), destination, 1, "g".repeat(64), ALLOWED_HOSTS, NEVER_CANCEL));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), destination, 1, "A".repeat(64), ALLOWED_HOSTS, NEVER_CANCEL));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), destination, 1, digest, ALLOWED_HOSTS, null));
+        assertFailure(CANCELLED, () -> source.download(policyUri("/unused"), destination, 1, digest, ALLOWED_HOSTS, () -> true));
+        assertFailure(INVALID_EXPECTATION, () -> source.download(policyUri("/unused"), temp.getRoot(), 1, digest, ALLOWED_HOSTS, NEVER_CANCEL));
+    }
+
+    @Test
+    void largePayloadExercisesFullBufferReadsAndIdentityEncoding() throws Exception {
+        byte[] payload = new byte[(16 * 1024) + 1];
+        for (int index = 0; index < payload.length; index++) {
+            payload[index] = (byte) index;
+        }
+        RuntimeHttpSource largeSource = sourceWithResponse(
+            200,
+            payload,
+            Map.of("Content-Encoding", List.of("identity"))
+        );
+        Path destination = temp.resolve("downloads/large.zip");
+
+        assertArrayEquals(
+            payload,
+            largeSource.fetchBytes(policyUri("/large-fetch"), payload.length, Set.of("RELEASES.MCAV.LIVE"))
+        );
+        DownloadResult result = largeSource.download(
+            policyUri("/large-download"),
+            destination,
+            payload.length,
+            sha256(payload),
+            ALLOWED_HOSTS,
+            NEVER_CANCEL
+        );
+
+        assertEquals(payload.length, result.bytesWritten());
+        assertArrayEquals(payload, Files.readAllBytes(destination));
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("invalidUris")
     void rejectsInvalidPolicyUris(
@@ -514,6 +768,66 @@ class RuntimeHttpSourceTest {
                 HttpResponse.BodyHandlers.ofInputStream()
             );
         };
+    }
+
+    private RuntimeHttpSource sourceWithTransport(Transport transport) {
+        return new RuntimeHttpSource(
+            transport,
+            temp.resolve("downloads"),
+            Duration.ofSeconds(1),
+            2
+        );
+    }
+
+    private static InputStream translatingFailure(InputStream delegate) {
+        return new InputStream() {
+            @Override
+            public int read() throws IOException {
+                try {
+                    return delegate.read();
+                } catch (RuntimeException error) {
+                    throw (IOException) error.getCause();
+                }
+            }
+
+            @Override
+            public int read(byte[] target, int offset, int length) throws IOException {
+                try {
+                    return delegate.read(target, offset, length);
+                } catch (RuntimeException error) {
+                    throw (IOException) error.getCause();
+                }
+            }
+        };
+    }
+
+    private RuntimeHttpSource sourceWithResponse(
+        int status,
+        byte[] body,
+        Map<String, List<String>> headers
+    ) {
+        return sourceWithTransport((uri, timeout) -> mockedResponse(status, body, headers));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static HttpResponse<InputStream> mockedResponse(
+        int status,
+        InputStream body,
+        Map<String, List<String>> headers
+    ) {
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(status);
+        when(response.headers()).thenReturn(HttpHeaders.of(headers, (name, value) -> true));
+        when(response.body()).thenReturn(body);
+        return response;
+    }
+
+    private static HttpResponse<InputStream> mockedResponse(
+        int status,
+        byte[] body,
+        Map<String, List<String>> headers
+    ) {
+        return mockedResponse(status, new ByteArrayInputStream(body), headers);
     }
 
     private static Stream<Arguments> invalidUris() {

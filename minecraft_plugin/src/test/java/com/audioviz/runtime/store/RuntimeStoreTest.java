@@ -1,6 +1,11 @@
 package com.audioviz.runtime.store;
 
 import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.VERSION_COLLISION;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.INVALID_RUNTIME;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.INVALID_STATE;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.NOT_CANDIDATE;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.RETENTION_INVALID;
+import static com.audioviz.runtime.store.RuntimeStoreException.FailureReason.TRANSACTION_CONFLICT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -297,6 +302,280 @@ class RuntimeStoreTest {
         assertTrue(store.installed(current.id()).isPresent());
     }
 
+    @Test
+    void rejectsInvalidLifecycleInputsAndConflictingTransactions() throws Exception {
+        assertFailure(INVALID_RUNTIME, () -> store.findCompatible(0));
+        assertFailure(RETENTION_INVALID, () -> store.prune(-1));
+
+        InstalledRuntime candidate = promote("1.2.0", 12, 1);
+        assertFailure(NOT_CANDIDATE, () -> store.markHealthy(candidate));
+
+        RuntimeState altered = new RuntimeState(
+            1,
+            candidate.id(),
+            candidate.state().manifestGeneration() + 1,
+            candidate.state().archiveSha256(),
+            candidate.state().filesManifestSha256(),
+            candidate.state().runtimeApi(),
+            candidate.state().activatedAt(),
+            candidate.state().health()
+        );
+        InstalledRuntime forged = new InstalledRuntime(
+            candidate.id(),
+            candidate.root(),
+            candidate.entrypoint(),
+            candidate.files(),
+            altered
+        );
+        assertFailure(INVALID_RUNTIME, () -> store.activateCandidate(forged));
+
+        RuntimeTransaction pending = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.PROMOTION_PREPARED,
+            paths.newStaging().getFileName().toString(),
+            candidate.state(),
+            null
+        );
+        store.atomicStateStore().writeTransaction(pending);
+        assertFailure(TRANSACTION_CONFLICT, () -> store.activateCandidate(candidate));
+        VerifiedRuntimeLayout another = layout("1.3.0", "payload-1.3.0");
+        assertFailure(
+            TRANSACTION_CONFLICT,
+            () -> store.promote(another, id("1.3.0"), 13, "a".repeat(64), 1)
+        );
+    }
+
+    @Test
+    void markHealthyRequiresTheActiveTransactionCandidate() throws Exception {
+        InstalledRuntime active = promote("1.1.0", 11, 1);
+        InstalledRuntime other = promote("1.2.0", 12, 1);
+        store.activateCandidate(active);
+
+        assertFailure(NOT_CANDIDATE, () -> store.markHealthy(other));
+    }
+
+    @Test
+    void promoteRejectsLayoutEntrypointMismatchAndOrphanedVersionTarget() throws Exception {
+        VerifiedRuntimeLayout valid = layout("1.2.0", "payload-1.2.0");
+        VerifiedRuntimeLayout mismatched = new VerifiedRuntimeLayout(
+            valid.root(),
+            valid.root().resolve("files.json"),
+            valid.files(),
+            valid.filesManifestBytes(),
+            valid.filesManifestSha256(),
+            valid.extractedBytes()
+        );
+        assertFailure(
+            INVALID_RUNTIME,
+            () -> store.promote(mismatched, id("1.2.0"), 12, "a".repeat(64), 1)
+        );
+
+        InstalledRuntime installed = promote("2.0.0", 20, 1);
+        store.atomicStateStore().deleteInstalledState(installed.id());
+        VerifiedRuntimeLayout duplicate = layout("2.0.0", "payload-2.0.0");
+        assertFailure(
+            VERSION_COLLISION,
+            () -> store.promote(duplicate, installed.id(), 20, "a".repeat(64), 1)
+        );
+    }
+
+    @Test
+    void installedRecordScanSkipsUnownedAndMalformedMetadata() throws Exception {
+        InstalledRuntime valid = promote("1.2.0", 12, 1);
+        Files.createDirectory(paths.installedState().resolve("directory.json"));
+        Files.writeString(paths.installedState().resolve("ignored.txt"), "ignored");
+        Files.writeString(paths.installedState().resolve("broken.json"), "not-json");
+        store.atomicStateStore().writeState(
+            paths.installedState().resolve("wrong-name.json"),
+            valid.state(),
+            null,
+            null
+        );
+
+        assertEquals(valid.id(), store.findCompatible(1).orElseThrow().id());
+    }
+
+    @Test
+    void installedRecordScanIsBounded() throws Exception {
+        RuntimeLimits defaults = RuntimeLimits.releaseDefaults();
+        RuntimeLimits oneRecord = new RuntimeLimits(
+            defaults.maximumManifestBytes(),
+            defaults.maximumSignatureEnvelopeBytes(),
+            defaults.maximumTrustedKeys(),
+            defaults.maximumArtifacts(),
+            defaults.maximumIdentifierCharacters(),
+            defaults.maximumVersionCharacters(),
+            defaults.maximumEntrypointCharacters(),
+            defaults.maximumArchiveBytes(),
+            defaults.maximumExtractedBytes(),
+            1,
+            defaults.maximumMemberPathBytes(),
+            defaults.maximumMemberBytes(),
+            defaults.maximumCompressionRatio(),
+            defaults.maximumJsonDepth()
+        );
+        RuntimeStore bounded = new RuntimeStore(paths, oneRecord, CLOCK, boundary -> {});
+        Files.writeString(paths.installedState().resolve("one.txt"), "one");
+        Files.writeString(paths.installedState().resolve("two.txt"), "two");
+
+        assertFailure(INVALID_STATE, () -> bounded.findCompatible(1));
+    }
+
+    @Test
+    void recoveryCompletesAnIdempotentPromotionWithBothCopiesPresent() throws Exception {
+        InstalledRuntime installed = promote("1.2.0", 12, 1);
+        VerifiedRuntimeLayout duplicate = layout("1.2.0", "payload-1.2.0");
+        RuntimeTransaction transaction = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.PROMOTION_PREPARED,
+            duplicate.root().getFileName().toString(),
+            installed.state(),
+            null
+        );
+        store.atomicStateStore().writeTransaction(transaction);
+
+        store.recover();
+
+        assertFalse(Files.exists(duplicate.root()));
+        assertTrue(store.atomicStateStore().readTransaction().isEmpty());
+        assertTrue(store.installed(installed.id()).isPresent());
+    }
+
+    @Test
+    void recoveryRejectsConflictingActivationAndMissingActivePointer() throws Exception {
+        InstalledRuntime previous = promote("1.1.0", 11, 1);
+        store.activateCandidate(previous);
+        store.markHealthy(previous);
+        InstalledRuntime candidate = promote("1.2.0", 12, 1);
+        RuntimeTransaction conflicting = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.CANDIDATE_ACTIVATING,
+            null,
+            candidate.state(),
+            null
+        );
+        store.atomicStateStore().writeTransaction(conflicting);
+        assertFailure(TRANSACTION_CONFLICT, store::recover);
+
+        Files.deleteIfExists(paths.currentState());
+        RuntimeTransaction active = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.CANDIDATE_ACTIVE,
+            null,
+            candidate.state(),
+            null
+        );
+        store.atomicStateStore().writeTransaction(active);
+        assertFailure(TRANSACTION_CONFLICT, store::recover);
+        assertFailure(NOT_CANDIDATE, () -> store.markHealthy(previous));
+
+        store.atomicStateStore().writeTransaction(
+            active.withPhase(TransactionPhase.HEALTH_COMMITTING)
+        );
+        assertFailure(TRANSACTION_CONFLICT, store::recover);
+    }
+
+    @Test
+    void activeCandidateRecoveryIsIdempotent() throws Exception {
+        InstalledRuntime candidate = promote("1.2.0", 12, 1);
+        store.activateCandidate(candidate);
+
+        store.recover();
+
+        assertEquals(candidate.id(), store.current().orElseThrow().id());
+        assertEquals(
+            TransactionPhase.CANDIDATE_ACTIVE,
+            store.atomicStateStore().readTransaction().orElseThrow().phase()
+        );
+    }
+
+    @Test
+    void reactivatingCurrentCandidateDoesNotCreateRollbackState() throws Exception {
+        InstalledRuntime candidate = promote("1.2.0", 12, 1);
+        store.activateCandidate(candidate);
+        store.markHealthy(candidate);
+
+        store.activateCandidate(candidate);
+
+        assertTrue(store.atomicStateStore().readTransaction().orElseThrow().previous() == null);
+    }
+
+    @Test
+    void markHealthyRejectsCandidateStillInActivatingPhase() throws Exception {
+        InstalledRuntime candidate = promote("1.2.0", 12, 1);
+        RuntimeTransaction activating = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.CANDIDATE_ACTIVATING,
+            null,
+            candidate.state(),
+            null
+        );
+        store.atomicStateStore().writeTransaction(activating);
+
+        assertFailure(NOT_CANDIDATE, () -> store.markHealthy(candidate));
+    }
+
+    @Test
+    void pointersMustMatchEveryInstalledRuntimeIdentityField() throws Exception {
+        InstalledRuntime installed = promote("1.2.0", 12, 1);
+        RuntimeState base = installed.state();
+        RuntimeState[] mismatches = {
+            new RuntimeState(1, base.id(), 13, base.archiveSha256(), base.filesManifestSha256(), 1, base.activatedAt(), base.health()),
+            new RuntimeState(1, base.id(), 12, "c".repeat(64), base.filesManifestSha256(), 1, base.activatedAt(), base.health()),
+            new RuntimeState(1, base.id(), 12, base.archiveSha256(), "d".repeat(64), 1, base.activatedAt(), base.health()),
+            new RuntimeState(1, base.id(), 12, base.archiveSha256(), base.filesManifestSha256(), 2, base.activatedAt(), base.health())
+        };
+
+        for (RuntimeState mismatch : mismatches) {
+            store.atomicStateStore().writeState(
+                paths.currentState(),
+                mismatch,
+                Boundary.CURRENT_TEMP_WRITE,
+                Boundary.CURRENT_REPLACE
+            );
+            assertTrue(store.current().isEmpty());
+        }
+    }
+
+    @Test
+    void rollbackIgnoresNullAndApiIncompatiblePreviousStates() throws Exception {
+        InstalledRuntime candidate = promote("1.2.0", 12, 1);
+        InstalledRuntime previous = promote("1.1.0", 11, 1);
+        RuntimeTransaction withoutPrevious = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.CANDIDATE_ACTIVE,
+            null,
+            candidate.state(),
+            null
+        );
+        store.atomicStateStore().writeTransaction(withoutPrevious);
+        assertTrue(store.rollbackTarget(1).isEmpty());
+
+        RuntimeTransaction incompatiblePrevious = new RuntimeTransaction(
+            1,
+            UUID.randomUUID(),
+            TransactionPhase.CANDIDATE_ACTIVE,
+            null,
+            candidate.state(),
+            previous.state()
+        );
+        store.atomicStateStore().writeTransaction(incompatiblePrevious);
+        assertTrue(store.rollbackTarget(2).isEmpty());
+    }
+
+    @Test
+    void malformedInstalledMetadataIsTreatedAsAbsent() throws Exception {
+        Files.writeString(paths.installedState(id("1.2.0")), "not-json");
+
+        assertTrue(store.installed(id("1.2.0")).isEmpty());
+    }
+
     private InstalledRuntime promote(String version, long generation, int runtimeApi)
         throws Exception {
         return store.promote(
@@ -346,6 +625,19 @@ class RuntimeStoreTest {
 
     private static String sha256(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private static void assertFailure(
+        RuntimeStoreException.FailureReason reason,
+        ThrowingStoreOperation operation
+    ) {
+        RuntimeStoreException failure = assertThrows(RuntimeStoreException.class, operation::run);
+        assertEquals(reason, failure.reason());
+    }
+
+    @FunctionalInterface
+    private interface ThrowingStoreOperation {
+        void run() throws Exception;
     }
 
     private static final class Faults implements AtomicStateStore.FaultInjector {
