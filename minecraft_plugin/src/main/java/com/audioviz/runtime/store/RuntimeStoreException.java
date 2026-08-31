@@ -30,6 +30,14 @@ public final class RuntimeStoreException extends Exception {
         ENTRYPOINT_INVALID,
         PLATFORM_MISMATCH,
         PATH_ESCAPE,
+        INVALID_STATE,
+        TRANSACTION_CONFLICT,
+        VERSION_COLLISION,
+        VERSION_CORRUPT,
+        ATOMIC_MOVE_UNSUPPORTED,
+        INVALID_RUNTIME,
+        NOT_CANDIDATE,
+        RETENTION_INVALID,
         IO_FAILURE
     }
 

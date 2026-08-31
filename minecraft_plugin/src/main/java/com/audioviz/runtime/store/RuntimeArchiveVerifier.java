@@ -38,6 +38,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.FileChannel;
@@ -159,6 +160,176 @@ public final class RuntimeArchiveVerifier {
             throw failure(INVALID_ZIP, error);
         } catch (IOException error) {
             throw failure(IO_FAILURE, error);
+        }
+    }
+
+    public VerifiedRuntimeLayout verifyStaging(Path staging, String filesManifestSha256)
+        throws RuntimeStoreException {
+        return verifyExtractedLayout(staging, paths.staging(), filesManifestSha256);
+    }
+
+    public VerifiedRuntimeLayout verifyVersion(Path version, String filesManifestSha256)
+        throws RuntimeStoreException {
+        return verifyExtractedLayout(version, paths.versions(), filesManifestSha256);
+    }
+
+    private VerifiedRuntimeLayout verifyExtractedLayout(
+        Path root,
+        Path expectedParent,
+        String filesManifestSha256
+    ) throws RuntimeStoreException {
+        if (root == null) {
+            throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+        }
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path rootParent = normalizedRoot.getParent();
+        if (
+            rootParent == null ||
+            !rootParent.equals(expectedParent) ||
+            Files.isSymbolicLink(normalizedRoot) ||
+            !Files.isDirectory(normalizedRoot, LinkOption.NOFOLLOW_LINKS)
+        ) {
+            throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+        }
+        Path filesManifest = normalizedRoot.resolve(FILES_MANIFEST_PATH);
+        if (
+            Files.isSymbolicLink(filesManifest) ||
+            !Files.isRegularFile(filesManifest, LinkOption.NOFOLLOW_LINKS)
+        ) {
+            throw failure(FILES_MANIFEST_MISSING);
+        }
+        try {
+            long manifestSize = Files.size(filesManifest);
+            if (manifestSize <= 0 || manifestSize > limits.maximumManifestBytes()) {
+                throw failure(FILES_MANIFEST_INVALID);
+            }
+            byte[] manifestBytes;
+            try (InputStream input = Files.newInputStream(filesManifest, StandardOpenOption.READ)) {
+                manifestBytes = readBounded(
+                    input,
+                    limits.maximumManifestBytes(),
+                    manifestSize
+                );
+            }
+            verifyDigest(manifestBytes, filesManifestSha256, FILES_MANIFEST_DIGEST);
+            Map<String, PackagedFile> packagedFiles = parseFilesManifest(manifestBytes);
+            PackagedFile entrypointFile = packagedFiles.values()
+                .stream()
+                .filter(PackagedFile::executable)
+                .reduce((left, right) -> {
+                    throw new IllegalArgumentException("multiple entrypoints");
+                })
+                .orElseThrow(() -> new IllegalArgumentException("missing entrypoint"));
+            Set<Path> expectedDirectories = new HashSet<>();
+            long total = manifestSize;
+            for (PackagedFile file : packagedFiles.values()) {
+                Path destination = resolveUnder(normalizedRoot, file.path());
+                Path parent = destination.getParent();
+                while (parent != null && !parent.equals(normalizedRoot)) {
+                    if (
+                        Files.isSymbolicLink(parent) ||
+                        !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)
+                    ) {
+                        throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+                    }
+                    expectedDirectories.add(parent);
+                    parent = parent.getParent();
+                }
+                verifyExtractedFile(destination, file);
+                total = addSize(total, file.size());
+                if (total > limits.maximumExtractedBytes()) {
+                    throw failure(TOTAL_TOO_LARGE);
+                }
+            }
+            long maximumEntries = 2L + packagedFiles.size() + expectedDirectories.size();
+            try (var entries = Files.walk(normalizedRoot)) {
+                var iterator = entries.iterator();
+                long observedEntries = 0;
+                while (iterator.hasNext()) {
+                    Path entry = iterator.next();
+                    observedEntries++;
+                    if (observedEntries > maximumEntries) {
+                        throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+                    }
+                    if (entry.equals(normalizedRoot)) {
+                        continue;
+                    }
+                    if (Files.isSymbolicLink(entry)) {
+                        throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+                    }
+                    if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+                        if (!expectedDirectories.contains(entry)) {
+                            throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+                        }
+                        continue;
+                    }
+                    if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+                        throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+                    }
+                    Path relative = normalizedRoot.relativize(entry);
+                    String portable = relative.toString().replace(java.io.File.separatorChar, '/');
+                    if (
+                        !FILES_MANIFEST_PATH.equals(portable) &&
+                        !packagedFiles.containsKey(portable)
+                    ) {
+                        throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+                    }
+                }
+            }
+            return new VerifiedRuntimeLayout(
+                normalizedRoot,
+                resolveUnder(normalizedRoot, entrypointFile.path()),
+                packagedFiles,
+                manifestBytes,
+                filesManifestSha256,
+                total
+            );
+        } catch (RuntimeStoreException error) {
+            throw error;
+        } catch (UncheckedIOException error) {
+            throw failure(IO_FAILURE, error.getCause());
+        } catch (IOException | IllegalArgumentException error) {
+            throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT, error);
+        }
+    }
+
+    private void verifyExtractedFile(Path path, PackagedFile file)
+        throws RuntimeStoreException {
+        if (
+            Files.isSymbolicLink(path) ||
+            !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+        ) {
+            throw failure(RuntimeStoreException.FailureReason.VERSION_CORRUPT);
+        }
+        MessageDigest digest = sha256Digest();
+        byte[] buffer = new byte[16 * 1024];
+        long total = 0;
+        try (InputStream input = Files.newInputStream(path, StandardOpenOption.READ)) {
+            while (true) {
+                int read = input.read(buffer, 0, boundedReadLength(file.size(), total, buffer.length));
+                if (read < 0) {
+                    break;
+                }
+                if (read == 0) {
+                    throw failure(IO_FAILURE);
+                }
+                total += read;
+                if (total > file.size()) {
+                    throw failure(MEMBER_SIZE_MISMATCH);
+                }
+                digest.update(buffer, 0, read);
+            }
+        } catch (RuntimeStoreException error) {
+            throw error;
+        } catch (IOException error) {
+            throw failure(IO_FAILURE, error);
+        }
+        if (total != file.size()) {
+            throw failure(MEMBER_SIZE_MISMATCH);
+        }
+        byte[] expected = parseDigest(file.sha256(), MEMBER_DIGEST_MISMATCH);
+        if (!MessageDigest.isEqual(expected, digest.digest())) {
+            throw failure(MEMBER_DIGEST_MISMATCH);
         }
     }
 

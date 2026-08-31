@@ -16,6 +16,7 @@ public final class RuntimePaths {
     private final Path staging;
     private final Path versions;
     private final Path state;
+    private final Path installedState;
     private final Path currentState;
     private final Path lastKnownGoodState;
     private final Path transactionJournal;
@@ -27,6 +28,7 @@ public final class RuntimePaths {
         staging = root.resolve("staging");
         versions = root.resolve("versions");
         state = root.resolve("state");
+        installedState = state.resolve("installed");
         currentState = state.resolve("current.json");
         lastKnownGoodState = state.resolve("last-known-good.json");
         transactionJournal = state.resolve("transaction.json");
@@ -50,6 +52,7 @@ public final class RuntimePaths {
             ensureDirectory(staging);
             ensureDirectory(versions);
             ensureDirectory(state);
+            ensureDirectory(installedState);
         } catch (RuntimeStoreException error) {
             throw error;
         } catch (IOException error) {
@@ -97,6 +100,15 @@ public final class RuntimePaths {
 
     public Path currentState() {
         return currentState;
+    }
+
+    public Path installedState() {
+        return installedState;
+    }
+
+    public Path installedState(RuntimeVersionId id) {
+        Objects.requireNonNull(id, "id");
+        return installedState.resolve(id.directoryName() + ".json");
     }
 
     public Path lastKnownGoodState() {
