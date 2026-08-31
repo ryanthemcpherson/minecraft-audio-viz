@@ -22,14 +22,14 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 futures-util = "0.3"
 rustfft = "6"
-cpal = "0.15"
+cpal = "0.18"
 log = "0.4"
 env_logger = "0.11"
 thiserror = "2"
 rand = "0.10"
 parking_lot = "0.12"
-base64 = "0.22"
-opus = { version = "0.3", optional = true }
+base64 = "0.23"
+opus = { version = "0.4", optional = true }
 tauri-plugin-store = "2"
 tauri-plugin-single-instance = "2"
 rustrict = "0.7"
