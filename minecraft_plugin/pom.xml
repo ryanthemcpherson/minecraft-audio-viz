@@ -15,7 +15,7 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <paper.version>26.2.build.112-stable</paper.version>
+        <paper.version>26.2.build.120-stable</paper.version>
         <mockito.version>5.23.0</mockito.version>
     </properties>
 
@@ -50,14 +50,14 @@
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
-            <version>2.13.2</version>
+            <version>2.14.0</version>
         </dependency>
 
         <!-- Simple Voice Chat API (optional - server must have the mod installed) -->
         <dependency>
             <groupId>de.maxhenkel.voicechat</groupId>
             <artifactId>voicechat-api</artifactId>
-            <version>2.6.13</version>
+            <version>2.6.20</version>
             <scope>provided</scope>
         </dependency>
 
