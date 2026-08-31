@@ -69,6 +69,7 @@ from vj_server.patterns import (
 from vj_server.relay import RelayMixin
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.stage_manager import StageManagerMixin
+from vj_server.transport import WebsocketsPeer
 from vj_server.viz_client import VizClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -1042,9 +1043,15 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             logger.info(f"Admin panel: {http_scheme}://{self.http_host}:{self.http_port}/")
             logger.info(f"3D Preview: {http_scheme}://{self.http_host}:{self.http_port}/preview/")
 
+        async def handle_dj_connection(connection):
+            await self._handle_dj_connection(WebsocketsPeer(connection, max_message_bytes=65_536))
+
+        async def handle_browser_connection(connection):
+            await self._handle_browser_client(WebsocketsPeer(connection, max_message_bytes=65_536))
+
         # Start DJ listener (64KB max message â€" valid audio frames are ~200 bytes)
         dj_server = await ws_serve(
-            self._handle_dj_connection,
+            handle_dj_connection,
             "0.0.0.0",
             self.dj_port,
             max_size=65_536,
@@ -1053,7 +1060,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
         # Start browser broadcast server (64KB — browsers only receive viz data)
         broadcast_server = await ws_serve(
-            self._handle_browser_client,
+            handle_browser_connection,
             "0.0.0.0",
             self.broadcast_port,
             max_size=65_536,

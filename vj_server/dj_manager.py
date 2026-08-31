@@ -9,10 +9,11 @@ import math
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 import msgspec
 import msgspec.json as mjson
+import websockets
 
 from vj_server.config import PRESETS as AUDIO_PRESETS
 from vj_server.config import ServerConfig
@@ -24,9 +25,7 @@ from vj_server.models import (
     _json_str,
     _sanitize_name,
 )
-
-if TYPE_CHECKING:
-    import websockets
+from vj_server.transport import PeerClosed, WebSocketPeer
 
 logger = logging.getLogger("vj_server")
 
@@ -151,7 +150,12 @@ class DJManagerMixin:
         roster.sort(key=lambda x: x["queue_position"])
         return roster
 
-    async def _process_dj_heartbeat(self, dj: "DJConnection", websocket, frame_data: dict) -> None:
+    async def _process_dj_heartbeat(
+        self,
+        dj: "DJConnection",
+        websocket: WebSocketPeer,
+        frame_data: dict,
+    ) -> None:
         """Process a dj_heartbeat message (shared between code_auth and dj_auth paths)."""
         now = time.time()
         dj.last_heartbeat = now
@@ -222,7 +226,7 @@ class DJManagerMixin:
         attempts.append(now)
         return False
 
-    async def _handle_dj_connection(self, websocket):
+    async def _handle_dj_connection(self, websocket: WebSocketPeer) -> None:
         """Handle an incoming DJ connection."""
         dj_id = None
 
@@ -368,7 +372,7 @@ class DJManagerMixin:
                         except asyncio.TimeoutError:
                             # Just a timeout on recv, keep waiting
                             pass
-                        except websockets.exceptions.ConnectionClosed:
+                        except (websockets.exceptions.ConnectionClosed, PeerClosed):
                             # DJ disconnected while waiting
                             self._pending_djs.pop(dj_id, None)
                             logger.info(
@@ -756,7 +760,7 @@ class DJManagerMixin:
                 except msgspec.DecodeError as e:
                     logger.warning(f"Invalid JSON from DJ {dj.dj_id}: {e}")
 
-        except websockets.exceptions.ConnectionClosed as e:
+        except (websockets.exceptions.ConnectionClosed, PeerClosed) as e:
             dj_name = (
                 self._djs[dj_id].dj_name if dj_id and dj_id in self._djs else dj_id or "unknown"
             )

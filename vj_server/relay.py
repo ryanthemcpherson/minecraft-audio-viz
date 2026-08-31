@@ -26,6 +26,7 @@ from vj_server.patterns import (
     _lua_pattern_exists,
     get_pattern,
 )
+from vj_server.transport import PeerClosed, WebSocketPeer
 
 try:
     import websockets
@@ -42,7 +43,7 @@ class RelayMixin:
     """
 
     @staticmethod
-    def _browser_remote_ip(websocket) -> str:
+    def _browser_remote_ip(websocket: WebSocketPeer) -> str:
         remote_address = getattr(websocket, "remote_address", None)
         if isinstance(remote_address, tuple) and remote_address:
             return str(remote_address[0])
@@ -67,7 +68,12 @@ class RelayMixin:
         attempts = self._browser_auth_attempts.setdefault(remote_ip, [])
         attempts.append(current_time)
 
-    async def _reject_browser_auth(self, websocket, *, rate_limited: bool = False):
+    async def _reject_browser_auth(
+        self,
+        websocket: WebSocketPeer,
+        *,
+        rate_limited: bool = False,
+    ) -> None:
         await websocket.send(
             _json_str(
                 {
@@ -79,7 +85,7 @@ class RelayMixin:
         close_code = 4008 if rate_limited else 4004
         await websocket.close(close_code, "Authentication failed")
 
-    async def _handle_browser_client(self, websocket):
+    async def _handle_browser_client(self, websocket: WebSocketPeer) -> None:
         """Handle browser preview/admin panel connection."""
 
         # --- VJ Authentication Gate ---
@@ -1245,7 +1251,7 @@ class RelayMixin:
                     logger.error(f"Error handling browser message: {e}")
                     # Don't close connection on error, just log and continue
 
-        except websockets.exceptions.ConnectionClosed:
+        except (websockets.exceptions.ConnectionClosed, PeerClosed):
             pass
         finally:
             self._broadcast_clients.discard(websocket)
@@ -1480,6 +1486,7 @@ class RelayMixin:
         except (
             asyncio.TimeoutError,
             websockets.exceptions.ConnectionClosed,
+            PeerClosed,
             Exception,
         ):
             dead_clients.add(client)
@@ -1827,7 +1834,7 @@ class RelayMixin:
                             "missed": self._browser_pong_pending.get(client, {}).get("missed", 0),
                         }
 
-                    except websockets.exceptions.ConnectionClosed:
+                    except (websockets.exceptions.ConnectionClosed, PeerClosed):
                         dead_clients.add(client)
                     except Exception as e:
                         logger.debug(f"[BROWSER HEARTBEAT] Error pinging client: {e}")

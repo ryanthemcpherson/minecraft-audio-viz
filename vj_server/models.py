@@ -27,10 +27,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import msgspec
 
 from vj_server.config import validate_http_bind_host
+from vj_server.transport import WebSocketPeer
 
 if TYPE_CHECKING:
-    import websockets
-
     from vj_server.patterns import PatternConfig
 import msgspec.json as mjson
 
@@ -383,7 +382,7 @@ class DJConnection:
 
     dj_id: str
     dj_name: str
-    websocket: "websockets.WebSocketServerProtocol"  # Type hint for websocket connection
+    websocket: WebSocketPeer
     connected_at: float = field(default_factory=time.time)
     last_frame_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
