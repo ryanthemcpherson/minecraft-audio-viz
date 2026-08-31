@@ -59,6 +59,14 @@
             <version>1.28.0</version>
         </dependency>
 
+        <!-- Compile-time annotations for narrowly scoped static-analysis suppressions. -->
+        <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-annotations</artifactId>
+            <version>4.9.8</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Simple Voice Chat API (optional - server must have the mod installed) -->
         <dependency>
             <groupId>de.maxhenkel.voicechat</groupId>

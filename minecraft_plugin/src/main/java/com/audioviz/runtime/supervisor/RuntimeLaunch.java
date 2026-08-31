@@ -71,7 +71,7 @@ public record RuntimeLaunch(
         Map<String, String> result = new LinkedHashMap<>();
         source.forEach((key, value) -> {
             if (
-                key == null || key.isBlank() || key.length() > 128 ||
+                !isMcavEnvironmentKey(key) ||
                 value == null || value.length() > 8_192
             ) {
                 throw new IllegalArgumentException("invalid runtime environment");
@@ -79,5 +79,22 @@ public record RuntimeLaunch(
             result.put(key, value);
         });
         return Map.copyOf(result);
+    }
+
+    private static boolean isMcavEnvironmentKey(String key) {
+        if (key == null || !key.startsWith("MCAV_") || key.length() > 128) {
+            return false;
+        }
+        for (int index = 5; index < key.length(); index++) {
+            char character = key.charAt(index);
+            if (
+                (character < 'A' || character > 'Z') &&
+                (character < '0' || character > '9') &&
+                character != '_'
+            ) {
+                return false;
+            }
+        }
+        return key.length() > 5;
     }
 }
