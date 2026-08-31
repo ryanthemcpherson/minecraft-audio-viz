@@ -136,7 +136,7 @@ def _validate_artifact(platform: str, artifact: dict[str, object]) -> None:
         if not DIGEST_PATTERN.fullmatch(digest):
             raise ManifestBuildError(f"artifact {platform} {field} must be lowercase SHA-256")
 
-    entrypoint = _require_string(artifact, "entrypoint", maximum=256)
+    entrypoint = _require_string(artifact, "entrypoint", maximum=128)
     if not ENTRYPOINT_PATTERN.fullmatch(entrypoint):
         raise ManifestBuildError(f"artifact {platform} entrypoint is not a normalized path")
 

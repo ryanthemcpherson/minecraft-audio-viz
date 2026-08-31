@@ -70,7 +70,7 @@
         "entrypoint": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 256,
+          "maxLength": 128,
           "pattern": "^[0-9A-Za-z._-]+(?:/[0-9A-Za-z._-]+)*$"
         },
         "files_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }

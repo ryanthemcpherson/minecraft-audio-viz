@@ -68,6 +68,18 @@ def test_canonical_manifest_rejects_unknown_top_level_member() -> None:
         canonical_manifest_bytes(document)
 
 
+def test_canonical_manifest_rejects_entrypoint_over_plugin_limit() -> None:
+    document = valid_document()
+    artifacts = document["artifacts"]
+    assert isinstance(artifacts, dict)
+    linux_artifact = artifacts["linux-x86_64"]
+    assert isinstance(linux_artifact, dict)
+    linux_artifact["entrypoint"] = "a" * 129
+
+    with pytest.raises(ManifestBuildError, match="entrypoint must be a non-empty bounded string"):
+        canonical_manifest_bytes(document)
+
+
 def test_signature_matches_golden_and_verifies_exact_payload() -> None:
     document = valid_document()
     private_key = load_der_private_key(
