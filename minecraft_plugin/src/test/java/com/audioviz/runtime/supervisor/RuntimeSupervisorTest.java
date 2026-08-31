@@ -47,6 +47,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -171,6 +172,56 @@ class RuntimeSupervisorTest {
 
         assertEquals(2, supervisor.snapshot().rejectedSignals());
         assertEquals(2, supervisor.snapshot().lastHealthSequence());
+    }
+
+    @Test
+    void acceptedHealthEventCannotBeOverwrittenByQueuedDuplicate() {
+        List<RuntimeSupervisor.SupervisorEvent> events = new ArrayList<>();
+        supervisor = supervisor(new RestartPolicy(() -> 1.0), events::add);
+        start(candidate);
+        FakeProcess process = launcher.onlyProcess();
+        supervisor.ready(ready(process));
+        runCurrent();
+        events.clear();
+        RuntimeLaunch launch = process.launch();
+        RuntimeHealth accepted = new RuntimeHealth(
+            launch.generation(), launch.launchNonce(), 2, true, true, true, true, true,
+            10, 1, 2
+        );
+        RuntimeHealth duplicate = new RuntimeHealth(
+            launch.generation(), launch.launchNonce(), 2, true, true, true, true, false,
+            999, 8, 9
+        );
+
+        supervisor.health(accepted);
+        supervisor.health(duplicate);
+        runCurrent();
+
+        assertEquals(1, events.size());
+        RuntimeSupervisor.AcceptedHealth published = events.getFirst()
+            .acceptedHealth()
+            .orElseThrow();
+        assertEquals(2, published.sequence());
+        assertTrue(published.rendererConnected());
+        assertEquals(10, published.lastRenderAgeMillis());
+        assertEquals(1, published.ingressQueueDepth());
+        assertEquals(2, published.renderQueueDepth());
+        assertEquals(1, supervisor.snapshot().rejectedSignals());
+    }
+
+    @Test
+    void authenticatedRendererDisconnectStopsAndBacksOffCurrentProcess() {
+        start(candidate);
+        FakeProcess process = launcher.onlyProcess();
+        supervisor.ready(ready(process));
+        runCurrent();
+
+        supervisor.rendererDisconnected(process.launch().generation());
+        runCurrent();
+
+        assertEquals(BACKING_OFF, supervisor.snapshot().state());
+        assertEquals("RENDERER_DISCONNECTED", supervisor.snapshot().reasonCode());
+        assertFalse(process.isAlive());
     }
 
     @Test
@@ -371,6 +422,13 @@ class RuntimeSupervisorTest {
     }
 
     private RuntimeSupervisor supervisor(RestartPolicy restartPolicy) {
+        return supervisor(restartPolicy, event -> { });
+    }
+
+    private RuntimeSupervisor supervisor(
+        RestartPolicy restartPolicy,
+        Consumer<RuntimeSupervisor.SupervisorEvent> eventSink
+    ) {
         return new RuntimeSupervisor(
             store,
             launcher,
@@ -397,7 +455,7 @@ class RuntimeSupervisorTest {
                 SHUTDOWN_GRACE,
                 Duration.ofSeconds(2)
             ),
-            event -> { }
+            eventSink
         );
     }
 

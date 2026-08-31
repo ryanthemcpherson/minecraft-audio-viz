@@ -89,6 +89,32 @@ public class VizWebSocketServer extends WebSocketServer {
         this(plugin, bindAddress, port, new MessageHandler(plugin));
     }
 
+    public static VizWebSocketServer managed(
+        AudioVizPlugin plugin,
+        String bindAddress,
+        int port,
+        String rendererSecret,
+        RuntimeControlMessageHandler controlHandler
+    ) {
+        Objects.requireNonNull(plugin, "plugin");
+        Objects.requireNonNull(controlHandler, "controlHandler");
+        MessageHandler handler = new MessageHandler(plugin);
+        MessageQueue queue = new MessageQueue(plugin, handler);
+        VizWebSocketServer server = new VizWebSocketServer(
+            plugin,
+            bindAddress,
+            port,
+            handler,
+            queue,
+            new WebSocketSecurityPolicy(rendererSecret),
+            task -> plugin.getServer().getScheduler().runTaskLaterAsynchronously(
+                plugin, task, AUTH_TIMEOUT_TICKS)
+        );
+        server.runtimeControlMessageHandler = controlHandler;
+        queue.start();
+        return server;
+    }
+
     private VizWebSocketServer(
         AudioVizPlugin plugin,
         String bindAddress,

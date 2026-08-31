@@ -18,7 +18,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -209,6 +211,59 @@ class RuntimeControlMessageHandlerTest {
         assertFalse(channel.connected());
         assertEquals(REJECTED, handle(connection, healthJson(2)));
         assertFalse(channel.sendShutdown(GENERATION, "PLUGIN_DISABLE"));
+    }
+
+    @Test
+    void readinessCallbackNeverRunsUnderChannelMonitor() throws Exception {
+        Object lifecycleGate = new Object();
+        CountDownLatch sinkEntered = new CountDownLatch(1);
+        CountDownLatch clearOwnsLifecycle = new CountDownLatch(1);
+        CountDownLatch releaseSink = new CountDownLatch(1);
+        AtomicReference<RuntimeControlMessageHandler.HandleResult> result =
+            new AtomicReference<>();
+        channel = new RuntimeControlChannel(
+            ready -> {
+                sinkEntered.countDown();
+                try {
+                    assertTrue(releaseSink.await(2, TimeUnit.SECONDS));
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(error);
+                }
+                synchronized (lifecycleGate) {
+                    // Reproduces the manager callback's lifecycle boundary.
+                }
+            },
+            health -> { },
+            generation -> { }
+        );
+        channel.expect(new ExpectedRuntime(GENERATION, NONCE, "1.2.0", 1));
+        handler = new RuntimeControlMessageHandler(channel);
+        Thread readinessThread = new Thread(
+            () -> result.set(handle(connection, readyJson())),
+            "runtime-ready-regression"
+        );
+        readinessThread.setDaemon(true);
+        readinessThread.start();
+        assertTrue(sinkEntered.await(2, TimeUnit.SECONDS));
+        Thread clearThread = new Thread(() -> {
+            synchronized (lifecycleGate) {
+                clearOwnsLifecycle.countDown();
+                channel.clear(GENERATION);
+            }
+        }, "runtime-clear-regression");
+        clearThread.setDaemon(true);
+        clearThread.start();
+        assertTrue(clearOwnsLifecycle.await(2, TimeUnit.SECONDS));
+
+        releaseSink.countDown();
+        readinessThread.join(2_000);
+        clearThread.join(2_000);
+
+        assertFalse(readinessThread.isAlive());
+        assertFalse(clearThread.isAlive());
+        assertEquals(ACCEPTED, result.get());
+        assertFalse(channel.connected());
     }
 
     @Test

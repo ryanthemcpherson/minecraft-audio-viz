@@ -49,7 +49,7 @@ public final class RuntimeControlChannel {
         lastHealthSequence = -1;
     }
 
-    synchronized boolean acceptReady(
+    boolean acceptReady(
         Object source,
         Sender outbound,
         RuntimeReady ready
@@ -57,51 +57,74 @@ public final class RuntimeControlChannel {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(outbound, "outbound");
         Objects.requireNonNull(ready, "ready");
-        if (
-            expected == null ||
-            readinessDelivered ||
-            (connection != null && connection != source) ||
-            ready.generation() != expected.generation() ||
-            ready.runtimeApi() != expected.runtimeApi() ||
-            !ready.releaseVersion().equals(expected.releaseVersion()) ||
-            !secretsEqual(ready.launchNonce(), expected.launchNonce())
-        ) {
-            return false;
+        synchronized (this) {
+            if (
+                expected == null ||
+                readinessDelivered ||
+                (connection != null && connection != source) ||
+                ready.generation() != expected.generation() ||
+                ready.runtimeApi() != expected.runtimeApi() ||
+                !ready.releaseVersion().equals(expected.releaseVersion()) ||
+                !secretsEqual(ready.launchNonce(), expected.launchNonce())
+            ) {
+                return false;
+            }
+            connection = source;
+            sender = outbound;
+            readinessDelivered = true;
+            lastHealthSequence = -1;
         }
-        connection = source;
-        sender = outbound;
-        readinessDelivered = true;
-        lastHealthSequence = -1;
         try {
             readinessSink.accept(ready);
             return true;
         } catch (RuntimeException error) {
-            connection = null;
-            sender = null;
-            readinessDelivered = false;
+            rollbackFailedReadiness(source, outbound, ready.generation());
             return false;
         }
     }
 
-    synchronized boolean acceptHealth(Object source, RuntimeHealth health) {
+    boolean acceptHealth(Object source, RuntimeHealth health) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(health, "health");
-        if (
-            expected == null ||
-            !readinessDelivered ||
-            connection != source ||
-            health.generation() != expected.generation() ||
-            health.sequence() <= lastHealthSequence ||
-            !secretsEqual(health.launchNonce(), expected.launchNonce())
-        ) {
-            return false;
+        synchronized (this) {
+            if (
+                expected == null ||
+                !readinessDelivered ||
+                connection != source ||
+                health.generation() != expected.generation() ||
+                health.sequence() <= lastHealthSequence ||
+                !secretsEqual(health.launchNonce(), expected.launchNonce())
+            ) {
+                return false;
+            }
+            lastHealthSequence = health.sequence();
         }
-        lastHealthSequence = health.sequence();
         try {
             healthSink.accept(health);
             return true;
         } catch (RuntimeException error) {
             return false;
+        }
+    }
+
+    private void rollbackFailedReadiness(
+        Object failedConnection,
+        Sender failedSender,
+        long generation
+    ) {
+        synchronized (this) {
+            if (
+                expected != null &&
+                expected.generation() == generation &&
+                connection == failedConnection &&
+                sender == failedSender &&
+                readinessDelivered
+            ) {
+                connection = null;
+                sender = null;
+                readinessDelivered = false;
+                lastHealthSequence = -1;
+            }
         }
     }
 

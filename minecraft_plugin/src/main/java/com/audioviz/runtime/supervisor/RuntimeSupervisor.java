@@ -98,6 +98,13 @@ public final class RuntimeSupervisor {
         enqueue(() -> processExitedOnCoordinator(launchGeneration, exitCode));
     }
 
+    public void rendererDisconnected(long launchGeneration) {
+        if (launchGeneration <= 0) {
+            throw new IllegalArgumentException("generation must be positive");
+        }
+        enqueue(() -> rendererDisconnectedOnCoordinator(launchGeneration));
+    }
+
     public void retry() {
         enqueue(this::retryRequested);
     }
@@ -236,15 +243,16 @@ public final class RuntimeSupervisor {
         }
         lastHealthSequence = signal.sequence();
         lastHealthHealthy = signal.healthy() && process != null && process.isAlive();
+        AcceptedHealth acceptedHealth = AcceptedHealth.from(signal);
         if (!lastHealthHealthy) {
-            transition(SupervisorState.DEGRADED, "HEALTH_FAILED");
+            transition(SupervisorState.DEGRADED, "HEALTH_FAILED", acceptedHealth);
             handleFailure("HEALTH_FAILED");
             return;
         }
         if (state == SupervisorState.DEGRADED) {
-            transition(SupervisorState.READY, "HEALTH_RECOVERED");
+            transition(SupervisorState.READY, "HEALTH_RECOVERED", acceptedHealth);
         } else {
-            publishSnapshot();
+            transition(SupervisorState.READY, "HEALTHY", acceptedHealth);
         }
     }
 
@@ -262,6 +270,17 @@ public final class RuntimeSupervisor {
             return;
         }
         handleFailure(exitCode == 0 ? "PROCESS_EXITED" : "PROCESS_CRASHED");
+    }
+
+    private void rendererDisconnectedOnCoordinator(long launchGeneration) {
+        if (
+            launchGeneration != generation ||
+            process == null ||
+            (state != SupervisorState.READY && state != SupervisorState.DEGRADED)
+        ) {
+            return;
+        }
+        handleFailure("RENDERER_DISCONNECTED");
     }
 
     private void readinessTimedOut(long launchGeneration) {
@@ -450,11 +469,25 @@ public final class RuntimeSupervisor {
     }
 
     private void transition(SupervisorState nextState, String reason) {
+        transition(nextState, reason, null);
+    }
+
+    private void transition(
+        SupervisorState nextState,
+        String reason,
+        AcceptedHealth acceptedHealth
+    ) {
         state = Objects.requireNonNull(nextState, "nextState");
         reasonCode = boundedReason(reason);
         publishSnapshot();
         try {
-            eventSink.accept(new SupervisorEvent(state, generation, reasonCode, clock.instant()));
+            eventSink.accept(new SupervisorEvent(
+                state,
+                generation,
+                reasonCode,
+                clock.instant(),
+                Optional.ofNullable(acceptedHealth)
+            ));
         } catch (RuntimeException ignored) {
             // Observability cannot mutate supervisor state or stop lifecycle work.
         }
@@ -577,7 +610,8 @@ public final class RuntimeSupervisor {
         SupervisorState state,
         long generation,
         String reasonCode,
-        Instant occurredAt
+        Instant occurredAt,
+        Optional<AcceptedHealth> acceptedHealth
     ) {
         public SupervisorEvent {
             Objects.requireNonNull(state, "state");
@@ -586,6 +620,39 @@ public final class RuntimeSupervisor {
             }
             reasonCode = boundedReason(reasonCode);
             Objects.requireNonNull(occurredAt, "occurredAt");
+            acceptedHealth = Objects.requireNonNull(acceptedHealth, "acceptedHealth");
+            if (acceptedHealth.isPresent() && !reasonCode.startsWith("HEALTH")) {
+                throw new IllegalArgumentException("accepted health requires a health event");
+            }
+        }
+    }
+
+    public record AcceptedHealth(
+        long generation,
+        long sequence,
+        boolean rendererConnected,
+        long lastRenderAgeMillis,
+        int ingressQueueDepth,
+        int renderQueueDepth
+    ) {
+        public AcceptedHealth {
+            if (
+                generation <= 0 || sequence < 0 || lastRenderAgeMillis < 0 ||
+                ingressQueueDepth < 0 || renderQueueDepth < 0
+            ) {
+                throw new IllegalArgumentException("invalid accepted runtime health");
+            }
+        }
+
+        private static AcceptedHealth from(RuntimeHealth signal) {
+            return new AcceptedHealth(
+                signal.generation(),
+                signal.sequence(),
+                signal.rendererConnected(),
+                signal.lastRenderAgeMillis(),
+                signal.ingressQueueDepth(),
+                signal.renderQueueDepth()
+            );
         }
     }
 

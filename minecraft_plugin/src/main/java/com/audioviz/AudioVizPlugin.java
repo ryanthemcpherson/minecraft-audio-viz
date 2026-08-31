@@ -5,6 +5,12 @@ import com.audioviz.bedrock.BedrockSupport;
 import com.audioviz.beatsync.BeatSyncManager;
 import com.audioviz.latency.LatencyTracker;
 import com.audioviz.recording.RecordingManager;
+import com.audioviz.runtime.PaperRuntimeManager;
+import com.audioviz.runtime.config.ReleaseDescriptorLoader;
+import com.audioviz.runtime.config.RuntimeConfig;
+import com.audioviz.runtime.config.RuntimeConfigLoader;
+import com.audioviz.runtime.control.RuntimeControlMessageHandler;
+import com.audioviz.runtime.release.ReleaseDescriptor;
 import com.audioviz.bitmap.BitmapPatternManager;
 import com.audioviz.bitmap.BitmapRendererBackend;
 import com.audioviz.bitmap.composition.CompositionManager;
@@ -50,6 +56,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private ZoneManager zoneManager;
     private EntityPoolManager entityPoolManager;
     private volatile WebSocketStartupManager<VizWebSocketServer> webSocketStartupManager;
+    private PaperRuntimeManager runtimeManager;
     private MenuManager menuManager;
     private ChatInputManager chatInputManager;
     private BeatEventManager beatEventManager;
@@ -81,6 +88,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
 
         // Save default config
         saveDefaultConfig();
+        RuntimeConfig runtimeConfig = loadRuntimeConfig();
 
         // Initialize core managers
         this.zoneManager = new ZoneManager(this);
@@ -210,7 +218,29 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         String wsAddress = getConfig().getString("websocket.address", "127.0.0.1");
         String wsSecret = getConfig().getString("ws-secret", "");
         if (WebSocketSecurityPolicy.isSafeConfiguration(wsAddress, wsSecret)) {
-            startWebSocketWithRetry(wsAddress.strip(), wsPort, 5, 2000);
+            runtimeManager = createRuntimeManager(
+                runtimeConfig,
+                wsAddress.strip(),
+                wsPort,
+                wsSecret
+            );
+            String effectiveSecret = runtimeManager == null
+                ? wsSecret
+                : runtimeManager.rendererAuthenticationToken();
+            RuntimeControlMessageHandler controlHandler = runtimeManager == null
+                ? null
+                : runtimeManager.runtimeControlHandler().orElse(null);
+            startWebSocketWithRetry(
+                wsAddress.strip(),
+                wsPort,
+                effectiveSecret,
+                controlHandler,
+                5,
+                2000
+            );
+            if (runtimeManager != null) {
+                runtimeManager.start();
+            }
         } else {
             getLogger().severe(
                 "AudioViz WebSocket listener is offline: bind to a loopback address " +
@@ -230,6 +260,8 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
     private void startWebSocketWithRetry(
         String bindAddress,
         int port,
+        String rendererSecret,
+        RuntimeControlMessageHandler controlHandler,
         int maxRetries,
         long delayMs
     ) {
@@ -238,11 +270,15 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
                 maxRetries,
                 delayMs,
                 () -> {
-                    VizWebSocketServer server = new VizWebSocketServer(
-                        this,
-                        bindAddress,
-                        port
-                    );
+                    VizWebSocketServer server = controlHandler == null
+                        ? new VizWebSocketServer(this, bindAddress, port)
+                        : VizWebSocketServer.managed(
+                            this,
+                            bindAddress,
+                            port,
+                            rendererSecret,
+                            controlHandler
+                        );
                     return new WebSocketStartupManager.Candidate<>() {
                         @Override
                         public VizWebSocketServer value() {
@@ -318,8 +354,78 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         return failure.getClass().getSimpleName();
     }
 
+    private RuntimeConfig loadRuntimeConfig() {
+        RuntimeConfigLoader loader = new RuntimeConfigLoader();
+        try {
+            RuntimeConfigLoader.MigrationResult migration = loader.migrate(
+                getDataFolder().toPath().resolve("config.yml")
+            );
+            if (migration.changed()) {
+                reloadConfig();
+                getLogger().info("Managed VJ configuration was upgraded; a backup was created");
+            }
+            return loader.load(getConfig(), getDataFolder().toPath());
+        } catch (RuntimeConfigLoader.ConfigException error) {
+            getLogger().warning("Managed VJ runtime disabled: " + error.reason().name());
+            return null;
+        }
+    }
+
+    private PaperRuntimeManager createRuntimeManager(
+        RuntimeConfig config,
+        String rendererAddress,
+        int rendererPort,
+        String rendererSecret
+    ) {
+        if (config == null) {
+            return null;
+        }
+        ReleaseDescriptor descriptor;
+        try {
+            descriptor = new ReleaseDescriptorLoader(1).load(getClass().getClassLoader());
+        } catch (ReleaseDescriptorLoader.DescriptorException error) {
+            if (error.reason() == ReleaseDescriptorLoader.FailureReason.DEVELOPMENT_DESCRIPTOR) {
+                getLogger().info("Managed VJ installation disabled in this development build");
+            } else {
+                getLogger().warning("Managed VJ runtime disabled: " + error.reason().name());
+            }
+            return PaperRuntimeManager.disabled(
+                config,
+                error.reason().name(),
+                rendererSecret,
+                getLogger()
+            );
+        }
+        try {
+            return PaperRuntimeManager.create(
+                config,
+                descriptor,
+                getDataFolder().toPath(),
+                rendererAddress,
+                rendererPort,
+                rendererSecret,
+                getLogger()
+            );
+        } catch (PaperRuntimeManager.InitializationException error) {
+            getLogger().warning("Managed VJ runtime disabled: " + error.reason().name());
+            return PaperRuntimeManager.disabled(
+                config,
+                error.reason().name(),
+                rendererSecret,
+                getLogger()
+            );
+        }
+    }
+
     @Override
     public void onDisable() {
+        // Stop the managed runtime while its authenticated renderer channel is
+        // still available for the graceful shutdown request.
+        PaperRuntimeManager managedRuntime = runtimeManager;
+        if (managedRuntime != null) {
+            managedRuntime.stop();
+        }
+
         // Close the startup boundary first so no candidate can publish, retry,
         // or schedule server tasks while the rest of plugin teardown runs.
         WebSocketStartupManager<VizWebSocketServer> startupManager = webSocketStartupManager;
