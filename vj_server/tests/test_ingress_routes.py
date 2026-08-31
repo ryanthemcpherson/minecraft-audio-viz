@@ -19,12 +19,23 @@ from vj_server.setup import SetupManager
 
 def create_project(root: Path) -> None:
     admin = root / "admin_panel"
+    admin_js = admin / "js"
+    admin_css = admin / "css"
     preview = root / "preview_tool" / "frontend"
     assets = root / "assets"
     admin.mkdir(parents=True)
+    admin_js.mkdir()
+    admin_css.mkdir()
     preview.mkdir(parents=True)
     assets.mkdir()
     (admin / "index.html").write_text("admin", encoding="utf-8")
+    (admin / "setup.html").write_text("setup", encoding="utf-8")
+    (admin_js / "setup.js").write_text("setup script", encoding="utf-8")
+    (admin_js / "admin-app.js").write_text("private admin script", encoding="utf-8")
+    (admin_css / "setup.css").write_text("setup style", encoding="utf-8")
+    (admin_css / "mcav-tokens.css").write_text("tokens", encoding="utf-8")
+    (admin / "mcav-medium-square.png").write_bytes(b"setup logo")
+    (admin / "mcav.ico").write_bytes(b"setup icon")
     (preview / "index.html").write_text("preview", encoding="utf-8")
 
 
@@ -152,6 +163,51 @@ async def test_setup_routes_verify_and_create_admin_without_caching(
     assert created.status == 201
     assert await created.json() == {"status": "complete", "username": "vj_admin"}
     assert setup.status() == "complete"
+
+
+@pytest.mark.asyncio
+async def test_setup_shell_uses_an_exact_allowlist_and_disappears_after_setup(
+    setup_client: tuple[TestClient, SetupManager, str],
+) -> None:
+    client, setup, token = setup_client
+
+    redirect = await client.get("/setup", allow_redirects=False)
+    shell = await client.get("/setup/")
+    script = await client.get("/setup/js/setup.js")
+    private_asset = await client.get("/setup/js/admin-app.js")
+    alternate_setup_assets = [
+        "/setup.html",
+        "/%73etup.html",
+        "/js/setup.js",
+        "/css/setup.css",
+    ]
+    alternate_before_setup = [await client.get(path) for path in alternate_setup_assets]
+
+    assert redirect.status == 308
+    assert redirect.headers["Location"] == "/setup/"
+    assert redirect.headers["Cache-Control"] == "no-store"
+    assert shell.status == 200
+    assert await shell.text() == "setup"
+    assert shell.headers["Cache-Control"] == "no-store"
+    assert shell.headers["Content-Security-Policy"] == (
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
+        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
+    assert script.status == 200
+    assert script.headers["Cache-Control"] == "no-store"
+    assert private_asset.status == 404
+    assert all(response.status == 404 for response in alternate_before_setup)
+    assert all(
+        response.headers["Cache-Control"] == "no-store" for response in alternate_before_setup
+    )
+
+    await setup.create_admin(token, "operator", "correct horse battery")
+
+    assert (await client.get("/setup/", allow_redirects=False)).status == 404
+    assert (await client.get("/setup", allow_redirects=False)).status == 404
+    alternate_after_setup = [await client.get(path) for path in alternate_setup_assets]
+    assert all(response.status == 404 for response in alternate_after_setup)
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>MCAV | Secure setup</title>
+  <link rel="icon" type="image/x-icon" href="/setup/mcav.ico">
+  <link rel="stylesheet" href="/setup/css/mcav-tokens.css">
+  <link rel="stylesheet" href="/setup/css/setup.css">
+</head>
+<body>
+  <a class="skip-link" href="#setup-account">Skip to account setup</a>
+  <main class="setup-shell" aria-labelledby="setup-title">
+    <aside class="commissioning-panel" aria-labelledby="commissioning-title">
+      <div class="brand-lockup">
+        <img src="/setup/mcav-medium-square.png" width="48" height="48" alt="MCAV">
+        <div>
+          <p class="brand-name">MCAV</p>
+          <p class="brand-product">Control Center</p>
+        </div>
+      </div>
+
+      <div class="signal-mark" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+
+      <p class="eyebrow">Secure commissioning</p>
+      <h1 id="commissioning-title">Bring the control surface online.</h1>
+      <p class="commissioning-copy">
+        This one-time path creates the first operator without writing a plaintext credential to disk.
+      </p>
+
+      <ol id="setup-phases" class="phase-rail" aria-label="Setup progress">
+        <li class="phase" data-phase="link" data-state="active">
+          <span class="phase-node" aria-hidden="true"></span>
+          <span><strong>Secure link</strong><small>Validate the server-issued setup token</small></span>
+        </li>
+        <li class="phase" data-phase="account" data-state="pending">
+          <span class="phase-node" aria-hidden="true"></span>
+          <span><strong>Operator identity</strong><small>Create the first administrator</small></span>
+        </li>
+        <li class="phase" data-phase="ready" data-state="pending">
+          <span class="phase-node" aria-hidden="true"></span>
+          <span><strong>Control ready</strong><small>Enter the live VJ workspace</small></span>
+        </li>
+      </ol>
+    </aside>
+
+    <section id="setup-account" class="account-panel" aria-labelledby="setup-title">
+      <div class="account-heading">
+        <p class="eyebrow">First-run access</p>
+        <h2 id="setup-title">Create your operator account</h2>
+        <p>Use a unique password. MCAV keeps credentials in this tab only while setup is active.</p>
+      </div>
+
+      <p id="setup-status" class="setup-status" data-tone="working" role="status" aria-live="polite" tabindex="-1">
+        Securing your setup link…
+      </p>
+
+      <div id="setup-form-panel" hidden>
+        <form id="setup-form" class="setup-form" novalidate>
+          <div class="field-group">
+            <label for="setup-username">Administrator username</label>
+            <input
+              id="setup-username"
+              name="username"
+              type="text"
+              inputmode="text"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+              minlength="3"
+              maxlength="32"
+              aria-describedby="username-requirements"
+              required
+            >
+            <p id="username-requirements" class="field-note">3–32 lowercase letters, numbers, underscores, or hyphens.</p>
+          </div>
+
+          <div class="field-group">
+            <div class="field-label-row">
+              <label for="setup-password">Password</label>
+              <span id="password-byte-count" class="byte-count" aria-live="polite">0 / 72 bytes</span>
+            </div>
+            <input
+              id="setup-password"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              aria-describedby="password-requirements"
+              required
+            >
+            <p id="password-requirements" class="field-note">12–72 UTF-8 bytes with no control characters.</p>
+          </div>
+
+          <button id="setup-submit" class="primary-action" type="submit">Create administrator</button>
+        </form>
+      </div>
+
+      <footer class="security-note">
+        <span aria-hidden="true">TLS</span>
+        <p>The token is removed from browser history before any request and is never stored in browser persistence.</p>
+      </footer>
+    </section>
+  </main>
+
+  <script type="module" src="/setup/js/setup.js" data-mcav-setup></script>
+</body>
+</html>

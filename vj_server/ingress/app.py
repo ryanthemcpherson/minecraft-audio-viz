@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import ssl
+import urllib.parse
 import weakref
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
@@ -36,6 +37,21 @@ from vj_server.transport import (
 PeerHandler = Callable[[WebSocketPeer], Awaitable[None]]
 SetupCompleteHandler = Callable[[str], Awaitable[None] | None]
 logger = logging.getLogger("vj_server.ingress")
+
+SETUP_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
+    "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+SETUP_ASSETS = {
+    "": "setup.html",
+    "css/mcav-tokens.css": "css/mcav-tokens.css",
+    "css/setup.css": "css/setup.css",
+    "js/setup.js": "js/setup.js",
+    "mcav-medium-square.png": "mcav-medium-square.png",
+    "mcav.ico": "mcav.ico",
+}
+SETUP_BACKING_ASSETS = frozenset({"setup.html", "css/setup.css", "js/setup.js"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,14 +541,17 @@ def create_ingress_application(
         request: web.Request,
         handler: web.RequestHandler,
     ) -> web.StreamResponse:
+        is_setup_request = request.path == "/setup" or request.path.startswith("/setup/")
         try:
             response = await handler(request)
         except web.HTTPException as response:
-            if request.path.startswith("/setup/"):
+            if is_setup_request:
                 response.headers["Cache-Control"] = "no-store"
+                response.headers["Content-Security-Policy"] = SETUP_CONTENT_SECURITY_POLICY
             raise
-        if request.path.startswith("/setup/"):
+        if is_setup_request:
             response.headers["Cache-Control"] = "no-store"
+            response.headers["Content-Security-Policy"] = SETUP_CONTENT_SECURITY_POLICY
         return response
 
     async def health(_request: web.Request) -> web.Response:
@@ -594,8 +613,35 @@ def create_ingress_application(
                 await completed
         return setup_response({"status": "complete", "username": username}, status=201)
 
+    async def setup_redirect(_request: web.Request) -> web.Response:
+        assert setup_manager is not None
+        if await setup_manager.status_async() != "available":
+            raise web.HTTPNotFound()
+        raise web.HTTPPermanentRedirect(location="/setup/")
+
+    async def setup_asset(request: web.Request) -> web.Response:
+        assert setup_manager is not None
+        if await setup_manager.status_async() != "available":
+            raise web.HTTPNotFound()
+        raw_tail = _raw_tail(request, "/setup/")
+        asset_path = SETUP_ASSETS.get(raw_tail)
+        if asset_path is None:
+            raise web.HTTPNotFound()
+        return await static_response(request, admin_root, asset_path, limits)
+
     async def admin_asset(request: web.Request) -> web.Response:
         raw_tail = _raw_tail(request, "/") or "index.html"
+        try:
+            decoded_tail = urllib.parse.unquote(raw_tail, encoding="utf-8", errors="strict")
+        except (UnicodeDecodeError, ValueError):
+            decoded_tail = ""
+        if decoded_tail in SETUP_BACKING_ASSETS:
+            raise web.HTTPNotFound(
+                headers={
+                    "Cache-Control": "no-store",
+                    "Content-Security-Policy": SETUP_CONTENT_SECURITY_POLICY,
+                }
+            )
         return await static_response(request, admin_root, raw_tail, limits)
 
     async def preview_asset(request: web.Request) -> web.Response:
@@ -621,6 +667,8 @@ def create_ingress_application(
         app.router.add_get("/setup/status", setup_status)
         app.router.add_post("/setup/verify", setup_verify)
         app.router.add_post("/setup/admin", setup_admin)
+        app.router.add_get("/setup", setup_redirect)
+        app.router.add_get("/setup/{tail:.*}", setup_asset)
     if websocket_handlers is not None:
         app.router.add_routes(
             _websocket_routes(
