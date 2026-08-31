@@ -85,7 +85,12 @@ final class WebSocketStartupManager<T> {
 
     void start() {
         synchronized (lifecycleLock) {
-            if (stopped || worker != null || starting != null || active != null) {
+            if (
+                stopped ||
+                (worker != null && worker.isAlive()) ||
+                starting != null ||
+                active != null
+            ) {
                 return;
             }
             worker = Objects.requireNonNull(
@@ -127,53 +132,45 @@ final class WebSocketStartupManager<T> {
     }
 
     private void runStartup() {
-        try {
-            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-                if (isStopped()) {
-                    return;
-                }
-
-                Candidate<T> candidate = null;
-                try {
-                    candidate = candidateFactory.create();
-                    if (!claimAsStarting(candidate)) {
-                        shutdown(candidate);
-                        return;
-                    }
-                    candidate.start();
-                    candidate.startupCompletion().toCompletableFuture().get();
-                } catch (InterruptedException exception) {
-                    releaseInterruptedCandidate(candidate);
-                    Thread.currentThread().interrupt();
-                    return;
-                } catch (ExecutionException exception) {
-                    if (!handleFailure(candidate, attempt, exception.getCause())) {
-                        return;
-                    }
-                    continue;
-                } catch (RuntimeException exception) {
-                    if (!handleFailure(candidate, attempt, exception)) {
-                        return;
-                    }
-                    continue;
-                }
-
-                synchronized (lifecycleLock) {
-                    if (stopped || starting != candidate) {
-                        return;
-                    }
-                    starting = null;
-                    active = candidate;
-                    events.onStarted(candidate.value(), attempt);
-                }
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (isStopped()) {
                 return;
             }
-        } finally {
-            synchronized (lifecycleLock) {
-                if (worker == Thread.currentThread()) {
-                    worker = null;
+
+            Candidate<T> candidate = null;
+            try {
+                candidate = candidateFactory.create();
+                if (!claimAsStarting(candidate)) {
+                    shutdown(candidate);
+                    return;
                 }
+                candidate.start();
+                candidate.startupCompletion().toCompletableFuture().get();
+            } catch (InterruptedException exception) {
+                releaseInterruptedCandidate(candidate);
+                Thread.currentThread().interrupt();
+                return;
+            } catch (ExecutionException exception) {
+                if (!handleFailure(candidate, attempt, exception.getCause())) {
+                    return;
+                }
+                continue;
+            } catch (RuntimeException exception) {
+                if (!handleFailure(candidate, attempt, exception)) {
+                    return;
+                }
+                continue;
             }
+
+            synchronized (lifecycleLock) {
+                if (stopped || starting != candidate) {
+                    return;
+                }
+                starting = null;
+                active = candidate;
+                events.onStarted(candidate.value(), attempt);
+            }
+            return;
         }
     }
 

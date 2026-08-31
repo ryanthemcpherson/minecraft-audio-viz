@@ -123,6 +123,32 @@ class WebSocketStartupManagerTest {
     }
 
     @Test
+    void disableJoinsWorkerAfterStartupTaskReturnsButBeforeThreadTerminates() {
+        FakeCandidate candidate = new FakeCandidate("active", true);
+        TailHoldingWorkerLauncher workerLauncher = new TailHoldingWorkerLauncher();
+        RecordingEvents events = new RecordingEvents();
+        WebSocketStartupManager<String> manager = new WebSocketStartupManager<>(
+            1,
+            0,
+            new CandidateSequence(candidate),
+            workerLauncher,
+            ignored -> { },
+            events
+        );
+
+        manager.start();
+        await(candidate.startCalled);
+        candidate.succeed();
+        await(events.started);
+        await(workerLauncher.taskReturned);
+
+        assertTrue(manager.stop());
+
+        assertFalse(workerLauncher.worker.get().isAlive());
+        assertEquals(1, candidate.shutdownCount.get());
+    }
+
+    @Test
     void disableDuringRetryWaitPreventsAnotherCandidateFromBeingCreated() {
         FakeCandidate first = new FakeCandidate("first", true);
         FakeCandidate forbiddenRetry = new FakeCandidate("forbidden", true);
@@ -244,6 +270,28 @@ class WebSocketStartupManagerTest {
         @Override
         public Thread launch(Runnable task) {
             Thread thread = new Thread(task, "websocket-startup-test");
+            worker.set(thread);
+            thread.start();
+            return thread;
+        }
+    }
+
+    private static final class TailHoldingWorkerLauncher
+            implements WebSocketStartupManager.WorkerLauncher {
+        private final AtomicReference<Thread> worker = new AtomicReference<>();
+        private final CountDownLatch taskReturned = new CountDownLatch(1);
+
+        @Override
+        public Thread launch(Runnable task) {
+            Thread thread = new Thread(() -> {
+                task.run();
+                taskReturned.countDown();
+                try {
+                    new CountDownLatch(1).await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "websocket-startup-tail-test");
             worker.set(thread);
             thread.start();
             return thread;
