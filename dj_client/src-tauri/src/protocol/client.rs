@@ -1,6 +1,7 @@
 //! WebSocket client for VJ server communication
 
 use super::messages::*;
+use super::tls::{ServerProfile, TlsConfigError, load_native_tls_config};
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -9,7 +10,9 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::Message, tungstenite::protocol::WebSocketConfig,
+    Connector, connect_async_tls_with_config,
+    tungstenite::protocol::WebSocketConfig,
+    tungstenite::{Error as WebSocketError, Message, error::TlsError},
 };
 
 /// Client errors
@@ -17,6 +20,24 @@ use tokio_tungstenite::{
 pub enum ClientError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
+
+    #[error("CONNECTION_TIMEOUT: server did not respond")]
+    ConnectionTimeout,
+
+    #[error("INVALID_SERVER_PROFILE: {0}")]
+    InvalidServerProfile(String),
+
+    #[error("CERTIFICATE_PIN_MISMATCH: presented certificate does not match this server profile")]
+    CertificatePinMismatch,
+
+    #[error("CERTIFICATE_UNTRUSTED: server certificate is not trusted")]
+    CertificateUntrusted,
+
+    #[error("CERTIFICATE_EXPIRED: server certificate is outside its validity period")]
+    CertificateExpired,
+
+    #[error("CERTIFICATE_HOSTNAME_MISMATCH: certificate does not match the server name")]
+    CertificateHostnameMismatch,
 
     #[error("Authentication failed: {0}")]
     AuthenticationFailed(String),
@@ -34,14 +55,51 @@ pub enum ClientError {
     NotConnected,
 }
 
+fn map_tls_config_error(error: TlsConfigError) -> ClientError {
+    match error {
+        TlsConfigError::InvalidProfile(profile_error) => {
+            ClientError::InvalidServerProfile(profile_error.to_string())
+        }
+        TlsConfigError::NativeRootsUnavailable
+        | TlsConfigError::NoNativeRoots
+        | TlsConfigError::VerifierConfiguration => ClientError::CertificateUntrusted,
+    }
+}
+
+pub(super) fn map_websocket_connection_error(error: WebSocketError) -> ClientError {
+    let rustls_error = match &error {
+        WebSocketError::Tls(TlsError::Rustls(rustls_error)) => Some(rustls_error.as_ref()),
+        WebSocketError::Io(io_error) => io_error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<rustls::Error>()),
+        _ => None,
+    };
+    if let Some(rustls::Error::InvalidCertificate(certificate_error)) = rustls_error {
+        use rustls::CertificateError;
+        return match certificate_error {
+            CertificateError::Expired
+            | CertificateError::ExpiredContext { .. }
+            | CertificateError::NotValidYet
+            | CertificateError::NotValidYetContext { .. } => ClientError::CertificateExpired,
+            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
+                ClientError::CertificateHostnameMismatch
+            }
+            CertificateError::Other(other)
+                if other.0.to_string().contains("CERTIFICATE_PIN_MISMATCH") =>
+            {
+                ClientError::CertificatePinMismatch
+            }
+            _ => ClientError::CertificateUntrusted,
+        };
+    }
+    ClientError::ConnectionFailed(error.to_string())
+}
+
 /// Client configuration
 #[derive(Debug, Clone)]
 pub struct DjClientConfig {
-    /// VJ server hostname
-    pub server_host: String,
-
-    /// VJ server port
-    pub server_port: u16,
+    /// Exact VJ server WebSocket endpoint and optional certificate pin.
+    pub server_profile: ServerProfile,
 
     /// DJ display name
     pub dj_name: String,
@@ -71,8 +129,7 @@ pub struct DjClientConfig {
 impl Default for DjClientConfig {
     fn default() -> Self {
         Self {
-            server_host: "localhost".to_string(),
-            server_port: 9000,
+            server_profile: ServerProfile::default(),
             dj_name: "DJ".to_string(),
             connect_code: None,
             dj_id: None,
@@ -181,15 +238,7 @@ impl DjClient {
             return Err(ClientError::AlreadyConnected);
         }
 
-        let scheme = if crate::is_local_host(&self.config.server_host) {
-            "ws"
-        } else {
-            "wss"
-        };
-        let url = format!(
-            "{}://{}:{}",
-            scheme, self.config.server_host, self.config.server_port
-        );
+        let url = self.config.server_profile.server_url().to_owned();
 
         log::info!("Connecting to VJ server at {}", url);
 
@@ -197,13 +246,24 @@ impl DjClient {
         let mut ws_config = WebSocketConfig::default();
         ws_config.max_message_size = Some(1_048_576); // 1 MB
         ws_config.max_frame_size = Some(1_048_576); // 1 MB
+        let connector = if self.config.server_profile.is_secure() {
+            let tls_config = load_native_tls_config(&self.config.server_profile)
+                .map_err(map_tls_config_error)?;
+            Connector::Rustls(Arc::new(tls_config))
+        } else if cfg!(debug_assertions) {
+            Connector::Plain
+        } else {
+            return Err(ClientError::InvalidServerProfile(
+                "release connections require wss://".to_string(),
+            ));
+        };
         let ws_stream = tokio::time::timeout(
             Duration::from_secs(10),
-            connect_async_with_config(&url, Some(ws_config), false),
+            connect_async_tls_with_config(&url, Some(ws_config), false, Some(connector)),
         )
         .await
-        .map_err(|_| ClientError::ConnectionFailed("Connection timeout".to_string()))?
-        .map_err(|e| ClientError::ConnectionFailed(e.to_string()))?;
+        .map_err(|_| ClientError::ConnectionTimeout)?
+        .map_err(map_websocket_connection_error)?;
 
         let (ws_stream, _) = ws_stream;
         let (mut write, mut read) = ws_stream.split();
@@ -339,6 +399,12 @@ impl DjClient {
                     break;
                 }
             }
+        }
+
+        if !self.state.lock().authenticated {
+            return Err(ClientError::AuthenticationFailed(
+                "server did not confirm authentication".to_string(),
+            ));
         }
 
         // Mark as connected
@@ -733,8 +799,11 @@ mod tests {
     fn default_config_uses_expected_connection_settings() {
         let config = DjClientConfig::default();
 
-        assert_eq!(config.server_host, "localhost");
-        assert_eq!(config.server_port, 9000);
+        assert_eq!(
+            config.server_profile.profile_key(),
+            config.server_profile.server_url()
+        );
+        assert_eq!(config.server_profile.certificate_sha256(), None);
         assert_eq!(config.dj_name, "DJ");
         assert_eq!(config.max_reconnect_attempts, 10);
         assert_eq!(config.reconnect_delay, 2.0);

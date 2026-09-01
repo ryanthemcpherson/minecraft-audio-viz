@@ -1,7 +1,7 @@
 //! Application state management
 
 use crate::audio::AudioCaptureHandle;
-use crate::protocol::DjClient;
+use crate::protocol::{DjClient, ServerProfile};
 use crate::voice::{VoiceConfig, VoiceStatus, VoiceStreamer};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -54,11 +54,8 @@ pub struct AppState {
     /// Connect code
     pub connect_code: Option<String>,
 
-    /// Server host
-    pub server_host: String,
-
-    /// Server port
-    pub server_port: u16,
+    /// Exact server endpoint and optional certificate pin used for reconnects.
+    pub server_profile: ServerProfile,
 
     /// Selected audio source ID
     pub audio_source_id: Option<String>,
@@ -95,8 +92,7 @@ impl Default for AppState {
             status: ConnectionStatus::default(),
             dj_name: String::new(),
             connect_code: None,
-            server_host: "192.168.1.204".to_string(),
-            server_port: 9000,
+            server_profile: ServerProfile::default(),
             audio_source_id: None,
             bridge_shutdown_tx: None,
             bridge_task_handle: None,
@@ -138,8 +134,10 @@ mod tests {
         assert!(!state.is_beat);
         assert_eq!(state.beat_intensity, 0.0);
         assert_eq!(state.bpm, 120.0);
-        assert_eq!(state.server_host, "192.168.1.204");
-        assert_eq!(state.server_port, 9000);
+        assert_eq!(
+            state.server_profile.profile_key(),
+            state.server_profile.server_url()
+        );
         assert!(state.bridge_shutdown_tx.is_none());
         assert!(state.bridge_task_handle.is_none());
         assert!(state.voice_streamer.is_none());

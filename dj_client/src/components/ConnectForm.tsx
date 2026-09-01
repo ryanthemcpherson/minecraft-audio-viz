@@ -16,10 +16,17 @@ interface ConnectFormProps {
   onRefreshSources: () => void;
   directConnect: boolean;
   onDirectConnectChange: (checked: boolean) => void;
-  serverHost: string;
-  onServerHostChange: (host: string) => void;
-  serverPort: number;
-  onServerPortChange: (port: number) => void;
+  serverUrl: string;
+  onServerUrlChange: (url: string) => void;
+  certificateFingerprint: string;
+  onCertificateFingerprintChange: (fingerprint: string) => void;
+  inviteLink: string;
+  onInviteLinkChange: (invite: string) => void;
+  onImportInvite: () => void;
+  inviteExpiresAt: number | null;
+  pinReplacementRequired: boolean;
+  pinReplacementConfirmed: boolean;
+  onPinReplacementConfirmedChange: (confirmed: boolean) => void;
   error: string | null;
   isConnecting: boolean;
   djName: string;
@@ -35,10 +42,17 @@ export default function ConnectForm({
   onRefreshSources,
   directConnect,
   onDirectConnectChange,
-  serverHost,
-  onServerHostChange,
-  serverPort,
-  onServerPortChange,
+  serverUrl,
+  onServerUrlChange,
+  certificateFingerprint,
+  onCertificateFingerprintChange,
+  inviteLink,
+  onInviteLinkChange,
+  onImportInvite,
+  inviteExpiresAt,
+  pinReplacementRequired,
+  pinReplacementConfirmed,
+  onPinReplacementConfirmedChange,
   error,
   isConnecting,
   djName,
@@ -62,27 +76,83 @@ export default function ConnectForm({
         </div>
       </div>
 
+      <div className="invite-import">
+        <label className="field-label" htmlFor="invite-link">Administrator invite</label>
+        <div className="invite-import-row">
+          <input
+            id="invite-link"
+            type="text"
+            className="input input-sm"
+            value={inviteLink}
+            onChange={event => onInviteLinkChange(event.target.value)}
+            placeholder="mcav://connect?invite=..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={onImportInvite}
+            disabled={!inviteLink.trim()}
+          >
+            Import
+          </button>
+        </div>
+      </div>
+
       <label className="checkbox-label">
         <input type="checkbox" checked={directConnect} onChange={e => onDirectConnectChange(e.target.checked)} />
         Direct connect (self-hosted)
       </label>
 
       {directConnect && (
-        <div className="direct-connect-row">
+        <div className="direct-connect-fields">
+          <label className="field-label" htmlFor="server-url">Secure server URL</label>
           <input
-            type="text"
+            id="server-url"
+            type="url"
             className="input input-sm"
-            value={serverHost}
-            onChange={e => onServerHostChange(e.target.value)}
-            placeholder="Host"
+            value={serverUrl}
+            onChange={event => onServerUrlChange(event.target.value)}
+            placeholder="wss://server.example:8080/ws/dj"
+            autoComplete="url"
+            spellCheck={false}
           />
+          <label className="field-label" htmlFor="certificate-fingerprint">
+            Certificate SHA-256 <span className="field-optional">(self-signed servers)</span>
+          </label>
           <input
-            type="number"
-            className="input input-sm input-port"
-            value={serverPort}
-            onChange={e => onServerPortChange(parseInt(e.target.value, 10) || 9000)}
-            placeholder="Port"
+            id="certificate-fingerprint"
+            type="text"
+            className="input input-sm fingerprint-input"
+            value={certificateFingerprint}
+            onChange={event => onCertificateFingerprintChange(event.target.value)}
+            placeholder="64 hexadecimal characters"
+            autoComplete="off"
+            spellCheck={false}
           />
+          {inviteExpiresAt && (
+            <p
+              className={
+                inviteExpiresAt * 1000 - Date.now() < 300_000
+                  ? 'connection-note connection-note-warning'
+                  : 'connection-note'
+              }
+              role="status"
+            >
+              Invite expires {new Date(inviteExpiresAt * 1000).toLocaleString()}.
+            </p>
+          )}
+          {pinReplacementRequired && (
+            <label className="pin-replacement-warning">
+              <input
+                type="checkbox"
+                checked={pinReplacementConfirmed}
+                onChange={event => onPinReplacementConfirmedChange(event.target.checked)}
+              />
+              I verified this certificate trust change with the server administrator.
+            </label>
+          )}
         </div>
       )}
 
@@ -91,7 +161,13 @@ export default function ConnectForm({
       <button
         className="btn btn-connect full-width"
         onClick={onConnect}
-        disabled={isConnecting || connectCode.length !== 8 || !djName.trim()}
+        disabled={
+          isConnecting ||
+          connectCode.length !== 8 ||
+          !djName.trim() ||
+          (directConnect && !serverUrl.trim()) ||
+          (pinReplacementRequired && !pinReplacementConfirmed)
+        }
       >
         {isConnecting ? 'Connecting...' : 'Connect'}
       </button>

@@ -222,6 +222,54 @@ body {
   gap: 8px;
 }
 
+.invite-import,
+.direct-connect-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.invite-import-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.direct-connect-fields {
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.field-optional,
+.connection-note {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.connection-note-warning {
+  color: var(--warning);
+}
+
+.connection-note {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.fingerprint-input {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.pin-replacement-warning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--warning);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
 .direct-connect-row .input-sm {
   padding: 6px 10px;
   font-size: 12px;

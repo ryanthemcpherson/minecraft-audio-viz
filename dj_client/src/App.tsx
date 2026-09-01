@@ -116,8 +116,8 @@ function App() {
               <div className="welcome-step">
                 <div className="step-number">1</div>
                 <div className="step-content">
-                  <h3>Get a connect code</h3>
-                  <p>Request a code from your VJ operator or server admin</p>
+                  <h3>Open an administrator invite</h3>
+                  <p>Use the secure MCAV link from your server admin, or enter details manually</p>
                 </div>
               </div>
 

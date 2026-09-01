@@ -14,17 +14,19 @@ pub mod state;
 pub mod voice;
 
 use audio::{AudioCaptureHandle, AudioPreset, AudioSource, CaptureMode};
-use protocol::{AudioFrameMessage, DjClient, DjClientConfig};
+use protocol::{AudioFrameMessage, DjClient, DjClientConfig, ServerProfile};
 use state::AppState;
 use voice::{VoiceStatus, VoiceStreamer};
 
 use parking_lot::Mutex;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -34,18 +36,43 @@ pub struct AppStateWrapper(pub Arc<Mutex<AppState>>);
 /// Sequence counter for audio frames (shared between bridge task and get_audio_levels)
 static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Returns true if the host is a private/local IP address that should use ws:// instead of wss://.
-pub(crate) fn is_local_host(host: &str) -> bool {
-    if host == "localhost" {
-        return true;
+const SERVER_PROFILE_STORE: &str = "server-profiles.json";
+const SERVER_PROFILES_KEY: &str = "profiles";
+
+fn load_server_profiles(app_handle: &AppHandle) -> Result<BTreeMap<String, ServerProfile>, String> {
+    let store = app_handle
+        .store(SERVER_PROFILE_STORE)
+        .map_err(|error| format!("Failed to open server profile store: {error}"))?;
+    match store.get(SERVER_PROFILES_KEY) {
+        Some(value) => serde_json::from_value(value)
+            .map_err(|error| format!("Server profile store is invalid: {error}")),
+        None => Ok(BTreeMap::new()),
     }
-    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
-        return ip.is_loopback() // 127.*
-            || ip.octets()[0] == 10 // 10.*
-            || (ip.octets()[0] == 172 && (16..=31).contains(&ip.octets()[1])) // 172.16-31.*
-            || (ip.octets()[0] == 192 && ip.octets()[1] == 168); // 192.168.*
-    }
-    false
+}
+
+fn persist_server_profile(app_handle: &AppHandle, profile: &ServerProfile) -> Result<(), String> {
+    let store = app_handle
+        .store(SERVER_PROFILE_STORE)
+        .map_err(|error| format!("Failed to open server profile store: {error}"))?;
+    let mut profiles = load_server_profiles(app_handle)?;
+    profiles.insert(profile.profile_key().to_owned(), profile.clone());
+    let serialized = serde_json::to_value(profiles)
+        .map_err(|error| format!("Failed to serialize server profile: {error}"))?;
+    store.set(SERVER_PROFILES_KEY, serialized);
+    store
+        .save()
+        .map_err(|error| format!("Failed to save server profile: {error}"))
+}
+
+#[tauri::command]
+fn get_saved_server_profile(
+    app_handle: AppHandle,
+    server_url: String,
+) -> Result<Option<ServerProfile>, String> {
+    let requested = ServerProfile::new(&server_url, None)
+        .map_err(|error| format!("INVALID_SERVER_PROFILE: {error}"))?;
+    let mut profiles = load_server_profiles(&app_handle)?;
+    Ok(profiles.remove(requested.profile_key()))
 }
 
 /// List available audio sources
@@ -81,10 +108,10 @@ async fn connect_common(
             let _ = tx.send(()).await;
         }
         if let Some(handle) = old_handle {
-            match tokio::time::timeout(Duration::from_millis(500), handle).await {
-                Ok(_) => log::info!("Old bridge task stopped cleanly"),
-                Err(_) => {
-                    log::warn!("Old bridge task did not stop within 500ms, proceeding anyway")
+            match stop_bridge_task(handle, Duration::from_millis(500)).await {
+                BridgeStopOutcome::Clean => log::info!("Old bridge task stopped cleanly"),
+                BridgeStopOutcome::Aborted => {
+                    log::warn!("Old bridge task did not stop within 500ms and was aborted")
                 }
             }
         }
@@ -95,17 +122,26 @@ async fn connect_common(
         }
     }
 
+    let bridge_reconnect_policy = reconnect_policy(connect_code.as_deref());
     {
         let mut app_state = state_arc.lock();
         app_state.connect_code = connect_code;
         app_state.dj_name = config.dj_name.clone();
-        app_state.server_host = config.server_host.clone();
-        app_state.server_port = config.server_port;
+        app_state.server_profile = config.server_profile.clone();
     }
 
     // Create and connect client (async, no mutex held)
+    let connected_profile = config.server_profile.clone();
     let mut client = DjClient::new(config);
-    client.connect().await.map_err(|e| e.to_string())?;
+    if let Err(error) = client.connect().await {
+        log::warn!("DJ connection failed: {error}");
+        return Err(error.to_string());
+    }
+    if let Err(error) = persist_server_profile(&app_handle, &connected_profile) {
+        log::error!("Failed to persist authenticated server profile: {error}");
+        let _ = client.disconnect().await;
+        return Err("SERVER_PROFILE_STORE_FAILED".to_string());
+    }
 
     // Send block palette if provided
     if let Some(palette) = block_palette
@@ -130,7 +166,13 @@ async fn connect_common(
     // Spawn bridge task and store its handle
     let bridge_state = state_arc.clone();
     let handle = tokio::spawn(async move {
-        run_bridge(bridge_state, shutdown_rx, app_handle).await;
+        run_bridge(
+            bridge_state,
+            shutdown_rx,
+            app_handle,
+            bridge_reconnect_policy,
+        )
+        .await;
     });
     state_arc.lock().bridge_task_handle = Some(handle);
 
@@ -145,16 +187,17 @@ async fn connect_with_code(
     state: State<'_, AppStateWrapper>,
     code: String,
     dj_name: String,
-    server_host: String,
-    server_port: u16,
+    server_url: String,
+    certificate_sha256: Option<String>,
     block_palette: Option<Vec<Option<String>>>,
     dj_session_id: Option<String>,
 ) -> Result<(), String> {
     content_filter::validate_no_slurs(&dj_name, "DJ name")?;
+    let server_profile = ServerProfile::new(&server_url, certificate_sha256.as_deref())
+        .map_err(|error| format!("INVALID_SERVER_PROFILE: {error}"))?;
 
     let config = DjClientConfig {
-        server_host: server_host.clone(),
-        server_port,
+        server_profile,
         dj_name: dj_name.clone(),
         connect_code: Some(code.clone()),
         dj_session_id,
@@ -177,14 +220,15 @@ async fn connect_direct(
     app_handle: AppHandle,
     state: State<'_, AppStateWrapper>,
     dj_name: String,
-    server_host: String,
-    server_port: u16,
+    server_url: String,
+    certificate_sha256: Option<String>,
 ) -> Result<(), String> {
     content_filter::validate_no_slurs(&dj_name, "DJ name")?;
+    let server_profile = ServerProfile::new(&server_url, certificate_sha256.as_deref())
+        .map_err(|error| format!("INVALID_SERVER_PROFILE: {error}"))?;
 
     let config = DjClientConfig {
-        server_host: server_host.clone(),
-        server_port,
+        server_profile,
         dj_name: dj_name.clone(),
         dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
         dj_key: Some(String::new()),
@@ -199,12 +243,46 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 10;
 /// Maximum backoff delay between reconnection attempts in seconds.
 const MAX_RECONNECT_DELAY_SECS: u64 = 30;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReconnectPolicy {
+    Automatic,
+    FreshInviteRequired,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BridgeStopOutcome {
+    Clean,
+    Aborted,
+}
+
+async fn stop_bridge_task(
+    mut handle: tokio::task::JoinHandle<()>,
+    timeout: Duration,
+) -> BridgeStopOutcome {
+    if tokio::time::timeout(timeout, &mut handle).await.is_ok() {
+        return BridgeStopOutcome::Clean;
+    }
+
+    handle.abort();
+    let _ = handle.await;
+    BridgeStopOutcome::Aborted
+}
+
+fn reconnect_policy(connect_code: Option<&str>) -> ReconnectPolicy {
+    if connect_code.is_some() {
+        ReconnectPolicy::FreshInviteRequired
+    } else {
+        ReconnectPolicy::Automatic
+    }
+}
+
 /// Bridge task: reads audio analysis and sends frames to VJ server at ~60fps.
 /// Automatically reconnects with exponential backoff when the connection drops.
 async fn run_bridge(
     state_arc: Arc<Mutex<AppState>>,
     mut shutdown_rx: mpsc::Receiver<()>,
     app_handle: AppHandle,
+    reconnect_policy: ReconnectPolicy,
 ) {
     let mut reconnect_count: u32 = 0;
 
@@ -499,6 +577,22 @@ async fn run_bridge(
             break 'reconnect;
         }
 
+        // Connect codes are single-use credentials. Retrying one after a
+        // successful session disconnects would fail authentication, consume
+        // retry/rate-limit budget, and falsely suggest the session can recover.
+        // Clear the in-memory credential and ask for a fresh administrator
+        // invite instead. Direct development connections remain retryable.
+        if reconnect_policy == ReconnectPolicy::FreshInviteRequired {
+            let mut app_state = state_arc.lock();
+            app_state.connect_code = None;
+            app_state.bridge_shutdown_tx = None;
+            app_state.bridge_task_handle = None;
+            app_state.status.error = Some("RECONNECT_REQUIRES_NEW_CODE".to_string());
+            let _ = app_handle.emit("dj-status", &app_state.status);
+            log::info!("One-time DJ session ended; a fresh administrator invite is required");
+            break 'reconnect;
+        }
+
         // Auto-reconnect with exponential backoff
         reconnect_count += 1;
         if reconnect_count > MAX_RECONNECT_ATTEMPTS {
@@ -547,8 +641,7 @@ async fn run_bridge(
             let app_state = state_arc.lock();
 
             DjClientConfig {
-                server_host: app_state.server_host.clone(),
-                server_port: app_state.server_port,
+                server_profile: app_state.server_profile.clone(),
                 dj_name: app_state.dj_name.clone(),
                 connect_code: app_state.connect_code.clone(),
                 dj_id: Some(format!("tauri_dj_{:08x}", rand::random::<u32>())),
@@ -579,6 +672,51 @@ async fn run_bridge(
             }
         }
     } // end 'reconnect loop
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::{BridgeStopOutcome, ReconnectPolicy, reconnect_policy, stop_bridge_task};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    #[test]
+    fn code_authenticated_sessions_require_a_fresh_invite() {
+        assert_eq!(
+            reconnect_policy(Some("BEAT-7K3M")),
+            ReconnectPolicy::FreshInviteRequired
+        );
+    }
+
+    #[test]
+    fn credentialless_development_sessions_may_retry() {
+        assert_eq!(reconnect_policy(None), ReconnectPolicy::Automatic);
+    }
+
+    #[tokio::test]
+    async fn timed_out_stale_bridge_cannot_mutate_replacement_state() {
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let stale_mutation = Arc::new(AtomicBool::new(false));
+        let task_started = started.clone();
+        let task_release = release.clone();
+        let task_mutation = stale_mutation.clone();
+        let handle = tokio::spawn(async move {
+            task_started.notify_one();
+            task_release.notified().await;
+            task_mutation.store(true, Ordering::SeqCst);
+        });
+        started.notified().await;
+
+        let outcome = stop_bridge_task(handle, Duration::from_millis(1)).await;
+        release.notify_one();
+        tokio::task::yield_now().await;
+
+        assert_eq!(outcome, BridgeStopOutcome::Aborted);
+        assert!(!stale_mutation.load(Ordering::SeqCst));
+    }
 }
 
 /// Start audio capture from selected source
@@ -977,14 +1115,16 @@ pub fn run() {
     env_logger::init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Second instance launched — focus the existing window
-            log::info!("Single-instance: second launch with args: {:?}", args);
+            // Deep-link arguments may contain a connect code and must never be logged.
+            log::info!("Single-instance: focusing the existing window");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(AppStateWrapper(Arc::new(Mutex::new(AppState::default()))))
@@ -992,6 +1132,7 @@ pub fn run() {
             list_audio_sources,
             connect_with_code,
             connect_direct,
+            get_saved_server_profile,
             start_capture,
             stop_capture,
             change_audio_source,
