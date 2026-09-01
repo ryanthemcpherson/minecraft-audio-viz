@@ -1,14 +1,58 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import build_managed_runtime as builder
 
 
 class ManagedRuntimeBuildTest(unittest.TestCase):
+    def test_download_stops_when_payload_exceeds_locked_size(self) -> None:
+        response = io.BytesIO(b"oversized")
+        response.headers = {}  # type: ignore[attr-defined]
+        with tempfile.TemporaryDirectory() as temporary_value:
+            destination = Path(temporary_value) / "python.tar.gz"
+            with (
+                patch.object(builder.urllib.request, "urlopen", return_value=response),
+                self.assertRaisesRegex(ValueError, "size bound"),
+            ):
+                builder.download_verified(
+                    builder.load_lock()["runtimes"]["linux-x86_64"]["url"],
+                    "0" * 64,
+                    destination,
+                    expected_size=4,
+                )
+            self.assertFalse(destination.exists())
+
+    def test_wheel_cache_removes_oversized_expected_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_value:
+            wheel_cache = Path(temporary_value)
+            cached = wheel_cache / "locked.whl"
+            cached.write_bytes(b"oversized")
+
+            builder.prune_wheel_cache(
+                wheel_cache,
+                {"locked.whl": (4, hashlib.sha256(b"safe").hexdigest())},
+            )
+
+            self.assertFalse(cached.exists())
+
+    def test_native_windows_build_uses_windows_runtime(self) -> None:
+        self.assertEqual(
+            builder.detect_native_build_target("Windows", "AMD64"),
+            "windows-x86_64",
+        )
+
+    def test_native_arm_linux_build_uses_arm_runtime(self) -> None:
+        self.assertEqual(
+            builder.detect_native_build_target("Linux", "aarch64"),
+            "linux-aarch64",
+        )
+
     def test_locked_runtime_urls_are_accepted(self) -> None:
         lock = builder.load_lock()
         payload = b"cached portable runtime"
@@ -74,6 +118,46 @@ class ManagedRuntimeBuildTest(unittest.TestCase):
             payload.write_text("def main():\n    return 0\n", encoding="utf-8")
 
             builder.validate_no_local_build_paths(runtime_root, build_root)
+
+    def test_runtime_files_use_platform_independent_posix_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_value:
+            runtime_root = Path(temporary_value)
+            for relative in ("z/file.txt", "admin/file.txt", "LICENSE"):
+                path = runtime_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(relative, encoding="utf-8")
+
+            observed = [
+                path.relative_to(runtime_root).as_posix()
+                for path in builder.runtime_files(runtime_root)
+            ]
+
+            self.assertEqual(observed, ["LICENSE", "admin/file.txt", "z/file.txt"])
+
+    def test_python_license_is_normalized_across_portable_runtimes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_value:
+            runtime_root = Path(temporary_value)
+            source = runtime_root / "python/lib/python3.12/LICENSE.txt"
+            source.parent.mkdir(parents=True)
+            source.write_text("Python license\n", encoding="utf-8")
+
+            builder.normalize_python_license(runtime_root, "3.12.14")
+
+            self.assertEqual(
+                (runtime_root / "python/LICENSE.txt").read_text(encoding="utf-8"),
+                "Python license\n",
+            )
+
+    def test_tracked_symlink_is_rejected_instead_of_dereferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_value:
+            root = Path(temporary_value)
+            external = root / "external.txt"
+            external.write_text("outside repository\n", encoding="utf-8")
+            source = root / "tracked-link.txt"
+            source.symlink_to(external)
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                builder.copy_tracked_regular_file(source, root / "runtime/copied.txt")
 
 
 if __name__ == "__main__":

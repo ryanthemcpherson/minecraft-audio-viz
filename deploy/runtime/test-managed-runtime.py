@@ -12,6 +12,7 @@ import socket
 import subprocess  # nosec B404 -- the release smoke invokes fixed local verification tools.
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -347,15 +348,37 @@ def verify_extracted_inventory(runtime_root: Path) -> None:
         assert sha256_file(path) == item["sha256"]
 
 
+def release_archive_metadata(archive: Path) -> dict[str, Any]:
+    from verify_release_runtime import verify_release_archive
+
+    verified = verify_release_archive(archive, PLATFORM, smoke=False)
+    with zipfile.ZipFile(archive) as source:
+        manifest = source.read("files.json")
+        uncompressed_size = sum(item.file_size for item in source.infolist())
+    return {
+        "archive_size": archive.stat().st_size,
+        "entrypoint": verified.entrypoint,
+        "files_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        "platform": PLATFORM,
+        "sha256": verified.sha256,
+        "uncompressed_size": uncompressed_size,
+    }
+
+
 @pytest.mark.asyncio
 async def test_real_managed_runtime_end_to_end() -> None:
-    artifact_directory = Path(
-        os.environ.get("MCAV_RUNTIME_ARTIFACT_DIR", DEFAULT_ARTIFACT_DIRECTORY)
-    ).resolve()
-    archive = artifact_directory / f"mcav-runtime-{PLATFORM}.zip"
-    metadata_path = artifact_directory / f"mcav-runtime-{PLATFORM}.artifact.json"
-    assert archive.is_file(), f"build the managed runtime first: {archive}"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    release_archive = os.environ.get("MCAV_RUNTIME_ARCHIVE")
+    if release_archive:
+        archive = Path(release_archive).resolve()
+        metadata = release_archive_metadata(archive)
+    else:
+        artifact_directory = Path(
+            os.environ.get("MCAV_RUNTIME_ARTIFACT_DIR", DEFAULT_ARTIFACT_DIRECTORY)
+        ).resolve()
+        archive = artifact_directory / f"mcav-runtime-{PLATFORM}.zip"
+        metadata_path = artifact_directory / f"mcav-runtime-{PLATFORM}.artifact.json"
+        assert archive.is_file(), f"build the managed runtime first: {archive}"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["platform"] == PLATFORM
     assert archive.stat().st_size == metadata["archive_size"]
     assert sha256_file(archive) == metadata["sha256"]
