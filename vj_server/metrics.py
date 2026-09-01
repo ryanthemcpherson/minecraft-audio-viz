@@ -7,6 +7,7 @@ Provides lightweight HTTP endpoints for production monitoring:
 """
 
 import asyncio
+import ipaddress
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -140,6 +141,35 @@ async def _handle_metrics(writer: asyncio.StreamWriter, server: "VJServer") -> N
         "",
     ]
 
+    managed_runtime = getattr(server, "_managed_runtime", None)
+    if managed_runtime is not None:
+        lines.extend(
+            [
+                "# HELP mcav_managed_mode Whether Paper manages this runtime",
+                "# TYPE mcav_managed_mode gauge",
+                "mcav_managed_mode 1",
+                "# HELP mcav_managed_parent_failures_total Parent identity observation failures",
+                "# TYPE mcav_managed_parent_failures_total counter",
+                f"mcav_managed_parent_failures_total {managed_runtime.parent_failure_total}",
+                "# HELP mcav_managed_control_rejections_total Rejected lifecycle instructions",
+                "# TYPE mcav_managed_control_rejections_total counter",
+                f"mcav_managed_control_rejections_total {managed_runtime.rejected_control_total}",
+                "# HELP mcav_managed_health_sequence Last managed health sequence",
+                "# TYPE mcav_managed_health_sequence gauge",
+                f"mcav_managed_health_sequence {managed_runtime.health_sequence}",
+                "# HELP mcav_managed_target_render_fps Current target render FPS",
+                "# TYPE mcav_managed_target_render_fps gauge",
+                f"mcav_managed_target_render_fps {server._target_render_fps}",
+                "# HELP mcav_managed_entity_budget Current active entity budget",
+                "# TYPE mcav_managed_entity_budget gauge",
+                f"mcav_managed_entity_budget {server._managed_entity_budget}",
+                "# HELP mcav_managed_particles_enabled Whether managed particles are enabled",
+                "# TYPE mcav_managed_particles_enabled gauge",
+                f"mcav_managed_particles_enabled {int(server._managed_particles_enabled)}",
+                "",
+            ]
+        )
+
     body = "\n".join(lines)
     response = (
         "HTTP/1.1 200 OK\r\n"
@@ -166,6 +196,14 @@ async def start_metrics_server(
     Returns:
         asyncio.Server instance
     """
+
+    normalized_host = host.strip().strip("[]")
+    try:
+        loopback = ipaddress.ip_address(normalized_host).is_loopback
+    except ValueError:
+        loopback = normalized_host.rstrip(".").casefold() == "localhost"
+    if not loopback:
+        raise ValueError("metrics server must bind to a loopback address")
 
     async def client_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         await handle_http_request(reader, writer, server)

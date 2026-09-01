@@ -68,6 +68,9 @@ public final class FixtureChildProcess {
         }
         for (String key : List.of(
             "MCAV_RENDERER_SECRET",
+            "MCAV_STATE_DIR",
+            "MCAV_PARENT_PID",
+            "MCAV_PARENT_START_ID",
             "AWS_SECRET_ACCESS_KEY",
             "HTTP_PROXY",
             "HTTPS_PROXY",

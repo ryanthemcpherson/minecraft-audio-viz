@@ -495,8 +495,11 @@ class RelayMixin:
                             ):
                                 try:
                                     await self.viz_client.cleanup_zone(self.zone)
-                                    await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, zs_ec.block_type
+                                    await self._init_managed_pool(
+                                        self.viz_client,
+                                        self.zone,
+                                        self.entity_count,
+                                        zs_ec.block_type,
                                     )
                                 except Exception as e:
                                     logger.warning(f"Failed to update Minecraft pool: {e}")
@@ -517,8 +520,11 @@ class RelayMixin:
                                 and self.viz_client.connected
                             ):
                                 try:
-                                    await self.viz_client.init_pool(
-                                        self.zone, self.entity_count, zs_zc.block_type
+                                    await self._init_managed_pool(
+                                        self.viz_client,
+                                        self.zone,
+                                        self.entity_count,
+                                        zs_zc.block_type,
                                     )
                                 except Exception as e:
                                     logger.warning(f"Failed to init Minecraft pool: {e}")
@@ -1628,6 +1634,10 @@ class RelayMixin:
             self.minecraft_port,
             enable_heartbeat=True,
             auth_token=self.minecraft_ws_secret,
+            require_authentication=getattr(self, "_managed_runtime", None) is not None,
+            required_server_type=(
+                "paper" if getattr(self, "_managed_runtime", None) is not None else None
+            ),
         )
         self.viz_client = candidate
         setup_succeeded = False
@@ -1705,7 +1715,12 @@ class RelayMixin:
                 else:
                     # Block mode: init entity pool
                     try:
-                        await candidate.init_pool(zn, zs.entity_count, zs.block_type)
+                        await self._init_managed_pool(
+                            candidate,
+                            zn,
+                            zs.entity_count,
+                            zs.block_type,
+                        )
                     except Exception as e:
                         logger.warning(f"Block pool init failed for zone '{zn}': {e}")
 
@@ -1720,6 +1735,9 @@ class RelayMixin:
                 self._bitmap_pattern_cache = []
 
             setup_succeeded = True
+            managed_runtime = getattr(self, "_managed_runtime", None)
+            if managed_runtime is not None:
+                await managed_runtime.renderer_authenticated(candidate)
             return True
         finally:
             if not setup_succeeded:
@@ -1896,8 +1914,13 @@ class RelayMixin:
             # Track the high-water mark of entities in the Minecraft pool.
             # Hide any pool entities not covered by the current frame to
             # prevent "ghost" blocks stuck at their last position.
+            effective_pool_size = self._managed_zone_entity_budgets().get(self.zone, 0)
+            entities = entities[:effective_pool_size]
             entity_count = len(entities)
-            self._minecraft_pool_size = max(self._minecraft_pool_size, entity_count)
+            self._minecraft_pool_size = min(
+                max(self._minecraft_pool_size, entity_count),
+                effective_pool_size,
+            )
             if entity_count < self._minecraft_pool_size:
                 covered_ids = {e.get("id") for e in entities}
                 for i in range(self._minecraft_pool_size):
@@ -1906,15 +1929,15 @@ class RelayMixin:
                         entities.append({"id": eid, "scale": 0})
             # After a deferred pool shrink completes, lower the high-water mark
             if not self._transitioning and self._transition_pending_resize is None:
-                self._minecraft_pool_size = self.entity_count
+                self._minecraft_pool_size = effective_pool_size
 
             # Sanitize entity data before forwarding to Minecraft
             entities = _sanitize_entities(
-                entities, max_count=max(len(entities), self.entity_count * 2)
+                entities, max_count=max(len(entities), effective_pool_size * 2)
             )
 
             particles = []
-            if is_beat and beat_intensity > 0.2:
+            if self._managed_particles_enabled and is_beat and beat_intensity > 0.2:
                 particles.append(
                     {
                         "particle": "NOTE",
@@ -1978,8 +2001,13 @@ class RelayMixin:
             return
 
         try:
+            effective_pool_size = self._managed_zone_entity_budgets().get(zone_name, 0)
+            entities = entities[:effective_pool_size]
             entity_count = len(entities)
-            zone_state.minecraft_pool_size = max(zone_state.minecraft_pool_size, entity_count)
+            zone_state.minecraft_pool_size = min(
+                max(zone_state.minecraft_pool_size, entity_count),
+                effective_pool_size,
+            )
             if entity_count < zone_state.minecraft_pool_size:
                 covered_ids = {e.get("id") for e in entities}
                 for i in range(zone_state.minecraft_pool_size):
@@ -1987,14 +2015,14 @@ class RelayMixin:
                     if eid not in covered_ids:
                         entities.append({"id": eid, "scale": 0})
             if not zone_state.transitioning and zone_state.transition_pending_resize is None:
-                zone_state.minecraft_pool_size = zone_state.entity_count
+                zone_state.minecraft_pool_size = effective_pool_size
 
             entities = _sanitize_entities(
-                entities, max_count=max(len(entities), zone_state.entity_count * 2)
+                entities, max_count=max(len(entities), effective_pool_size * 2)
             )
 
             particles = []
-            if is_beat and beat_intensity > 0.2:
+            if self._managed_particles_enabled and is_beat and beat_intensity > 0.2:
                 particles.append(
                     {
                         "particle": "NOTE",

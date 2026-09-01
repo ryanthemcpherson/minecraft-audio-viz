@@ -72,14 +72,13 @@ class RuntimeProcessLauncherTest {
         assertEquals(
             List.of(
                 "--managed-by-paper",
-                "--state-dir", launch.stateDirectory().toString(),
                 "--public-host", "0.0.0.0",
                 "--public-port", "9000"
             ),
             command.subList(1, command.size())
         );
         assertFalse(command.stream().anyMatch(argument -> argument.contains(SECRET)));
-        assertTrue(command.contains(launch.stateDirectory().toString()));
+        assertFalse(command.contains(launch.stateDirectory().toString()));
     }
 
     @Test
@@ -88,12 +87,25 @@ class RuntimeProcessLauncherTest {
         List<String> logs = new CopyOnWriteArrayList<>();
         RuntimeProcessLauncher launcher = launcher(fixture, 0, false, false, logs);
 
-        ManagedRuntimeProcess process = track(launcher.launch(launchFixture(false)));
+        RuntimeLaunch launch = launchFixture(false);
+        ManagedRuntimeProcess process = track(launcher.launch(launch));
         Properties report = awaitReport(fixture.report());
         process.requestShutdown();
         process.terminate(Duration.ofSeconds(2), Duration.ofMillis(200));
 
         assertEquals(SECRET, report.getProperty("environment.MCAV_RENDERER_SECRET"));
+        assertEquals(
+            launch.stateDirectory().toString(),
+            report.getProperty("environment.MCAV_STATE_DIR")
+        );
+        assertEquals(
+            Long.toString(ProcessHandle.current().pid()),
+            report.getProperty("environment.MCAV_PARENT_PID")
+        );
+        assertEquals(
+            RuntimeProcessLauncher.currentProcessStartIdentity(),
+            report.getProperty("environment.MCAV_PARENT_START_ID")
+        );
         assertEquals("1", report.getProperty("environment.OPENBLAS_NUM_THREADS"));
         assertEquals("1", report.getProperty("environment.OMP_NUM_THREADS"));
         assertEquals("1", report.getProperty("environment.MKL_NUM_THREADS"));
@@ -328,6 +340,7 @@ class RuntimeProcessLauncherTest {
         Path root = temporaryDirectory.resolve(missingDirectory ? "missing" : "runtime with spaces");
         if (!missingDirectory) {
             Files.createDirectories(root);
+            Files.createDirectories(root.resolve("state with spaces"));
         }
         Path entrypoint = root.resolve(isWindows() ? "fixture.exe" : "fixture");
         if (!missingDirectory) {

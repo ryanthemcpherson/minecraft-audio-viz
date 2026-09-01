@@ -114,6 +114,9 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
         environment.clear();
         environment.putAll(baseEnvironment(inheritedEnvironment));
         environment.putAll(launch.environment());
+        environment.put("MCAV_STATE_DIR", launch.stateDirectory().toString());
+        environment.put("MCAV_PARENT_PID", Long.toString(ProcessHandle.current().pid()));
+        environment.put("MCAV_PARENT_START_ID", currentProcessStartIdentity());
         environment.putAll(THREAD_LIMITS);
 
         Process process;
@@ -151,7 +154,6 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
         return List.of(
             launch.entrypoint().toString(),
             "--managed-by-paper",
-            "--state-dir", launch.stateDirectory().toString(),
             "--public-host", launch.publicHost(),
             "--public-port", Integer.toString(launch.publicPort())
         );
@@ -163,6 +165,12 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
             Files.isSymbolicLink(launch.workingDirectory())
         ) {
             throw new LaunchException(FailureReason.WORKING_DIRECTORY_INVALID);
+        }
+        if (
+            !Files.isDirectory(launch.stateDirectory(), LinkOption.NOFOLLOW_LINKS) ||
+            Files.isSymbolicLink(launch.stateDirectory())
+        ) {
+            throw new LaunchException(FailureReason.STATE_DIRECTORY_INVALID);
         }
         Path entrypoint = launch.entrypoint();
         if (
@@ -182,6 +190,49 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
         } else if (!Files.isExecutable(entrypoint)) {
             throw new LaunchException(FailureReason.ENTRYPOINT_NOT_EXECUTABLE);
         }
+    }
+
+    static String currentProcessStartIdentity() throws LaunchException {
+        if (isWindows()) {
+            return ProcessHandle.current().info().startInstant()
+                .map(value -> Long.toString(value.toEpochMilli()))
+                .filter(RuntimeProcessLauncher::decimalIdentity)
+                .orElseThrow(() -> new LaunchException(
+                    FailureReason.PARENT_IDENTITY_UNAVAILABLE
+                ));
+        }
+        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) {
+            throw new LaunchException(FailureReason.PARENT_IDENTITY_UNAVAILABLE);
+        }
+        try {
+            String stat = Files.readString(
+                Path.of("/proc", Long.toString(ProcessHandle.current().pid()), "stat"),
+                StandardCharsets.UTF_8
+            );
+            int closingParenthesis = stat.lastIndexOf(')');
+            if (closingParenthesis < 0) {
+                throw new IOException("invalid procfs process stat");
+            }
+            String[] fields = stat.substring(closingParenthesis + 1).trim().split("\\s+");
+            if (fields.length <= 19 || !decimalIdentity(fields[19])) {
+                throw new IOException("invalid procfs process start identity");
+            }
+            return fields[19];
+        } catch (IOException | SecurityException error) {
+            throw new LaunchException(FailureReason.PARENT_IDENTITY_UNAVAILABLE, error);
+        }
+    }
+
+    private static boolean decimalIdentity(String value) {
+        if (value == null || value.isEmpty() || value.length() > 64) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            if (value.charAt(index) < '0' || value.charAt(index) > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static List<String> validateCommand(List<String> source) throws LaunchException {
@@ -343,11 +394,13 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
 
     public enum FailureReason {
         WORKING_DIRECTORY_INVALID,
+        STATE_DIRECTORY_INVALID,
         ENTRYPOINT_INVALID,
         ENTRYPOINT_NOT_EXECUTABLE,
         COMMAND_INVALID,
         START_FAILED,
-        LOG_READER_UNAVAILABLE
+        LOG_READER_UNAVAILABLE,
+        PARENT_IDENTITY_UNAVAILABLE
     }
 
     public static final class LaunchException extends Exception {

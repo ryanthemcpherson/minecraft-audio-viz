@@ -632,6 +632,7 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
 ) -> None:
     captured: dict = {}
     state_directory = tmp_path / "state"
+    state_directory.mkdir()
     certificate_path = state_directory / "tls.crt"
     key_path = state_directory / "tls.key"
     auth_path = state_directory / "auth.json"
@@ -643,7 +644,7 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
             captured["identity_options"] = kwargs
 
         def ensure(self):
-            state_directory.mkdir()
+            state_directory.mkdir(exist_ok=True)
             auth_path.write_text('{"djs":{},"vj_operators":{}}\n', encoding="utf-8")
             return type(
                 "IdentityState",
@@ -680,6 +681,13 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
     monkeypatch.setattr(cli_module.signal, "signal", lambda *args: None)
     monkeypatch.setenv("MCAV_RENDERER_TOKEN", "r" * 32)
     monkeypatch.setenv("MCAV_SETUP_TOKEN", "A" * 43)
+    monkeypatch.setenv("MCAV_LAUNCH_GENERATION", "42")
+    monkeypatch.setenv("MCAV_LAUNCH_NONCE", "N" * 43)
+    monkeypatch.setenv("MCAV_PARENT_PID", "321")
+    monkeypatch.setenv("MCAV_PARENT_START_ID", "987654")
+    monkeypatch.setenv("MCAV_STATE_DIR", str(state_directory.resolve()))
+    monkeypatch.setenv("MCAV_RELEASE_VERSION", "1.2.0")
+    monkeypatch.setenv("MCAV_RUNTIME_API", "1")
     monkeypatch.setenv("MCAV_PUBLIC_URL", "https://panel.example.test:8443/")
     monkeypatch.setenv("MCAV_TLS_MODE", tls_mode)
     if tls_mode == "PROVIDED":
@@ -691,8 +699,6 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
         [
             "audioviz-vj",
             "--managed-by-paper",
-            "--state-dir",
-            str(state_directory),
             "--project-root",
             str(tmp_path),
         ],
@@ -708,6 +714,7 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
     assert captured["server"]["tls_key"] == key_path
     assert captured["server"]["setup_manager"] is setup_manager
     assert captured["server"]["certificate_fingerprint"] == expected_fingerprint
+    assert captured["server"]["managed_environment"].generation == 42
 
 
 @pytest.mark.asyncio

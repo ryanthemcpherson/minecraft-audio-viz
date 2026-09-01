@@ -206,6 +206,26 @@ def get_performance_profile(name: str) -> PerformanceConfig:
     return PERFORMANCE_PROFILES.get(name.lower(), PERFORMANCE_PROFILES["default"])
 
 
+@dataclass(frozen=True)
+class ManagedPerformanceSettings:
+    """Ephemeral load limits sent by the supervising Paper plugin."""
+
+    level: str
+    target_fps: int
+    entity_budget: int
+    particles_enabled: bool
+
+    def __post_init__(self) -> None:
+        if self.level not in {"NORMAL", "PREVIEW_REDUCED", "FPS_REDUCED", "SAFE"}:
+            raise ValueError("unsupported managed performance level")
+        if type(self.target_fps) is not int or not 1 <= self.target_fps <= 240:
+            raise ValueError("managed target FPS must be between 1 and 240")
+        if type(self.entity_budget) is not int or not 1 <= self.entity_budget <= 10_000:
+            raise ValueError("managed entity budget must be between 1 and 10000")
+        if type(self.particles_enabled) is not bool:
+            raise ValueError("managed particle policy must be boolean")
+
+
 @dataclass
 class ServerConfig:
     """Server connection configuration."""

@@ -48,10 +48,11 @@ except ImportError:
     HAS_LINK = False
 
 from vj_server.beat_predictor import BeatPredictor
-from vj_server.config import validate_http_bind_host
+from vj_server.config import ManagedPerformanceSettings, validate_http_bind_host
 from vj_server.coordinator_client import CoordinatorClient
 from vj_server.dj_manager import DJManagerMixin
 from vj_server.ingress.app import IngressServer, WebSocketHandlers
+from vj_server.managed import ManagedEnvironment, ManagedHealthSnapshot, ManagedRuntime
 from vj_server.models import (
     _USE_ASYNC_LUA,
     ConnectCode,
@@ -117,6 +118,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         legacy_separate_listeners: bool = False,
         setup_manager: SetupManager | None = None,
         certificate_fingerprint: str | None = None,
+        managed_environment: ManagedEnvironment | None = None,
     ):
         self.dj_port = dj_port
         self.broadcast_port = broadcast_port
@@ -151,6 +153,32 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         self.auth_config = auth_config or DJAuthConfig()
         self.require_auth = require_auth
         self.metrics_port = metrics_port
+
+        # Paper may adjust these in memory when server load changes. They are
+        # deliberately never persisted, so every process starts from config.
+        self._target_render_fps = 60
+        self._preview_frame_divisor = 3
+        self._managed_entity_budget = 10_000
+        self._managed_particles_enabled = True
+        self._managed_ingress_healthy = False
+        current_monotonic = time.monotonic()
+        self._last_loop_iteration_at = current_monotonic
+        self._last_render_completed_at = current_monotonic
+        self._managed_render_queue_depth = 0
+        self._managed_pool_reconcile_task: asyncio.Task[Any] | None = None
+        self._managed_pool_reconcile_version = 0
+        if managed_environment is not None:
+            self._apply_managed_performance(managed_environment.initial_performance)
+        self._managed_runtime = (
+            ManagedRuntime(
+                managed_environment,
+                request_stop=self.stop,
+                apply_performance=self._apply_managed_performance,
+                health_provider=self._managed_health_snapshot,
+            )
+            if managed_environment is not None
+            else None
+        )
 
         # DJ management
         self._djs: Dict[str, DJConnection] = {}
@@ -751,7 +779,6 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
     async def _main_loop(self):
         """Main visualization loop."""
-        frame_interval = 0.016  # 60 FPS simulation/preview loop
         mc_frame_interval = 0.05  # 20 TPS-aligned Minecraft update pacing
         next_mc_send_at = time.monotonic()
         next_frame_at = time.perf_counter()
@@ -762,6 +789,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         while self._running:
             try:
                 frame_start = time.perf_counter()
+                self._last_loop_iteration_at = time.monotonic()
+                frame_interval = 1.0 / self._target_render_fps
                 loop_dt = min(frame_start - last_frame_start, 0.05)  # Cap at 50ms
                 last_frame_start = frame_start
                 calc_ms = 0.0
@@ -889,6 +918,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     calc_start = time.perf_counter()
                     # Collect zones that need Lua calculation
                     calc_tasks = {}
+                    zone_budgets = self._managed_zone_entity_budgets()
                     for zone_name, zone_state in self._zone_patterns.items():
                         if zone_state.render_mode == "bitmap":
                             zone_entities[zone_name] = []  # Bitmap zones render on MC side
@@ -899,11 +929,23 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                             zone_entities[zone_name] = []
                         else:
                             calc_tasks[zone_name] = self._calculate_entities_for_zone(
-                                zone_state, audio_state, zone_name
+                                zone_state,
+                                audio_state,
+                                zone_name,
+                                entity_limit=zone_budgets.get(zone_name, 0),
                             )
                     if calc_tasks:
-                        results = await asyncio.gather(*calc_tasks.values())
+                        self._managed_render_queue_depth = len(calc_tasks)
+                        try:
+                            results = await asyncio.gather(*calc_tasks.values())
+                        finally:
+                            self._managed_render_queue_depth = 0
                         for zn, zents in zip(calc_tasks.keys(), results):
+                            zone_entities[zn] = zents
+                    zone_entities = self._apply_managed_entity_budget(zone_entities)
+                    if calc_tasks:
+                        for zn in calc_tasks:
+                            zents = zone_entities.get(zn, [])
                             zents = self._apply_effects(zents, visual_bands)
                             self._zone_patterns[zn].last_entities = zents
                             zone_entities[zn] = zents
@@ -964,10 +1006,10 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                         )
                     mc_ms = (time.perf_counter() - mc_start) * 1000.0
 
-                # Send to browser clients at ~20fps (every 3rd frame) to avoid
+                # Send to browser clients at a bounded cadence to avoid
                 # overwhelming slow clients. Beats always send immediately.
                 broadcast_start = time.perf_counter()
-                should_broadcast = is_beat or (self._frame_count % 3 == 0)
+                should_broadcast = is_beat or (self._frame_count % self._preview_frame_divisor == 0)
                 if should_broadcast:
                     await self._broadcast_viz_state(
                         entities,
@@ -995,6 +1037,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     self._last_health_log = current_time
 
                 consecutive_errors = 0  # Reset on successful frame
+                self._last_render_completed_at = time.monotonic()
                 next_frame_at += frame_interval
                 sleep_for = next_frame_at - time.perf_counter()
                 if sleep_for < 0.0:
@@ -1046,6 +1089,9 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         legacy_http_server = None
         legacy_http_thread = None
         legacy_http_thread_started = False
+
+        if self._managed_runtime is not None:
+            await self._managed_runtime.start()
 
         async def handle_dj_connection(connection):
             await self._handle_dj_connection(WebsocketsPeer(connection, max_message_bytes=65_536))
@@ -1111,6 +1157,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             except BaseException:
                 self._running = False
                 await close_started_servers()
+                if self._managed_runtime is not None:
+                    await self._managed_runtime.close()
                 raise
         else:
             ingress_server = IngressServer(
@@ -1133,10 +1181,16 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             except BaseException:
                 self._running = False
                 await close_started_servers()
+                if self._managed_runtime is not None:
+                    await self._managed_runtime.close()
                 raise
             scheme = "https" if self.server_ssl_context is not None else "http"
             host, port = ingress_server.bound_address
             logger.info("Unified public ingress: %s://%s:%d", scheme, host, port)
+
+        self._managed_ingress_healthy = True
+        if self._managed_runtime is not None:
+            await self._managed_runtime.mark_ingress_bound()
 
         # Start metrics HTTP server if enabled
         try:
@@ -1145,11 +1199,25 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
                 metrics_server = await start_metrics_server(self, self.metrics_port)
 
+            if self._managed_runtime is not None:
+                if metrics_server is None:
+                    raise RuntimeError("Paper-managed mode requires the loopback metrics server")
+                await self._managed_runtime.mark_metrics_bound()
+
+                if not self._skip_minecraft:
+                    if await self.connect_minecraft():
+                        logger.info("Authenticated the managed Minecraft renderer")
+                    else:
+                        logger.warning("Managed Minecraft renderer is not ready; retrying")
+
             # Register with coordinator if configured
             await self._init_coordinator()
         except BaseException:
             self._running = False
+            self._managed_ingress_healthy = False
             await close_started_servers()
+            if self._managed_runtime is not None:
+                await self._managed_runtime.close()
             raise
 
         try:
@@ -1227,6 +1295,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     getattr(self, "_pattern_hot_reload_task", None),
                     self._coordinator_heartbeat_task,
                     self._link_task,
+                    self._managed_pool_reconcile_task,
                     getattr(self, "_health_log_task", None),
                 ]
                 if t is not None and not t.done()
@@ -1246,6 +1315,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
             # Close public and compatibility listeners.
             await close_started_servers()
+            if self._managed_runtime is not None:
+                await self._managed_runtime.close()
             logger.info("VJ server shutdown complete")
 
     def _reload_managed_auth(self, username: str) -> None:
@@ -1264,6 +1335,140 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
     def stop(self):
         """Stop the server."""
         self._running = False
+
+    def _apply_managed_performance(self, settings: ManagedPerformanceSettings) -> None:
+        """Apply a validated, process-local load profile from Paper."""
+        self._target_render_fps = settings.target_fps
+        preview_fps = {
+            "NORMAL": 20,
+            "PREVIEW_REDUCED": 10,
+            "FPS_REDUCED": 15,
+            "SAFE": 5,
+        }[settings.level]
+        self._preview_frame_divisor = max(1, math.ceil(settings.target_fps / preview_fps))
+        self._managed_entity_budget = settings.entity_budget
+        self._managed_particles_enabled = settings.particles_enabled
+        self._managed_pool_reconcile_version += 1
+        client = getattr(self, "viz_client", None)
+        if client is not None and client.connected:
+            current_task = self._managed_pool_reconcile_task
+            if current_task is None or current_task.done():
+                self._managed_pool_reconcile_task = asyncio.get_running_loop().create_task(
+                    self._reconcile_managed_pools(),
+                    name="mcav-pool-reconcile",
+                )
+
+    def _managed_zone_entity_budgets(self) -> Dict[str, int]:
+        """Allocate the configured total entity budget in stable zone order."""
+        return {
+            zone_name: effective_count
+            for zone_name, _zone_state, effective_count in self._managed_pool_snapshot()
+        }
+
+    def _managed_pool_snapshot(
+        self,
+    ) -> tuple[tuple[str, ZonePatternState, int], ...]:
+        """Capture block-zone allocations without awaiting a mutable dictionary."""
+        remaining = self._managed_entity_budget
+        snapshot = []
+        for zone_name, zone_state in tuple(self._zone_patterns.items()):
+            if zone_state.render_mode == "bitmap":
+                continue
+            allocation = min(max(0, zone_state.entity_count), remaining)
+            snapshot.append((zone_name, zone_state, allocation))
+            remaining -= allocation
+        return tuple(snapshot)
+
+    @staticmethod
+    def _managed_pool_snapshot_signature(
+        snapshot: tuple[tuple[str, ZonePatternState, int], ...],
+    ) -> tuple[tuple[str, int, int, str, str, int], ...]:
+        return tuple(
+            (
+                zone_name,
+                id(zone_state),
+                zone_state.entity_count,
+                zone_state.render_mode,
+                zone_state.block_type,
+                effective_count,
+            )
+            for zone_name, zone_state, effective_count in snapshot
+        )
+
+    async def _init_managed_pool(
+        self,
+        client: Any,
+        zone_name: str,
+        requested_count: int,
+        material: str,
+    ) -> bool:
+        allocation = self._managed_zone_entity_budgets().get(zone_name, 0)
+        effective_count = min(max(0, requested_count), allocation)
+        initialized = await client.init_pool(zone_name, effective_count, material)
+        zone_state = self._zone_patterns.get(zone_name)
+        if zone_state is not None and initialized:
+            zone_state.minecraft_pool_size = effective_count
+        return initialized
+
+    async def _reconcile_managed_pools(self) -> None:
+        client = self.viz_client
+        if client is None or not client.connected:
+            return
+        while client is self.viz_client and client.connected:
+            observed_version = self._managed_pool_reconcile_version
+            snapshot = self._managed_pool_snapshot()
+            observed_signature = self._managed_pool_snapshot_signature(snapshot)
+            for zone_name, zone_state, effective_count in snapshot:
+                if client is not self.viz_client or not client.connected:
+                    return
+                current_snapshot = self._managed_pool_snapshot()
+                if (
+                    observed_version != self._managed_pool_reconcile_version
+                    or observed_signature != self._managed_pool_snapshot_signature(current_snapshot)
+                ):
+                    break
+                initialized = await client.init_pool(
+                    zone_name,
+                    effective_count,
+                    zone_state.block_type,
+                )
+                if initialized and self._zone_patterns.get(zone_name) is zone_state:
+                    zone_state.minecraft_pool_size = effective_count
+
+            current_snapshot = self._managed_pool_snapshot()
+            if (
+                observed_version == self._managed_pool_reconcile_version
+                and observed_signature == self._managed_pool_snapshot_signature(current_snapshot)
+            ):
+                return
+
+    def _apply_managed_entity_budget(
+        self,
+        zone_entities: Dict[str, List[dict]],
+    ) -> Dict[str, List[dict]]:
+        """Limit active entities across zones deterministically."""
+        remaining = self._managed_entity_budget
+        limited: Dict[str, List[dict]] = {}
+        for zone_name, entities in zone_entities.items():
+            keep = min(len(entities), remaining)
+            limited[zone_name] = entities[:keep]
+            remaining -= keep
+        return limited
+
+    def _managed_health_snapshot(self) -> ManagedHealthSnapshot:
+        now = time.monotonic()
+        renderer_connected = self.viz_client is not None and self.viz_client.connected
+        return ManagedHealthSnapshot(
+            renderer_connected=renderer_connected,
+            ingress_healthy=self._managed_ingress_healthy,
+            # ManagedRuntime measures scheduler drift in its own periodic task.
+            # Render cadence is reported separately and must not masquerade as
+            # event-loop health when a reduced performance profile is active.
+            event_loop_lag_ms=0,
+            last_render_age_ms=max(0, int((now - self._last_render_completed_at) * 1000)),
+            ingress_queue_depth=0,
+            render_queue_depth=self._managed_render_queue_depth,
+        )
 
     async def cleanup(self):
         """Clean up resources."""

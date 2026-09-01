@@ -32,6 +32,14 @@ async def mock_server():
     mock_viz_client = Mock()
     mock_viz_client.connected = True
     server.viz_client = mock_viz_client
+    server._managed_runtime = Mock(
+        parent_failure_total=2,
+        rejected_control_total=3,
+        health_sequence=8,
+    )
+    server._target_render_fps = 20
+    server._managed_entity_budget = 160
+    server._managed_particles_enabled = False
 
     return server
 
@@ -81,6 +89,25 @@ async def test_metrics_contains_uptime(metrics_server):
 
 
 @pytest.mark.asyncio
+async def test_metrics_contains_fixed_managed_lifecycle_metrics(metrics_server):
+    response = await _http_get("/metrics")
+
+    assert "mcav_managed_mode 1" in response
+    assert "mcav_managed_parent_failures_total 2" in response
+    assert "mcav_managed_control_rejections_total 3" in response
+    assert "mcav_managed_health_sequence 8" in response
+    assert "mcav_managed_target_render_fps 20" in response
+    assert "mcav_managed_entity_budget 160" in response
+    assert "mcav_managed_particles_enabled 0" in response
+
+
+@pytest.mark.asyncio
 async def test_unknown_path_returns_404(metrics_server):
     response = await _http_get("/notfound")
     assert "404 Not Found" in response
+
+
+@pytest.mark.asyncio
+async def test_metrics_server_rejects_non_loopback_bind(mock_server):
+    with pytest.raises(ValueError, match="loopback"):
+        await start_metrics_server(mock_server, 0, "0.0.0.0")

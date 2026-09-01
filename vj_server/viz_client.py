@@ -138,6 +138,8 @@ class VizClient:
         max_reconnect_attempts: int = 10,
         enable_heartbeat: bool = False,  # Enable background heartbeat (requires receive loop)
         auth_token: str | None = None,
+        require_authentication: bool = False,
+        required_server_type: str | None = None,
     ):
         self.host = _normalize_host(host)
         self.port = port
@@ -155,6 +157,11 @@ class VizClient:
         self._reconnect_attempts = 0
         self._reconnect_task: Optional[asyncio.Task[Any]] = None
         self.auth_token = auth_token.strip() if auth_token and auth_token.strip() else None
+        self.require_authentication = require_authentication
+        if required_server_type not in {None, "paper", "fabric"}:
+            raise ValueError("unsupported required renderer type")
+        self.required_server_type = required_server_type
+        self.token_authenticated = False
 
         # Heartbeat settings
         self._enable_heartbeat = enable_heartbeat
@@ -246,6 +253,7 @@ class VizClient:
                 reconnect_task.cancel()
         self._cancel_pending_futures(pending_reason)
         self.server_type = None
+        self.token_authenticated = False
         websocket = self.ws
         self.ws = None
 
@@ -273,6 +281,7 @@ class VizClient:
         """Connect and complete the Minecraft WebSocket authentication handshake."""
         self._connected = False
         self.server_type = None
+        self.token_authenticated = False
         endpoint_host, endpoint_port = self.host, self.port
         if not _is_loopback_host(endpoint_host):
             logger.error(
@@ -321,6 +330,14 @@ class VizClient:
                 await self._close_failed_connection()
                 return False
             self.server_type = server_type
+            if self.required_server_type is not None and server_type != self.required_server_type:
+                logger.error("Minecraft WebSocket renderer type does not match the required type")
+                await self._close_failed_connection()
+                return False
+            if self.require_authentication and not auth_required:
+                logger.error("Minecraft WebSocket did not require managed token authentication")
+                await self._close_failed_connection()
+                return False
             if auth_required:
                 if self.auth_token is None:
                     logger.error(
@@ -338,6 +355,7 @@ class VizClient:
                     logger.error("Minecraft WebSocket authentication was rejected")
                     await self._close_failed_connection()
                     return False
+                self.token_authenticated = True
 
             # Renderer requests and liveness traffic are gated on a completed
             # handshake, including the unauthenticated loopback case.
@@ -640,6 +658,12 @@ class VizClient:
         """Ping the server."""
         response = await self.send({"type": "ping"})
         return response is not None and response.get("type") == "pong"
+
+    async def send_runtime_message(self, payload: dict) -> None:
+        """Send an authenticated Paper lifecycle message without awaiting a reply."""
+        if self.ws is None or not self._connected:
+            raise ConnectionError("Minecraft runtime control transport is disconnected")
+        await self.ws.send(self._encode(payload))
 
     async def get_zones(self) -> list[dict]:
         """Get all visualization zones."""

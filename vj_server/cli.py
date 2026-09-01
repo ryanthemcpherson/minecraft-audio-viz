@@ -109,8 +109,8 @@ Examples:
     parser.add_argument(
         "--state-dir",
         type=Path,
-        default=(Path(value) if (value := os.environ.get("MCAV_STATE_DIR")) else None),
-        help="Persistent managed identity directory",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--legacy-separate-listeners",
@@ -293,19 +293,25 @@ Examples:
     from vj_server.vj_server import VJServer
 
     managed_identity = None
+    managed_environment = None
     if args.managed_by_paper:
         from vj_server.identity import IdentityStore
+        from vj_server.managed import ManagedEnvironment
 
-        renderer_secret = os.environ.get("MCAV_RENDERER_TOKEN")
+        if args.state_dir is not None:
+            parser.error("--state-dir is not accepted with --managed-by-paper")
+        try:
+            managed_environment = ManagedEnvironment.from_environ()
+        except ValueError as error:
+            parser.error(str(error))
+        renderer_secret = managed_environment.renderer_token
         setup_token = os.environ.get("MCAV_SETUP_TOKEN")
-        if args.state_dir is None:
-            parser.error("--state-dir is required with --managed-by-paper")
-        if renderer_secret is None or len(renderer_secret.encode("utf-8")) < 32:
-            parser.error("MCAV_RENDERER_TOKEN is required with --managed-by-paper")
         if setup_token is None:
             parser.error("MCAV_SETUP_TOKEN is required with --managed-by-paper")
         if args.no_auth:
             parser.error("--no-auth is not permitted with --managed-by-paper")
+        if args.no_metrics:
+            parser.error("--no-metrics is not permitted with --managed-by-paper")
         tls_mode = os.environ.get("MCAV_TLS_MODE", "GENERATED").upper()
         if tls_mode not in {"GENERATED", "PROVIDED"}:
             parser.error("MCAV_TLS_MODE must be GENERATED or PROVIDED")
@@ -321,7 +327,7 @@ Examples:
         try:
             public_names = _public_name_from_url(os.environ.get("MCAV_PUBLIC_URL"))
             managed_identity = IdentityStore(
-                args.state_dir,
+                managed_environment.state_directory,
                 renderer_secret=renderer_secret,
                 public_names=public_names,
                 supplied_certificate=supplied_certificate,
@@ -424,6 +430,7 @@ Examples:
             if managed_identity is not None and managed_identity.tls.generated
             else None
         ),
+        managed_environment=managed_environment,
     )
 
     def signal_handler(sig, frame):
@@ -434,13 +441,15 @@ Examples:
 
     async def _run_vj_server():
         """Run VJ server with Minecraft connection."""
-        # Connect to Minecraft first
-        if await server.connect_minecraft():
-            print(f"Connected to Minecraft at {args.minecraft_host}:{args.minecraft_port}")
-        else:
-            print(
-                f"Warning: Could not connect to Minecraft at {args.minecraft_host}:{args.minecraft_port}"
-            )
+        # Managed readiness requires ingress and metrics to bind before the
+        # authenticated renderer control channel comes online.
+        if managed_environment is None:
+            if await server.connect_minecraft():
+                print(f"Connected to Minecraft at {args.minecraft_host}:{args.minecraft_port}")
+            else:
+                print(
+                    f"Warning: Could not connect to Minecraft at {args.minecraft_host}:{args.minecraft_port}"
+                )
 
         try:
             await server.run()

@@ -454,8 +454,11 @@ class StageManagerMixin:
                     # Repair: re-init pool
                     try:
                         if self.viz_client and self.viz_client.connected:
-                            await self.viz_client.init_pool(
-                                zone_name, zs.entity_count, zs.block_type
+                            await self._init_managed_pool(
+                                self.viz_client,
+                                zone_name,
+                                zs.entity_count,
+                                zs.block_type,
                             )
                             repairs.append(f"re-initialized pool with {zs.entity_count} entities")
                     except Exception as e:
@@ -554,7 +557,12 @@ class StageManagerMixin:
             # Init block entity pool
             if self.viz_client and self.viz_client.connected:
                 try:
-                    await self.viz_client.init_pool(zone_name, zs.entity_count, zs.block_type)
+                    await self._init_managed_pool(
+                        self.viz_client,
+                        zone_name,
+                        zs.entity_count,
+                        zs.block_type,
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to init block pool for '{zone_name}': {e}")
         # Set Lua pattern (handles crossfade etc)
@@ -950,8 +958,11 @@ class StageManagerMixin:
             ):
                 try:
                     if zone_state.entity_count > old_count:
-                        await self.viz_client.init_pool(
-                            zone_name, zone_state.entity_count, zone_state.block_type
+                        await self._init_managed_pool(
+                            self.viz_client,
+                            zone_name,
+                            zone_state.entity_count,
+                            zone_state.block_type,
                         )
                     else:
                         zone_state.transition_pending_resize = zone_state.entity_count
@@ -980,8 +991,11 @@ class StageManagerMixin:
                 try:
                     # Just resize — init_pool resizes existing pools in place
                     # (no cleanup_zone needed; that would destroy + recreate = flash)
-                    await self.viz_client.init_pool(
-                        zone_name, zone_state.entity_count, zone_state.block_type
+                    await self._init_managed_pool(
+                        self.viz_client,
+                        zone_name,
+                        zone_state.entity_count,
+                        zone_state.block_type,
                     )
                 except Exception as e:
                     logger.warning(
@@ -1041,7 +1055,40 @@ class StageManagerMixin:
             )
 
     async def _calculate_entities_for_zone(
-        self, zone_state: ZonePatternState, audio_state: "AudioState", zone_name: str = ""
+        self,
+        zone_state: ZonePatternState,
+        audio_state: "AudioState",
+        zone_name: str = "",
+        *,
+        entity_limit: int | None = None,
+    ) -> List[dict]:
+        """Calculate a zone after applying an ephemeral managed entity limit."""
+        effective_count = zone_state.entity_count if entity_limit is None else max(0, entity_limit)
+        patterns = [zone_state.pattern]
+        if zone_state.transitioning and zone_state.old_pattern is not None:
+            patterns.append(zone_state.old_pattern)
+        original_configs = []
+        for pattern in patterns:
+            original_config = getattr(pattern, "config", None)
+            original_configs.append((pattern, original_config))
+            if original_config is not None:
+                pattern.config = replace(original_config, entity_count=effective_count)
+        try:
+            return await self._calculate_entities_for_zone_with_active_config(
+                zone_state,
+                audio_state,
+                zone_name,
+            )
+        finally:
+            for pattern, original_config in original_configs:
+                if original_config is not None:
+                    pattern.config = original_config
+
+    async def _calculate_entities_for_zone_with_active_config(
+        self,
+        zone_state: ZonePatternState,
+        audio_state: "AudioState",
+        zone_name: str = "",
     ) -> List[dict]:
         """Calculate entity positions for a specific zone, with crossfade support.
 
@@ -1074,8 +1121,11 @@ class StageManagerMixin:
                         and self.viz_client.connected
                     ):
                         asyncio.ensure_future(
-                            self.viz_client.init_pool(
-                                zone_name or self.zone, pending, zone_state.block_type
+                            self._init_managed_pool(
+                                self.viz_client,
+                                zone_name or self.zone,
+                                pending,
+                                zone_state.block_type,
                             )
                         )
                 if _USE_ASYNC_LUA:
@@ -1150,7 +1200,12 @@ class StageManagerMixin:
                         and self.viz_client.connected
                     ):
                         asyncio.ensure_future(
-                            self.viz_client.init_pool(self.zone, pending, zs_legacy.block_type)
+                            self._init_managed_pool(
+                                self.viz_client,
+                                self.zone,
+                                pending,
+                                zs_legacy.block_type,
+                            )
                         )
                 entities = self._current_pattern.calculate_entities(audio_state)
                 logger.info(

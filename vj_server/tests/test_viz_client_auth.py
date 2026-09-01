@@ -179,6 +179,60 @@ async def test_connect_authenticates_before_returning_success(
     assert websocket.sent_messages == [{"type": "auth", "token": "shared-secret"}]
 
 
+@pytest.mark.parametrize(
+    ("auth_required", "server_type"),
+    [(False, "paper"), (True, "fabric")],
+)
+@pytest.mark.asyncio
+async def test_managed_connect_requires_paper_token_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+    auth_required: bool,
+    server_type: str,
+) -> None:
+    websocket = FakeWebSocket(
+        {
+            "type": "connected",
+            "auth_required": auth_required,
+            "server_type": server_type,
+        },
+        {"type": "auth_ok"},
+    )
+    install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(
+        auth_token="shared-secret",
+        connect_timeout=0.05,
+        require_authentication=True,
+        required_server_type="paper",
+    )
+
+    assert await client.connect() is False
+    assert client.connected is False
+    assert client.token_authenticated is False
+    assert websocket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_managed_connect_records_successful_paper_token_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakeWebSocket(
+        {"type": "connected", "auth_required": True, "server_type": "paper"},
+        {"type": "auth_ok"},
+    )
+    install_websocket_factory(monkeypatch, websocket)
+    client = VizClient(
+        auth_token="shared-secret",
+        connect_timeout=0.05,
+        require_authentication=True,
+        required_server_type="paper",
+    )
+
+    assert await client.connect() is True
+    assert client.token_authenticated is True
+
+    await client.disconnect()
+
+
 @pytest.mark.asyncio
 async def test_transport_logger_redacts_encoded_auth_frame_with_escaped_token(
     monkeypatch: pytest.MonkeyPatch,
