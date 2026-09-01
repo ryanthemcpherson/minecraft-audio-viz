@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "python": "3.12.14",
+  "release": "20260814",
+  "runtimes": {
+    "linux-x86_64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.12.14%2B20260814-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "5acfa3e9ba26b51ae161c83aff278da915b590d22373a424b2ba55b8afe91fcc",
+      "entrypoint": "python/bin/python3.12",
+      "pip_platforms": [
+        "manylinux_2_28_x86_64",
+        "manylinux_2_17_x86_64",
+        "manylinux2014_x86_64"
+      ]
+    },
+    "linux-aarch64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.12.14%2B20260814-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "2d8e17dfd732102cfeb18e0e1fa6769b24caa034e159981129590fe409c7157a",
+      "entrypoint": "python/bin/python3.12",
+      "pip_platforms": [
+        "manylinux_2_28_aarch64",
+        "manylinux_2_17_aarch64",
+        "manylinux2014_aarch64"
+      ]
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.12.14%2B20260814-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "sha256": "89f18f6932917163b74339ebcec2645c8e47ae7f1c5f2ac37f2b4f4cf3beb647",
+      "entrypoint": "python/python.exe",
+      "pip_platforms": ["win_amd64"]
+    }
+  },
+  "dependencies": [
+    {
+      "name": "aiohappyeyeballs",
+      "version": "2.7.1",
+      "wheels": {
+        "any": {
+          "filename": "aiohappyeyeballs-2.7.1-py3-none-any.whl",
+          "sha256": "9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472"
+        }
+      }
+    },
+    {
+      "name": "aiohttp",
+      "version": "3.14.3",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "aiohttp-3.14.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "543906c127fb1d929b95076db19b83fa2d46751006ff1e23b093aa5ac4d8db42"
+        },
+        "linux-aarch64": {
+          "filename": "aiohttp-3.14.3-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "f631fe87a6f30df5fbe6d79640b25e4cffb38c31c7fb6f10871517b84b0f8c1a"
+        },
+        "windows-x86_64": {
+          "filename": "aiohttp-3.14.3-cp312-cp312-win_amd64.whl",
+          "sha256": "33a2d7c28d33797a2e99923dffa63f83d908a19b6bf26cfe80fa790aa5e1a75a"
+        }
+      }
+    },
+    {
+      "name": "aiosignal",
+      "version": "1.4.0",
+      "wheels": {
+        "any": {
+          "filename": "aiosignal-1.4.0-py3-none-any.whl",
+          "sha256": "053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e"
+        }
+      }
+    },
+    {
+      "name": "attrs",
+      "version": "26.1.0",
+      "wheels": {
+        "any": {
+          "filename": "attrs-26.1.0-py3-none-any.whl",
+          "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309"
+        }
+      }
+    },
+    {
+      "name": "bcrypt",
+      "version": "5.0.0",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "bcrypt-5.0.0-cp39-abi3-manylinux_2_28_x86_64.whl",
+          "sha256": "f8429e1c410b4073944f03bd778a9e066e7fad723564a52ff91841d278dfc822"
+        },
+        "linux-aarch64": {
+          "filename": "bcrypt-5.0.0-cp39-abi3-manylinux_2_28_aarch64.whl",
+          "sha256": "f0ce778135f60799d89c9693b9b398819d15f1921ba15fe719acb3178215a7db"
+        },
+        "windows-x86_64": {
+          "filename": "bcrypt-5.0.0-cp39-abi3-win_amd64.whl",
+          "sha256": "64ee8434b0da054d830fa8e89e1c8bf30061d539044a39524ff7dec90481e5c2"
+        }
+      }
+    },
+    {
+      "name": "better-profanity",
+      "version": "0.7.0",
+      "wheels": {
+        "any": {
+          "filename": "better_profanity-0.7.0-py3-none-any.whl",
+          "sha256": "bd4c529ea6aa2db1aaa50524be1ed14d0fe5c664f1fd88c8bc388c7e9f9f00e8"
+        }
+      }
+    },
+    {
+      "name": "cffi",
+      "version": "2.1.1",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf"
+        },
+        "linux-aarch64": {
+          "filename": "cffi-2.1.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "68e62fe11f30d5ca8289242866f0a5291402d8529ca2178ab8afc5c9694ae890"
+        },
+        "windows-x86_64": {
+          "filename": "cffi-2.1.1-cp312-cp312-win_amd64.whl",
+          "sha256": "f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a"
+        }
+      }
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.1",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "cryptography-50.0.1-cp311-abi3-manylinux_2_28_x86_64.whl",
+          "sha256": "51593d180cf6d179bde5c5d065bed81386b1f381656ae7d042b7ffc87a9895ad"
+        },
+        "linux-aarch64": {
+          "filename": "cryptography-50.0.1-cp311-abi3-manylinux_2_28_aarch64.whl",
+          "sha256": "e74591e283fe6eb956416c929eb58262a719fe0311fd9054c62c3350ed8760d8"
+        },
+        "windows-x86_64": {
+          "filename": "cryptography-50.0.1-cp311-abi3-win_amd64.whl",
+          "sha256": "aed8db4f6d71c51efb89530e12d9464e7bf2923d46c3205dc794a2a93f8c0648"
+        }
+      }
+    },
+    {
+      "name": "frozenlist",
+      "version": "1.8.0",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "494a5952b1c597ba44e0e78113a7266e656b9794eec897b19ead706bd7074383"
+        },
+        "linux-aarch64": {
+          "filename": "frozenlist-1.8.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "96f423a119f4777a4a056b66ce11527366a8bb92f54e541ade21f2374433f6d4"
+        },
+        "windows-x86_64": {
+          "filename": "frozenlist-1.8.0-cp312-cp312-win_amd64.whl",
+          "sha256": "34187385b08f866104f0c0617404c8eb08165ab1272e884abc89c112e9c00746"
+        }
+      }
+    },
+    {
+      "name": "idna",
+      "version": "3.19",
+      "wheels": {
+        "any": {
+          "filename": "idna-3.19-py3-none-any.whl",
+          "sha256": "815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4"
+        }
+      }
+    },
+    {
+      "name": "lupa",
+      "version": "2.8",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "lupa-2.8-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "8cf4f064a0e5531afce2d7d750120c10c10f9529139af6ca6150d13151034398"
+        },
+        "linux-aarch64": {
+          "filename": "lupa-2.8-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "27044f3363047f946b3d3aab9157cbd172b3538ada9ec1baef43432bf7d03a78"
+        },
+        "windows-x86_64": {
+          "filename": "lupa-2.8-cp312-cp312-win_amd64.whl",
+          "sha256": "281bedc5deb92d31e649a3552edd662449365a635904fa4d5cb4509c7245e34e"
+        }
+      }
+    },
+    {
+      "name": "msgspec",
+      "version": "0.21.1",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "msgspec-0.21.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "21995e74b5c598c2e004110ad66ec7f1b8c20bf2bcf3b2de8fd9a3094422d3ff"
+        },
+        "linux-aarch64": {
+          "filename": "msgspec-0.21.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "846758412e9518252b2ac9bffd6f0e54d9ff614f5f9488df7749f81ff5c80920"
+        },
+        "windows-x86_64": {
+          "filename": "msgspec-0.21.1-cp312-cp312-win_amd64.whl",
+          "sha256": "d4ab834a054c6f0cbeef6df9e7e1b33d5f1bc7b86dea1d2fd7cad003873e783d"
+        }
+      }
+    },
+    {
+      "name": "multidict",
+      "version": "6.7.1",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "multidict-6.7.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "bfde23ef6ed9db7eaee6c37dcec08524cb43903c60b285b172b6c094711b3961"
+        },
+        "linux-aarch64": {
+          "filename": "multidict-6.7.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "eb0ce7b2a32d09892b3dd6cc44877a0d02a33241fafca5f25c8b6b62374f8b75"
+        },
+        "windows-x86_64": {
+          "filename": "multidict-6.7.1-cp312-cp312-win_amd64.whl",
+          "sha256": "fcee94dfbd638784645b066074b338bc9cc155d4b4bffa4adce1615c5a426c19"
+        }
+      }
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.2",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "numpy-2.5.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "3cdec01fa790a186d430433fdd4d4ffb70eed6f0eeb4bf05c8dbe2dce0a9bcb8"
+        },
+        "linux-aarch64": {
+          "filename": "numpy-2.5.2-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "8ee9c4eeb8454b3660a8b53493563c3e121c2fc94fbd72b848ef814ed7b676a9"
+        },
+        "windows-x86_64": {
+          "filename": "numpy-2.5.2-cp312-cp312-win_amd64.whl",
+          "sha256": "28ac63476ec7651484215ee7fa15a1f78b57c14621f01e392afe17b9a1390ce4"
+        }
+      }
+    },
+    {
+      "name": "propcache",
+      "version": "0.5.2",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "propcache-0.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "6f328175a2cde1f0ff2c4ed8ce968b9dcfb55f3a7153f39e2957ed994da13476"
+        },
+        "linux-aarch64": {
+          "filename": "propcache-0.5.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "5dbc581d2814337da56222fab8dc5f161cd798a434e49bac27930aaef798e144"
+        },
+        "windows-x86_64": {
+          "filename": "propcache-0.5.2-cp312-cp312-win_amd64.whl",
+          "sha256": "d9ee8826a7d47863a08ac44e1a5f611a462eefc3a194b492da242128bec75b42"
+        }
+      }
+    },
+    {
+      "name": "pycparser",
+      "version": "3.0",
+      "wheels": {
+        "any": {
+          "filename": "pycparser-3.0-py3-none-any.whl",
+          "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+        }
+      }
+    },
+    {
+      "name": "python-dotenv",
+      "version": "1.2.3",
+      "wheels": {
+        "any": {
+          "filename": "python_dotenv-1.2.3-py3-none-any.whl",
+          "sha256": "904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9"
+        }
+      }
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "wheels": {
+        "any": {
+          "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+          "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+        }
+      }
+    },
+    {
+      "name": "websockets",
+      "version": "16.0",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "websockets-16.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "9b5aca38b67492ef518a8ab76851862488a478602229112c4b0d58d63a7a4d5c"
+        },
+        "linux-aarch64": {
+          "filename": "websockets-16.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "e0334872c0a37b606418ac52f6ab9cfd17317ac26365f7f65e203e2d0d0d359f"
+        },
+        "windows-x86_64": {
+          "filename": "websockets-16.0-cp312-cp312-win_amd64.whl",
+          "sha256": "5569417dc80977fc8c2d43a86f78e0a5a22fee17565d78621b6bb264a115d4ea"
+        }
+      }
+    },
+    {
+      "name": "yarl",
+      "version": "1.24.5",
+      "wheels": {
+        "linux-x86_64": {
+          "filename": "yarl-1.24.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "f08c7513ecef5aad65687bfdf6bc601ae9fccd04a42904501f8f7141abad9eb9"
+        },
+        "linux-aarch64": {
+          "filename": "yarl-1.24.5-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "90333fd89b43c0d08ac85f3f1447593fc2c66de18c3d6378d7125ea118dc7a54"
+        },
+        "windows-x86_64": {
+          "filename": "yarl-1.24.5-cp312-cp312-win_amd64.whl",
+          "sha256": "a929d878fec099030c292803b31e5d5540a7b6a31e6a3cc76cb4685fc2a2f51b"
+        }
+      }
+    }
+  ]
+}

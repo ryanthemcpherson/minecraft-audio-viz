@@ -55,19 +55,20 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'start-mcav.sh') -Destination $m
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'mcav.env.example') -Destination $mcavRoot
 Set-Content -LiteralPath (Join-Path $mcavRoot 'VERSION') -Value $Version -NoNewline
 
-New-Item -ItemType Directory -Force -Path (Join-Path $mcavRoot 'vj_server') | Out-Null
-Get-ChildItem (Join-Path $repoRoot 'vj_server') -Filter '*.py' -File | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $mcavRoot 'vj_server')
-}
-Copy-Item -LiteralPath (Join-Path $repoRoot 'admin_panel') -Destination $mcavRoot -Recurse
-New-Item -ItemType Directory -Force -Path (Join-Path $mcavRoot 'preview_tool') | Out-Null
-Copy-Item -LiteralPath (Join-Path $repoRoot 'preview_tool\frontend') -Destination (Join-Path $mcavRoot 'preview_tool') -Recurse
-Copy-Item -LiteralPath (Join-Path $repoRoot 'patterns') -Destination $mcavRoot -Recurse
-New-Item -ItemType Directory -Force -Path (Join-Path $mcavRoot 'configs') | Out-Null
-Copy-Item -LiteralPath (Join-Path $repoRoot 'configs\dj_auth.example.json') -Destination (Join-Path $mcavRoot 'configs')
-foreach ($configDirectory in @('scenes', 'banners')) {
-    $source = Join-Path $repoRoot "configs\$configDirectory"
-    if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $mcavRoot 'configs') -Recurse }
+$trackedProductFiles = & git -C $repoRoot ls-files -- `
+    vj_server admin_panel preview_tool/frontend patterns `
+    configs/dj_auth.example.json configs/scenes configs/banners
+if ($LASTEXITCODE -ne 0) { throw 'Unable to read the tracked release inventory.' }
+foreach ($relativePath in $trackedProductFiles) {
+    $portablePath = $relativePath.Replace('\', '/')
+    if ($portablePath.StartsWith('vj_server/tests/') -or
+        ($portablePath.StartsWith('vj_server/') -and [IO.Path]::GetExtension($portablePath) -ne '.py')) {
+        continue
+    }
+    $source = Join-Path $repoRoot $relativePath
+    $destination = Join-Path $mcavRoot ($portablePath.Replace('/', '\'))
+    New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($destination)) | Out-Null
+    Copy-Item -LiteralPath $source -Destination $destination
 }
 
 Write-Host 'Building portable AMD64 and ARM64 runtimes...'

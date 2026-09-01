@@ -78,7 +78,8 @@ public final class FixtureChildProcess {
             "OMP_NUM_THREADS",
             "MKL_NUM_THREADS",
             "NUMEXPR_NUM_THREADS",
-            "VECLIB_MAXIMUM_THREADS"
+            "VECLIB_MAXIMUM_THREADS",
+            "PYTHONDONTWRITEBYTECODE"
         )) {
             String value = System.getenv(key);
             if (value != null) {

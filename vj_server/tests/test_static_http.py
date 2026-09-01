@@ -688,6 +688,7 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
     monkeypatch.setenv("MCAV_STATE_DIR", str(state_directory.resolve()))
     monkeypatch.setenv("MCAV_RELEASE_VERSION", "1.2.0")
     monkeypatch.setenv("MCAV_RUNTIME_API", "1")
+    monkeypatch.setenv("MCAV_RENDERER_URL", "ws://127.0.0.1:18765")
     monkeypatch.setenv("MCAV_PUBLIC_URL", "https://panel.example.test:8443/")
     monkeypatch.setenv("MCAV_TLS_MODE", tls_mode)
     if tls_mode == "PROVIDED":
@@ -710,12 +711,58 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
     assert captured["identity_options"]["setup_token"] == "A" * 43
     assert captured["identity_options"]["public_names"] == ("panel.example.test",)
     assert captured["server"]["minecraft_ws_secret"] == "r" * 32
+    assert captured["server"]["minecraft_host"] == "127.0.0.1"
+    assert captured["server"]["minecraft_port"] == 18765
     assert captured["server"]["tls_cert"] == certificate_path
     assert captured["server"]["tls_key"] == key_path
     assert captured["server"]["setup_manager"] is setup_manager
     assert captured["server"]["certificate_fingerprint"] == expected_fingerprint
     assert captured["server"]["public_url"] == "https://panel.example.test:8443/"
     assert captured["server"]["managed_environment"].generation == 42
+
+
+@pytest.mark.parametrize(
+    "renderer_url",
+    [
+        "http://127.0.0.1:8765",
+        "ws://operator:secret@127.0.0.1:8765",
+        "ws://127.0.0.1:8765/renderer",
+        "ws://127.0.0.1:8765?token=secret",
+        "ws://127.0.0.1:8765#fragment",
+        "ws://127.0.0.1",
+        "ws://renderer.example.test:8765",
+    ],
+)
+def test_managed_paper_cli_rejects_invalid_renderer_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    renderer_url: str,
+) -> None:
+    state_directory = tmp_path / "state"
+    state_directory.mkdir()
+    monkeypatch.setenv("MCAV_RENDERER_TOKEN", "r" * 32)
+    monkeypatch.setenv("MCAV_SETUP_TOKEN", "A" * 43)
+    monkeypatch.setenv("MCAV_LAUNCH_GENERATION", "42")
+    monkeypatch.setenv("MCAV_LAUNCH_NONCE", "N" * 43)
+    monkeypatch.setenv("MCAV_PARENT_PID", "321")
+    monkeypatch.setenv("MCAV_PARENT_START_ID", "987654")
+    monkeypatch.setenv("MCAV_STATE_DIR", str(state_directory.resolve()))
+    monkeypatch.setenv("MCAV_RELEASE_VERSION", "1.2.0")
+    monkeypatch.setenv("MCAV_RUNTIME_API", "1")
+    monkeypatch.setenv("MCAV_RENDERER_URL", renderer_url)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audioviz-vj",
+            "--managed-by-paper",
+            "--project-root",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        modern_cli_main()
 
 
 @pytest.mark.asyncio

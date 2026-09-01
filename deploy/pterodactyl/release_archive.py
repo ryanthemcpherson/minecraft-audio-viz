@@ -27,6 +27,8 @@ REQUIRED_ENTRIES = {
     "mcav-vj/vj_server/auth.py",
     "mcav-vj/vj_server/cli.py",
     "mcav-vj/vj_server/config.py",
+    "mcav-vj/vj_server/ingress/app.py",
+    "mcav-vj/vj_server/ingress/security.py",
     "mcav-vj/vj_server/patterns.py",
     "mcav-vj/vj_server/vj_server.py",
     "mcav-vj/patterns/lib.lua",

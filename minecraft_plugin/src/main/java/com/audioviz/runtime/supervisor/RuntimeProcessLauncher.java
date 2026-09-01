@@ -118,6 +118,7 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
         environment.put("MCAV_PARENT_PID", Long.toString(ProcessHandle.current().pid()));
         environment.put("MCAV_PARENT_START_ID", currentProcessStartIdentity());
         environment.putAll(THREAD_LIMITS);
+        environment.put("PYTHONDONTWRITEBYTECODE", "1");
 
         Process process;
         try {
@@ -153,6 +154,8 @@ public final class RuntimeProcessLauncher implements RuntimeSupervisor.ProcessLa
         Objects.requireNonNull(launch, "launch");
         return List.of(
             launch.entrypoint().toString(),
+            "-m", "vj_server.cli",
+            "--project-root", launch.workingDirectory().toString(),
             "--managed-by-paper",
             "--public-host", launch.publicHost(),
             "--public-port", Integer.toString(launch.publicPort())

@@ -71,6 +71,8 @@ class RuntimeProcessLauncherTest {
         assertEquals(launch.entrypoint().toString(), command.get(0));
         assertEquals(
             List.of(
+                "-m", "vj_server.cli",
+                "--project-root", launch.workingDirectory().toString(),
                 "--managed-by-paper",
                 "--public-host", "0.0.0.0",
                 "--public-port", "9000"
@@ -111,6 +113,7 @@ class RuntimeProcessLauncherTest {
         assertEquals("1", report.getProperty("environment.MKL_NUM_THREADS"));
         assertEquals("1", report.getProperty("environment.NUMEXPR_NUM_THREADS"));
         assertEquals("1", report.getProperty("environment.VECLIB_MAXIMUM_THREADS"));
+        assertEquals("1", report.getProperty("environment.PYTHONDONTWRITEBYTECODE"));
         assertFalse(report.containsKey("environment.AWS_SECRET_ACCESS_KEY"));
         assertEquals(
             "http://proxy.example.test:8080",

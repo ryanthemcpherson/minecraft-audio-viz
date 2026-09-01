@@ -8,60 +8,61 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LOCK_FILE="$SCRIPT_DIR/runtime-lock.json"
 OUTPUT_ROOT="$(mkdir -p "$1" && cd "$1" && pwd)"
-CACHE_DIR="$SCRIPT_DIR/.cache"
-mkdir -p "$CACHE_DIR" "$OUTPUT_ROOT/bin"
+if [[ "$OUTPUT_ROOT" == / ]] || [[ "$OUTPUT_ROOT" == "$HOME" ]]; then
+  printf 'Refusing unsafe runtime output root: %s\n' "$OUTPUT_ROOT" >&2
+  exit 64
+fi
+mkdir -p "$OUTPUT_ROOT/bin"
+TEMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TEMP_ROOT"' EXIT
 
 BUILD_PYTHON="$REPO_ROOT/vj_server/.venv/bin/python"
 if [[ ! -x "$BUILD_PYTHON" ]]; then
   BUILD_PYTHON="$(command -v python3)"
 fi
 
-mapfile -t dependencies < <(
-  "$BUILD_PYTHON" -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["dependencies"]))' "$LOCK_FILE"
-)
-
-for architecture in linux-amd64 linux-arm64; do
-  url="$($BUILD_PYTHON -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtimes"][sys.argv[2]]["url"])' "$LOCK_FILE" "$architecture")"
-  expected_sha="$($BUILD_PYTHON -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtimes"][sys.argv[2]]["sha256"])' "$LOCK_FILE" "$architecture")"
-  archive="$CACHE_DIR/${architecture}-python.tar.gz"
+for mapping in linux-amd64:linux-x86_64 linux-arm64:linux-aarch64; do
+  architecture="${mapping%%:*}"
+  platform="${mapping#*:}"
+  build_output="$TEMP_ROOT/$platform"
+  "$REPO_ROOT/deploy/runtime/build-managed-runtime.sh" \
+    --platform "$platform" \
+    --output "$build_output"
+  archive="$build_output/mcav-runtime-$platform.zip"
   runtime_root="$OUTPUT_ROOT/bin/$architecture"
 
-  if [[ ! -f "$archive" ]] || [[ "$(sha256sum "$archive" | cut -d' ' -f1)" != "$expected_sha" ]]; then
-    rm -f "$archive"
-    printf 'Downloading %s portable Python...\n' "$architecture"
-    curl --fail --location --retry 3 --output "$archive" "$url"
-  fi
-  actual_sha="$(sha256sum "$archive" | cut -d' ' -f1)"
-  if [[ "$actual_sha" != "$expected_sha" ]]; then
-    printf 'SHA-256 mismatch for %s: expected %s, got %s\n' "$architecture" "$expected_sha" "$actual_sha" >&2
+  if [[ ! -f "$archive" ]]; then
+    printf 'Managed runtime build did not produce %s.\n' "$platform" >&2
     exit 1
   fi
 
   rm -rf "$runtime_root"
   mkdir -p "$runtime_root"
-  tar -xzf "$archive" -C "$runtime_root"
-  site_packages="$runtime_root/python/lib/python3.12/site-packages"
-  mkdir -p "$site_packages"
+  "$BUILD_PYTHON" - "$archive" "$runtime_root" <<'PY'
+import shutil
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
 
-  pip_args=(
-    -m pip install
-    --disable-pip-version-check
-    --no-compile
-    --only-binary=:all:
-    --implementation cp
-    --python-version 3.12
-    --target "$site_packages"
-    --upgrade
-  )
-  mapfile -t platforms < <(
-    "$BUILD_PYTHON" -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["runtimes"][sys.argv[2]]["pip_platforms"]))' "$LOCK_FILE" "$architecture"
-  )
-  for platform in "${platforms[@]}"; do
-    pip_args+=(--platform "$platform")
-  done
-  "$BUILD_PYTHON" "${pip_args[@]}" "${dependencies[@]}"
+archive_path, output_value = sys.argv[1:]
+output = Path(output_value)
+with zipfile.ZipFile(archive_path) as archive:
+    for entry in archive.infolist():
+        path = PurePosixPath(entry.filename)
+        if (
+            entry.is_dir()
+            or not path.parts
+            or path.parts[0] != "python"
+            or "__pycache__" in path.parts
+            or path.suffix in {".pyc", ".pyo"}
+        ):
+            continue
+        destination = output.joinpath(*path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(entry) as source, destination.open("wb") as target:
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+PY
 
   launcher="$runtime_root/audioviz-vj"
   printf '%s\n' \
@@ -74,19 +75,13 @@ for architecture in linux-amd64 linux-arm64; do
     > "$launcher"
   chmod 755 "$launcher" "$runtime_root/python/bin/python3.12"
 
-  find "$runtime_root" -type d -name __pycache__ -prune -exec rm -rf {} +
-  find "$runtime_root/python" -type d \( -name test -o -name tests \) -prune -exec rm -rf {} +
-  find "$runtime_root" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
-  rm -rf "$runtime_root/python/share" "$runtime_root/python/include" "$runtime_root/python/lib/pkgconfig"
-  find "$runtime_root/python/bin" -mindepth 1 -maxdepth 1 ! -name python3.12 -delete
-  find "$runtime_root/python" -type l -delete
 done
 
 native_arch="$(uname -m)"
 if [[ "$native_arch" == x86_64 ]]; then
   "$OUTPUT_ROOT/bin/linux-amd64/python/bin/python3.12" -c \
-    'import bcrypt,lupa,msgspec,numpy,websockets; print("AMD64 runtime imports passed")'
+    'import aiohttp,bcrypt,cryptography,lupa,msgspec,numpy,websockets; print("AMD64 runtime imports passed")'
 elif [[ "$native_arch" == aarch64 ]]; then
   "$OUTPUT_ROOT/bin/linux-arm64/python/bin/python3.12" -c \
-    'import bcrypt,lupa,msgspec,numpy,websockets; print("ARM64 runtime imports passed")'
+    'import aiohttp,bcrypt,cryptography,lupa,msgspec,numpy,websockets; print("ARM64 runtime imports passed")'
 fi

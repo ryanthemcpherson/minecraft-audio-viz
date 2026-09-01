@@ -7,6 +7,7 @@ Entry point:
 
 import argparse
 import asyncio
+import ipaddress
 import os
 import signal
 import sys
@@ -55,6 +56,36 @@ def _public_name_from_url(value: str | None) -> tuple[str, ...]:
     parsed = urllib.parse.urlsplit(canonical_url)
     assert parsed.hostname is not None
     return (parsed.hostname,)
+
+
+def _renderer_endpoint_from_url(value: str | None) -> tuple[str, int]:
+    """Parse Paper's private renderer endpoint without accepting URL metadata."""
+    if not value:
+        raise ValueError("MCAV_RENDERER_URL is required with --managed-by-paper")
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("MCAV_RENDERER_URL is invalid") from error
+    if (
+        parsed.scheme != "ws"
+        or parsed.hostname is None
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != ""
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("MCAV_RENDERER_URL must be a private ws://host:port endpoint")
+    host = parsed.hostname
+    if host.lower() != "localhost":
+        try:
+            if not ipaddress.ip_address(host).is_loopback:
+                raise ValueError
+        except ValueError as error:
+            raise ValueError("MCAV_RENDERER_URL host must be loopback") from error
+    return host, port
 
 
 def vj_server():
@@ -301,6 +332,9 @@ Examples:
             parser.error("--state-dir is not accepted with --managed-by-paper")
         try:
             managed_environment = ManagedEnvironment.from_environ()
+            args.minecraft_host, args.minecraft_port = _renderer_endpoint_from_url(
+                os.environ.get("MCAV_RENDERER_URL")
+            )
         except ValueError as error:
             parser.error(str(error))
         renderer_secret = managed_environment.renderer_token

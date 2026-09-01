@@ -67,17 +67,28 @@ copy_tracked_file() {
   install -m 644 "$REPO_ROOT/$relative_path" "$destination"
 }
 
+git_tracked_product_files() {
+  if git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+    git -C "$REPO_ROOT" ls-files -z -- "$@"
+    return
+  fi
+  if command -v git.exe > /dev/null && command -v wslpath > /dev/null; then
+    git.exe -C "$(wslpath -w "$REPO_ROOT")" ls-files -z -- "$@"
+    return
+  fi
+  printf 'Unable to read the tracked release inventory.\n' >&2
+  return 1
+}
+
 while IFS= read -r -d '' relative_path; do
   case "$relative_path" in
-    vj_server/*.py)
-      if [[ "${relative_path#vj_server/}" == */* ]]; then
-        continue
-      fi
+    */tests/*)
+      continue
       ;;
   esac
   copy_tracked_file "$relative_path"
 done < <(
-  git -C "$REPO_ROOT" ls-files -z -- \
+  git_tracked_product_files \
     'vj_server/*.py' \
     admin_panel \
     preview_tool/frontend \

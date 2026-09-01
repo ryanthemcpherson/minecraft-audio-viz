@@ -72,6 +72,8 @@ required = {
     "mcav-vj/bin/linux-amd64/python/bin/python3.12",
     "mcav-vj/bin/linux-arm64/audioviz-vj",
     "mcav-vj/bin/linux-arm64/python/bin/python3.12",
+    "mcav-vj/vj_server/ingress/app.py",
+    "mcav-vj/vj_server/ingress/security.py",
     "mcav-vj/MANIFEST.sha256",
 }
 executables = {
