@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -295,7 +296,7 @@ class DJManagerMixin:
                 # where two concurrent auths could both pass is_valid())
                 async with self._dj_lock:
                     if code not in self._connect_codes:
-                        logger.warning(f"DJ code auth failed: invalid code {code}")
+                        logger.warning("DJ code auth failed: invalid credential")
                         await websocket.send(
                             _json_str({"type": "auth_error", "error": "Invalid connect code"})
                         )
@@ -304,7 +305,7 @@ class DJManagerMixin:
 
                     connect_code = self._connect_codes[code]
                     if not connect_code.is_valid():
-                        logger.warning(f"DJ code auth failed: expired code {code}")
+                        logger.warning("DJ code auth failed: expired credential")
                         await websocket.send(
                             _json_str(
                                 {
@@ -319,11 +320,13 @@ class DJManagerMixin:
                     # Mark code as used (atomically with validation)
                     connect_code.used = True
 
-                # Generate a unique DJ ID for code-authenticated users
-                dj_id = f"dj_{code.replace('-', '_').lower()}"
+                # Do not reuse the one-time credential as a public/logged identifier.
+                dj_id = f"dj_{secrets.token_hex(8)}"
+                while dj_id in self._pending_djs or dj_id in self._djs:
+                    dj_id = f"dj_{secrets.token_hex(8)}"
                 priority = 10  # Default priority for code-authenticated DJs
 
-                logger.info(f"DJ code auth successful: {dj_name} with code {code}")
+                logger.info("DJ code auth successful: %s", dj_name)
 
                 # Connect-code DJs go into pending approval queue
                 direct_mode = data.get("direct_mode", False)
@@ -334,7 +337,6 @@ class DJManagerMixin:
                     "waiting_since": time.time(),
                     "direct_mode": direct_mode,
                     "priority": priority,
-                    "code": code,
                     "dj_session_id": data.get("dj_session_id"),  # For profile lookup
                 }
                 self._pending_djs[dj_id] = pending_info
@@ -1310,8 +1312,7 @@ class DJManagerMixin:
             )
             self._code_show_ids[show_info.connect_code] = show_info.show_id
             logger.info(
-                "Created show on coordinator: code=%s show_id=%s",
-                show_info.connect_code,
+                "Created show on coordinator: show_id=%s",
                 show_info.show_id,
             )
             return code
@@ -1328,7 +1329,7 @@ class DJManagerMixin:
             logger.debug(f"Cleaned up {len(expired)} expired connect codes")
 
     async def _broadcast_connect_codes(self):
-        """Broadcast active connect codes to all browser clients."""
+        """Broadcast active connect codes only to authenticated admin-route clients."""
         self._cleanup_expired_codes()
         codes = [
             {
@@ -1344,9 +1345,11 @@ class DJManagerMixin:
         message = _json_str({"type": "connect_codes", "codes": codes})
 
         dead_clients = set()
-        for client in list(self._broadcast_clients):
+        admin_clients = self._admin_clients & self._broadcast_clients
+        for client in list(admin_clients):
             try:
                 await client.send(message)
             except Exception:
                 dead_clients.add(client)
         self._broadcast_clients -= dead_clients
+        self._admin_clients -= dead_clients

@@ -62,7 +62,7 @@ async def create_show(
     await session.commit()
     await session.refresh(show)
 
-    logger.info("Show created: id=%s name=%s code=%s", show.id, show.name, connect_code)
+    logger.info("Show created: id=%s name=%s", show.id, show.name)
 
     return CreateShowResponse(
         show_id=show.id,

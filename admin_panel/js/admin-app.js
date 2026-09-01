@@ -5,6 +5,11 @@
 
 import { WebSocketService } from './services/WebSocketService.js';
 import { debounce, throttle, rafThrottle } from './utils/debounce.js';
+import {
+    buildInvite,
+    copyInviteLink,
+    renderInvite,
+} from './managers/connect-codes.js';
 
 class AdminApp {
     constructor(options = {}) {
@@ -63,6 +68,7 @@ class AdminApp {
             minecraftServerType: null,  // 'paper' or 'fabric'
             // Connect codes state
             connectCodes: [],
+            generatedInvite: null,
             // Stage data
             stages: [],
             selectedStage: null,
@@ -318,6 +324,15 @@ class AdminApp {
         this.elements.generatedCodeText = document.getElementById('generated-code-text');
         this.elements.generatedCodeTtl = document.getElementById('generated-code-ttl');
         this.elements.btnCopyCode = document.getElementById('btn-copy-code');
+        this.elements.inviteDetails = document.getElementById('invite-details');
+        this.elements.inviteServerUrl = document.getElementById('invite-server-url');
+        this.elements.inviteExpiresAt = document.getElementById('invite-expires-at');
+        this.elements.inviteFingerprintRow = document.getElementById('invite-fingerprint-row');
+        this.elements.inviteFingerprint = document.getElementById('invite-fingerprint');
+        this.elements.btnCopyInvite = document.getElementById('btn-copy-invite');
+        this.elements.inviteManualCopy = document.getElementById('invite-manual-copy');
+        this.elements.inviteCopyStatus = document.getElementById('invite-copy-status');
+        this.elements.inviteUnavailable = document.getElementById('invite-unavailable');
 
         // Reconnect button
         this.elements.btnReconnect = document.getElementById('btn-reconnect');
@@ -656,6 +671,28 @@ class AdminApp {
             });
         }
 
+        if (this.elements.btnCopyInvite) {
+            this.elements.btnCopyInvite.addEventListener('click', async () => {
+                if (!this.state.generatedInvite) return;
+                const originalLabel = this.elements.btnCopyInvite.textContent;
+                this.elements.btnCopyInvite.disabled = true;
+                const result = await copyInviteLink(this.state.generatedInvite, {
+                    clipboard: window.isSecureContext ? navigator.clipboard : null,
+                    fallbackField: this.elements.inviteManualCopy,
+                });
+                this.elements.inviteCopyStatus.textContent = result.copied
+                    ? 'DJ invite copied.'
+                    : 'Clipboard access was unavailable. Copy the selected invite below.';
+                this.elements.btnCopyInvite.textContent = result.copied ? 'Copied!' : 'Select & copy';
+                this.elements.btnCopyInvite.classList.toggle('btn-copy-success', result.copied);
+                setTimeout(() => {
+                    this.elements.btnCopyInvite.disabled = false;
+                    this.elements.btnCopyInvite.textContent = originalLabel;
+                    this.elements.btnCopyInvite.classList.remove('btn-copy-success');
+                }, 2000);
+            });
+        }
+
         // Event delegation for revoke buttons
         if (this.elements.activeCodes) {
             this.elements.activeCodes.addEventListener('click', (e) => {
@@ -675,7 +712,9 @@ class AdminApp {
         }
     }
 
-    _showGeneratedCode(code, ttlMinutes = 30) {
+    _showGeneratedCode(message) {
+        const code = message.code;
+        const ttlMinutes = message.ttl_minutes || 30;
         // Reset generate button
         if (this.elements.btnGenerateCode) {
             this.elements.btnGenerateCode.disabled = false;
@@ -691,6 +730,35 @@ class AdminApp {
         }
         if (this.elements.generatedCodeDisplay) {
             this.elements.generatedCodeDisplay.classList.remove('hidden');
+        }
+        this.state.generatedInvite = null;
+        this.elements.inviteDetails.hidden = true;
+        this.elements.inviteUnavailable.hidden = true;
+        this.elements.inviteManualCopy.hidden = true;
+        this.elements.inviteManualCopy.value = '';
+        this.elements.inviteCopyStatus.textContent = '';
+        try {
+            const invite = buildInvite(
+                message.runtime,
+                {
+                    code: message.code,
+                    expires_at: message.expires_at,
+                    ttl_minutes: message.ttl_minutes,
+                },
+            );
+            this.state.generatedInvite = invite;
+            renderInvite(invite, {
+                container: this.elements.inviteDetails,
+                serverUrl: this.elements.inviteServerUrl,
+                expiresAt: this.elements.inviteExpiresAt,
+                fingerprintRow: this.elements.inviteFingerprintRow,
+                fingerprint: this.elements.inviteFingerprint,
+            });
+        } catch (_) {
+            this.elements.inviteUnavailable.textContent = message.runtime?.public_url
+                ? 'The server invitation settings are invalid. Check runtime.public-url.'
+                : 'Set runtime.public-url in the Paper plugin config to enable one-click DJ invites.';
+            this.elements.inviteUnavailable.hidden = false;
         }
     }
 
@@ -1298,7 +1366,7 @@ class AdminApp {
 
             case 'connect_code_generated':
                 // Show the newly generated code inline
-                this._showGeneratedCode(data.code, data.ttl_minutes || 30);
+                this._showGeneratedCode(data);
                 break;
 
             case 'connect_codes':

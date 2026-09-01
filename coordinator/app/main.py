@@ -19,7 +19,7 @@ from app.config import Settings, get_settings
 from app.database import init_engine, shutdown_engine
 from app.logging_config import configure_logging
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.request_context import RequestContextMiddleware, request_path_template
 from app.middleware.security import SecurityHeadersMiddleware
 from app.routers import (
     admin,
@@ -123,13 +123,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Catch unhandled exceptions and return a clean JSON error response."""
         env = os.environ.get("MCAV_ENV", "production").lower()
         is_production = env in ("production", "prod", "staging")
+        path_template = request_path_template(request)
 
         # Log the full traceback
         _logger.exception(
             "Unhandled exception",
             extra={
                 "request_id": getattr(request.state, "request_id", None),
-                "path": request.url.path,
+                "path": path_template,
                 "method": request.method,
             },
         )

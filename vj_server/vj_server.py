@@ -51,7 +51,12 @@ from vj_server.beat_predictor import BeatPredictor
 from vj_server.config import ManagedPerformanceSettings, validate_http_bind_host
 from vj_server.coordinator_client import CoordinatorClient
 from vj_server.dj_manager import DJManagerMixin
-from vj_server.ingress.app import IngressServer, WebSocketHandlers
+from vj_server.ingress.app import (
+    IngressServer,
+    WebSocketHandlers,
+    normalize_certificate_fingerprint,
+    normalize_public_url,
+)
 from vj_server.managed import ManagedEnvironment, ManagedHealthSnapshot, ManagedRuntime
 from vj_server.models import (
     _USE_ASYNC_LUA,
@@ -115,6 +120,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         tls_key: str | Path | None = None,
         public_host: str | None = None,
         public_port: int | None = None,
+        public_url: str | None = None,
         legacy_separate_listeners: bool = False,
         setup_manager: SetupManager | None = None,
         certificate_fingerprint: str | None = None,
@@ -130,7 +136,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             raise ValueError("public port is outside the supported range")
         self.legacy_separate_listeners = legacy_separate_listeners
         self.setup_manager = setup_manager
-        self.certificate_fingerprint = certificate_fingerprint
+        self.public_url = normalize_public_url(public_url)
+        self.certificate_fingerprint = normalize_certificate_fingerprint(certificate_fingerprint)
         self.project_root = (
             Path(project_root).resolve()
             if project_root is not None
@@ -214,6 +221,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
         # Browser clients
         self._broadcast_clients: Set = set()
+        self._admin_clients: Set = set()
         self._voice_subscribers: Set = set()  # Clients subscribed to voice_audio frames
         self._browser_heartbeat_task: Optional[asyncio.Task] = None
         self._browser_pong_pending: Dict = {}  # websocket -> missed_pong_count
@@ -1097,7 +1105,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
             await self._handle_dj_connection(WebsocketsPeer(connection, max_message_bytes=65_536))
 
         async def handle_browser_connection(connection):
-            await self._handle_browser_client(WebsocketsPeer(connection, max_message_bytes=65_536))
+            await self._handle_admin_client(WebsocketsPeer(connection, max_message_bytes=65_536))
 
         async def close_started_servers() -> None:
             if legacy_http_server is not None:
@@ -1169,8 +1177,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 allow_insecure_loopback=self.server_ssl_context is None,
                 websocket_handlers=WebSocketHandlers(
                     dj=self._handle_dj_connection,
-                    admin=self._handle_browser_client,
-                    preview=self._handle_browser_client,
+                    admin=self._handle_admin_client,
+                    preview=self._handle_preview_client,
                 ),
                 certificate_fingerprint=self.certificate_fingerprint,
                 setup_manager=self.setup_manager,

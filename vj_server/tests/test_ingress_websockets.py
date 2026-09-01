@@ -419,8 +419,8 @@ async def test_managed_vj_run_uses_one_ingress_and_no_legacy_listener(
     assert captured["stopped"] == 1
     handlers = captured["init"][1]["websocket_handlers"]
     assert handlers.dj == server._handle_dj_connection
-    assert handlers.admin == server._handle_browser_client
-    assert handlers.preview == server._handle_browser_client
+    assert handlers.admin == server._handle_admin_client
+    assert handlers.preview == server._handle_preview_client
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ import urllib.parse
 from pathlib import Path
 
 from vj_server.config import validate_http_bind_host
+from vj_server.ingress.app import normalize_public_url
 
 # Fix Windows console encoding for unicode characters
 if sys.platform == "win32":
@@ -48,18 +49,11 @@ def validate_hostname(value: str) -> str:
 
 
 def _public_name_from_url(value: str | None) -> tuple[str, ...]:
-    if value is None:
+    canonical_url = normalize_public_url(value)
+    if canonical_url is None:
         return ()
-    parsed = urllib.parse.urlsplit(value)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError("MCAV_PUBLIC_URL must be an absolute HTTPS URL without credentials")
+    parsed = urllib.parse.urlsplit(canonical_url)
+    assert parsed.hostname is not None
     return (parsed.hostname,)
 
 
@@ -95,6 +89,11 @@ Examples:
         type=validate_port,
         default=(int(value) if (value := os.environ.get("MCAV_PUBLIC_PORT")) is not None else None),
         help="Unified HTTPS/WSS port (default: --http-port)",
+    )
+    parser.add_argument(
+        "--public-url",
+        default=os.environ.get("MCAV_PUBLIC_URL"),
+        help="Canonical public HTTPS origin used in DJ invitations",
     )
     parser.add_argument(
         "--managed",
@@ -325,7 +324,7 @@ Examples:
             supplied_certificate = Path(certificate_value)
             supplied_private_key = Path(key_value)
         try:
-            public_names = _public_name_from_url(os.environ.get("MCAV_PUBLIC_URL"))
+            public_names = _public_name_from_url(args.public_url)
             managed_identity = IdentityStore(
                 managed_environment.state_directory,
                 renderer_secret=renderer_secret,
@@ -423,6 +422,7 @@ Examples:
         enable_link=args.enable_link,
         public_host=args.public_host or args.http_host,
         public_port=args.public_port if args.public_port is not None else args.http_port,
+        public_url=args.public_url,
         legacy_separate_listeners=args.legacy_separate_listeners,
         setup_manager=managed_identity.setup if managed_identity is not None else None,
         certificate_fingerprint=(

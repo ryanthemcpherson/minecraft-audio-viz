@@ -190,6 +190,35 @@
                                 <button id="btn-copy-code" class="btn btn-copy-inline" title="Copy code">Copy</button>
                             </div>
                             <span class="generated-code-ttl">Expires in <span id="generated-code-ttl">30</span>m</span>
+                            <div id="invite-details" class="invite-details" hidden>
+                                <dl class="invite-metadata">
+                                    <div>
+                                        <dt>DJ server</dt>
+                                        <dd id="invite-server-url"></dd>
+                                    </div>
+                                    <div>
+                                        <dt>Expires</dt>
+                                        <dd id="invite-expires-at"></dd>
+                                    </div>
+                                    <div id="invite-fingerprint-row">
+                                        <dt>Certificate pin</dt>
+                                        <dd id="invite-fingerprint" class="invite-fingerprint"></dd>
+                                    </div>
+                                </dl>
+                                <button id="btn-copy-invite" class="btn btn-primary btn-full" type="button">
+                                    Copy DJ Invite
+                                </button>
+                                <input
+                                    id="invite-manual-copy"
+                                    class="invite-manual-copy"
+                                    type="text"
+                                    readonly
+                                    hidden
+                                    aria-label="DJ invite link for manual copy"
+                                >
+                                <p id="invite-copy-status" class="invite-copy-status" aria-live="polite"></p>
+                            </div>
+                            <p id="invite-unavailable" class="invite-unavailable" hidden></p>
                         </div>
                         <div id="active-codes" class="active-codes"></div>
                     </div>

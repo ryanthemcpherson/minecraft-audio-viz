@@ -17,13 +17,28 @@
       "description": "The generated WORD-XXXX connect code."
     },
     "expires_at": {
-      "type": "number",
+      "type": "integer",
       "description": "Expiry timestamp (seconds since epoch)."
     },
     "ttl_minutes": {
       "type": "integer",
       "description": "Time-to-live in minutes."
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "public_url": {
+          "type": ["string", "null"],
+          "pattern": "^https://[^/?#@]+$"
+        },
+        "certificate_sha256": {
+          "type": "string",
+          "pattern": "^[0-9A-F]{64}$"
+        }
+      },
+      "required": ["public_url"]
     }
   },
-  "required": ["type", "code", "expires_at", "ttl_minutes"]
+  "required": ["type", "code", "expires_at", "ttl_minutes", "runtime"]
 }

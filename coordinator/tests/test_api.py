@@ -6,9 +6,16 @@ SQLite database (see conftest.py).
 
 from __future__ import annotations
 
+import logging
+import uuid
+
 import pytest
 from app.config import Settings
+from app.models.db import DJSession
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -104,8 +111,13 @@ async def test_register_server(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_flow(client: AsyncClient) -> None:
+async def test_full_flow(
+    client: AsyncClient,
+    caplog: pytest.LogCaptureFixture,
+    db_session: AsyncSession,
+) -> None:
     """Register a server, create a show, and resolve the connect code."""
+    caplog.set_level(logging.INFO)
 
     # 0. Get auth token
     user_token = await _get_user_token(client, "flow@example.com")
@@ -158,6 +170,16 @@ async def test_full_flow(client: AsyncClient) -> None:
     assert resolve_data["show_name"] == "Friday Night Beats"
     assert resolve_data["dj_count"] == 1
     assert "token" in resolve_data
+    assert connect_code not in resolve_resp.text
+
+    dj_session_id = uuid.UUID(resolve_data["dj_session_id"])
+    persisted_session = await db_session.get(DJSession, dj_session_id)
+    assert persisted_session is not None
+    assert persisted_session.dj_name == f"DJ-{dj_session_id.hex[:12].upper()}"
+    assert connect_code not in persisted_session.dj_name
+
+    unmatched = await client.get(f"/api/v1/connect/{connect_code}/unexpected")
+    assert unmatched.status_code == 404
 
     # 5. Verify the JWT is valid
     import jwt as pyjwt
@@ -194,6 +216,55 @@ async def test_full_flow(client: AsyncClient) -> None:
     # 8. Resolving the code again should fail (show ended, code cleared)
     resolve_again = await client.get(f"/api/v1/connect/{connect_code}")
     assert resolve_again.status_code == 404
+    application_logs = "\n".join(
+        f"{record.getMessage()} {getattr(record, 'path', '')}"
+        for record in caplog.records
+        if not record.name.startswith(("httpx", "httpcore"))
+    )
+    assert connect_code not in application_logs
+    assert any(
+        record.name == "request"
+        and getattr(record, "status_code", None) == 404
+        and getattr(record, "path", None) == "<unmatched>"
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_connect_database_failure_redacts_code_from_formatted_logs(
+    client: AsyncClient,
+    caplog: pytest.LogCaptureFixture,
+    db_session: AsyncSession,
+) -> None:
+    caplog.set_level(logging.INFO)
+    user_token = await _get_user_token(client, "failure-log@example.com")
+    server = await _register_server(
+        client,
+        user_token,
+        name="Failure Stage",
+        websocket_url="ws://192.168.1.51:9000",
+        api_key="failure-log-key",
+    )
+    show_response = await client.post(
+        "/api/v1/shows",
+        json={"server_id": server["server_id"], "name": "Failure Show", "max_djs": 4},
+        headers={"Authorization": "Bearer failure-log-key"},
+    )
+    connect_code = show_response.json()["connect_code"]
+    caplog.clear()
+
+    await db_session.execute(text("DROP TABLE shows"))
+    await db_session.commit()
+    with pytest.raises(OperationalError):
+        await client.get(f"/api/v1/connect/{connect_code}")
+
+    formatter = logging.Formatter("%(levelname)s %(name)s %(message)s")
+    formatted_application_logs = "\n".join(
+        formatter.format(record)
+        for record in caplog.records
+        if record.name in {"app.main", "request"}
+    )
+    assert connect_code not in formatted_application_logs
 
 
 # ---------------------------------------------------------------------------

@@ -93,13 +93,12 @@ async def resolve_connect_code(
 
     metrics_incr("connect.resolve.success")
     logger.info(
-        "Connect code resolved metadata: code=%s show_id=%s",
-        normalised,
+        "Connect credential resolved metadata: show_id=%s",
         show.id,
         extra={
             "request_id": request_id,
             "event": "connect_resolve",
-            "path": request.url.path,
+            "path": "/api/v1/connect/{code}",
             "method": request.method,
         },
     )
@@ -235,7 +234,7 @@ async def _join_connect_code_inner(
         id=dj_session_id,
         show_id=show.id,
         user_id=user_id,
-        dj_name=f"DJ-{normalised}",
+        dj_name=f"DJ-{dj_session_id.hex[:12].upper()}",
         ip_address=client_ip,
     )
     session.add(dj_session)
@@ -251,14 +250,13 @@ async def _join_connect_code_inner(
     )
 
     logger.info(
-        "Connect code joined: code=%s show_id=%s dj_session=%s",
-        normalised,
+        "Connect credential joined: show_id=%s dj_session=%s",
         show.id,
         dj_session_id,
         extra={
             "request_id": getattr(request.state, "request_id", None),
             "event": "connect_join",
-            "path": request.url.path,
+            "path": "/api/v1/connect/{code}/join",
             "method": request.method,
         },
     )

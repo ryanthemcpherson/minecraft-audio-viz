@@ -711,7 +711,7 @@ class IngressServer:
         self._ssl_context = ssl_context
         self._allow_insecure_loopback = allow_insecure_loopback
         self._limits = limits or IngressLimits()
-        self._certificate_fingerprint = _fingerprint(certificate_fingerprint)
+        self._certificate_fingerprint = normalize_certificate_fingerprint(certificate_fingerprint)
         self._healthy = False
         self._bound_address: tuple[str, int] | None = None
         self._runner: web.AppRunner | None = None
@@ -853,7 +853,7 @@ def _site_address(site: web.TCPSite) -> tuple[str, int]:
     return str(address[0]), int(address[1])
 
 
-def _fingerprint(value: str | None) -> str | None:
+def normalize_certificate_fingerprint(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.replace(":", "").upper()
@@ -862,3 +862,29 @@ def _fingerprint(value: str | None) -> str | None:
     ):
         raise ValueError("certificate fingerprint must be SHA-256 hex")
     return normalized
+
+
+def normalize_public_url(value: str | None) -> str | None:
+    """Return a canonical HTTPS origin suitable for certificate-bound invites."""
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(value.strip())
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("public URL must be a valid HTTPS origin") from error
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise ValueError("public URL must be a credential-free HTTPS origin")
+    hostname = parsed.hostname.lower()
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    port_suffix = f":{port}" if port is not None and port != 443 else ""
+    return f"https://{hostname}{port_suffix}"

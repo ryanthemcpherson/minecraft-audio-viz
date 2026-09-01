@@ -714,6 +714,7 @@ def test_managed_paper_cli_bootstraps_identity_from_secret_environment(
     assert captured["server"]["tls_key"] == key_path
     assert captured["server"]["setup_manager"] is setup_manager
     assert captured["server"]["certificate_fingerprint"] == expected_fingerprint
+    assert captured["server"]["public_url"] == "https://panel.example.test:8443/"
     assert captured["server"]["managed_environment"].generation == 42
 
 

@@ -13,6 +13,16 @@ from starlette.responses import Response
 from app.services.metrics import observe_http_request_duration
 
 logger = logging.getLogger("request")
+UNMATCHED_ROUTE_PATH = "<unmatched>"
+
+
+def request_path_template(request: Request) -> str:
+    """Return a low-cardinality route label without logging path credentials."""
+    route = request.scope.get("route")
+    path_template = getattr(route, "path", None)
+    if isinstance(path_template, str) and path_template:
+        return path_template
+    return UNMATCHED_ROUTE_PATH
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -25,8 +35,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         response = await call_next(request)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        route = request.scope.get("route")
-        path_template = getattr(route, "path", request.url.path)
+        path_template = request_path_template(request)
         observe_http_request_duration(request.method, path_template, duration_ms)
 
         response.headers["X-Request-ID"] = request_id
@@ -35,7 +44,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             "request_complete",
             extra={
                 "request_id": request_id,
-                "path": request.url.path,
+                "path": path_template,
                 "method": request.method,
                 "status_code": response.status_code,
                 "duration_ms": duration_ms,

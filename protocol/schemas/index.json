@@ -36,6 +36,7 @@
     "audio_state": "types/audio-state.schema.json",
     "entity_update": "types/entity-update.schema.json",
     "particle_spawn": "types/particle-spawn.schema.json",
+    "dj_invite": "types/dj-invite.schema.json",
     "renderer_backend": "types/renderer-backend.schema.json",
     "hologram_config": "types/hologram-config.schema.json"
   },

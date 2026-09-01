@@ -35,6 +35,14 @@ except ImportError:
 
 logger = logging.getLogger("vj_server")
 
+_ADMIN_ONLY_BROWSER_COMMANDS = frozenset(
+    {
+        "generate_connect_code",
+        "get_connect_codes",
+        "revoke_connect_code",
+    }
+)
+
 
 class RelayMixin:
     """Mixin providing browser/MC/DJ WebSocket handling and broadcasting.
@@ -92,8 +100,23 @@ class RelayMixin:
         close_code = 4008 if rate_limited else 4004
         await websocket.close(close_code, "Authentication failed")
 
-    async def _handle_browser_client(self, websocket: WebSocketPeer) -> None:
-        """Handle browser preview/admin panel connection."""
+    async def _handle_admin_client(self, websocket: WebSocketPeer) -> None:
+        """Handle the authenticated administrator WebSocket route."""
+        await self._handle_browser_client(websocket, client_role="admin")
+
+    async def _handle_preview_client(self, websocket: WebSocketPeer) -> None:
+        """Handle the authenticated preview WebSocket route."""
+        await self._handle_browser_client(websocket, client_role="preview")
+
+    async def _handle_browser_client(
+        self,
+        websocket: WebSocketPeer,
+        *,
+        client_role: str = "admin",
+    ) -> None:
+        """Handle a browser connection with route-scoped command permissions."""
+        if client_role not in {"admin", "preview"}:
+            raise ValueError("Unsupported browser client role")
 
         # --- VJ Authentication Gate ---
         if self.require_auth:
@@ -195,6 +218,8 @@ class RelayMixin:
             return
 
         self._broadcast_clients.add(websocket)
+        if client_role == "admin":
+            self._admin_clients.add(websocket)
         self._browser_connects += 1
         logger.info(f"Browser client connected. Total: {len(self._broadcast_clients)}")
 
@@ -251,6 +276,19 @@ class RelayMixin:
                 try:
                     data = mjson.decode(message)
                     msg_type = data.get("type")
+
+                    if client_role != "admin" and msg_type in _ADMIN_ONLY_BROWSER_COMMANDS:
+                        await websocket.send(
+                            _json_str(
+                                {
+                                    "type": "error",
+                                    "message": (
+                                        "Command is only available on the administrator route"
+                                    ),
+                                }
+                            )
+                        )
+                        continue
 
                     # Rate-limit state-mutating commands (10/sec token bucket)
                     if msg_type in _RATE_LIMITED_COMMANDS:
@@ -380,6 +418,19 @@ class RelayMixin:
                     elif msg_type == "generate_connect_code":
                         # Generate a new connect code for DJ client auth
                         ttl_minutes = data.get("ttl_minutes", 30)
+                        if type(ttl_minutes) is not int or not 1 <= ttl_minutes <= 1440:
+                            await websocket.send(
+                                _json_str(
+                                    {
+                                        "type": "error",
+                                        "message": (
+                                            "Connect code lifetime must be between 1 and "
+                                            "1440 minutes"
+                                        ),
+                                    }
+                                )
+                            )
+                            continue
 
                         # Try coordinator first (centralized codes)
                         connect_code = await self._coordinator_create_show(ttl_minutes)
@@ -393,7 +444,8 @@ class RelayMixin:
                         self._cleanup_expired_codes()
 
                         logger.info(
-                            f"Generated connect code: {connect_code.code} (expires in {ttl_minutes}m)"
+                            "Generated DJ connect credential (expires in %dm)",
+                            ttl_minutes,
                         )
 
                         await websocket.send(
@@ -401,8 +453,9 @@ class RelayMixin:
                                 {
                                     "type": "connect_code_generated",
                                     "code": connect_code.code,
-                                    "expires_at": connect_code.expires_at,
+                                    "expires_at": int(connect_code.expires_at),
                                     "ttl_minutes": ttl_minutes,
+                                    "runtime": self._invite_runtime_info(),
                                 }
                             )
                         )
@@ -430,7 +483,7 @@ class RelayMixin:
                         code = data.get("code", "").upper()
                         if code in self._connect_codes:
                             del self._connect_codes[code]
-                            logger.info(f"Revoked connect code: {code}")
+                            logger.info("Revoked DJ connect credential")
                             await self._broadcast_connect_codes()
 
                     elif msg_type == "get_dj_roster":
@@ -1284,12 +1337,23 @@ class RelayMixin:
             pass
         finally:
             self._broadcast_clients.discard(websocket)
+            self._admin_clients.discard(websocket)
             self._voice_subscribers.discard(websocket)
             # Clean up heartbeat tracking for this client
             self._browser_pong_pending.pop(websocket, None)
             self._browser_last_pong.pop(websocket, None)
             self._browser_disconnects += 1
             logger.info(f"Browser client disconnected. Total: {len(self._broadcast_clients)}")
+
+    def _invite_runtime_info(self) -> dict[str, str | None]:
+        """Return the public, non-secret fields required to build a DJ invite."""
+        runtime_info: dict[str, str | None] = {
+            "public_url": getattr(self, "public_url", None),
+        }
+        fingerprint = getattr(self, "certificate_fingerprint", None)
+        if fingerprint is not None:
+            runtime_info["certificate_sha256"] = fingerprint
+        return runtime_info
 
     async def _broadcast_dj_roster(self):
         """Broadcast DJ roster to all browser clients and connected DJs."""
