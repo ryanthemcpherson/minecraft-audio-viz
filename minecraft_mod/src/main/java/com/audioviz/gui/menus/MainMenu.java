@@ -130,7 +130,7 @@ public class MainMenu extends AudioVizGui {
             .addLoreLine(Text.literal("AudioViz Fabric Mod").formatted(Formatting.GRAY))
             .addLoreLine(Text.literal("Real-time audio visualization").formatted(Formatting.GRAY))
             .addLoreLine(Text.empty())
-            .addLoreLine(Text.literal("Version: 1.0.0").formatted(Formatting.WHITE))
+            .addLoreLine(Text.literal("Version: " + AudioVizMod.getVersion()).formatted(Formatting.WHITE))
             .addLoreLine(Text.literal("API: Fabric 1.21.11").formatted(Formatting.WHITE))
             .addLoreLine(Text.empty())
             .addLoreLine(Text.literal("Use /audioviz help for").formatted(Formatting.GRAY))

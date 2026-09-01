@@ -204,7 +204,7 @@ public class VizWebSocketServer extends WebSocketServer {
         JsonObject welcome = new JsonObject();
         welcome.addProperty("type", "connected");
         welcome.addProperty("message", "Connected to AudioViz server");
-        welcome.addProperty("version", "1.0.0");
+        welcome.addProperty("version", AudioVizMod.getVersion());
         welcome.addProperty("server_type", "fabric");
         welcome.addProperty("auth_required", securityPolicy.requiresAuthentication());
         conn.send(gson.toJson(welcome));

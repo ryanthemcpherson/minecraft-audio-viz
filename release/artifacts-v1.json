@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "artifacts": [
+    {
+      "id": "paper-plugin",
+      "filename": "AudioViz-{version}.jar"
+    },
+    {
+      "id": "runtime-linux-x86-64",
+      "filename": "mcav-vj-runtime-{version}-linux-x86_64.zip"
+    },
+    {
+      "id": "runtime-linux-aarch64",
+      "filename": "mcav-vj-runtime-{version}-linux-aarch64.zip"
+    },
+    {
+      "id": "runtime-windows-x86-64",
+      "filename": "mcav-vj-runtime-{version}-windows-x86_64.zip"
+    },
+    {
+      "id": "runtime-manifest",
+      "filename": "mcav-runtime-manifest-v1.json"
+    },
+    {
+      "id": "runtime-manifest-signature",
+      "filename": "mcav-runtime-manifest-v1.json.sig"
+    },
+    {
+      "id": "dj-client-nsis",
+      "filename": "MCAV-DJ-Client-{version}-setup.exe"
+    },
+    {
+      "id": "dj-client-msi",
+      "filename": "MCAV-DJ-Client-{version}.msi"
+    },
+    {
+      "id": "fabric-mod",
+      "filename": "audioviz-fabric-{version}.jar"
+    },
+    {
+      "id": "checksums",
+      "filename": "SHA256SUMS.txt"
+    },
+    {
+      "id": "checksums-signature",
+      "filename": "SHA256SUMS.txt.asc"
+    }
+  ]
+}

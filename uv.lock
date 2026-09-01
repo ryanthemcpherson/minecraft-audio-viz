@@ -734,7 +734,7 @@ wheels = [
 
 [[package]]
 name = "mcav-vj-server"
-version = "1.0.0"
+version = "1.2.0"
 source = { editable = "vj_server" }
 dependencies = [
     { name = "aiohttp" },

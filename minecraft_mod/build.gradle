@@ -4,7 +4,7 @@ plugins {
     id 'org.owasp.dependencycheck' version '12.2.2'
 }
 
-version = '1.0.0'
+version = '1.2.0'
 group = 'com.audioviz'
 
 repositories {

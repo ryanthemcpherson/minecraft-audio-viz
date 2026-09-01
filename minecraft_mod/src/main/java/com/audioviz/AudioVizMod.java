@@ -40,6 +40,7 @@ import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.server.MinecraftServer;
@@ -61,6 +62,13 @@ public class AudioVizMod implements DedicatedServerModInitializer {
     private static MinecraftServer server;
 
     public static AudioVizMod getInstance() { return instance; }
+
+    public static String getVersion() {
+        return FabricLoader.getInstance()
+            .getModContainer("audioviz")
+            .map(container -> container.getMetadata().getVersion().getFriendlyString())
+            .orElse("unknown");
+    }
 
     private Path configDir;
     private ModConfig config;

@@ -138,7 +138,7 @@ public class MainMenu implements Menu {
                 "&7AudioViz Plugin",
                 "&7Real-time audio visualization",
                 "",
-                "&fVersion: &71.0.0",
+                "&fVersion: &7" + plugin.getDescription().getVersion(),
                 "&fAPI: &7Paper 1.21.11",
                 "",
                 "&7Use &f/audioviz help &7for",

@@ -1,6 +1,6 @@
 {
   "name": "audioviz-frontend",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "AudioViz - Web frontends for Minecraft audio visualization",
   "type": "module",
   "scripts": {

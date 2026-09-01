@@ -40,7 +40,7 @@ cd minecraft_mod
 ./gradlew build
 ```
 
-Output JAR: `build/libs/audioviz-mod-1.0.0.jar`
+Output JAR: `build/libs/audioviz-mod-1.2.0.jar`
 
 ## Commands
 
