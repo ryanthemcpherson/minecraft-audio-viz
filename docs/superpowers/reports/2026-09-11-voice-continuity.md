@@ -30,6 +30,8 @@ The user reported a friend's deployment rendered no entities; those server logs 
 
 Use a disposable Paper/Pterodactyl environment with retained logs. Prove clean install, cold restart, stage restoration, nonzero entity count, and changing transforms under synthetic audio. Socket startup alone is insufficient. Add actionable diagnostics for plugin, zone/pool, runtime, TLS, DJ connection, and incoming frames. Pin one Paper/Java combination first, then broaden support.
 
+The local Paper renderer gate now passes with Paper 1.21.11 build 132 and Java 21: eight main-stage entities on clean start and cold restart, actual BlockDisplay position/scale changes under synthetic render batches, graceful shutdowns, and unchanged persisted stage history. The cold restart needed no activation or pool-initialization request. Evidence and reproduction are in [the Paper acceptance report](2026-09-11-paper-acceptance.md). This run disabled managed runtime installation and did not test audio processing or Pterodactyl. It also exposed a separate startup error: without Simple Voice Chat, the main plugin's event handlers fail registration because an optional API class is missing. That remains the next standalone-startup fix.
+
 ## Recovered release implementation
 
 `main` at `e9b317e8` contains plans but not the implementation. The existing `codex/self-installing-release` branch at `.worktrees/self-installing-release` already includes:
@@ -50,7 +52,7 @@ Validation: initial 6 Python signer and 75 Java manifest/platform tests passed; 
 ## Next sequence
 
 1. Retain the verified DSP baseline on its independent branch until integration review.
-2. Prove the cold-restart rendering acceptance gate and preserve diagnostics. No disposable Paper server or pinned Paper download was found in the repository during this continuation; the Java 21 build is available locally, but unit-test success is not live-server acceptance.
+2. Fix event-handler registration when Simple Voice Chat is absent, then repeat the now-passing local Paper gate and check error-free startup. Retain the pinned renderer evidence and extend acceptance separately to managed installation and Pterodactyl.
 3. Compare one Rust DSP/visual vertical slice against the baseline before revising Python-specific release plans.
 4. Reuse the runtime-neutral manifest/store/supervisor foundation for the selected runtime.
 5. Finish signed candidate evidence and clean-install gates, then golden visuals and hosted management.
