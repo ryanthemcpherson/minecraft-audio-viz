@@ -9,16 +9,22 @@
   --color-disc-cyan: var(--mcav-cyan);
   --color-disc-blue: var(--mcav-blue);
   --color-noteblock-amber: var(--mcav-amber);
+  --color-success: var(--mcav-success);
+  --color-warning: var(--mcav-warning);
+  --color-danger: var(--mcav-danger);
   --color-text-primary: var(--mcav-text-primary);
   --color-text-secondary: var(--mcav-text-secondary);
 
   --font-sans: var(--mcav-font-sans);
+  --font-heading: var(--mcav-font-heading);
+  --font-mono: var(--mcav-font-mono);
 }
 
 /* ---- Base Styles ---- */
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
 }
 
 body {
@@ -29,12 +35,31 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+h1,
+h2,
+h3,
+.font-heading {
+  font-family: var(--font-heading);
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: rgba(0, 204, 255, 0.28);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-disc-cyan);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
 /* ---- Animations ---- */
 
 @keyframes slide-up {
   from {
     opacity: 0;
-    transform: translateY(40px);
+    transform: translateY(24px);
   }
   to {
     opacity: 1;
@@ -66,22 +91,58 @@ body {
   }
 }
 
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
 .animate-slide-up {
-  animation: slide-up 0.8s ease-out forwards;
+  animation: slide-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .animate-slide-up-delay-1 {
-  animation: slide-up 0.8s ease-out 0.1s forwards;
+  animation: slide-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
   opacity: 0;
 }
 
 .animate-slide-up-delay-2 {
-  animation: slide-up 0.8s ease-out 0.2s forwards;
+  animation: slide-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.2s forwards;
+  opacity: 0;
+}
+
+.animate-slide-up-delay-3 {
+  animation: slide-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.32s forwards;
   opacity: 0;
 }
 
 .animate-fade-in {
   animation: fade-in 1s ease-out forwards;
+}
+
+.flow-line {
+  stroke-dasharray: 6 6;
+  animation: flow-dash 1.2s linear infinite;
+}
+
+.pulse-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  animation: pulse-ring 1.8s ease-out infinite;
 }
 
 /* ---- Gradient Dither (prevents banding on dark gradients) ---- */
@@ -98,7 +159,7 @@ body {
   z-index: 1;
 }
 
-/* ---- Glass Card ---- */
+/* ---- Surfaces ---- */
 
 .glass-card {
   background: rgba(255, 255, 255, 0.03);
@@ -113,7 +174,7 @@ body {
   border-color: rgba(255, 255, 255, 0.12);
 }
 
-/* Flat card — solid bg, no blur, for content grids */
+/* Flat card: solid bg, no blur, for content grids */
 .flat-card {
   background: var(--color-bg-secondary);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -122,6 +183,16 @@ body {
 
 .flat-card:hover {
   border-color: rgba(255, 255, 255, 0.14);
+}
+
+/* Subtle grid backdrop for technical sections */
+.grid-backdrop {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%);
 }
 
 /* ---- Glow Effects ---- */
@@ -169,8 +240,8 @@ body {
 }
 
 .callout-warning {
-  border-left: 3px solid #f59e0b;
-  background: rgba(245, 158, 11, 0.05);
+  border-left: 3px solid var(--color-warning);
+  background: rgba(255, 209, 102, 0.06);
   padding: 1rem 1.25rem;
   border-radius: 0 0.75rem 0.75rem 0;
 }
@@ -200,6 +271,12 @@ details.faq-item[open] summary .faq-chevron {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .animate-slide-up-delay-1,
+  .animate-slide-up-delay-2,
+  .animate-slide-up-delay-3 {
+    opacity: 1;
   }
 }
 

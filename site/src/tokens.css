@@ -12,13 +12,19 @@
   --mcav-blue: #5B6AFF;
   --mcav-amber: #FFAA00;
 
+  /* Status colors */
+  --mcav-success: #2fe098;
+  --mcav-warning: #ffd166;
+  --mcav-danger: #ff6767;
+
   /* Text */
   --mcav-text-primary: #f5f5f5;
   --mcav-text-secondary: #a1a1aa;
 
-  /* Typography */
-  --mcav-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --mcav-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Typography (font variables are injected by next/font in layout.tsx) */
+  --mcav-font-sans: var(--font-inter, "Inter"), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mcav-font-heading: var(--font-space-grotesk, "Space Grotesk"), var(--mcav-font-sans);
+  --mcav-font-mono: var(--font-jetbrains-mono, "JetBrains Mono"), ui-monospace, "SFMono-Regular", Menlo, monospace;
 
   /* Shared effects */
   --mcav-glow-cyan: 0 0 30px rgba(0, 204, 255, 0.15);

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import AuthProvider from "@/components/AuthProvider";
@@ -8,7 +8,22 @@ import NowPlaying from "@/components/NowPlaying";
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+  display: "swap",
 });
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space-grotesk",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
+
+const fontVariables = `${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable}`;
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://mcav.live"),
@@ -25,9 +40,12 @@ export const metadata: Metadata = {
   other: {
     "theme-color": "#08090d",
   },
-  title: "MCAV - Minecraft Audio Visualizer",
+  title: {
+    default: "MCAV - Minecraft Audio Visualizer",
+    template: "%s - MCAV",
+  },
   description:
-    "Real-time audio visualization in Minecraft. No client mods. Capture system audio, process with FFT analysis, and render reactive 3D structures using Display Entities.",
+    "Live audio-reactive visuals inside Minecraft. MCAV captures your system audio, analyzes it in real time, and drives 3D structures on a Paper server. No client mods.",
   keywords: [
     "Minecraft",
     "audio visualizer",
@@ -39,28 +57,18 @@ export const metadata: Metadata = {
     "beat detection",
     "WASAPI",
   ],
+  // Social images come from src/app/opengraph-image.tsx (generated at build time).
   openGraph: {
     title: "MCAV - Minecraft Audio Visualizer",
-    description:
-      "Real-time audio visualization in Minecraft. No client mods.",
+    description: "Your music, rendered live in Minecraft. Vanilla clients, no mods.",
     url: "https://mcav.live",
     type: "website",
     siteName: "MCAV",
-    images: [
-      {
-        url: "/og-image.jpg",
-        width: 1200,
-        height: 630,
-        alt: "MCAV - Minecraft Audio Visualizer",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "MCAV - Minecraft Audio Visualizer",
-    description:
-      "Real-time audio visualization in Minecraft. No client mods.",
-    images: ["/og-image.jpg"],
+    description: "Your music, rendered live in Minecraft. Vanilla clients, no mods.",
   },
 };
 
@@ -70,7 +78,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={fontVariables}>
       <body className="bg-bg-primary text-text-primary antialiased">
         <a
           href="#main-content"
