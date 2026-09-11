@@ -445,6 +445,11 @@ final class StrictJson {
     }
 
     private static boolean isEntrypoint(String value) {
+        for (String segment : value.split("/")) {
+            if (segment.equals(".") || segment.equals("..")) {
+                return false;
+            }
+        }
         boolean segmentHasCharacter = false;
         for (int index = 0; index < value.length(); index++) {
             char character = value.charAt(index);
@@ -494,7 +499,12 @@ final class StrictJson {
             throw failure(INVALID_TYPE);
         }
         try {
-            return Instant.parse(value);
+            Instant parsed = Instant.parse(value);
+            // Instant.parse normalizes leap seconds and 24:00; release metadata must not.
+            if (value.startsWith("0000") || !parsed.toString().equals(value)) {
+                throw failure(INVALID_TYPE);
+            }
+            return parsed;
         } catch (DateTimeParseException error) {
             throw failure(INVALID_TYPE, error);
         }

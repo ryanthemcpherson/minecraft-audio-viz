@@ -108,3 +108,38 @@ def test_sign_manifest_rejects_mismatched_key_id() -> None:
 
     with pytest.raises(ManifestBuildError, match="key ID must equal manifest signing_key_id"):
         sign_manifest(document, private_key, "different-test-key")
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    [".", "..", "../engine", "bin/../engine", "./engine", "bin/./engine", "bin/.", "bin/.."],
+)
+def test_rejects_non_normalized_entrypoint_segments(entrypoint: str) -> None:
+    document = valid_document()
+    document["artifacts"]["linux-x86_64"]["entrypoint"] = entrypoint
+
+    with pytest.raises(ManifestBuildError, match="normalized path"):
+        canonical_manifest_bytes(document)
+
+
+@pytest.mark.parametrize("field", ["published_at", "expires_at"])
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-9-01T00:00:00Z",
+        "2026-09-1T00:00:00Z",
+        "2026-09-01T0:00:00Z",
+        "2026-09-01T00:0:00Z",
+        "2026-09-01T00:00:0Z",
+        "2026-09-01T24:00:00Z",
+        "2026-09-01T23:59:60Z",
+        "0000-09-01T00:00:00Z",
+        "2026-02-30T00:00:00Z",
+    ],
+)
+def test_rejects_noncanonical_timestamps(field: str, timestamp: str) -> None:
+    document = valid_document()
+    document[field] = timestamp
+
+    with pytest.raises(ManifestBuildError, match="UTC RFC 3339 seconds"):
+        canonical_manifest_bytes(document)

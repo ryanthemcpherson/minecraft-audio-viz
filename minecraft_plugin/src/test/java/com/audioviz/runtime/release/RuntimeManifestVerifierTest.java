@@ -255,6 +255,28 @@ class RuntimeManifestVerifierTest {
         assertNotNull(manifest.artifacts().get(RuntimePlatform.LINUX_X86_64));
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        ".", "..", "../engine", "bin/../engine", "./engine", "bin/./engine", "bin/.", "bin/.."
+    })
+    void rejectsNonNormalizedEntrypointSegments(String entrypoint) throws Exception {
+        byte[] payload = replaceFirst(validJson(), "bin/audioviz-vj", entrypoint);
+        assertReason(INVALID_TYPE, payload, signedEnvelope(payload, KEY_ID, "Ed25519"), descriptor(1, 1), NOW);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "2026-9-01T00:00:00Z", "2026-09-1T00:00:00Z", "2026-09-01T0:00:00Z",
+        "2026-09-01T00:0:00Z", "2026-09-01T00:00:0Z", "2026-09-01T24:00:00Z",
+        "2026-09-01T23:59:60Z", "0000-09-01T00:00:00Z", "2026-02-30T00:00:00Z"
+    })
+    void rejectsNonCanonicalTimestamps(String timestamp) throws Exception {
+        for (String original : new String[] { "2026-08-31T00:00:00Z", "2026-09-30T00:00:00Z" }) {
+            byte[] payload = replace(validJson(), original, timestamp);
+            assertReason(INVALID_TYPE, payload, signedEnvelope(payload, KEY_ID, "Ed25519"), descriptor(1, 1), NOW);
+        }
+    }
+
     @Test
     void rejectsInvalidTopLevelInputsAndEnvelopeBounds() {
         assertReason(MANIFEST_TOO_LARGE, null, validEnvelope, descriptor(1, 1), NOW);

@@ -36,6 +36,10 @@ VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 KEY_ID_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
 DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 ENTRYPOINT_PATTERN = re.compile(r"^[0-9A-Za-z._-]+(?:/[0-9A-Za-z._-]+)*$")
+UTC_SECONDS_PATTERN = re.compile(
+    r"^(?!0000)[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+)
 
 
 class ManifestBuildError(ValueError):
@@ -137,7 +141,9 @@ def _validate_artifact(platform: str, artifact: dict[str, object]) -> None:
             raise ManifestBuildError(f"artifact {platform} {field} must be lowercase SHA-256")
 
     entrypoint = _require_string(artifact, "entrypoint", maximum=128)
-    if not ENTRYPOINT_PATTERN.fullmatch(entrypoint):
+    if not ENTRYPOINT_PATTERN.fullmatch(entrypoint) or any(
+        segment in {".", ".."} for segment in entrypoint.split("/")
+    ):
         raise ManifestBuildError(f"artifact {platform} entrypoint is not a normalized path")
 
     url = _require_string(artifact, "url", maximum=2048)
@@ -187,6 +193,8 @@ def _require_string(value: dict[str, object], field: str, *, maximum: int) -> st
 
 def _require_timestamp(value: dict[str, object], field: str) -> datetime:
     timestamp = _require_string(value, field, maximum=32)
+    if not UTC_SECONDS_PATTERN.fullmatch(timestamp):
+        raise ManifestBuildError(f"{field} must be UTC RFC 3339 seconds")
     try:
         return datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError as error:
