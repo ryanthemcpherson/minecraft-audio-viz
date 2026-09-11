@@ -136,6 +136,10 @@ public class StageManager {
      * Activate a stage: initialize entity pools for all zones.
      */
     public void activateStage(Stage stage) {
+        activateStage(stage, true);
+    }
+
+    private void activateStage(Stage stage, boolean recordActivation) {
         int defaultEntityCount = plugin.getConfig().getInt("defaults.entity_count", 16);
         for (Map.Entry<StageZoneRole, String> entry : stage.getRoleToZone().entrySet()) {
             StageZoneRole role = entry.getKey();
@@ -151,8 +155,10 @@ public class StageManager {
         }
 
         stage.setActive(true);
-        stage.setLastActivatedAt(System.currentTimeMillis());
-        saveStages();
+        if (recordActivation) {
+            stage.setLastActivatedAt(System.currentTimeMillis());
+            saveStages();
+        }
 
         // Activate decorators for this stage
         if (plugin.getDecoratorManager() != null) {
@@ -162,7 +168,8 @@ public class StageManager {
         // Broadcast zone configs to VJ server so it applies correct patterns and entity counts
         broadcastStageZoneConfigs(stage);
 
-        plugin.getLogger().info("Activated stage '" + stage.getName() + "'");
+        plugin.getLogger().info((recordActivation ? "Activated" : "Restored")
+            + " stage '" + stage.getName() + "'");
     }
 
     /**
@@ -633,6 +640,18 @@ public class StageManager {
 
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Failed to load stage '" + stageName + "'", e);
+            }
+        }
+
+        // Persisted activity is intent; entity pools and decorators are process-local.
+        // Restore only after all stage metadata is loaded, without rewriting saved history.
+        for (Stage stage : stages.values()) {
+            if (!stage.isActive()) continue;
+            try {
+                activateStage(stage, false);
+            } catch (Exception error) {
+                plugin.getLogger().log(Level.WARNING,
+                    "Failed to restore active stage '" + stage.getName() + "'", error);
             }
         }
 
