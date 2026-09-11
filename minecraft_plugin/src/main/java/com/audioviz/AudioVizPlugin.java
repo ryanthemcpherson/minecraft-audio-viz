@@ -147,7 +147,7 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         this.recordingManager = new RecordingManager(this);
 
         // Register event listeners
-        getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(new CoreEventListener(this), this);
         getServer().getPluginManager().registerEvents(menuManager, this);
         getServer().getPluginManager().registerEvents(chatInputManager, this);
         getServer().getPluginManager().registerEvents(zoneEditor, this);
@@ -557,6 +557,28 @@ public class AudioVizPlugin extends JavaPlugin implements Listener {
         BitmapPattern pattern = bitmapPatternManager.getPattern("bmp_chat_wall");
         if (pattern instanceof ChatWallPattern chatWall) {
             chatWall.addMessage(event.getPlayer().getName(), event.getMessage());
+        }
+    }
+
+    /**
+     * Paper reflects over every listener method, including unannotated getters.
+     * Keep that scan away from the plugin's optional VoicechatIntegration return type.
+     */
+    public static final class CoreEventListener implements Listener {
+        private final AudioVizPlugin plugin;
+
+        CoreEventListener(AudioVizPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        @EventHandler
+        public void onWorldUnload(WorldUnloadEvent event) {
+            plugin.onWorldUnload(event);
+        }
+
+        @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+        public void onPlayerChat(AsyncPlayerChatEvent event) {
+            plugin.onPlayerChat(event);
         }
     }
 
