@@ -53,10 +53,13 @@ System Audio (WASAPI/cpal) → Rust DJ Client (FFT + Beat Detection) → WebSock
 6. **scripts/** - Quick-start PowerShell scripts
 
 8. **site/** (TypeScript/React) - Landing page and pattern gallery at mcav.live
-   - Next.js 15 with App Router, React 19, Tailwind CSS 4
-   - `src/app/` - Pages (home, getting started, pattern gallery, login, dashboard)
-   - `src/components/` - Navbar, AuthProvider, Three.js visualizations
-   - `src/lib/` - Auth utilities, audio simulation, pattern implementations
+   - Next.js 16 with App Router, React 19, Tailwind CSS 4
+   - `src/app/` - Pages (home, `/patterns` gallery, getting started, login, dashboard, settings, admin, legal); `opengraph-image.tsx` generates the social card at build time
+   - `src/components/ui/` - Shared primitives (Button, Badge, SectionHeader, PageHeader, Alert, Field, Spinner); use these instead of hand-rolled classes
+   - `src/components/home/` - Landing page sections; `src/components/patterns/` - live Lua previews (`livePreviewSlots.ts` caps concurrent WebGL contexts at 4)
+   - `src/lib/releaseStatus.ts` - Single flag (`RELEASE.isReleased`) gating download buttons and the Phase 0 banner; `src/lib/links.ts` - canonical GitHub/Discord URLs
+   - `src/tokens.css` - Canonical design tokens mapped into Tailwind via `@theme` in `globals.css`
+   - `scripts/generate-patterns.mjs` - Emits `src/lib/patterns/generated.ts` (Lua sources, client only) and `meta.ts` (metadata, safe for server components)
    - `package.json` (name: mcav-site) - Independent from root package.json
 
 9. **coordinator/** (Python 3.12+) - Central DJ coordinator API

@@ -9,9 +9,11 @@ const COORDINATOR_URL =
   process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
 
 if (!COORDINATOR_URL && typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-  console.error(
-    "[MCAV] NEXT_PUBLIC_COORDINATOR_URL is not set. API requests will fail. " +
-    "Set it in .env.local or the environment."
+  // Not an error: with no explicit URL, requests go to same-origin /api/v1,
+  // which next.config.ts rewrites to the coordinator (COORDINATOR_API_URL).
+  console.info(
+    "[MCAV] NEXT_PUBLIC_COORDINATOR_URL is not set; using the same-origin /api/v1 rewrite. " +
+    "Set it in .env.local to call a coordinator directly."
   );
 }
 
