@@ -66,6 +66,7 @@ from vj_server.patterns import (
     AudioState,
     PatternConfig,
 )
+from vj_server.pipeline_timing import PipelineTimingMetrics
 from vj_server.relay import RelayMixin
 from vj_server.spectrograph import TerminalSpectrograph
 from vj_server.stage_manager import StageManagerMixin
@@ -233,6 +234,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
         # Metrics tracking
         self._start_time = time.time()
         self._frames_processed = 0
+        self._pipeline_timing = PipelineTimingMetrics()
         self._pattern_changes = 0
 
         # Visual delay buffer for audio-visual sync
@@ -399,6 +401,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
     async def _handle_dj_frame(self, dj: DJConnection, data: "DjAudioFrame"):
         """Process an audio frame from a DJ."""
+        received_mono = time.monotonic()
         # Rate limit: drop excess frames (allows bursts up to 120fps, sustain ~60fps)
         if not dj.check_rate_limit():
             logger.debug(f"Rate limit: dropping frame from {dj.dj_id}")
@@ -406,6 +409,8 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
         # Validate and clamp all incoming values
         safe = _sanitize_audio_frame(data)
+        self._pipeline_timing.observe_dj(safe["timing"])
+        dj.last_frame_received_mono = received_mono
 
         dj.seq = safe["seq"]
         dj.bands = safe["bands"]
@@ -435,6 +440,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
 
         # Append timestamped frame to buffer (for visual delay feature)
         frame_data_snapshot = {
+            "_received_mono": received_mono,
             "bands": list(dj.bands),
             "peak": dj.peak,
             "is_beat": dj.is_beat,
@@ -484,6 +490,20 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                 dj.latency_ms = dj.network_rtt_ms
             else:
                 dj.latency_ms = dj.pipeline_latency_ms
+
+        self._pipeline_timing.observe(
+            "server_handler_ms", (time.monotonic() - received_mono) * 1000.0
+        )
+
+    def _observe_frame_selection(self, dj: DJConnection, delayed: dict | None) -> None:
+        """Measure age of the actual selected frame on the server's monotonic clock."""
+        received = (
+            delayed.get("_received_mono") if delayed is not None else dj.last_frame_received_mono
+        )
+        if received is not None:
+            self._pipeline_timing.observe(
+                "server_receipt_to_selection_ms", (time.monotonic() - received) * 1000.0
+            )
 
     def _apply_clock_resync(self, dj: DJConnection, data: dict) -> None:
         """Process an incoming clock_sync_response for periodic drift correction."""
@@ -763,6 +783,7 @@ class VJServer(DJManagerMixin, StageManagerMixin, RelayMixin):
                     # Check for delayed frame (audio-visual sync)
                     effective_delay = self._get_effective_delay_ms(dj)
                     delayed = self._read_delayed_frame(dj, effective_delay)
+                    self._observe_frame_selection(dj, delayed)
                     if delayed:
                         bands = delayed["bands"]
                         peak = delayed["peak"]

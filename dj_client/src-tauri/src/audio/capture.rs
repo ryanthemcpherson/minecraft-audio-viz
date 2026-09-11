@@ -1,6 +1,6 @@
 //! Audio capture implementation using a dedicated thread
 
-use super::{AudioConfig, BassLane, FftAnalyzer};
+use super::{AnalysisTiming, AudioConfig, BassLane, FftAnalyzer};
 use crate::voice::VoiceStreamer;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, StreamConfig};
@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 use thiserror::Error;
 
 /// Audio capture errors
@@ -85,6 +86,9 @@ pub struct AnalysisResult {
 
     /// Instant kick detected by bass lane onset detector
     pub instant_kick: bool,
+
+    /// Monotonic timestamps for the exact sample-buffer snapshot analyzed.
+    pub timing: Option<AnalysisTiming>,
 }
 
 /// Commands sent to the audio thread
@@ -202,6 +206,7 @@ pub struct AudioBuffer {
     samples: Vec<f32>,
     write_pos: usize,
     capacity: usize,
+    latest_received_at: Option<Instant>,
 }
 
 impl AudioBuffer {
@@ -210,10 +215,14 @@ impl AudioBuffer {
             samples: vec![0.0; capacity],
             write_pos: 0,
             capacity,
+            latest_received_at: None,
         }
     }
 
     pub fn push_samples(&mut self, data: &[f32]) {
+        if !data.is_empty() {
+            self.latest_received_at = Some(Instant::now());
+        }
         for &sample in data {
             self.samples[self.write_pos] = sample;
             self.write_pos = (self.write_pos + 1) % self.capacity;
@@ -379,9 +388,16 @@ fn run_audio_thread(
                             if sample_buf.len() < fft_size {
                                 sample_buf.resize(fft_size, 0.0);
                             }
-                            let count = buffer.lock().get_latest_into(&mut sample_buf[..fft_size]);
+                            let (count, received_at) = {
+                                let buf = buffer.lock();
+                                (
+                                    buf.get_latest_into(&mut sample_buf[..fft_size]),
+                                    buf.latest_received_at,
+                                )
+                            };
 
                             if count >= fft_size {
+                                let analysis_started_at = Instant::now();
                                 let samples = &sample_buf[..count];
                                 let (i_bass, i_kick) = {
                                     let mut bl = bass_lane.lock();
@@ -401,6 +417,13 @@ fn run_audio_thread(
                                     result.beat_intensity = result.beat_intensity.max(0.5);
                                 }
 
+                                result.timing =
+                                    received_at.map(|buffer_received_at| AnalysisTiming {
+                                        buffer_received_at,
+                                        analysis_started_at,
+                                        analysis_finished_at: Instant::now(),
+                                        window_ms: count as f64 / sample_rate as f64 * 1000.0,
+                                    });
                                 *result_out.lock() = result;
                             }
 
@@ -560,10 +583,17 @@ fn run_audio_thread(
         if sample_buf.len() < fft_size {
             sample_buf.resize(fft_size, 0.0);
         }
-        let count = buffer.lock().get_latest_into(&mut sample_buf[..fft_size]);
+        let (count, received_at) = {
+            let buf = buffer.lock();
+            (
+                buf.get_latest_into(&mut sample_buf[..fft_size]),
+                buf.latest_received_at,
+            )
+        };
         // All locks dropped - audio callback can push freely
 
         if count >= fft_size {
+            let analysis_started_at = Instant::now();
             let samples = &sample_buf[..count];
             // Run bass lane on the same samples (moved out of audio callback to avoid contention)
             let (i_bass, i_kick) = {
@@ -588,6 +618,12 @@ fn run_audio_thread(
             }
 
             // Update shared result (brief lock)
+            result.timing = received_at.map(|buffer_received_at| AnalysisTiming {
+                buffer_received_at,
+                analysis_started_at,
+                analysis_finished_at: Instant::now(),
+                window_ms: count as f64 / sample_rate as f64 * 1000.0,
+            });
             *result_out.lock() = result;
         }
 
@@ -650,6 +686,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::AudioBuffer;
+
+    #[test]
+    fn buffer_receipt_only_advances_with_samples() {
+        let mut buffer = AudioBuffer::new(4);
+        buffer.push_samples(&[]);
+        assert!(buffer.latest_received_at.is_none());
+        let before = std::time::Instant::now();
+        buffer.push_samples(&[1.0, 2.0]);
+        let received = buffer.latest_received_at.unwrap();
+        assert!(received >= before && received <= std::time::Instant::now());
+        buffer.push_samples(&[]);
+        assert_eq!(buffer.latest_received_at, Some(received));
+        let mut samples = [0.0; 2];
+        assert_eq!(buffer.get_latest_into(&mut samples), 2);
+        assert_eq!(samples, [1.0, 2.0]);
+        assert_eq!(buffer.latest_received_at, Some(received));
+    }
 
     #[test]
     fn get_latest_returns_recent_samples_in_order() {

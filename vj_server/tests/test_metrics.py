@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from vj_server.metrics import start_metrics_server
+from vj_server.pipeline_timing import PipelineTimingMetrics
 
 METRICS_PORT = 9099
 METRICS_HOST = "127.0.0.1"
@@ -21,6 +22,7 @@ async def mock_server():
     server._broadcast_clients = {Mock(), Mock(), Mock()}
     server._pattern_name = "spectrum"
     server._frames_processed = 42000
+    server._pipeline_timing = PipelineTimingMetrics()
     server._pattern_changes = 5
     server._dj_connects = 10
 
@@ -50,7 +52,7 @@ async def _http_get(path: str) -> str:
     reader, writer = await asyncio.open_connection(METRICS_HOST, METRICS_PORT)
     writer.write(f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode())
     await writer.drain()
-    response = await reader.read(4096)
+    response = await reader.read()
     writer.close()
     await writer.wait_closed()
     return response.decode("utf-8")
@@ -72,6 +74,16 @@ async def test_health_contains_status_ok(metrics_server):
 async def test_metrics_returns_200_ok(metrics_server):
     response = await _http_get("/metrics")
     assert "200 OK" in response
+
+
+@pytest.mark.asyncio
+async def test_metrics_exposes_observed_timing_without_fabricating_missing_stages(
+    metrics_server, mock_server
+):
+    mock_server._pipeline_timing.observe("server_handler_ms", 2.5)
+    response = await _http_get("/metrics")
+    assert 'mcav_pipeline_window_ms{stage="server_handler_ms",statistic="p95"} 2.500000' in response
+    assert 'stage="dj_analysis_ms"' not in response
 
 
 @pytest.mark.asyncio

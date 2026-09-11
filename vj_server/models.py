@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import msgspec
 
 from vj_server.config import validate_http_bind_host
+from vj_server.pipeline_timing import sanitize_timing
 
 if TYPE_CHECKING:
     import websockets
@@ -77,6 +78,7 @@ class DjAudioFrame(msgspec.Struct):
     ts: Optional[float] = None
     tempo_conf: float = 0.0
     beat_phase: float = 0.0
+    timing: Any = None  # Optional telemetry must never prevent audio decoding.
 
 
 _frame_decoder = msgspec.json.Decoder(DjAudioFrame)
@@ -194,6 +196,7 @@ def _sanitize_audio_frame(data: DjAudioFrame | dict) -> dict:
         "i_bass": _clamp_finite(_get("i_bass", 0.0), 0.0, 5.0, 0.0),
         "i_kick": bool(_get("i_kick", False)),
         "ts": _get("ts", None),  # validated separately in latency calc
+        "timing": sanitize_timing(_get("timing", None)),
     }
 
 
@@ -443,6 +446,7 @@ class DJConnection:
 
     # Frame buffer for visual delay (timestamped audio state ring buffer)
     _frame_buffer: deque = field(default_factory=deque)  # (timestamp, data) pairs; trimmed manually
+    last_frame_received_mono: Optional[float] = None
 
     # Jitter tracking
     _jitter_ms: float = 0.0  # Smoothed frame arrival jitter

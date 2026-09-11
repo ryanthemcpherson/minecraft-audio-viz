@@ -69,6 +69,9 @@ pub struct AudioFrameMessage {
     /// Instant kick detected by bass lane
     pub i_kick: bool,
     pub ts: f64,
+    /// DJ-local durations; no shared clock or network-latency claim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<crate::audio::FrameTiming>,
     /// Whether this DJ is using direct Minecraft connection mode
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct_mode: Option<bool>,
@@ -105,6 +108,7 @@ impl AudioFrameMessage {
                 .unwrap_or_default()
                 .as_secs_f64(),
             direct_mode: None,
+            timing: None,
         }
     }
 }
@@ -493,6 +497,24 @@ mod tests {
         assert!((json["i_bass"].as_f64().unwrap_or_default() - 0.6).abs() < 1e-6);
         assert_eq!(json["i_kick"], true);
         assert!(json["ts"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(json.get("timing").is_none());
+
+        let mut timed_msg = msg;
+        timed_msg.timing = Some(crate::audio::FrameTiming {
+            buffer_to_analysis_ms: 7.0,
+            analysis_ms: 2.0,
+            analysis_to_enqueue_ms: 7.0,
+            window_ms: 1024.0 / 48.0,
+        });
+        let mut timed_json = serde_json::to_value(&timed_msg).unwrap();
+        let timing = timed_json
+            .as_object_mut()
+            .unwrap()
+            .remove("timing")
+            .unwrap();
+        assert_eq!(timing["analysis_ms"], 2.0);
+        assert_eq!(timing.as_object().unwrap().len(), 4);
+        assert_eq!(timed_json, json);
     }
 
     #[test]

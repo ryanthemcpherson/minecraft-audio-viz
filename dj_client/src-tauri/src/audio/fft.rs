@@ -471,6 +471,7 @@ impl FftAnalyzer {
             // Bass lane fields are populated by the capture loop, not by FFT analysis
             instant_bass: 0.0,
             instant_kick: false,
+            timing: None,
         }
     }
 

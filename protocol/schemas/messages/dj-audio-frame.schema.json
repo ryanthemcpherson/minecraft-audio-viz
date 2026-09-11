@@ -60,6 +60,18 @@
     "i_kick": {
       "type": "boolean"
     },
+    "timing": {
+      "type": "object",
+      "description": "Optional DJ-local monotonic durations in milliseconds. Buffer receipt is mono buffer ingress, enqueue is before bridge serialization; excludes device, network and Minecraft delivery. window_ms is sample-window duration, not measured processing latency.",
+      "additionalProperties": false,
+      "properties": {
+        "buffer_to_analysis_ms": {"type": "number", "minimum": 0, "maximum": 60000},
+        "analysis_ms": {"type": "number", "minimum": 0, "maximum": 60000},
+        "analysis_to_enqueue_ms": {"type": "number", "minimum": 0, "maximum": 60000},
+        "window_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 60000}
+      },
+      "required": ["buffer_to_analysis_ms", "analysis_ms", "analysis_to_enqueue_ms", "window_ms"]
+    },
     "direct_mode": {
       "type": "boolean",
       "description": "Whether this DJ is using direct Minecraft connection mode"

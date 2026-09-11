@@ -300,7 +300,7 @@ async fn run_bridge(
                             out_beat_intensity = out_beat_intensity.max(0.5);
                         }
 
-                        let msg = AudioFrameMessage::new(
+                        let mut msg = AudioFrameMessage::new(
                             seq,
                             analysis.bands,
                             analysis.peak,
@@ -312,6 +312,8 @@ async fn run_bridge(
                             analysis.instant_bass,
                             analysis.instant_kick,
                         );
+                        msg.timing = analysis.timing.and_then(|timing|
+                            timing.at_enqueue(std::time::Instant::now()));
 
                         if let Ok(json) = serde_json::to_string(&msg) {
                             match tx.try_send(Message::Text(json.into())) {

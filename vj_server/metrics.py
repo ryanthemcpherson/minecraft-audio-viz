@@ -140,6 +140,7 @@ async def _handle_metrics(writer: asyncio.StreamWriter, server: "VJServer") -> N
         "",
     ]
 
+    lines.extend(server._pipeline_timing.prometheus_lines())
     body = "\n".join(lines)
     response = (
         "HTTP/1.1 200 OK\r\n"

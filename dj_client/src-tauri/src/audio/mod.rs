@@ -4,11 +4,16 @@ mod capture;
 mod fft;
 mod sources;
 
+#[cfg(test)]
+mod dsp_benchmark;
+
 mod platform;
+mod timing;
 
 pub use capture::{AnalysisResult, AudioCaptureHandle, CaptureMode};
 pub use fft::{AudioPreset, BassLane, FftAnalyzer, get_preset, get_presets};
 pub use sources::{AudioSource, list_sources};
+pub use timing::{AnalysisTiming, FrameTiming};
 
 /// Audio processing configuration
 #[derive(Debug, Clone)]
