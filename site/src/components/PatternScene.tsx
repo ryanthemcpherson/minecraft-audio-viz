@@ -2,16 +2,23 @@
 
 import { useRef, useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
+import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 import type { EntityData } from "@/lib/patterns/base";
 import type { PatternInstance } from "@/lib/patterns";
-import { generateAudioState } from "@/lib/audioSim";
+import { sampleAudio } from "@/lib/audio/audioSource";
+import { getVizBlockTexture } from "@/lib/blockTextures";
 import MinecraftStage from "./MinecraftStage";
 
 const BLOCK_SIZE = 0.22;
 const STAGE_Y = -1.8;
 const STAGE_BLOCK = 0.38;
 const FLOOR_Y = STAGE_Y + STAGE_BLOCK / 2; // top surface of grass
+const WORLD_SCALE = 6; // normalized 0..1 pattern space to world units
+/** Radius (normalized units) we try to keep the pattern's extent within. */
+const FIT_TARGET_RADIUS = 0.42;
+const FIT_MIN = 0.55;
+const FIT_MAX = 1.5;
 const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
 
@@ -24,19 +31,37 @@ const BAND_COLORS = [
   new THREE.Color(0xe040fb),
 ];
 
+export type PreviewQuality = "low" | "high";
+
 interface PatternSceneProps {
   pattern: PatternInstance;
   phaseOffset: number;
   staticCamera?: boolean;
+  /** "high" adds bloom post-processing. Use for a single showcase canvas only. */
+  quality?: PreviewQuality;
 }
 
-export default function PatternScene({ pattern, phaseOffset, staticCamera = false }: PatternSceneProps) {
+export default function PatternScene({
+  pattern,
+  phaseOffset,
+  staticCamera = false,
+  quality = "low",
+}: PatternSceneProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const groupRef = useRef<THREE.Group>(null);
+  const keyLightRef = useRef<THREE.DirectionalLight>(null);
+  const cyanLightRef = useRef<THREE.PointLight>(null);
+  const beatRingRef = useRef<THREE.Mesh>(null);
+  const beatRingMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
   const maxCount = pattern.config.entityCount;
   const prevPositions = useRef<Float32Array | null>(null);
   const smoothCenter = useRef({ x: 0.5, y: 0.35, z: 0.5 });
   const frameCount = useRef(0);
+  const fitScale = useRef(1);
+  const radiusHold = useRef(FIT_TARGET_RADIUS);
+  const beatGlow = useRef(0);
+
+  const blockTexture = useMemo(() => getVizBlockTexture(), []);
 
   // Pre-allocate position tracking
   useEffect(() => {
@@ -51,8 +76,8 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
     // Clamp delta to avoid huge jumps when tab is backgrounded
     const dt = Math.min(delta, 0.1);
 
-    // Generate simulated audio for this card
-    const audio = generateAudioState(time, phaseOffset);
+    // Synthetic track or live microphone/tab audio, whichever is selected
+    const audio = sampleAudio(time, phaseOffset);
 
     // Update pattern internal time
     pattern.update(dt);
@@ -60,15 +85,13 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
     // Calculate entity positions from the pattern
     const entities: EntityData[] = pattern.calculateEntities(audio, dt);
 
-    // Map entities to 3D positions — 0-1 range to world space
-    const scale3d = 6;
     const prev = prevPositions.current;
     if (!prev) return;
 
     const sc = smoothCenter.current;
 
     if (staticCamera) {
-      // Fixed center for spectrum-style patterns — no jiggle
+      // Fixed center for spectrum-style patterns. No jiggle.
       sc.x = 0.5;
       sc.y = 0.35;
       sc.z = 0.5;
@@ -100,6 +123,35 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
       sc.y += (cy - sc.y) * centerLerp;
       sc.z += (cz - sc.z) * centerLerp;
     }
+
+    // Auto-fit: track the pattern's peak extent (with slow decay) so wide
+    // patterns shrink to fit and tight ones fill the frame, without pumping
+    // on every beat.
+    let maxRadiusSq = 0;
+    for (let i = 0; i < entities.length && i < maxCount; i++) {
+      const e = entities[i];
+      if (!e.visible) continue;
+      const dx = e.x - sc.x;
+      const dy = e.y - sc.y;
+      const dz = e.z - sc.z;
+      const r2 = dx * dx + dy * dy + dz * dz;
+      if (r2 > maxRadiusSq) maxRadiusSq = r2;
+    }
+    const radius = Math.sqrt(maxRadiusSq);
+    radiusHold.current = Math.max(radius, radiusHold.current * Math.pow(0.35, dt)); // ~1 s memory
+    const targetFit = Math.min(
+      FIT_MAX,
+      Math.max(FIT_MIN, FIT_TARGET_RADIUS / Math.max(radiusHold.current, 0.05)),
+    );
+    const fitLerp = frameCount.current < 10 ? 0.5 : 1 - Math.pow(0.02, dt);
+    fitScale.current += (targetFit - fitScale.current) * fitLerp * 0.5;
+    const scale3d = WORLD_SCALE * fitScale.current;
+
+    // Beat flash envelope
+    beatGlow.current = audio.isBeat
+      ? Math.max(beatGlow.current, 0.6 + audio.beatIntensity * 0.4)
+      : beatGlow.current * Math.pow(0.02, dt);
+    const glow = beatGlow.current;
 
     for (let i = 0; i < maxCount; i++) {
       if (i < entities.length && entities[i].visible) {
@@ -135,9 +187,9 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
         TEMP_OBJECT.updateMatrix();
         mesh.setMatrixAt(i, TEMP_OBJECT.matrix);
 
-        // Color by band — moderate brightness so directional light shading shows
+        // Color by band. Values above 1 read as emissive under bloom.
         const bandColor = BAND_COLORS[Math.min(e.band, 4)];
-        const brightness = 0.7 + e.scale * 1.8;
+        const brightness = 0.75 + e.scale * 1.8 + glow * 0.5;
         TEMP_COLOR.copy(bandColor).multiplyScalar(brightness);
         mesh.setColorAt(i, TEMP_COLOR);
       } else {
@@ -155,6 +207,15 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
+    // Lights and the floor ring flash on the beat
+    if (keyLightRef.current) keyLightRef.current.intensity = 1.5 + glow * 0.9;
+    if (cyanLightRef.current) cyanLightRef.current.intensity = 0.8 + glow * 1.6;
+    if (beatRingRef.current && beatRingMaterialRef.current) {
+      const ringScale = 1 + (1 - glow) * 0.35;
+      beatRingRef.current.scale.set(ringScale, ringScale, 1);
+      beatRingMaterialRef.current.opacity = glow * 0.45;
+    }
+
     // Slow auto-rotate (skip for static camera patterns)
     if (groupRef.current && !staticCamera) {
       groupRef.current.rotation.y = time * 0.15 + Math.sin(time * 0.3) * 0.1;
@@ -164,8 +225,8 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
   return (
     <>
       <ambientLight intensity={0.3} />
-      <directionalLight position={[4, 6, 3]} intensity={1.5} color="#ffffff" />
-      <pointLight position={[3, 4, 3]} intensity={0.8} distance={14} color="#00CCFF" />
+      <directionalLight ref={keyLightRef} position={[4, 6, 3]} intensity={1.5} color="#ffffff" />
+      <pointLight ref={cyanLightRef} position={[3, 4, 3]} intensity={0.8} distance={14} color="#00CCFF" />
       <pointLight position={[-3, 3, -2]} intensity={0.6} distance={14} color="#5B6AFF" />
       <pointLight position={[0, -2, 3]} intensity={0.4} distance={12} color="#FFAA00" />
       <fog attach="fog" args={["#050505", 8, 25]} />
@@ -173,14 +234,30 @@ export default function PatternScene({ pattern, phaseOffset, staticCamera = fals
       <group ref={groupRef}>
         <instancedMesh ref={meshRef} args={[undefined, undefined, maxCount]}>
           <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
-          <meshStandardMaterial
-            toneMapped={false}
-            roughness={0.6}
-            metalness={0.05}
-          />
+          <meshStandardMaterial map={blockTexture} toneMapped={false} roughness={0.55} metalness={0.05} />
         </instancedMesh>
-        <MinecraftStage size={7} layers={3} yOffset={-1.8} />
+
+        {/* Beat ring on the stage floor */}
+        <mesh ref={beatRingRef} rotation-x={-Math.PI / 2} position={[0, FLOOR_Y + 0.012, 0]}>
+          <ringGeometry args={[1.35, 1.6, 64]} />
+          <meshBasicMaterial
+            ref={beatRingMaterialRef}
+            color="#00CCFF"
+            transparent
+            opacity={0}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+
+        <MinecraftStage size={7} layers={3} yOffset={STAGE_Y} />
       </group>
+
+      {quality === "high" && (
+        <EffectComposer>
+          <Bloom intensity={0.7} luminanceThreshold={0.7} luminanceSmoothing={0.25} mipmapBlur />
+        </EffectComposer>
+      )}
     </>
   );
 }

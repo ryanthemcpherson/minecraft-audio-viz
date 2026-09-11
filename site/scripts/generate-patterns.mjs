@@ -12,9 +12,56 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SITE_DIR = join(__dirname, "..");
 const PATTERNS_DIR = join(SITE_DIR, "..", "patterns");
 const OUTPUT = join(SITE_DIR, "src", "lib", "patterns", "generated.ts");
+// Lightweight metadata bundle (no Lua sources) safe to import from server components
+const META_OUTPUT = join(SITE_DIR, "src", "lib", "patterns", "meta.ts");
 
 // Category sort order for consistent display
-const CATEGORY_ORDER = ["Original", "Epic", "Cosmic", "Organic", "Spectrum"];
+const CATEGORY_ORDER = ["Original", "Mainstage", "Epic", "Cosmic", "Organic", "Spectrum"];
+
+function writeMetaBundle(patterns) {
+  const meta = patterns.map(({ id, name, description, category, staticCamera, startBlocks }) => ({
+    id,
+    name,
+    description,
+    category,
+    staticCamera,
+    startBlocks,
+  }));
+  const categories = [...new Set(patterns.map((p) => p.category))].sort((a, b) => {
+    const ia = CATEGORY_ORDER.indexOf(a);
+    const ib = CATEGORY_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
+  const lines = [
+    "// AUTO-GENERATED from patterns/*.lua — DO NOT EDIT",
+    "// Run: node scripts/generate-patterns.mjs",
+    "// Metadata only (no Lua sources). Safe to import from server components.",
+    "",
+    "export interface PatternMetaDef {",
+    "  id: string;",
+    "  name: string;",
+    "  description: string;",
+    "  category: string;",
+    "  staticCamera: boolean;",
+    "  startBlocks: number | null;",
+    "}",
+    "",
+    `export const CATEGORY_ORDER = ${JSON.stringify(CATEGORY_ORDER)} as const;`,
+    "",
+    `export const PATTERN_CATEGORIES: string[] = ${JSON.stringify(categories)};`,
+    "",
+    `export const PATTERN_COUNT = ${patterns.length};`,
+    "",
+    `export const PATTERN_META: PatternMetaDef[] = ${JSON.stringify(meta, null, 2)};`,
+    "",
+  ];
+  writeFileSync(META_OUTPUT, lines.join("\n"), "utf-8");
+  console.log(`Generated ${META_OUTPUT} with ${patterns.length} entries`);
+}
 
 function escapeForTemplateLiteral(s) {
   return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
@@ -49,8 +96,8 @@ function main() {
   // On Railway, rootDirectory is /site so ../patterns doesn't exist.
   // Fall back to the committed generated.ts (kept in git).
   if (!existsSync(PATTERNS_DIR)) {
-    if (existsSync(OUTPUT)) {
-      console.log("Patterns dir not found (Railway build). Using committed generated.ts.");
+    if (existsSync(OUTPUT) && existsSync(META_OUTPUT)) {
+      console.log("Patterns dir not found (Railway build). Using committed generated.ts and meta.ts.");
       return;
     }
     console.error("ERROR: patterns/ dir missing and no generated.ts — cannot build.");
@@ -126,6 +173,8 @@ function main() {
 
   writeFileSync(OUTPUT, lines.join("\n"), "utf-8");
   console.log(`\nGenerated ${OUTPUT} with ${patterns.length} patterns`);
+
+  writeMetaBundle(patterns);
 }
 
 main();

@@ -137,6 +137,8 @@ export class LuaPatternInstance {
   private _calculateRef: number = -1;
   readonly config: PatternConfig;
   private _ready = false;
+  private _lastError: string | null = null;
+  private _errorLogged = false;
 
   constructor(
     libSource: string,
@@ -205,6 +207,19 @@ export class LuaPatternInstance {
 
   get ready(): boolean {
     return this._ready;
+  }
+
+  /** Message of the most recent runtime error from calculate(), if any. */
+  get lastError(): string | null {
+    return this._lastError;
+  }
+
+  /** Log a runtime error once per instance so a broken pattern does not spam every frame. */
+  private _reportRuntimeError(message: string): void {
+    this._lastError = message;
+    if (this._errorLogged) return;
+    this._errorLogged = true;
+    console.error("Lua pattern runtime error:", message);
   }
 
   update(_: number = 0.016): void {
@@ -302,7 +317,7 @@ export class LuaPatternInstance {
       // Call calculate(audio, config, dt)
       const status = lua.lua_pcall(L, 3, 1, 0);
       if (status !== lua.LUA_OK) {
-        this._popString(); // discard error
+        this._reportRuntimeError(this._popString());
         return [];
       }
 
@@ -311,9 +326,10 @@ export class LuaPatternInstance {
       lua.lua_pop(L, 1);
 
       return entities;
-    } catch {
+    } catch (e) {
       // Reset Lua stack on error
       lua.lua_settop(L, 0);
+      this._reportRuntimeError(e instanceof Error ? e.message : String(e));
       return [];
     }
   }

@@ -31,35 +31,47 @@ export interface PatternMeta {
 /**
  * Wrapper that returns empty entities while fengari loads,
  * then seamlessly delegates to the real LuaPatternInstance.
+ *
+ * The Lua state is created lazily on the first calculateEntities() call and
+ * again after dispose() if the wrapper is used once more. React StrictMode
+ * mounts, unmounts, and remounts components in development, so a wrapper
+ * that dies on the first dispose() would leave every preview empty.
  */
 class PendingPattern implements PatternInstance {
   config: PatternConfig;
   private _inner: LuaPatternInstance | null = null;
-  private _libSource: string;
-  private _patternSource: string;
+  private readonly _libSource: string;
+  private readonly _patternSource: string;
+  private readonly _config?: Partial<PatternConfig>;
 
   constructor(libSource: string, patternSource: string, config?: Partial<PatternConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this._libSource = libSource;
     this._patternSource = patternSource;
+    this._config = config;
 
-    if (isFengariReady()) {
-      this._inner = new LuaPatternInstance(libSource, patternSource, config);
-    } else if (typeof window !== "undefined") {
-      ensureFengari().then(() => {
-        if (!this._inner) {
-          this._inner = new LuaPatternInstance(this._libSource, this._patternSource, config);
-        }
+    if (typeof window !== "undefined") {
+      // Kick off the load; the instance is created on first use.
+      ensureFengari().catch((error) => {
+        console.error("[MCAV] Failed to load the Lua runtime for pattern previews:", error);
       });
     }
   }
 
+  private _ensureInner(): LuaPatternInstance | null {
+    if (!this._inner && isFengariReady()) {
+      this._inner = new LuaPatternInstance(this._libSource, this._patternSource, this._config);
+    }
+    return this._inner;
+  }
+
   update(dt: number): void {
-    this._inner?.update(dt);
+    this._ensureInner()?.update(dt);
   }
 
   calculateEntities(audio: AudioState, dt?: number): EntityData[] {
-    if (this._inner) return this._inner.calculateEntities(audio, dt);
+    const inner = this._ensureInner();
+    if (inner) return inner.calculateEntities(audio, dt);
     return [];
   }
 

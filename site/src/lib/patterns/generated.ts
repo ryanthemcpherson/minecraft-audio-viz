@@ -1281,6 +1281,1235 @@ end
 `,
   },
   {
+    id: "dropsequence",
+    name: "Drop Sequence",
+    description: "EDM build-up tension over 16 beats, then explosive drop — the tension-release cycle",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 80,
+    source: `-- Pattern metadata
+name = "Drop Sequence"
+description = "EDM build-up tension over 16 beats, then explosive drop — the tension-release cycle"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 80
+
+state = {}
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+
+    -- Initialize state
+    if not state.phase then
+        state.phase = "build"
+        state.build_progress = 0
+        state.build_beats = 0
+        state.drop_timer = 0
+        state.orbit_phase = 0
+        state.time = 0
+        state.positions = {}
+        state.velocities = {}
+        state.flash = 0
+
+        -- Initialize positions on fibonacci sphere (cache for reuse)
+        state.sphere = fibonacci_sphere(n)
+        for i = 1, n do
+            state.positions[i] = {
+                x = 0.5 + state.sphere[i].x * 0.4,
+                y = 0.5 + state.sphere[i].y * 0.4,
+                z = 0.5 + state.sphere[i].z * 0.4,
+            }
+            state.velocities[i] = {x = 0, y = 0, z = 0}
+        end
+    end
+
+    state.time = state.time + dt
+
+    -- Target build beats based on BPM
+    local target_beats = 16
+    if audio.bpm > 170 then
+        target_beats = 8
+    elseif audio.bpm > 140 then
+        target_beats = 12
+    end
+
+    -- Beat handling
+    if audio.is_beat then
+        if state.phase == "build" then
+            state.build_beats = state.build_beats + 1
+            state.build_progress = math.min(1.0, state.build_beats / target_beats)
+
+            -- Check for drop trigger
+            if state.build_progress >= 1.0 and (audio.beat_intensity or 0) > 0.35 then
+                state.phase = "drop"
+                state.drop_timer = 0
+                state.flash = 1.0
+
+                -- Generate explosion velocities using cached sphere
+                for i = 1, n do
+                    local speed = 1.2 + math.random() * 0.6
+                    -- Amplitude scales explosion
+                    speed = speed * (0.8 + audio.amplitude * 0.5)
+                    state.velocities[i] = {
+                        x = state.sphere[i].x * speed,
+                        y = state.sphere[i].y * speed + 0.3,  -- slight upward bias
+                        z = state.sphere[i].z * speed,
+                    }
+                end
+            end
+
+        elseif state.phase == "drop" then
+            state.flash = 0.8  -- re-flash on beats during drop
+        end
+    end
+
+    -- Phase-specific update
+    if state.phase == "build" then
+        -- Orbit entities in a contracting sphere
+        local build_t = state.build_progress
+        local radius = lerp(0.35, 0.04, build_t)
+        local orbit_speed = 1.0 + build_t * 5.0
+
+        state.orbit_phase = state.orbit_phase + orbit_speed * dt
+
+        -- Bass wobble on radius
+        local wobble = audio.bands[1] * 0.03
+
+        for i = 1, n do
+            local r = radius + wobble * math.sin(i * 0.5 + state.time * 3)
+
+            -- Apply orbit rotation using cached sphere points
+            local sx = state.sphere[i].x * r
+            local sy = state.sphere[i].y * r
+            local sz = state.sphere[i].z * r
+
+            -- Rotate around Y axis
+            local angle = state.orbit_phase + (i / n) * 0.3
+            local cos_a = math.cos(angle)
+            local sin_a = math.sin(angle)
+            local rx = sx * cos_a - sz * sin_a
+            local rz = sx * sin_a + sz * cos_a
+
+            state.positions[i].x = smooth(state.positions[i].x, 0.5 + rx, 0.2, dt)
+            state.positions[i].y = smooth(state.positions[i].y, 0.5 + sy, 0.2, dt)
+            state.positions[i].z = smooth(state.positions[i].z, 0.5 + rz, 0.2, dt)
+        end
+
+    elseif state.phase == "drop" then
+        state.drop_timer = state.drop_timer + dt
+        state.flash = decay(state.flash, 0.85, dt)
+
+        -- Update positions with explosion velocities + gravity
+        for i = 1, n do
+            local v = state.velocities[i]
+            local p = state.positions[i]
+
+            p.x = p.x + v.x * dt
+            p.y = p.y + v.y * dt
+            p.z = p.z + v.z * dt
+
+            -- Gravity
+            v.y = v.y - 0.5 * dt
+
+            -- Velocity decay (air resistance)
+            v.x = v.x * (1.0 - 2.0 * dt)
+            v.z = v.z * (1.0 - 2.0 * dt)
+        end
+
+        -- Reset after drop completes
+        if state.drop_timer > 2.5 then
+            state.phase = "build"
+            state.build_progress = 0
+            state.build_beats = 0
+            state.drop_timer = 0
+            state.orbit_phase = 0
+            state.flash = 0
+
+            -- Reset positions to sphere using cached points
+            for i = 1, n do
+                state.positions[i] = {
+                    x = 0.5 + state.sphere[i].x * 0.35,
+                    y = 0.5 + state.sphere[i].y * 0.35,
+                    z = 0.5 + state.sphere[i].z * 0.35,
+                }
+                state.velocities[i] = {x = 0, y = 0, z = 0}
+            end
+        end
+    end
+
+    -- Render entities
+    local entities = {}
+    local build_t = state.build_progress
+
+    for i = 1, n do
+        local p = state.positions[i]
+
+        local scale, brightness, glow, material, visible, interp
+        local band = (i - 1) % 5
+
+        if state.phase == "build" then
+            -- Scale shrinks as entities compress
+            scale = config.base_scale * (1.0 - build_t * 0.5)
+
+            -- Brightness ramps up with build
+            brightness = math.floor(5 + build_t * 10)
+
+            -- Tension flicker at >70% progress
+            visible = true
+            if build_t > 0.7 then
+                local flicker = simple_noise(i, math.floor(state.time * 15), 0)
+                visible = flicker > (build_t - 0.7) * 2  -- more flicker as progress increases
+            end
+
+            glow = build_t > 0.5
+            material = build_t > 0.8 and "GLOWSTONE" or "WHITE_CONCRETE"
+            interp = 5  -- smooth orbiting
+
+        else  -- drop
+            local drop_life = math.max(0, 1.0 - state.drop_timer / 2.5)
+
+            scale = config.base_scale * (0.5 + state.flash * 1.0) * drop_life
+            brightness = math.floor(clamp(state.flash + drop_life * 0.5) * 15)
+            glow = drop_life > 0.3
+            material = drop_life > 0.5 and "GLOWSTONE" or "WHITE_CONCRETE"
+            visible = drop_life > 0.05
+            interp = 1  -- fast for explosion
+        end
+
+        entities[i] = {
+            id = string.format("block_%d", i - 1),
+            x = clamp(p.x),
+            y = clamp(p.y),
+            z = clamp(p.z),
+            scale = math.min(config.max_scale, math.max(0.01, scale)),
+            rotation = (state.orbit_phase * 50 + i * 10) % 360,
+            band = band,
+            visible = visible,
+            glow = glow,
+            brightness = math.min(15, brightness),
+            material = material,
+            interpolation = interp,
+        }
+    end
+
+    return entities
+end
+`,
+  },
+  {
+    id: "laserfan",
+    name: "Laser Fan",
+    description: "Floor-origin laser beams sweep in synchronized arcs and freeze on beat",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 96,
+    source: `-- Pattern metadata
+name = "Laser Fan"
+description = "Floor-origin laser beams sweep in synchronized arcs and freeze on beat"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 96
+
+state = {}
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+    local num_beams = 8
+    local points_per_beam = math.max(2, math.floor(n / num_beams))
+
+    -- Initialize state
+    if not state.sweep_phase then
+        state.sweep_phase = 0
+        state.freeze_timer = 0
+        state.smooth_bass = 0
+        state.smooth_high = 0
+    end
+
+    -- Smooth inputs
+    state.smooth_bass = smooth(state.smooth_bass, audio.bands[1], 0.35, dt)
+    state.smooth_high = smooth(state.smooth_high, audio.bands[5], 0.3, dt)
+
+    -- Beat: freeze sweep momentarily
+    if audio.is_beat then
+        state.freeze_timer = 0.15
+    end
+
+    -- Update freeze timer
+    if state.freeze_timer > 0 then
+        state.freeze_timer = state.freeze_timer - dt
+    else
+        -- Advance sweep, speed tied to BPM
+        local sweep_speed = 1.0
+        if audio.bpm > 0 then
+            sweep_speed = audio.bpm / 128.0
+        end
+        state.sweep_phase = state.sweep_phase + sweep_speed * dt
+    end
+
+    -- Fan geometry
+    -- Fan half-angle widens with bass
+    local fan_half = 0.3 + state.smooth_bass * 0.5
+    -- Beam length scales with amplitude
+    local beam_length = 0.4 + audio.amplitude * 0.3
+
+    -- Origin point: bottom center
+    local ox, oy, oz = 0.5, 0.1, 0.5
+
+    -- Sweep oscillation
+    local sweep_offset = math.sin(state.sweep_phase * math.pi * 2) * 0.3
+
+    local entities = {}
+    local idx = 0
+
+    for b = 0, num_beams - 1 do
+        -- Base angle for this beam within the fan
+        local beam_frac = (b / math.max(1, num_beams - 1)) - 0.5  -- -0.5 to 0.5
+        local beam_angle = beam_frac * fan_half * 2 + sweep_offset
+
+        -- Each beam has a slight independent phase offset
+        local phase_offset = math.sin(state.sweep_phase * 1.7 + b * 0.8) * 0.1
+        beam_angle = beam_angle + phase_offset
+
+        -- Beam direction: upward and outward
+        -- angle controls left-right spread, beam goes upward
+        local dir_x = math.sin(beam_angle)
+        local dir_y = 1.0  -- always upward
+        local dir_z = math.cos(beam_angle) * 0.3  -- slight depth
+
+        -- Normalize direction
+        local len = math.sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z)
+        dir_x, dir_y, dir_z = dir_x / len, dir_y / len, dir_z / len
+
+        -- Beam visibility: dimmer beams disappear at low amplitude
+        local beam_threshold = (b % 4) / 8  -- stagger thresholds
+        local beam_visible = audio.amplitude > beam_threshold
+
+        -- Band per beam for color variety
+        local beam_band = b % 5
+
+        for j = 0, points_per_beam - 1 do
+            if idx >= n then break end
+
+            local t = (j + 1) / points_per_beam
+            local x = ox + dir_x * t * beam_length
+            local y = oy + dir_y * t * beam_length
+            local z = oz + dir_z * t * beam_length
+
+            -- Scale tapers: thick at base, thin at tip
+            local base_scale = lerp(0.15, 0.04, t)
+            -- High frequencies add shimmer
+            local shimmer = state.smooth_high * simple_noise(b, j, math.floor(state.sweep_phase * 10)) * 0.03
+            local scale = base_scale + shimmer
+
+            -- Intensity fades slightly along beam
+            local intensity = 1.0 - t * 0.3
+
+            entities[#entities + 1] = {
+                id = string.format("block_%d", idx),
+                x = clamp(x),
+                y = clamp(y),
+                z = clamp(z),
+                scale = math.min(config.max_scale, scale),
+                rotation = (beam_angle * 180 / math.pi + 90) % 360,
+                band = beam_band,
+                visible = beam_visible,
+                glow = true,
+                brightness = math.floor(intensity * 15),
+                material = "END_ROD",
+                interpolation = 2,
+            }
+
+            idx = idx + 1
+        end
+    end
+
+    -- Fill remaining as invisible
+    while idx < n do
+        entities[#entities + 1] = {
+            id = string.format("block_%d", idx),
+            x = 0.5, y = 0.5, z = 0.5,
+            scale = 0, rotation = 0, band = 0, visible = false,
+        }
+        idx = idx + 1
+    end
+
+    return entities
+end
+`,
+  },
+  {
+    id: "ledwall",
+    name: "LED Wall",
+    description: "Giant LED screen with spectrum bars, waveform, color wash, and beat geometry modes",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 100,
+    source: `-- Pattern metadata
+name = "LED Wall"
+description = "Giant LED screen with spectrum bars, waveform, color wash, and beat geometry modes"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 100
+
+state = {}
+
+local MATERIALS = {
+    "RED_CONCRETE",
+    "ORANGE_CONCRETE",
+    "YELLOW_CONCRETE",
+    "LIME_CONCRETE",
+    "BLUE_CONCRETE",
+}
+
+local function sample_band(bands, col_frac)
+    -- Interpolate 5 bands across a continuous 0-1 range
+    local pos = col_frac * 4
+    local lo = math.floor(pos)
+    local hi = math.min(lo + 1, 4)
+    local t = pos - lo
+    return lerp(bands[lo + 1] or 0, bands[hi + 1] or 0, t)
+end
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+    local cols = math.max(2, math.floor(math.sqrt(n)))
+    local rows = math.max(2, math.floor(n / cols))
+
+    -- Initialize state
+    if not state.mode then
+        state.mode = 0
+        state.mode_timer = 0
+        state.beat_count = 0
+        state.scroll_offset = 0
+        state.amp_buffer = {}
+        state.amp_idx = 1
+        state.shape = 0
+        state.smooth_bands = {0, 0, 0, 0, 0}
+        state.flash = 0
+    end
+
+    -- Smooth bands for spectrum display
+    for i = 1, 5 do
+        state.smooth_bands[i] = smooth(state.smooth_bands[i], audio.bands[i], 0.4, dt)
+    end
+
+    -- Beat handling
+    if audio.is_beat then
+        state.beat_count = state.beat_count + 1
+        state.flash = 1.0
+        state.mode_timer = state.mode_timer + 1
+        if state.mode_timer >= 32 then
+            state.mode_timer = 0
+            state.mode = (state.mode + 1) % 4
+        end
+        -- Update amplitude ring buffer (for waveform mode)
+        state.amp_buffer[state.amp_idx] = audio.amplitude
+        state.amp_idx = (state.amp_idx % cols) + 1
+        -- Cycle geometry shape
+        state.shape = (state.shape + 1) % 4
+    end
+
+    state.flash = decay(state.flash, 0.8, dt)
+    state.scroll_offset = state.scroll_offset + dt * 0.3
+
+    local entities = {}
+    local idx = 0
+    local mode = state.mode
+
+    for row = 0, rows - 1 do
+        for col = 0, cols - 1 do
+            if idx >= n then break end
+
+            local col_frac = col / math.max(1, cols - 1)
+            local row_frac = row / math.max(1, rows - 1)
+            local x = 0.1 + col_frac * 0.8
+            local y = 0.1 + row_frac * 0.8
+
+            local intensity = 0
+            local band_idx = math.floor(col_frac * 4.99)
+            local visible = true
+            local pixel_scale = config.base_scale
+
+            if mode == 0 then
+                -- Spectrum bars: columns as frequency bars rising from bottom
+                local bar_height = sample_band(state.smooth_bands, col_frac)
+                if row_frac <= bar_height then
+                    intensity = 0.5 + bar_height * 0.5
+                    band_idx = math.floor(col_frac * 4.99)
+                else
+                    intensity = 0.05
+                    visible = false
+                end
+
+            elseif mode == 1 then
+                -- Waveform: ring buffer displayed as horizontal wave
+                local buf_idx = ((col + math.floor(state.amp_idx)) % cols) + 1
+                local amp_val = state.amp_buffer[buf_idx] or 0
+                local wave_y = amp_val * 0.8
+                local dist = math.abs(row_frac - wave_y)
+                if dist < 0.15 then
+                    intensity = 1.0 - dist / 0.15
+                    band_idx = math.floor(amp_val * 4.99)
+                else
+                    intensity = 0.02
+                    visible = false
+                end
+
+            elseif mode == 2 then
+                -- Color wash: scrolling gradient
+                local shifted = (col_frac + state.scroll_offset) % 1.0
+                band_idx = math.floor(shifted * 4.99)
+                local band_val = state.smooth_bands[band_idx + 1] or 0
+                intensity = 0.3 + band_val * 0.7
+                pixel_scale = config.base_scale * (0.8 + band_val * 0.4)
+
+            elseif mode == 3 then
+                -- Beat geometry: flash shapes on beat
+                local shape = state.shape
+                local cx = math.floor(cols / 2)
+                local cy = math.floor(rows / 2)
+                local in_shape = false
+
+                if shape == 0 then
+                    -- X shape: diagonals
+                    in_shape = math.abs(col - row * cols / rows) < 1.5
+                             or math.abs(col - (rows - 1 - row) * cols / rows) < 1.5
+                elseif shape == 1 then
+                    -- Diamond
+                    local dx = math.abs(col - cx)
+                    local dy = math.abs(row - cy)
+                    in_shape = (dx / cx + dy / cy) < 0.8 and (dx / cx + dy / cy) > 0.5
+                elseif shape == 2 then
+                    -- Border
+                    in_shape = col == 0 or col == cols - 1 or row == 0 or row == rows - 1
+                elseif shape == 3 then
+                    -- Cross
+                    in_shape = math.abs(col - cx) <= 1 or math.abs(row - cy) <= 1
+                end
+
+                if in_shape then
+                    intensity = state.flash
+                    band_idx = (state.beat_count + col) % 5
+                else
+                    intensity = state.flash * 0.1
+                    visible = state.flash > 0.3
+                end
+            end
+
+            -- Global amplitude boost
+            intensity = clamp(intensity + audio.amplitude * 0.1)
+
+            local brightness = math.floor(clamp(intensity) * 15)
+            local glow = intensity > 0.4
+            local mat = MATERIALS[(band_idx % 5) + 1]
+
+            entities[#entities + 1] = {
+                id = string.format("block_%d", idx),
+                x = clamp(x),
+                y = clamp(y),
+                z = 0.5,
+                scale = math.min(config.max_scale, pixel_scale * (0.5 + intensity * 0.5)),
+                rotation = 0,
+                band = band_idx % 5,
+                visible = visible,
+                glow = glow,
+                brightness = brightness,
+                material = glow and mat or "GRAY_CONCRETE",
+                interpolation = 2,
+            }
+
+            idx = idx + 1
+        end
+    end
+
+    return normalize_entities(entities, n)
+end
+`,
+  },
+  {
+    id: "movingheads",
+    name: "Moving Heads",
+    description: "Concert moving-head lights with sweeping beams and ballyhoo snap on beat",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 96,
+    source: `-- Pattern metadata
+name = "Moving Heads"
+description = "Concert moving-head lights with sweeping beams and ballyhoo snap on beat"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 96
+
+state = {}
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+    local num_fixtures = 8
+    local points_per_beam = math.max(2, math.floor(n / num_fixtures))
+
+    -- Initialize state
+    if not state.time then
+        state.time = 0
+        state.snap_timer = 0
+        state.fixtures = {}
+        for i = 1, num_fixtures do
+            state.fixtures[i] = {
+                pan = 0,
+                tilt = 0,
+                target_pan = 0,
+                target_tilt = 0,
+            }
+        end
+    end
+
+    state.time = state.time + dt
+
+    -- Beat: trigger ballyhoo (all snap to center)
+    if audio.is_beat then
+        state.snap_timer = 1.0  -- full beat cycle to return
+    end
+
+    -- Sweep speed tied to BPM
+    local sweep_speed = 0.5
+    if audio.bpm > 0 then
+        sweep_speed = audio.bpm / 200.0
+    end
+
+    -- Update fixture targets
+    local snap_active = state.snap_timer > 0.7  -- snap during first 30% of timer
+    state.snap_timer = math.max(0, state.snap_timer - dt * 2)
+
+    for i = 1, num_fixtures do
+        local fix = state.fixtures[i]
+        local phase_offset = (i - 1) * 0.8
+
+        if snap_active then
+            -- Ballyhoo: all snap straight down center
+            fix.target_pan = 0
+            fix.target_tilt = -1.2  -- steep downward angle
+        else
+            -- Normal: Lissajous figure-8 sweep
+            local t = state.time * sweep_speed
+            fix.target_pan = math.sin(t + phase_offset) * 0.6
+            fix.target_tilt = math.sin(t * 1.5 + phase_offset) * 0.4 - 0.8
+        end
+
+        -- Smooth toward target: fast during snap, slow during sweep
+        local rate = snap_active and 0.6 or 0.12
+        fix.pan = smooth(fix.pan, fix.target_pan, rate, dt)
+        fix.tilt = smooth(fix.tilt, fix.target_tilt, rate, dt)
+    end
+
+    -- Beam reach scales with amplitude
+    local beam_reach = 0.55 + audio.amplitude * 0.2
+
+    local entities = {}
+    local idx = 0
+
+    for i = 1, num_fixtures do
+        local fix = state.fixtures[i]
+
+        -- Fixture position: top edge, evenly spaced
+        local fixture_x = 0.12 + ((i - 1) / math.max(1, num_fixtures - 1)) * 0.76
+        local fixture_y = 0.92
+        local fixture_z = 0.5
+
+        -- Beam direction from pan/tilt
+        local dir_x = math.sin(fix.pan)
+        local dir_y = fix.tilt  -- negative = downward
+        local dir_z = math.cos(fix.pan) * 0.3
+
+        -- Normalize
+        local len = math.sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z)
+        if len > 0.001 then
+            dir_x, dir_y, dir_z = dir_x / len, dir_y / len, dir_z / len
+        end
+
+        -- Per-fixture brightness driven by corresponding frequency band
+        local fixture_band = ((i - 1) % 5)
+        local band_val = audio.bands[fixture_band + 1] or 0
+        local fixture_brightness = 10 + math.floor(band_val * 5)
+
+        for j = 0, points_per_beam - 1 do
+            if idx >= n then break end
+
+            local t = (j + 1) / points_per_beam
+
+            local x = fixture_x + dir_x * t * beam_reach
+            local y = fixture_y + dir_y * t * beam_reach
+            local z = fixture_z + dir_z * t * beam_reach
+
+            -- Scale: slightly thicker beam than lasers, tapers at end
+            local scale = lerp(0.12, 0.05, t)
+            -- Snap pulse makes beams briefly larger
+            if snap_active then
+                scale = scale * 1.4
+            end
+
+            -- Intensity fades along beam
+            local intensity = 1.0 - t * 0.4
+
+            entities[#entities + 1] = {
+                id = string.format("block_%d", idx),
+                x = clamp(x),
+                y = clamp(y),
+                z = clamp(z),
+                scale = math.min(config.max_scale, scale),
+                rotation = (fix.pan * 180 / math.pi + 90) % 360,
+                band = fixture_band,
+                visible = true,
+                glow = true,
+                brightness = math.min(15, math.floor(fixture_brightness * intensity)),
+                material = "SEA_LANTERN",
+                interpolation = 3,
+            }
+
+            idx = idx + 1
+        end
+    end
+
+    -- Fill remaining as invisible
+    while idx < n do
+        entities[#entities + 1] = {
+            id = string.format("block_%d", idx),
+            x = 0.5, y = 0.5, z = 0.5,
+            scale = 0, rotation = 0, band = 0, visible = false,
+        }
+        idx = idx + 1
+    end
+
+    return entities
+end
+`,
+  },
+  {
+    id: "pyro",
+    name: "Pyro",
+    description: "Beat-triggered firework bursts with ballistic physics and gravity",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 100,
+    source: `-- Pattern metadata
+name = "Pyro"
+description = "Beat-triggered firework bursts with ballistic physics and gravity"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 100
+
+state = {}
+
+local BURST_MATERIALS = {
+    "REDSTONE_BLOCK",
+    "GOLD_BLOCK",
+    "DIAMOND_BLOCK",
+    "EMERALD_BLOCK",
+    "LAPIS_BLOCK",
+}
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+
+    -- Initialize state
+    if not state.fireworks then
+        state.fireworks = {}
+        state.time = 0
+        state.next_color = 1
+    end
+
+    state.time = state.time + dt
+
+    -- Gravity strength: high amplitude = sparks hang longer
+    local gravity = 0.4 - audio.amplitude * 0.15
+
+    -- Launch new firework on beat (max 5 concurrent)
+    if audio.is_beat then
+        local active = 0
+        for _, fw in ipairs(state.fireworks) do
+            if fw.phase ~= "dead" then active = active + 1 end
+        end
+        if active < 5 then
+            local peak_y = 0.55 + (audio.beat_intensity or 0.5) * 0.3
+            state.fireworks[#state.fireworks + 1] = {
+                phase = "rise",
+                x = 0.3 + math.random() * 0.4,
+                y = 0.05,
+                z = 0.3 + math.random() * 0.4,
+                peak_y = math.min(0.9, peak_y),
+                rise_speed = 0.8 + (audio.beat_intensity or 0.5) * 0.4,
+                sparks = {},
+                life = 1.0,
+                material = BURST_MATERIALS[state.next_color],
+                band = (state.next_color - 1) % 5,
+                trail = {},
+            }
+            state.next_color = (state.next_color % #BURST_MATERIALS) + 1
+        end
+    end
+
+    -- Update fireworks
+    for i = #state.fireworks, 1, -1 do
+        local fw = state.fireworks[i]
+
+        if fw.phase == "rise" then
+            -- Rising: move upward toward peak
+            fw.y = fw.y + fw.rise_speed * dt
+
+            -- Store trail positions
+            fw.trail[#fw.trail + 1] = {x = fw.x, y = fw.y, z = fw.z}
+            if #fw.trail > 3 then
+                table.remove(fw.trail, 1)
+            end
+
+            -- Reached peak: burst
+            if fw.y >= fw.peak_y then
+                fw.phase = "burst"
+                fw.y = fw.peak_y
+
+                -- Generate sparks using fibonacci sphere
+                local spark_count = 15 + math.floor((audio.beat_intensity or 0.5) * 10)
+                local dirs = fibonacci_sphere(spark_count)
+                fw.sparks = {}
+                for j = 1, spark_count do
+                    local spread = 0.25 + math.random() * 0.15
+                    -- Bass adds upward bias
+                    local bass_boost = audio.bands[1] * 0.1
+                    fw.sparks[j] = {
+                        x = fw.x,
+                        y = fw.y,
+                        z = fw.z,
+                        dx = dirs[j].x * spread,
+                        dy = dirs[j].y * spread + bass_boost,
+                        dz = dirs[j].z * spread,
+                        life = 1.0,
+                    }
+                end
+                fw.trail = {}  -- clear trail on burst
+            end
+
+        elseif fw.phase == "burst" then
+            -- Update sparks
+            local all_dead = true
+            for _, spark in ipairs(fw.sparks) do
+                if spark.life > 0 then
+                    all_dead = false
+                    spark.x = spark.x + spark.dx * dt
+                    spark.y = spark.y + spark.dy * dt
+                    spark.z = spark.z + spark.dz * dt
+                    spark.dy = spark.dy - gravity * dt
+                    -- Velocity drag
+                    spark.dx = spark.dx * (1.0 - 1.5 * dt)
+                    spark.dz = spark.dz * (1.0 - 1.5 * dt)
+                    spark.life = spark.life - dt * 0.7
+
+                    -- High frequencies add sparkle (scale flicker)
+                    if audio.bands[5] > 0.3 then
+                        spark.life = spark.life + dt * 0.1  -- slightly longer sparkle
+                    end
+                end
+            end
+
+            if all_dead then
+                fw.phase = "dead"
+            end
+        end
+
+        -- Remove dead fireworks
+        if fw.phase == "dead" then
+            table.remove(state.fireworks, i)
+        end
+    end
+
+    -- Render entities
+    local entities = {}
+    local idx = 0
+
+    for _, fw in ipairs(state.fireworks) do
+        if fw.phase == "rise" then
+            -- Rocket head
+            if idx < n then
+                entities[#entities + 1] = {
+                    id = string.format("block_%d", idx),
+                    x = clamp(fw.x),
+                    y = clamp(fw.y),
+                    z = clamp(fw.z),
+                    scale = math.min(config.max_scale, 0.15),
+                    rotation = 0,
+                    band = fw.band,
+                    visible = true,
+                    glow = true,
+                    brightness = 15,
+                    material = "GLOWSTONE",
+                    interpolation = 1,
+                }
+                idx = idx + 1
+            end
+
+            -- Trail
+            for ti, tp in ipairs(fw.trail) do
+                if idx >= n then break end
+                local trail_life = ti / (#fw.trail + 1)
+                entities[#entities + 1] = {
+                    id = string.format("block_%d", idx),
+                    x = clamp(tp.x),
+                    y = clamp(tp.y),
+                    z = clamp(tp.z),
+                    scale = math.min(config.max_scale, 0.08 * trail_life),
+                    rotation = 0,
+                    band = fw.band,
+                    visible = true,
+                    glow = true,
+                    brightness = math.floor(trail_life * 10),
+                    material = fw.material,
+                    interpolation = 1,
+                }
+                idx = idx + 1
+            end
+
+        elseif fw.phase == "burst" then
+            -- Sparks
+            for _, spark in ipairs(fw.sparks) do
+                if idx >= n then break end
+                if spark.life > 0 then
+                    local sparkle = 1.0
+                    if audio.bands[5] > 0.3 then
+                        sparkle = 0.7 + simple_noise(spark.x * 10, spark.y * 10, state.time * 5) * 0.3
+                    end
+
+                    local scale = config.base_scale * spark.life * sparkle * 0.8
+                    entities[#entities + 1] = {
+                        id = string.format("block_%d", idx),
+                        x = clamp(spark.x),
+                        y = clamp(spark.y),
+                        z = clamp(spark.z),
+                        scale = math.min(config.max_scale, math.max(0.02, scale)),
+                        rotation = (spark.dx * 500) % 360,
+                        band = fw.band,
+                        visible = true,
+                        glow = spark.life > 0.3,
+                        brightness = math.floor(clamp(spark.life) * 15),
+                        material = fw.material,
+                        interpolation = 1,
+                    }
+                    idx = idx + 1
+                end
+            end
+        end
+    end
+
+    -- Fill remaining entities as invisible
+    while idx < n do
+        entities[#entities + 1] = {
+            id = string.format("block_%d", idx),
+            x = 0.5, y = 0.5, z = 0.5,
+            scale = 0, rotation = 0, band = 0, visible = false,
+        }
+        idx = idx + 1
+    end
+
+    return entities
+end
+`,
+  },
+  {
+    id: "shockwave",
+    name: "Shockwave",
+    description: "Expanding ring pulses radiate from center on each beat",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 80,
+    source: `-- Pattern metadata
+name = "Shockwave"
+description = "Expanding ring pulses radiate from center on each beat"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 80
+
+state = {}
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+
+    -- Initialize state
+    if not state.waves then
+        state.waves = {}
+        state.time = 0
+    end
+
+    state.time = state.time + dt
+
+    -- Spawn new wave on beat (max 4 concurrent)
+    if audio.is_beat then
+        local active = 0
+        for _, w in ipairs(state.waves) do
+            if w.life > 0 then active = active + 1 end
+        end
+        if active < 4 then
+            state.waves[#state.waves + 1] = {
+                radius = 0,
+                speed = 0.6 + (audio.beat_intensity or 0.5) * 0.6,
+                life = 1.0,
+                band = math.floor(math.random() * 5),
+                y_base = 0.5,
+                vertical = math.random() > 0.7,  -- 30% chance of vertical wave
+            }
+        end
+    end
+
+    -- Update waves
+    for i = #state.waves, 1, -1 do
+        local w = state.waves[i]
+        w.radius = w.radius + w.speed * dt
+        -- Faster fade as wave reaches edges
+        local edge_factor = 1.0 + w.radius * 3.0
+        w.life = w.life - dt * edge_factor
+        -- Slight speed decay for natural deceleration
+        w.speed = w.speed * (1.0 - 0.3 * dt)
+
+        -- Remove dead waves
+        if w.life <= 0 or w.radius > 0.55 then
+            table.remove(state.waves, i)
+        end
+    end
+
+    -- Count active waves
+    local active_waves = {}
+    for _, w in ipairs(state.waves) do
+        if w.life > 0 then
+            active_waves[#active_waves + 1] = w
+        end
+    end
+
+    local entities = {}
+    local idx = 0
+
+    if #active_waves == 0 then
+        -- No active waves — show dim center point as idle indicator
+        for i = 0, n - 1 do
+            entities[#entities + 1] = {
+                id = string.format("block_%d", i),
+                x = 0.5,
+                y = 0.5,
+                z = 0.5,
+                scale = 0,
+                rotation = 0,
+                band = 0,
+                visible = false,
+            }
+        end
+        return entities
+    end
+
+    -- Distribute entities across active waves
+    local per_wave = math.max(4, math.floor(n / #active_waves))
+
+    for wi, w in ipairs(active_waves) do
+        local count = per_wave
+        if wi == #active_waves then
+            count = n - idx  -- remaining entities
+        end
+        if count <= 0 then break end
+
+        local ring_thickness = 0.02 + audio.bands[1] * 0.02
+        local high_wobble = audio.bands[5] * 0.05
+
+        for j = 0, count - 1 do
+            if idx >= n then break end
+
+            local angle = (j / count) * math.pi * 2
+            -- Slight radius variation for ring thickness
+            local r_offset = (j % 3 - 1) * ring_thickness
+            local r = w.radius + r_offset
+
+            local x, y, z
+            if w.vertical then
+                -- Vertical ring: expands in x-y plane
+                x = 0.5 + math.cos(angle) * r
+                y = 0.5 + math.sin(angle) * r
+                z = 0.5 + math.sin(angle * 3 + state.time * 5) * high_wobble
+            else
+                -- Horizontal ring: expands in x-z plane
+                x = 0.5 + math.cos(angle) * r
+                z = 0.5 + math.sin(angle) * r
+                y = w.y_base + math.sin(angle * 3 + state.time * 5) * high_wobble
+            end
+
+            local intensity = w.life
+            local scale = config.base_scale * (0.5 + intensity * 1.0)
+            local brightness = math.floor(clamp(intensity) * 15)
+
+            entities[#entities + 1] = {
+                id = string.format("block_%d", idx),
+                x = clamp(x),
+                y = clamp(y),
+                z = clamp(z),
+                scale = math.min(config.max_scale, scale),
+                rotation = (angle * 180 / math.pi) % 360,
+                band = w.band,
+                visible = true,
+                glow = true,
+                brightness = brightness,
+                material = "SEA_LANTERN",
+                interpolation = 1,
+            }
+
+            idx = idx + 1
+        end
+    end
+
+    -- Fill remaining entities as invisible
+    while idx < n do
+        entities[#entities + 1] = {
+            id = string.format("block_%d", idx),
+            x = 0.5, y = 0.5, z = 0.5,
+            scale = 0, rotation = 0, band = 0, visible = false,
+        }
+        idx = idx + 1
+    end
+
+    return entities
+end
+`,
+  },
+  {
+    id: "strobe",
+    name: "Strobe Wall",
+    description: "Full-zone grid that flashes on/off in sync with beats — 4 strobe modes cycle automatically",
+    category: "Mainstage",
+    staticCamera: true,
+    startBlocks: 96,
+    source: `-- Pattern metadata
+name = "Strobe Wall"
+description = "Full-zone grid that flashes on/off in sync with beats — 4 strobe modes cycle automatically"
+category = "Mainstage"
+static_camera = true
+recommended_entities = 96
+
+state = {}
+
+function calculate(audio, config, dt)
+    local n = config.entity_count
+    -- Grid dimensions: closest rectangle to n
+    local cols = math.max(1, math.floor(math.sqrt(n * 1.5)))
+    local rows = math.max(1, math.floor(n / cols))
+
+    -- Initialize state
+    if not state.flash then
+        state.flash = 0
+        state.mode = 0
+        state.mode_timer = 0
+        state.beat_count = 0
+        state.parity = 0
+    end
+
+    -- Beat handling
+    if audio.is_beat then
+        state.flash = 1.0
+        state.beat_count = state.beat_count + 1
+        state.parity = 1 - state.parity
+        -- Cycle mode every 16 beats
+        state.mode_timer = state.mode_timer + 1
+        if state.mode_timer >= 16 then
+            state.mode_timer = 0
+            state.mode = (state.mode + 1) % 4
+        end
+    end
+
+    -- Decay flash between beats
+    state.flash = decay(state.flash, 0.75, dt)
+
+    -- BPM-adaptive subdivision
+    local subdiv = 1
+    if audio.bpm > 140 then
+        subdiv = 0.5  -- half-time for fast tracks
+    elseif audio.bpm > 0 and audio.bpm < 100 then
+        subdiv = 2    -- double-time for slow tracks
+    end
+
+    -- Beat pulse for sustained strobe between discrete beats
+    local pulse = beat_pulse(audio.beat_phase, subdiv, 8.0)
+    local base_intensity = math.max(state.flash, pulse)
+
+    -- Bass adds a brightness floor
+    local bass_floor = audio.bands[1] * 0.3
+
+    local entities = {}
+    local idx = 0
+
+    for row = 0, rows - 1 do
+        for col = 0, cols - 1 do
+            if idx >= n then break end
+
+            local x = 0.1 + (col / math.max(1, cols - 1)) * 0.8
+            local z = 0.1 + (row / math.max(1, rows - 1)) * 0.8
+
+            -- Per-entity intensity based on current mode
+            local intensity = 0
+            local mode = state.mode
+
+            if mode == 0 then
+                -- Mode 0: Full flash — all entities strobe together
+                intensity = base_intensity
+
+            elseif mode == 1 then
+                -- Mode 1: Checkerboard — alternating halves flash
+                local is_even = (row + col) % 2 == state.parity
+                intensity = is_even and base_intensity or (base_intensity * 0.1)
+
+            elseif mode == 2 then
+                -- Mode 2: Wave sweep — flash propagates left to right
+                local wave_pos = beat_sub(audio.beat_phase, subdiv) * (cols + 2)
+                local dist = math.abs(col - wave_pos)
+                local wave_intensity = math.max(0, 1.0 - dist * 0.4)
+                intensity = wave_intensity * math.max(state.flash, 0.5)
+
+            elseif mode == 3 then
+                -- Mode 3: Random scatter — noise-based 40% selection on beat
+                local noise = simple_noise(col, row, state.beat_count)
+                local threshold = 0.2  -- ~40% of noise range [-1,1] is above 0.2
+                if noise > threshold then
+                    intensity = base_intensity
+                else
+                    intensity = base_intensity * 0.05
+                end
+            end
+
+            -- Add bass floor
+            intensity = clamp(intensity + bass_floor)
+
+            -- Amplitude affects decay rate perception (high amp = hold longer)
+            if audio.amplitude > 0.6 then
+                intensity = math.max(intensity, base_intensity * 0.5)
+            end
+
+            local scale = config.base_scale + intensity * (config.max_scale - config.base_scale)
+            local brightness = math.floor(intensity * 15)
+            local glow = intensity > 0.4
+            local material = intensity > 0.25 and "GLOWSTONE" or "WHITE_CONCRETE"
+
+            entities[#entities + 1] = {
+                id = string.format("block_%d", idx),
+                x = clamp(x),
+                y = 0.5,
+                z = clamp(z),
+                scale = math.min(config.max_scale, scale),
+                rotation = 0,
+                band = math.floor(col / math.max(1, cols) * 5) % 5,
+                visible = true,
+                glow = glow,
+                brightness = brightness,
+                material = material,
+                interpolation = 0,
+            }
+
+            idx = idx + 1
+        end
+    end
+
+    return normalize_entities(entities, n)
+end
+`,
+  },
+  {
     id: "crown",
     name: "Crown",
     description: "Floating royal crown with 5 frequency-reactive spikes and glowing jewels",
@@ -6426,1235 +7655,6 @@ function calculate(audio, config, dt)
                 }
                 entity_idx = entity_idx + 1
             end
-        end
-    end
-
-    return normalize_entities(entities, n)
-end
-`,
-  },
-  {
-    id: "dropsequence",
-    name: "Drop Sequence",
-    description: "EDM build-up tension over 16 beats, then explosive drop — the tension-release cycle",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 80,
-    source: `-- Pattern metadata
-name = "Drop Sequence"
-description = "EDM build-up tension over 16 beats, then explosive drop — the tension-release cycle"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 80
-
-state = {}
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-
-    -- Initialize state
-    if not state.phase then
-        state.phase = "build"
-        state.build_progress = 0
-        state.build_beats = 0
-        state.drop_timer = 0
-        state.orbit_phase = 0
-        state.time = 0
-        state.positions = {}
-        state.velocities = {}
-        state.flash = 0
-
-        -- Initialize positions on fibonacci sphere (cache for reuse)
-        state.sphere = fibonacci_sphere(n)
-        for i = 1, n do
-            state.positions[i] = {
-                x = 0.5 + state.sphere[i].x * 0.4,
-                y = 0.5 + state.sphere[i].y * 0.4,
-                z = 0.5 + state.sphere[i].z * 0.4,
-            }
-            state.velocities[i] = {x = 0, y = 0, z = 0}
-        end
-    end
-
-    state.time = state.time + dt
-
-    -- Target build beats based on BPM
-    local target_beats = 16
-    if audio.bpm > 170 then
-        target_beats = 8
-    elseif audio.bpm > 140 then
-        target_beats = 12
-    end
-
-    -- Beat handling
-    if audio.is_beat then
-        if state.phase == "build" then
-            state.build_beats = state.build_beats + 1
-            state.build_progress = math.min(1.0, state.build_beats / target_beats)
-
-            -- Check for drop trigger
-            if state.build_progress >= 1.0 and (audio.beat_intensity or 0) > 0.35 then
-                state.phase = "drop"
-                state.drop_timer = 0
-                state.flash = 1.0
-
-                -- Generate explosion velocities using cached sphere
-                for i = 1, n do
-                    local speed = 1.2 + math.random() * 0.6
-                    -- Amplitude scales explosion
-                    speed = speed * (0.8 + audio.amplitude * 0.5)
-                    state.velocities[i] = {
-                        x = state.sphere[i].x * speed,
-                        y = state.sphere[i].y * speed + 0.3,  -- slight upward bias
-                        z = state.sphere[i].z * speed,
-                    }
-                end
-            end
-
-        elseif state.phase == "drop" then
-            state.flash = 0.8  -- re-flash on beats during drop
-        end
-    end
-
-    -- Phase-specific update
-    if state.phase == "build" then
-        -- Orbit entities in a contracting sphere
-        local build_t = state.build_progress
-        local radius = lerp(0.35, 0.04, build_t)
-        local orbit_speed = 1.0 + build_t * 5.0
-
-        state.orbit_phase = state.orbit_phase + orbit_speed * dt
-
-        -- Bass wobble on radius
-        local wobble = audio.bands[1] * 0.03
-
-        for i = 1, n do
-            local r = radius + wobble * math.sin(i * 0.5 + state.time * 3)
-
-            -- Apply orbit rotation using cached sphere points
-            local sx = state.sphere[i].x * r
-            local sy = state.sphere[i].y * r
-            local sz = state.sphere[i].z * r
-
-            -- Rotate around Y axis
-            local angle = state.orbit_phase + (i / n) * 0.3
-            local cos_a = math.cos(angle)
-            local sin_a = math.sin(angle)
-            local rx = sx * cos_a - sz * sin_a
-            local rz = sx * sin_a + sz * cos_a
-
-            state.positions[i].x = smooth(state.positions[i].x, 0.5 + rx, 0.2, dt)
-            state.positions[i].y = smooth(state.positions[i].y, 0.5 + sy, 0.2, dt)
-            state.positions[i].z = smooth(state.positions[i].z, 0.5 + rz, 0.2, dt)
-        end
-
-    elseif state.phase == "drop" then
-        state.drop_timer = state.drop_timer + dt
-        state.flash = decay(state.flash, 0.85, dt)
-
-        -- Update positions with explosion velocities + gravity
-        for i = 1, n do
-            local v = state.velocities[i]
-            local p = state.positions[i]
-
-            p.x = p.x + v.x * dt
-            p.y = p.y + v.y * dt
-            p.z = p.z + v.z * dt
-
-            -- Gravity
-            v.y = v.y - 0.5 * dt
-
-            -- Velocity decay (air resistance)
-            v.x = v.x * (1.0 - 2.0 * dt)
-            v.z = v.z * (1.0 - 2.0 * dt)
-        end
-
-        -- Reset after drop completes
-        if state.drop_timer > 2.5 then
-            state.phase = "build"
-            state.build_progress = 0
-            state.build_beats = 0
-            state.drop_timer = 0
-            state.orbit_phase = 0
-            state.flash = 0
-
-            -- Reset positions to sphere using cached points
-            for i = 1, n do
-                state.positions[i] = {
-                    x = 0.5 + state.sphere[i].x * 0.35,
-                    y = 0.5 + state.sphere[i].y * 0.35,
-                    z = 0.5 + state.sphere[i].z * 0.35,
-                }
-                state.velocities[i] = {x = 0, y = 0, z = 0}
-            end
-        end
-    end
-
-    -- Render entities
-    local entities = {}
-    local build_t = state.build_progress
-
-    for i = 1, n do
-        local p = state.positions[i]
-
-        local scale, brightness, glow, material, visible, interp
-        local band = (i - 1) % 5
-
-        if state.phase == "build" then
-            -- Scale shrinks as entities compress
-            scale = config.base_scale * (1.0 - build_t * 0.5)
-
-            -- Brightness ramps up with build
-            brightness = math.floor(5 + build_t * 10)
-
-            -- Tension flicker at >70% progress
-            visible = true
-            if build_t > 0.7 then
-                local flicker = simple_noise(i, math.floor(state.time * 15), 0)
-                visible = flicker > (build_t - 0.7) * 2  -- more flicker as progress increases
-            end
-
-            glow = build_t > 0.5
-            material = build_t > 0.8 and "GLOWSTONE" or "WHITE_CONCRETE"
-            interp = 5  -- smooth orbiting
-
-        else  -- drop
-            local drop_life = math.max(0, 1.0 - state.drop_timer / 2.5)
-
-            scale = config.base_scale * (0.5 + state.flash * 1.0) * drop_life
-            brightness = math.floor(clamp(state.flash + drop_life * 0.5) * 15)
-            glow = drop_life > 0.3
-            material = drop_life > 0.5 and "GLOWSTONE" or "WHITE_CONCRETE"
-            visible = drop_life > 0.05
-            interp = 1  -- fast for explosion
-        end
-
-        entities[i] = {
-            id = string.format("block_%d", i - 1),
-            x = clamp(p.x),
-            y = clamp(p.y),
-            z = clamp(p.z),
-            scale = math.min(config.max_scale, math.max(0.01, scale)),
-            rotation = (state.orbit_phase * 50 + i * 10) % 360,
-            band = band,
-            visible = visible,
-            glow = glow,
-            brightness = math.min(15, brightness),
-            material = material,
-            interpolation = interp,
-        }
-    end
-
-    return entities
-end
-`,
-  },
-  {
-    id: "laserfan",
-    name: "Laser Fan",
-    description: "Floor-origin laser beams sweep in synchronized arcs and freeze on beat",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 96,
-    source: `-- Pattern metadata
-name = "Laser Fan"
-description = "Floor-origin laser beams sweep in synchronized arcs and freeze on beat"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 96
-
-state = {}
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-    local num_beams = 8
-    local points_per_beam = math.max(2, math.floor(n / num_beams))
-
-    -- Initialize state
-    if not state.sweep_phase then
-        state.sweep_phase = 0
-        state.freeze_timer = 0
-        state.smooth_bass = 0
-        state.smooth_high = 0
-    end
-
-    -- Smooth inputs
-    state.smooth_bass = smooth(state.smooth_bass, audio.bands[1], 0.35, dt)
-    state.smooth_high = smooth(state.smooth_high, audio.bands[5], 0.3, dt)
-
-    -- Beat: freeze sweep momentarily
-    if audio.is_beat then
-        state.freeze_timer = 0.15
-    end
-
-    -- Update freeze timer
-    if state.freeze_timer > 0 then
-        state.freeze_timer = state.freeze_timer - dt
-    else
-        -- Advance sweep, speed tied to BPM
-        local sweep_speed = 1.0
-        if audio.bpm > 0 then
-            sweep_speed = audio.bpm / 128.0
-        end
-        state.sweep_phase = state.sweep_phase + sweep_speed * dt
-    end
-
-    -- Fan geometry
-    -- Fan half-angle widens with bass
-    local fan_half = 0.3 + state.smooth_bass * 0.5
-    -- Beam length scales with amplitude
-    local beam_length = 0.4 + audio.amplitude * 0.3
-
-    -- Origin point: bottom center
-    local ox, oy, oz = 0.5, 0.1, 0.5
-
-    -- Sweep oscillation
-    local sweep_offset = math.sin(state.sweep_phase * math.pi * 2) * 0.3
-
-    local entities = {}
-    local idx = 0
-
-    for b = 0, num_beams - 1 do
-        -- Base angle for this beam within the fan
-        local beam_frac = (b / math.max(1, num_beams - 1)) - 0.5  -- -0.5 to 0.5
-        local beam_angle = beam_frac * fan_half * 2 + sweep_offset
-
-        -- Each beam has a slight independent phase offset
-        local phase_offset = math.sin(state.sweep_phase * 1.7 + b * 0.8) * 0.1
-        beam_angle = beam_angle + phase_offset
-
-        -- Beam direction: upward and outward
-        -- angle controls left-right spread, beam goes upward
-        local dir_x = math.sin(beam_angle)
-        local dir_y = 1.0  -- always upward
-        local dir_z = math.cos(beam_angle) * 0.3  -- slight depth
-
-        -- Normalize direction
-        local len = math.sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z)
-        dir_x, dir_y, dir_z = dir_x / len, dir_y / len, dir_z / len
-
-        -- Beam visibility: dimmer beams disappear at low amplitude
-        local beam_threshold = (b % 4) / 8  -- stagger thresholds
-        local beam_visible = audio.amplitude > beam_threshold
-
-        -- Band per beam for color variety
-        local beam_band = b % 5
-
-        for j = 0, points_per_beam - 1 do
-            if idx >= n then break end
-
-            local t = (j + 1) / points_per_beam
-            local x = ox + dir_x * t * beam_length
-            local y = oy + dir_y * t * beam_length
-            local z = oz + dir_z * t * beam_length
-
-            -- Scale tapers: thick at base, thin at tip
-            local base_scale = lerp(0.15, 0.04, t)
-            -- High frequencies add shimmer
-            local shimmer = state.smooth_high * simple_noise(b, j, math.floor(state.sweep_phase * 10)) * 0.03
-            local scale = base_scale + shimmer
-
-            -- Intensity fades slightly along beam
-            local intensity = 1.0 - t * 0.3
-
-            entities[#entities + 1] = {
-                id = string.format("block_%d", idx),
-                x = clamp(x),
-                y = clamp(y),
-                z = clamp(z),
-                scale = math.min(config.max_scale, scale),
-                rotation = (beam_angle * 180 / math.pi + 90) % 360,
-                band = beam_band,
-                visible = beam_visible,
-                glow = true,
-                brightness = math.floor(intensity * 15),
-                material = "END_ROD",
-                interpolation = 2,
-            }
-
-            idx = idx + 1
-        end
-    end
-
-    -- Fill remaining as invisible
-    while idx < n do
-        entities[#entities + 1] = {
-            id = string.format("block_%d", idx),
-            x = 0.5, y = 0.5, z = 0.5,
-            scale = 0, rotation = 0, band = 0, visible = false,
-        }
-        idx = idx + 1
-    end
-
-    return entities
-end
-`,
-  },
-  {
-    id: "ledwall",
-    name: "LED Wall",
-    description: "Giant LED screen with spectrum bars, waveform, color wash, and beat geometry modes",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 100,
-    source: `-- Pattern metadata
-name = "LED Wall"
-description = "Giant LED screen with spectrum bars, waveform, color wash, and beat geometry modes"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 100
-
-state = {}
-
-local MATERIALS = {
-    "RED_CONCRETE",
-    "ORANGE_CONCRETE",
-    "YELLOW_CONCRETE",
-    "LIME_CONCRETE",
-    "BLUE_CONCRETE",
-}
-
-local function sample_band(bands, col_frac)
-    -- Interpolate 5 bands across a continuous 0-1 range
-    local pos = col_frac * 4
-    local lo = math.floor(pos)
-    local hi = math.min(lo + 1, 4)
-    local t = pos - lo
-    return lerp(bands[lo + 1] or 0, bands[hi + 1] or 0, t)
-end
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-    local cols = math.max(2, math.floor(math.sqrt(n)))
-    local rows = math.max(2, math.floor(n / cols))
-
-    -- Initialize state
-    if not state.mode then
-        state.mode = 0
-        state.mode_timer = 0
-        state.beat_count = 0
-        state.scroll_offset = 0
-        state.amp_buffer = {}
-        state.amp_idx = 1
-        state.shape = 0
-        state.smooth_bands = {0, 0, 0, 0, 0}
-        state.flash = 0
-    end
-
-    -- Smooth bands for spectrum display
-    for i = 1, 5 do
-        state.smooth_bands[i] = smooth(state.smooth_bands[i], audio.bands[i], 0.4, dt)
-    end
-
-    -- Beat handling
-    if audio.is_beat then
-        state.beat_count = state.beat_count + 1
-        state.flash = 1.0
-        state.mode_timer = state.mode_timer + 1
-        if state.mode_timer >= 32 then
-            state.mode_timer = 0
-            state.mode = (state.mode + 1) % 4
-        end
-        -- Update amplitude ring buffer (for waveform mode)
-        state.amp_buffer[state.amp_idx] = audio.amplitude
-        state.amp_idx = (state.amp_idx % cols) + 1
-        -- Cycle geometry shape
-        state.shape = (state.shape + 1) % 4
-    end
-
-    state.flash = decay(state.flash, 0.8, dt)
-    state.scroll_offset = state.scroll_offset + dt * 0.3
-
-    local entities = {}
-    local idx = 0
-    local mode = state.mode
-
-    for row = 0, rows - 1 do
-        for col = 0, cols - 1 do
-            if idx >= n then break end
-
-            local col_frac = col / math.max(1, cols - 1)
-            local row_frac = row / math.max(1, rows - 1)
-            local x = 0.1 + col_frac * 0.8
-            local y = 0.1 + row_frac * 0.8
-
-            local intensity = 0
-            local band_idx = math.floor(col_frac * 4.99)
-            local visible = true
-            local pixel_scale = config.base_scale
-
-            if mode == 0 then
-                -- Spectrum bars: columns as frequency bars rising from bottom
-                local bar_height = sample_band(state.smooth_bands, col_frac)
-                if row_frac <= bar_height then
-                    intensity = 0.5 + bar_height * 0.5
-                    band_idx = math.floor(col_frac * 4.99)
-                else
-                    intensity = 0.05
-                    visible = false
-                end
-
-            elseif mode == 1 then
-                -- Waveform: ring buffer displayed as horizontal wave
-                local buf_idx = ((col + math.floor(state.amp_idx)) % cols) + 1
-                local amp_val = state.amp_buffer[buf_idx] or 0
-                local wave_y = amp_val * 0.8
-                local dist = math.abs(row_frac - wave_y)
-                if dist < 0.15 then
-                    intensity = 1.0 - dist / 0.15
-                    band_idx = math.floor(amp_val * 4.99)
-                else
-                    intensity = 0.02
-                    visible = false
-                end
-
-            elseif mode == 2 then
-                -- Color wash: scrolling gradient
-                local shifted = (col_frac + state.scroll_offset) % 1.0
-                band_idx = math.floor(shifted * 4.99)
-                local band_val = state.smooth_bands[band_idx + 1] or 0
-                intensity = 0.3 + band_val * 0.7
-                pixel_scale = config.base_scale * (0.8 + band_val * 0.4)
-
-            elseif mode == 3 then
-                -- Beat geometry: flash shapes on beat
-                local shape = state.shape
-                local cx = math.floor(cols / 2)
-                local cy = math.floor(rows / 2)
-                local in_shape = false
-
-                if shape == 0 then
-                    -- X shape: diagonals
-                    in_shape = math.abs(col - row * cols / rows) < 1.5
-                             or math.abs(col - (rows - 1 - row) * cols / rows) < 1.5
-                elseif shape == 1 then
-                    -- Diamond
-                    local dx = math.abs(col - cx)
-                    local dy = math.abs(row - cy)
-                    in_shape = (dx / cx + dy / cy) < 0.8 and (dx / cx + dy / cy) > 0.5
-                elseif shape == 2 then
-                    -- Border
-                    in_shape = col == 0 or col == cols - 1 or row == 0 or row == rows - 1
-                elseif shape == 3 then
-                    -- Cross
-                    in_shape = math.abs(col - cx) <= 1 or math.abs(row - cy) <= 1
-                end
-
-                if in_shape then
-                    intensity = state.flash
-                    band_idx = (state.beat_count + col) % 5
-                else
-                    intensity = state.flash * 0.1
-                    visible = state.flash > 0.3
-                end
-            end
-
-            -- Global amplitude boost
-            intensity = clamp(intensity + audio.amplitude * 0.1)
-
-            local brightness = math.floor(clamp(intensity) * 15)
-            local glow = intensity > 0.4
-            local mat = MATERIALS[(band_idx % 5) + 1]
-
-            entities[#entities + 1] = {
-                id = string.format("block_%d", idx),
-                x = clamp(x),
-                y = clamp(y),
-                z = 0.5,
-                scale = math.min(config.max_scale, pixel_scale * (0.5 + intensity * 0.5)),
-                rotation = 0,
-                band = band_idx % 5,
-                visible = visible,
-                glow = glow,
-                brightness = brightness,
-                material = glow and mat or "GRAY_CONCRETE",
-                interpolation = 2,
-            }
-
-            idx = idx + 1
-        end
-    end
-
-    return normalize_entities(entities, n)
-end
-`,
-  },
-  {
-    id: "movingheads",
-    name: "Moving Heads",
-    description: "Concert moving-head lights with sweeping beams and ballyhoo snap on beat",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 96,
-    source: `-- Pattern metadata
-name = "Moving Heads"
-description = "Concert moving-head lights with sweeping beams and ballyhoo snap on beat"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 96
-
-state = {}
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-    local num_fixtures = 8
-    local points_per_beam = math.max(2, math.floor(n / num_fixtures))
-
-    -- Initialize state
-    if not state.time then
-        state.time = 0
-        state.snap_timer = 0
-        state.fixtures = {}
-        for i = 1, num_fixtures do
-            state.fixtures[i] = {
-                pan = 0,
-                tilt = 0,
-                target_pan = 0,
-                target_tilt = 0,
-            }
-        end
-    end
-
-    state.time = state.time + dt
-
-    -- Beat: trigger ballyhoo (all snap to center)
-    if audio.is_beat then
-        state.snap_timer = 1.0  -- full beat cycle to return
-    end
-
-    -- Sweep speed tied to BPM
-    local sweep_speed = 0.5
-    if audio.bpm > 0 then
-        sweep_speed = audio.bpm / 200.0
-    end
-
-    -- Update fixture targets
-    local snap_active = state.snap_timer > 0.7  -- snap during first 30% of timer
-    state.snap_timer = math.max(0, state.snap_timer - dt * 2)
-
-    for i = 1, num_fixtures do
-        local fix = state.fixtures[i]
-        local phase_offset = (i - 1) * 0.8
-
-        if snap_active then
-            -- Ballyhoo: all snap straight down center
-            fix.target_pan = 0
-            fix.target_tilt = -1.2  -- steep downward angle
-        else
-            -- Normal: Lissajous figure-8 sweep
-            local t = state.time * sweep_speed
-            fix.target_pan = math.sin(t + phase_offset) * 0.6
-            fix.target_tilt = math.sin(t * 1.5 + phase_offset) * 0.4 - 0.8
-        end
-
-        -- Smooth toward target: fast during snap, slow during sweep
-        local rate = snap_active and 0.6 or 0.12
-        fix.pan = smooth(fix.pan, fix.target_pan, rate, dt)
-        fix.tilt = smooth(fix.tilt, fix.target_tilt, rate, dt)
-    end
-
-    -- Beam reach scales with amplitude
-    local beam_reach = 0.55 + audio.amplitude * 0.2
-
-    local entities = {}
-    local idx = 0
-
-    for i = 1, num_fixtures do
-        local fix = state.fixtures[i]
-
-        -- Fixture position: top edge, evenly spaced
-        local fixture_x = 0.12 + ((i - 1) / math.max(1, num_fixtures - 1)) * 0.76
-        local fixture_y = 0.92
-        local fixture_z = 0.5
-
-        -- Beam direction from pan/tilt
-        local dir_x = math.sin(fix.pan)
-        local dir_y = fix.tilt  -- negative = downward
-        local dir_z = math.cos(fix.pan) * 0.3
-
-        -- Normalize
-        local len = math.sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z)
-        if len > 0.001 then
-            dir_x, dir_y, dir_z = dir_x / len, dir_y / len, dir_z / len
-        end
-
-        -- Per-fixture brightness driven by corresponding frequency band
-        local fixture_band = ((i - 1) % 5)
-        local band_val = audio.bands[fixture_band + 1] or 0
-        local fixture_brightness = 10 + math.floor(band_val * 5)
-
-        for j = 0, points_per_beam - 1 do
-            if idx >= n then break end
-
-            local t = (j + 1) / points_per_beam
-
-            local x = fixture_x + dir_x * t * beam_reach
-            local y = fixture_y + dir_y * t * beam_reach
-            local z = fixture_z + dir_z * t * beam_reach
-
-            -- Scale: slightly thicker beam than lasers, tapers at end
-            local scale = lerp(0.12, 0.05, t)
-            -- Snap pulse makes beams briefly larger
-            if snap_active then
-                scale = scale * 1.4
-            end
-
-            -- Intensity fades along beam
-            local intensity = 1.0 - t * 0.4
-
-            entities[#entities + 1] = {
-                id = string.format("block_%d", idx),
-                x = clamp(x),
-                y = clamp(y),
-                z = clamp(z),
-                scale = math.min(config.max_scale, scale),
-                rotation = (fix.pan * 180 / math.pi + 90) % 360,
-                band = fixture_band,
-                visible = true,
-                glow = true,
-                brightness = math.min(15, math.floor(fixture_brightness * intensity)),
-                material = "SEA_LANTERN",
-                interpolation = 3,
-            }
-
-            idx = idx + 1
-        end
-    end
-
-    -- Fill remaining as invisible
-    while idx < n do
-        entities[#entities + 1] = {
-            id = string.format("block_%d", idx),
-            x = 0.5, y = 0.5, z = 0.5,
-            scale = 0, rotation = 0, band = 0, visible = false,
-        }
-        idx = idx + 1
-    end
-
-    return entities
-end
-`,
-  },
-  {
-    id: "pyro",
-    name: "Pyro",
-    description: "Beat-triggered firework bursts with ballistic physics and gravity",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 100,
-    source: `-- Pattern metadata
-name = "Pyro"
-description = "Beat-triggered firework bursts with ballistic physics and gravity"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 100
-
-state = {}
-
-local BURST_MATERIALS = {
-    "REDSTONE_BLOCK",
-    "GOLD_BLOCK",
-    "DIAMOND_BLOCK",
-    "EMERALD_BLOCK",
-    "LAPIS_BLOCK",
-}
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-
-    -- Initialize state
-    if not state.fireworks then
-        state.fireworks = {}
-        state.time = 0
-        state.next_color = 1
-    end
-
-    state.time = state.time + dt
-
-    -- Gravity strength: high amplitude = sparks hang longer
-    local gravity = 0.4 - audio.amplitude * 0.15
-
-    -- Launch new firework on beat (max 5 concurrent)
-    if audio.is_beat then
-        local active = 0
-        for _, fw in ipairs(state.fireworks) do
-            if fw.phase ~= "dead" then active = active + 1 end
-        end
-        if active < 5 then
-            local peak_y = 0.55 + (audio.beat_intensity or 0.5) * 0.3
-            state.fireworks[#state.fireworks + 1] = {
-                phase = "rise",
-                x = 0.3 + math.random() * 0.4,
-                y = 0.05,
-                z = 0.3 + math.random() * 0.4,
-                peak_y = math.min(0.9, peak_y),
-                rise_speed = 0.8 + (audio.beat_intensity or 0.5) * 0.4,
-                sparks = {},
-                life = 1.0,
-                material = BURST_MATERIALS[state.next_color],
-                band = (state.next_color - 1) % 5,
-                trail = {},
-            }
-            state.next_color = (state.next_color % #BURST_MATERIALS) + 1
-        end
-    end
-
-    -- Update fireworks
-    for i = #state.fireworks, 1, -1 do
-        local fw = state.fireworks[i]
-
-        if fw.phase == "rise" then
-            -- Rising: move upward toward peak
-            fw.y = fw.y + fw.rise_speed * dt
-
-            -- Store trail positions
-            fw.trail[#fw.trail + 1] = {x = fw.x, y = fw.y, z = fw.z}
-            if #fw.trail > 3 then
-                table.remove(fw.trail, 1)
-            end
-
-            -- Reached peak: burst
-            if fw.y >= fw.peak_y then
-                fw.phase = "burst"
-                fw.y = fw.peak_y
-
-                -- Generate sparks using fibonacci sphere
-                local spark_count = 15 + math.floor((audio.beat_intensity or 0.5) * 10)
-                local dirs = fibonacci_sphere(spark_count)
-                fw.sparks = {}
-                for j = 1, spark_count do
-                    local spread = 0.25 + math.random() * 0.15
-                    -- Bass adds upward bias
-                    local bass_boost = audio.bands[1] * 0.1
-                    fw.sparks[j] = {
-                        x = fw.x,
-                        y = fw.y,
-                        z = fw.z,
-                        dx = dirs[j].x * spread,
-                        dy = dirs[j].y * spread + bass_boost,
-                        dz = dirs[j].z * spread,
-                        life = 1.0,
-                    }
-                end
-                fw.trail = {}  -- clear trail on burst
-            end
-
-        elseif fw.phase == "burst" then
-            -- Update sparks
-            local all_dead = true
-            for _, spark in ipairs(fw.sparks) do
-                if spark.life > 0 then
-                    all_dead = false
-                    spark.x = spark.x + spark.dx * dt
-                    spark.y = spark.y + spark.dy * dt
-                    spark.z = spark.z + spark.dz * dt
-                    spark.dy = spark.dy - gravity * dt
-                    -- Velocity drag
-                    spark.dx = spark.dx * (1.0 - 1.5 * dt)
-                    spark.dz = spark.dz * (1.0 - 1.5 * dt)
-                    spark.life = spark.life - dt * 0.7
-
-                    -- High frequencies add sparkle (scale flicker)
-                    if audio.bands[5] > 0.3 then
-                        spark.life = spark.life + dt * 0.1  -- slightly longer sparkle
-                    end
-                end
-            end
-
-            if all_dead then
-                fw.phase = "dead"
-            end
-        end
-
-        -- Remove dead fireworks
-        if fw.phase == "dead" then
-            table.remove(state.fireworks, i)
-        end
-    end
-
-    -- Render entities
-    local entities = {}
-    local idx = 0
-
-    for _, fw in ipairs(state.fireworks) do
-        if fw.phase == "rise" then
-            -- Rocket head
-            if idx < n then
-                entities[#entities + 1] = {
-                    id = string.format("block_%d", idx),
-                    x = clamp(fw.x),
-                    y = clamp(fw.y),
-                    z = clamp(fw.z),
-                    scale = math.min(config.max_scale, 0.15),
-                    rotation = 0,
-                    band = fw.band,
-                    visible = true,
-                    glow = true,
-                    brightness = 15,
-                    material = "GLOWSTONE",
-                    interpolation = 1,
-                }
-                idx = idx + 1
-            end
-
-            -- Trail
-            for ti, tp in ipairs(fw.trail) do
-                if idx >= n then break end
-                local trail_life = ti / (#fw.trail + 1)
-                entities[#entities + 1] = {
-                    id = string.format("block_%d", idx),
-                    x = clamp(tp.x),
-                    y = clamp(tp.y),
-                    z = clamp(tp.z),
-                    scale = math.min(config.max_scale, 0.08 * trail_life),
-                    rotation = 0,
-                    band = fw.band,
-                    visible = true,
-                    glow = true,
-                    brightness = math.floor(trail_life * 10),
-                    material = fw.material,
-                    interpolation = 1,
-                }
-                idx = idx + 1
-            end
-
-        elseif fw.phase == "burst" then
-            -- Sparks
-            for _, spark in ipairs(fw.sparks) do
-                if idx >= n then break end
-                if spark.life > 0 then
-                    local sparkle = 1.0
-                    if audio.bands[5] > 0.3 then
-                        sparkle = 0.7 + simple_noise(spark.x * 10, spark.y * 10, state.time * 5) * 0.3
-                    end
-
-                    local scale = config.base_scale * spark.life * sparkle * 0.8
-                    entities[#entities + 1] = {
-                        id = string.format("block_%d", idx),
-                        x = clamp(spark.x),
-                        y = clamp(spark.y),
-                        z = clamp(spark.z),
-                        scale = math.min(config.max_scale, math.max(0.02, scale)),
-                        rotation = (spark.dx * 500) % 360,
-                        band = fw.band,
-                        visible = true,
-                        glow = spark.life > 0.3,
-                        brightness = math.floor(clamp(spark.life) * 15),
-                        material = fw.material,
-                        interpolation = 1,
-                    }
-                    idx = idx + 1
-                end
-            end
-        end
-    end
-
-    -- Fill remaining entities as invisible
-    while idx < n do
-        entities[#entities + 1] = {
-            id = string.format("block_%d", idx),
-            x = 0.5, y = 0.5, z = 0.5,
-            scale = 0, rotation = 0, band = 0, visible = false,
-        }
-        idx = idx + 1
-    end
-
-    return entities
-end
-`,
-  },
-  {
-    id: "shockwave",
-    name: "Shockwave",
-    description: "Expanding ring pulses radiate from center on each beat",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 80,
-    source: `-- Pattern metadata
-name = "Shockwave"
-description = "Expanding ring pulses radiate from center on each beat"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 80
-
-state = {}
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-
-    -- Initialize state
-    if not state.waves then
-        state.waves = {}
-        state.time = 0
-    end
-
-    state.time = state.time + dt
-
-    -- Spawn new wave on beat (max 4 concurrent)
-    if audio.is_beat then
-        local active = 0
-        for _, w in ipairs(state.waves) do
-            if w.life > 0 then active = active + 1 end
-        end
-        if active < 4 then
-            state.waves[#state.waves + 1] = {
-                radius = 0,
-                speed = 0.6 + (audio.beat_intensity or 0.5) * 0.6,
-                life = 1.0,
-                band = math.floor(math.random() * 5),
-                y_base = 0.5,
-                vertical = math.random() > 0.7,  -- 30% chance of vertical wave
-            }
-        end
-    end
-
-    -- Update waves
-    for i = #state.waves, 1, -1 do
-        local w = state.waves[i]
-        w.radius = w.radius + w.speed * dt
-        -- Faster fade as wave reaches edges
-        local edge_factor = 1.0 + w.radius * 3.0
-        w.life = w.life - dt * edge_factor
-        -- Slight speed decay for natural deceleration
-        w.speed = w.speed * (1.0 - 0.3 * dt)
-
-        -- Remove dead waves
-        if w.life <= 0 or w.radius > 0.55 then
-            table.remove(state.waves, i)
-        end
-    end
-
-    -- Count active waves
-    local active_waves = {}
-    for _, w in ipairs(state.waves) do
-        if w.life > 0 then
-            active_waves[#active_waves + 1] = w
-        end
-    end
-
-    local entities = {}
-    local idx = 0
-
-    if #active_waves == 0 then
-        -- No active waves — show dim center point as idle indicator
-        for i = 0, n - 1 do
-            entities[#entities + 1] = {
-                id = string.format("block_%d", i),
-                x = 0.5,
-                y = 0.5,
-                z = 0.5,
-                scale = 0,
-                rotation = 0,
-                band = 0,
-                visible = false,
-            }
-        end
-        return entities
-    end
-
-    -- Distribute entities across active waves
-    local per_wave = math.max(4, math.floor(n / #active_waves))
-
-    for wi, w in ipairs(active_waves) do
-        local count = per_wave
-        if wi == #active_waves then
-            count = n - idx  -- remaining entities
-        end
-        if count <= 0 then break end
-
-        local ring_thickness = 0.02 + audio.bands[1] * 0.02
-        local high_wobble = audio.bands[5] * 0.05
-
-        for j = 0, count - 1 do
-            if idx >= n then break end
-
-            local angle = (j / count) * math.pi * 2
-            -- Slight radius variation for ring thickness
-            local r_offset = (j % 3 - 1) * ring_thickness
-            local r = w.radius + r_offset
-
-            local x, y, z
-            if w.vertical then
-                -- Vertical ring: expands in x-y plane
-                x = 0.5 + math.cos(angle) * r
-                y = 0.5 + math.sin(angle) * r
-                z = 0.5 + math.sin(angle * 3 + state.time * 5) * high_wobble
-            else
-                -- Horizontal ring: expands in x-z plane
-                x = 0.5 + math.cos(angle) * r
-                z = 0.5 + math.sin(angle) * r
-                y = w.y_base + math.sin(angle * 3 + state.time * 5) * high_wobble
-            end
-
-            local intensity = w.life
-            local scale = config.base_scale * (0.5 + intensity * 1.0)
-            local brightness = math.floor(clamp(intensity) * 15)
-
-            entities[#entities + 1] = {
-                id = string.format("block_%d", idx),
-                x = clamp(x),
-                y = clamp(y),
-                z = clamp(z),
-                scale = math.min(config.max_scale, scale),
-                rotation = (angle * 180 / math.pi) % 360,
-                band = w.band,
-                visible = true,
-                glow = true,
-                brightness = brightness,
-                material = "SEA_LANTERN",
-                interpolation = 1,
-            }
-
-            idx = idx + 1
-        end
-    end
-
-    -- Fill remaining entities as invisible
-    while idx < n do
-        entities[#entities + 1] = {
-            id = string.format("block_%d", idx),
-            x = 0.5, y = 0.5, z = 0.5,
-            scale = 0, rotation = 0, band = 0, visible = false,
-        }
-        idx = idx + 1
-    end
-
-    return entities
-end
-`,
-  },
-  {
-    id: "strobe",
-    name: "Strobe Wall",
-    description: "Full-zone grid that flashes on/off in sync with beats — 4 strobe modes cycle automatically",
-    category: "Mainstage",
-    staticCamera: true,
-    startBlocks: 96,
-    source: `-- Pattern metadata
-name = "Strobe Wall"
-description = "Full-zone grid that flashes on/off in sync with beats — 4 strobe modes cycle automatically"
-category = "Mainstage"
-static_camera = true
-recommended_entities = 96
-
-state = {}
-
-function calculate(audio, config, dt)
-    local n = config.entity_count
-    -- Grid dimensions: closest rectangle to n
-    local cols = math.max(1, math.floor(math.sqrt(n * 1.5)))
-    local rows = math.max(1, math.floor(n / cols))
-
-    -- Initialize state
-    if not state.flash then
-        state.flash = 0
-        state.mode = 0
-        state.mode_timer = 0
-        state.beat_count = 0
-        state.parity = 0
-    end
-
-    -- Beat handling
-    if audio.is_beat then
-        state.flash = 1.0
-        state.beat_count = state.beat_count + 1
-        state.parity = 1 - state.parity
-        -- Cycle mode every 16 beats
-        state.mode_timer = state.mode_timer + 1
-        if state.mode_timer >= 16 then
-            state.mode_timer = 0
-            state.mode = (state.mode + 1) % 4
-        end
-    end
-
-    -- Decay flash between beats
-    state.flash = decay(state.flash, 0.75, dt)
-
-    -- BPM-adaptive subdivision
-    local subdiv = 1
-    if audio.bpm > 140 then
-        subdiv = 0.5  -- half-time for fast tracks
-    elseif audio.bpm > 0 and audio.bpm < 100 then
-        subdiv = 2    -- double-time for slow tracks
-    end
-
-    -- Beat pulse for sustained strobe between discrete beats
-    local pulse = beat_pulse(audio.beat_phase, subdiv, 8.0)
-    local base_intensity = math.max(state.flash, pulse)
-
-    -- Bass adds a brightness floor
-    local bass_floor = audio.bands[1] * 0.3
-
-    local entities = {}
-    local idx = 0
-
-    for row = 0, rows - 1 do
-        for col = 0, cols - 1 do
-            if idx >= n then break end
-
-            local x = 0.1 + (col / math.max(1, cols - 1)) * 0.8
-            local z = 0.1 + (row / math.max(1, rows - 1)) * 0.8
-
-            -- Per-entity intensity based on current mode
-            local intensity = 0
-            local mode = state.mode
-
-            if mode == 0 then
-                -- Mode 0: Full flash — all entities strobe together
-                intensity = base_intensity
-
-            elseif mode == 1 then
-                -- Mode 1: Checkerboard — alternating halves flash
-                local is_even = (row + col) % 2 == state.parity
-                intensity = is_even and base_intensity or (base_intensity * 0.1)
-
-            elseif mode == 2 then
-                -- Mode 2: Wave sweep — flash propagates left to right
-                local wave_pos = beat_sub(audio.beat_phase, subdiv) * (cols + 2)
-                local dist = math.abs(col - wave_pos)
-                local wave_intensity = math.max(0, 1.0 - dist * 0.4)
-                intensity = wave_intensity * math.max(state.flash, 0.5)
-
-            elseif mode == 3 then
-                -- Mode 3: Random scatter — noise-based 40% selection on beat
-                local noise = simple_noise(col, row, state.beat_count)
-                local threshold = 0.2  -- ~40% of noise range [-1,1] is above 0.2
-                if noise > threshold then
-                    intensity = base_intensity
-                else
-                    intensity = base_intensity * 0.05
-                end
-            end
-
-            -- Add bass floor
-            intensity = clamp(intensity + bass_floor)
-
-            -- Amplitude affects decay rate perception (high amp = hold longer)
-            if audio.amplitude > 0.6 then
-                intensity = math.max(intensity, base_intensity * 0.5)
-            end
-
-            local scale = config.base_scale + intensity * (config.max_scale - config.base_scale)
-            local brightness = math.floor(intensity * 15)
-            local glow = intensity > 0.4
-            local material = intensity > 0.25 and "GLOWSTONE" or "WHITE_CONCRETE"
-
-            entities[#entities + 1] = {
-                id = string.format("block_%d", idx),
-                x = clamp(x),
-                y = 0.5,
-                z = clamp(z),
-                scale = math.min(config.max_scale, scale),
-                rotation = 0,
-                band = math.floor(col / math.max(1, cols) * 5) % 5,
-                visible = true,
-                glow = glow,
-                brightness = brightness,
-                material = material,
-                interpolation = 0,
-            }
-
-            idx = idx + 1
         end
     end
 

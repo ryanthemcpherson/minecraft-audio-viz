@@ -70,3 +70,13 @@ declare module "fengari/src/lcorolib.js" {
 declare module "fengari/src/lutf8lib.js" {
   export function luaopen_utf8(L: any): number;
 }
+
+// Package entry point (CommonJS). Used by tests to seed window.__fengari the
+// same way scripts/bundle-fengari.mjs does for the browser bundle.
+declare module "fengari" {
+  export const lua: any;
+  export const lauxlib: any;
+  export const lualib: any;
+  export function to_luastring(s: string): Uint8Array;
+  export function to_jsstring(s: Uint8Array): string;
+}
