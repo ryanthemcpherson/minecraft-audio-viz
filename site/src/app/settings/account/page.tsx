@@ -15,6 +15,19 @@ import {
   revokeSession,
 } from "@/lib/auth";
 import type { UserProfile, User, SessionInfo } from "@/lib/auth";
+import Alert from "@/components/ui/Alert";
+import Badge from "@/components/ui/Badge";
+import Spinner from "@/components/ui/Spinner";
+import { Label, Input } from "@/components/ui/Field";
+
+const primaryButtonClassName =
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
+
+const secondaryButtonClassName =
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 font-semibold whitespace-nowrap text-white backdrop-blur-sm transition-all duration-200 select-none hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50";
+
+const dangerButtonClassName =
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-danger/40 bg-danger/10 font-semibold whitespace-nowrap text-danger transition-all duration-200 select-none hover:bg-danger/20 disabled:cursor-not-allowed disabled:opacity-50";
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "Never";
@@ -212,7 +225,7 @@ export default function AccountSettingsPage() {
   if (authLoading || loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
+        <Spinner />
       </div>
     );
   }
@@ -224,29 +237,31 @@ export default function AccountSettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="mb-1 text-lg font-semibold">Account</h2>
+        <h2 className="mb-1 font-heading text-lg font-bold">Account</h2>
         <p className="text-sm text-text-secondary">
           Your account information
         </p>
       </div>
 
       {/* Display name + Email */}
-      <div className="glass-card rounded-xl p-5">
-        <div className="flex flex-col gap-4">
+      <section className="flat-card rounded-2xl p-6">
+        <p className="mb-4 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+          Identity
+        </p>
+        <div className="flex flex-col gap-5">
           {/* Display Name */}
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-secondary">
-              Display Name
-            </label>
+            <Label htmlFor="display_name">Display name</Label>
             {editingName ? (
               <div className="flex items-center gap-2">
-                <input
+                <Input
+                  id="display_name"
                   type="text"
                   name="display_name"
                   autoComplete="name"
                   value={nameValue}
                   onChange={(e) => setNameValue(e.target.value)}
-                  className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
+                  className="flex-1 py-1.5"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") saveName();
@@ -257,7 +272,7 @@ export default function AccountSettingsPage() {
                   type="button"
                   onClick={saveName}
                   disabled={nameSaving || !nameValue.trim()}
-                  className="rounded-lg bg-disc-cyan/20 px-3 py-1.5 text-xs font-medium text-disc-cyan transition-colors hover:bg-disc-cyan/30 disabled:opacity-50"
+                  className={`${primaryButtonClassName} px-4 py-2 text-xs`}
                 >
                   {nameSaving ? "Saving..." : "Save"}
                 </button>
@@ -265,7 +280,7 @@ export default function AccountSettingsPage() {
                   type="button"
                   onClick={cancelEditingName}
                   disabled={nameSaving}
-                  className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-white/10"
+                  className={`${secondaryButtonClassName} px-4 py-2 text-xs`}
                 >
                   Cancel
                 </button>
@@ -285,6 +300,7 @@ export default function AccountSettingsPage() {
                     viewBox="0 0 24 24"
                     stroke="currentColor"
                     strokeWidth={2}
+                    aria-hidden="true"
                   >
                     <path
                       strokeLinecap="round"
@@ -296,18 +312,16 @@ export default function AccountSettingsPage() {
               </div>
             )}
             {nameError && (
-              <p className="mt-1 text-xs text-red-400">{nameError}</p>
+              <p className="mt-1.5 text-xs text-danger" role="alert">{nameError}</p>
             )}
             {nameSuccess && (
-              <p className="mt-1 text-xs text-green-400">{nameSuccess}</p>
+              <p className="mt-1.5 text-xs text-success" role="status">{nameSuccess}</p>
             )}
           </div>
 
           {/* Email */}
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-secondary">
-              Email
-            </label>
+            <Label>Email</Label>
             <p className="text-sm text-white">
               {profile.email || (
                 <span className="text-text-secondary">Not set</span>
@@ -317,37 +331,35 @@ export default function AccountSettingsPage() {
 
           {/* Discord */}
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-secondary">
-              Discord
-            </label>
-            <div className="flex items-center gap-2">
+            <Label>Discord</Label>
+            <div className="flex flex-wrap items-center gap-2">
               {profile.discord_username ? (
                 <>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#5865F2]/10 px-2.5 py-0.5 text-sm text-[#5865F2]">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#5865F2]/30 bg-[#5865F2]/10 px-2.5 py-0.5 text-sm text-[#5865F2]">
                     <svg
                       className="h-3.5 w-3.5"
                       viewBox="0 0 24 24"
                       fill="currentColor"
+                      aria-hidden="true"
                     >
                       <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z" />
                     </svg>
                     {profile.discord_username}
                   </span>
-                  <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-xs text-green-400">
-                    Connected
-                  </span>
+                  <Badge tone="success" dot>Connected</Badge>
                 </>
               ) : (
                 <button
                   type="button"
                   onClick={handleConnectDiscord}
                   disabled={discordRedirecting}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#5865F2]/10 px-3 py-1.5 text-sm font-medium text-[#5865F2] transition-colors hover:bg-[#5865F2]/20 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#5865F2]/30 bg-[#5865F2]/10 px-4 py-2 text-xs font-semibold text-[#5865F2] transition-colors hover:bg-[#5865F2]/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg
                     className="h-4 w-4"
                     viewBox="0 0 24 24"
                     fill="currentColor"
+                    aria-hidden="true"
                   >
                     <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z" />
                   </svg>
@@ -357,13 +369,14 @@ export default function AccountSettingsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Password section */}
-      <div className="glass-card rounded-xl p-5">
-        <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-text-secondary">
-          Password
-        </label>
+      <section className="flat-card rounded-2xl p-6">
+        <p className="mb-1 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+          Security
+        </p>
+        <h3 className="mb-4 font-heading text-lg font-bold">Password</h3>
 
         {hasEmail ? (
           <form
@@ -371,13 +384,8 @@ export default function AccountSettingsPage() {
             className="flex flex-col gap-4"
           >
             <div>
-              <label
-                htmlFor="currentPassword"
-                className="mb-1 block text-sm text-text-secondary"
-              >
-                Current password
-              </label>
-              <input
+              <Label htmlFor="currentPassword">Current password</Label>
+              <Input
                 id="currentPassword"
                 name="current-password"
                 type="password"
@@ -385,18 +393,12 @@ export default function AccountSettingsPage() {
                 required
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               />
             </div>
 
             <div>
-              <label
-                htmlFor="newPassword"
-                className="mb-1 block text-sm text-text-secondary"
-              >
-                New password
-              </label>
-              <input
+              <Label htmlFor="newPassword">New password</Label>
+              <Input
                 id="newPassword"
                 name="new-password"
                 type="password"
@@ -405,18 +407,12 @@ export default function AccountSettingsPage() {
                 minLength={8}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               />
             </div>
 
             <div>
-              <label
-                htmlFor="confirmPassword"
-                className="mb-1 block text-sm text-text-secondary"
-              >
-                Confirm new password
-              </label>
-              <input
+              <Label htmlFor="confirmPassword">Confirm new password</Label>
+              <Input
                 id="confirmPassword"
                 name="confirm-password"
                 type="password"
@@ -425,27 +421,18 @@ export default function AccountSettingsPage() {
                 minLength={8}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
               />
             </div>
 
-            {pwError && (
-              <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                {pwError}
-              </p>
-            )}
-            {pwSuccess && (
-              <p className="rounded-lg bg-green-500/10 px-3 py-2 text-sm text-green-400">
-                {pwSuccess}
-              </p>
-            )}
+            {pwError && <Alert tone="danger">{pwError}</Alert>}
+            {pwSuccess && <Alert tone="success">{pwSuccess}</Alert>}
 
             <button
               type="submit"
               disabled={pwSaving || !currentPassword || !newPassword || !confirmPassword}
-              className="w-fit rounded-lg bg-white/5 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/10 disabled:opacity-50"
+              className={`${secondaryButtonClassName} w-fit px-6 py-3 text-sm`}
             >
-              {pwSaving ? "Changing..." : "Change Password"}
+              {pwSaving ? "Changing..." : "Change password"}
             </button>
           </form>
         ) : (
@@ -454,17 +441,20 @@ export default function AccountSettingsPage() {
             account.
           </p>
         )}
-      </div>
+      </section>
 
       {/* Active Sessions */}
-      <div className="glass-card rounded-xl p-5">
-        <h3 className="mb-3 text-sm font-semibold">Active Sessions</h3>
+      <section className="flat-card rounded-2xl p-6">
+        <p className="mb-1 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+          Devices
+        </p>
+        <h3 className="mb-4 font-heading text-lg font-bold">Active sessions</h3>
         {sessionsLoading ? (
           <div className="flex items-center justify-center py-6">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
+            <Spinner size="sm" label="Loading sessions" />
           </div>
         ) : sessionsError ? (
-          <p className="text-sm text-red-400">{sessionsError}</p>
+          <Alert tone="danger">{sessionsError}</Alert>
         ) : sessions.length === 0 ? (
           <p className="text-sm text-text-secondary">No active sessions found.</p>
         ) : (
@@ -472,7 +462,7 @@ export default function AccountSettingsPage() {
             {sessions.map((session) => (
               <div
                 key={session.id}
-                className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-4 py-3"
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3"
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-white" title={session.user_agent ?? undefined}>
@@ -482,13 +472,11 @@ export default function AccountSettingsPage() {
                         : session.user_agent
                       : "Unknown device"}
                   </p>
-                  <div className="mt-0.5 flex items-center gap-3 text-xs text-text-secondary">
+                  <div className="mt-1 flex flex-wrap items-center gap-3 font-mono text-xs text-text-secondary">
                     <span>{session.ip_address ?? "Unknown IP"}</span>
                     <span>Last used: {timeAgo(session.last_used_at)}</span>
                     {session.is_current && (
-                      <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-green-400">
-                        Current
-                      </span>
+                      <Badge tone="success" dot>Current</Badge>
                     )}
                   </div>
                 </div>
@@ -496,7 +484,7 @@ export default function AccountSettingsPage() {
                   <button
                     type="button"
                     onClick={() => handleRevokeSession(session.id)}
-                    className="ml-4 shrink-0 rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/10"
+                    className={`${dangerButtonClassName} ml-4 shrink-0 px-4 py-2 text-xs`}
                   >
                     Revoke
                   </button>
@@ -505,62 +493,59 @@ export default function AccountSettingsPage() {
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {/* Danger Zone */}
-      <div className="glass-card rounded-xl border border-red-500/20 p-5">
-        <h3 className="mb-1 text-sm font-semibold text-red-400">Danger Zone</h3>
+      <section className="flat-card rounded-2xl border-danger/25 p-6">
+        <p className="mb-1 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-danger">
+          Danger zone
+        </p>
+        <h3 className="mb-1 font-heading text-lg font-bold text-danger">Delete account</h3>
         <p className="mb-4 text-sm text-text-secondary">
           Permanently delete your account. This action cannot be undone.
         </p>
 
-        <form onSubmit={handleDeleteAccount} className="flex flex-col gap-3">
+        <form onSubmit={handleDeleteAccount} className="flex flex-col gap-4">
           {hasEmail && (
             <div>
-              <label htmlFor="delete-password" className="mb-1 block text-sm text-text-secondary">
-                Confirm your password
-              </label>
-              <input
+              <Label htmlFor="delete-password">Confirm your password</Label>
+              <Input
                 id="delete-password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
                 value={deletePassword}
                 onChange={(e) => setDeletePassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50"
+                className="focus:border-danger/50"
               />
             </div>
           )}
 
           <div>
-            <label htmlFor="delete-confirm" className="mb-1 block text-sm text-text-secondary">
-              Type <span className="font-mono text-red-400">DELETE</span> to confirm
-            </label>
-            <input
+            <Label htmlFor="delete-confirm">
+              Type <span className="text-danger">DELETE</span> to confirm
+            </Label>
+            <Input
               id="delete-confirm"
               type="text"
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500/50"
+              className="focus:border-danger/50"
               placeholder="DELETE"
             />
           </div>
 
-          {deleteError && (
-            <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-              {deleteError}
-            </p>
-          )}
+          {deleteError && <Alert tone="danger">{deleteError}</Alert>}
 
           <button
             type="submit"
             disabled={deleting || deleteConfirm !== "DELETE" || (hasEmail && !deletePassword)}
-            className="w-fit rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+            className={`${dangerButtonClassName} w-fit px-6 py-3 text-sm`}
           >
-            {deleting ? "Deleting..." : "Delete Account"}
+            {deleting ? "Deleting..." : "Delete account"}
           </button>
         </form>
-      </div>
+      </section>
     </div>
   );
 }

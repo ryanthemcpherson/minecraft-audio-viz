@@ -4,8 +4,18 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import Alert from "@/components/ui/Alert";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Field";
+import PageHeader from "@/components/ui/PageHeader";
 import type { OrgDetail, OrgServerDetail, RegisterServerResponse } from "@/lib/auth";
 import { getOrgBySlug, listOrgServers, registerOrgServer, removeOrgServer, fetchMe } from "@/lib/auth";
+
+// Native <button> styles mirroring Button's primary variant, used where a real
+// disabled state is required while submitting (Button's "disabled" variant renders a span).
+const primaryButtonClassName =
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-xs font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:hover:shadow-lg";
 
 // ---------------------------------------------------------------------------
 // Relative time helper
@@ -42,56 +52,47 @@ function ApiKeyReveal({ data, onDismiss }: { data: RegisterServerResponse; onDis
   }
 
   return (
-    <div className="glass-card rounded-xl border-yellow-500/30 p-6">
+    <div className="flat-card rounded-xl border-warning/30 p-6">
       <div className="mb-4 flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-yellow-500/10">
-          <svg className="h-4 w-4 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-warning/10">
+          <svg className="h-4 w-4 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
         <div>
-          <h3 className="font-semibold text-yellow-400">Save These Credentials</h3>
+          <h3 className="font-heading font-semibold text-warning">Save these credentials</h3>
           <p className="text-xs text-text-secondary">The API key will not be shown again.</p>
         </div>
       </div>
 
       <div className="flex flex-col gap-3">
         <div>
-          <label className="mb-1 block text-xs text-text-secondary">API Key</label>
+          <Label>API key</Label>
           <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-lg bg-black/30 px-3 py-2 font-mono text-sm text-green-400 break-all">
+            <code className="flex-1 rounded-lg border border-white/10 bg-bg-primary px-3 py-2 font-mono text-sm text-success break-all">
               {data.api_key}
             </code>
-            <button
-              onClick={() => handleCopy(data.api_key, setCopiedKey)}
-              className="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-xs transition-colors hover:bg-white/5"
-            >
+            <Button size="sm" variant="secondary" onClick={() => handleCopy(data.api_key, setCopiedKey)}>
               {copiedKey ? "Copied!" : "Copy"}
-            </button>
+            </Button>
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs text-text-secondary">JWT Secret</label>
+          <Label>JWT secret</Label>
           <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-lg bg-black/30 px-3 py-2 font-mono text-sm text-blue-400 break-all">
+            <code className="flex-1 rounded-lg border border-white/10 bg-bg-primary px-3 py-2 font-mono text-sm text-disc-cyan break-all">
               {data.jwt_secret}
             </code>
-            <button
-              onClick={() => handleCopy(data.jwt_secret, setCopiedSecret)}
-              className="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-xs transition-colors hover:bg-white/5"
-            >
+            <Button size="sm" variant="secondary" onClick={() => handleCopy(data.jwt_secret, setCopiedSecret)}>
               {copiedSecret ? "Copied!" : "Copy"}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
-      <button
-        onClick={onDismiss}
-        className="mt-4 w-full rounded-lg border border-white/10 py-2 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
-      >
+      <Button variant="ghost" size="sm" className="mt-4 w-full border border-white/10" onClick={onDismiss}>
         I&apos;ve saved these credentials
-      </button>
+      </Button>
     </div>
   );
 }
@@ -131,49 +132,46 @@ function RegisterServerForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-card rounded-xl p-6">
-      <h3 className="mb-4 font-semibold">Register New Server</h3>
+    <form onSubmit={handleSubmit} className="flat-card rounded-xl p-6">
+      <h3 className="mb-4 font-heading font-semibold">Register new server</h3>
       <div className="flex flex-col gap-4">
         <div>
-          <label className="mb-1 block text-sm text-text-secondary">Server Name</label>
-          <input
+          <Label htmlFor="org-server-name">Server name</Label>
+          <Input
+            id="org-server-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="My VJ Server"
             required
             maxLength={100}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none transition-colors focus:border-disc-cyan/40"
           />
         </div>
         <div>
-          <label className="mb-1 block text-sm text-text-secondary">WebSocket URL</label>
-          <input
+          <Label htmlFor="org-server-ws-url">WebSocket URL</Label>
+          <Input
+            id="org-server-ws-url"
             type="text"
             value={wsUrl}
             onChange={(e) => setWsUrl(e.target.value)}
             placeholder="wss://your-server.com/ws"
             required
             maxLength={500}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm outline-none transition-colors focus:border-disc-cyan/40"
+            className="font-mono"
           />
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <Alert tone="danger">{error}</Alert>}
         <div className="flex gap-3">
           <button
             type="submit"
             disabled={submitting || !name || !wsUrl}
-            className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={primaryButtonClassName}
           >
-            {submitting ? "Registering..." : "Register Server"}
+            {submitting ? "Registering..." : "Register server"}
           </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-white/10 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
-          >
+          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </form>
@@ -198,19 +196,13 @@ function ServerCard({
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   return (
-    <div className="glass-card rounded-xl p-5 transition-all duration-200 hover:border-disc-cyan/20">
+    <div className="flat-card rounded-xl p-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h3 className="font-semibold">{server.name}</h3>
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs ${
-              server.is_online
-                ? "bg-green-500/10 text-green-400"
-                : "bg-white/5 text-text-secondary"
-            }`}
-          >
+          <h3 className="font-heading font-semibold">{server.name}</h3>
+          <Badge tone={server.is_online ? "success" : "neutral"} dot>
             {server.is_online ? "Online" : "Offline"}
-          </span>
+          </Badge>
         </div>
         {isOwner && (
           <div>
@@ -220,7 +212,7 @@ function ServerCard({
                 <button
                   onClick={() => onRemove(server.id)}
                   disabled={removingId === server.id}
-                  className="rounded-lg bg-red-500/10 px-3 py-1 text-xs text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                  className="rounded-lg border border-danger/25 bg-danger/10 px-3 py-1 text-xs font-semibold text-danger transition-colors hover:bg-danger/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {removingId === server.id ? "..." : "Yes"}
                 </button>
@@ -234,7 +226,7 @@ function ServerCard({
             ) : (
               <button
                 onClick={() => setConfirmRemove(true)}
-                className="rounded-lg border border-white/10 px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-white/5 hover:text-red-400"
+                className="rounded-lg border border-white/10 px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-white/5 hover:text-danger"
               >
                 Remove
               </button>
@@ -245,7 +237,7 @@ function ServerCard({
 
       <code className="mt-2 block text-xs text-text-secondary font-mono">{server.websocket_url}</code>
 
-      <div className="mt-3 flex gap-4 text-xs text-text-secondary">
+      <div className="mt-3 flex flex-wrap gap-4 font-mono text-xs text-text-secondary">
         <span>{server.active_show_count} active show{server.active_show_count !== 1 ? "s" : ""}</span>
         <span>Created {relativeTime(server.created_at)}</span>
         {server.last_heartbeat && (
@@ -351,10 +343,10 @@ export default function OrgServersPage() {
   if (error) {
     return (
       <div className="flex min-h-screen items-center justify-center pt-20">
-        <div className="glass-card rounded-xl p-8 text-center">
-          <p className="text-red-400">{error}</p>
+        <div className="flat-card w-full max-w-md rounded-2xl p-8 text-center">
+          <Alert tone="danger">{error}</Alert>
           <Link href="/dashboard" className="mt-4 inline-block text-sm text-disc-cyan hover:underline">
-            Back to Dashboard
+            Back to dashboard
           </Link>
         </div>
       </div>
@@ -373,7 +365,7 @@ export default function OrgServersPage() {
 
       <div className="relative z-10">
         {/* Breadcrumb */}
-        <nav className="mb-6 flex items-center gap-2 text-sm text-text-secondary">
+        <nav className="mb-6 flex items-center gap-2 font-mono text-xs text-text-secondary">
           <Link href="/dashboard" className="transition-colors hover:text-white">Dashboard</Link>
           <span>/</span>
           <span>{org.name}</span>
@@ -382,19 +374,19 @@ export default function OrgServersPage() {
         </nav>
 
         {/* Heading */}
-        <div className="mb-8 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">
-            <span className="text-disc-cyan">Servers</span>
-          </h1>
-          {isOwner && !showRegisterForm && (
-            <button
-              onClick={() => setShowRegisterForm(true)}
-              className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            >
-              Register Server
-            </button>
-          )}
-        </div>
+        <PageHeader
+          eyebrow="Organization"
+          title="Servers"
+          description={org.name}
+          className="mb-8"
+          actions={
+            isOwner && !showRegisterForm ? (
+              <Button size="sm" onClick={() => setShowRegisterForm(true)}>
+                Register server
+              </Button>
+            ) : undefined
+          }
+        />
 
         <div className="flex flex-col gap-6">
           {/* API key reveal */}
@@ -414,7 +406,7 @@ export default function OrgServersPage() {
 
           {/* Server list */}
           {servers.length === 0 && !showRegisterForm ? (
-            <div className="glass-card rounded-xl p-8 text-center">
+            <div className="flat-card rounded-xl p-8 text-center">
               <div className="mb-4 flex justify-center">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-disc-cyan/10">
                   <svg className="h-6 w-6 text-disc-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -424,12 +416,9 @@ export default function OrgServersPage() {
               </div>
               <p className="mb-2 text-text-secondary">No servers registered yet.</p>
               {isOwner && (
-                <button
-                  onClick={() => setShowRegisterForm(true)}
-                  className="mt-2 rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                >
-                  Register Your First Server
-                </button>
+                <Button size="sm" className="mt-2" onClick={() => setShowRegisterForm(true)}>
+                  Register your first server
+                </Button>
               )}
             </div>
           ) : (

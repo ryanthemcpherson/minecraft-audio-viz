@@ -2,7 +2,7 @@ import { Metadata } from "next";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
-  title: "Terms of Service - MCAV",
+  title: "Terms of service",
   description:
     "Read the terms and conditions for using MCAV services.",
 };
@@ -11,12 +11,16 @@ export default function TermsPage() {
   return (
     <>
       {/* Hero */}
-      <section className="px-6 pt-32 pb-16">
-        <div className="mx-auto max-w-4xl text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
-            Terms of <span className="text-disc-cyan">Service</span>
+      <section className="px-6 pt-32 pb-12">
+        {/* Inlined SectionHeader styling: the primitive renders an h2, but a page needs an h1. */}
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+            Legal
+          </p>
+          <h1 className="font-heading text-3xl font-bold leading-[1.1] sm:text-4xl md:text-5xl">
+            Terms of Service
           </h1>
-          <p className="mt-4 text-lg text-text-secondary sm:text-xl">
+          <p className="mt-4 text-base leading-relaxed text-text-secondary sm:text-lg">
             Last updated: February 19, 2026
           </p>
         </div>
@@ -25,10 +29,10 @@ export default function TermsPage() {
       {/* Content */}
       <div className="px-6 pb-32">
         <div className="mx-auto max-w-3xl">
-          <div className="glass-card rounded-2xl p-8 sm:p-12 space-y-8">
+          <div className="[&>section:first-child>h2]:mt-0">
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Acceptance of Terms</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Acceptance of Terms</h2>
               <p className="text-text-secondary leading-relaxed">
                 By accessing or using MCAV (Minecraft Audio Visualizer) services, including the
                 website at mcav.live, the DJ Client app, VJ server software, and Minecraft plugin,
@@ -38,11 +42,11 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Description of Service</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Description of Service</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 MCAV is an open source real-time audio visualization system for Minecraft. The service includes:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary">
                 <li>A Minecraft plugin for rendering 3D audio visualizations using Display Entities</li>
                 <li>A VJ server for processing audio data and managing visualization patterns</li>
                 <li>A DJ Client desktop app for capturing and streaming audio</li>
@@ -52,7 +56,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Open Source License</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Open Source License</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 MCAV is released under the{" "}
                 <a
@@ -76,11 +80,11 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">User Accounts</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">User Accounts</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 To access certain features, you may need to create an account:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-4">
                 <li>You must provide accurate and complete information when creating an account</li>
                 <li>You may sign in using third-party providers (Discord, Google). When you do so, you authorize us to access the profile information described in our Privacy Policy</li>
                 <li>You are responsible for maintaining the security of your account credentials</li>
@@ -94,11 +98,11 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Acceptable Use</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Acceptable Use</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 When using MCAV, you agree not to:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary">
                 <li>Use the service for any illegal or unauthorized purpose</li>
                 <li>Violate any laws in your jurisdiction (including copyright laws)</li>
                 <li>Transmit malware, viruses, or malicious code</li>
@@ -112,7 +116,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Audio Content</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Audio Content</h2>
               <p className="text-text-secondary leading-relaxed">
                 You are solely responsible for ensuring you have the rights to stream and visualize
                 any audio content you use with MCAV. This includes music, voice chat, or any other audio.
@@ -122,11 +126,11 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Server Hosting</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Server Hosting</h2>
               <p className="text-text-secondary leading-relaxed">
                 If you host a VJ server or Minecraft server using MCAV:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mt-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mt-4">
                 <li>You are responsible for the content and conduct on your server</li>
                 <li>You must comply with all applicable laws and Minecraft&apos;s terms of service</li>
                 <li>You are responsible for securing your server and managing user access</li>
@@ -135,12 +139,12 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Termination</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Termination</h2>
               <p className="text-text-secondary leading-relaxed">
                 We reserve the right to suspend or terminate your access to MCAV services at any time,
                 with or without cause, with or without notice. Reasons for termination may include:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mt-4 mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mt-4 mb-4">
                 <li>Violation of these Terms of Service</li>
                 <li>Fraudulent, abusive, or illegal activity</li>
                 <li>Prolonged inactivity</li>
@@ -160,12 +164,12 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Disclaimer of Warranties</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Disclaimer of Warranties</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 MCAV is provided &quot;as is&quot; and &quot;as available&quot; without warranties of any kind,
                 either express or implied, including but not limited to:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-4">
                 <li>Warranties of merchantability or fitness for a particular purpose</li>
                 <li>Warranties of non-infringement</li>
                 <li>Warranties that the service will be uninterrupted, secure, or error-free</li>
@@ -178,13 +182,13 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Limitation of Liability</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Limitation of Liability</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 To the maximum extent permitted by law, MCAV, its maintainers, contributors, and affiliates
                 shall not be liable for any indirect, incidental, special, consequential, or punitive damages,
                 including but not limited to:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-4">
                 <li>Loss of profits, data, use, goodwill, or other intangible losses</li>
                 <li>Unauthorized access to or alteration of your transmissions or data</li>
                 <li>Statements or conduct of any third party on the service</li>
@@ -197,7 +201,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Indemnification</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Indemnification</h2>
               <p className="text-text-secondary leading-relaxed">
                 You agree to indemnify, defend, and hold harmless MCAV, its maintainers, contributors,
                 and affiliates from any claims, liabilities, damages, losses, and expenses (including
@@ -207,7 +211,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Third-Party Services</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Third-Party Services</h2>
               <p className="text-text-secondary leading-relaxed">
                 MCAV integrates with third-party services including Discord, Google, Cloudflare, and Railway.
                 Your use of these services is subject to their respective terms of service and privacy policies.
@@ -216,11 +220,11 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">OAuth and Third-Party Authentication</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">OAuth and Third-Party Authentication</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 MCAV allows you to sign in using third-party identity providers including Discord and Google. When you authenticate through these providers:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary">
                 <li>We receive limited profile information (user ID, email, display name, avatar) as authorized by the provider</li>
                 <li>We do not receive or store your password for any third-party provider</li>
                 <li>You can revoke MCAV&apos;s access at any time through the respective provider&apos;s settings (Discord: User Settings &gt; Authorized Apps; Google: myaccount.google.com/permissions)</li>
@@ -229,7 +233,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Modifications to Terms</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Modifications to Terms</h2>
               <p className="text-text-secondary leading-relaxed">
                 We reserve the right to modify these Terms of Service at any time. Changes will be posted
                 on this page with an updated revision date. Continued use of MCAV after changes constitutes
@@ -246,7 +250,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Governing Law</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Governing Law</h2>
               <p className="text-text-secondary leading-relaxed">
                 These Terms of Service shall be governed by and construed in accordance with the laws
                 of the jurisdiction in which the project maintainer resides, without regard to conflict
@@ -255,7 +259,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Contact</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Contact</h2>
               <p className="text-text-secondary leading-relaxed">
                 For questions about these Terms of Service, please contact us:
               </p>

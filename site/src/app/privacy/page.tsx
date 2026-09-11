@@ -2,7 +2,7 @@ import { Metadata } from "next";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy - MCAV",
+  title: "Privacy policy",
   description:
     "Learn how MCAV collects, uses, and protects your personal information.",
 };
@@ -11,12 +11,16 @@ export default function PrivacyPage() {
   return (
     <>
       {/* Hero */}
-      <section className="px-6 pt-32 pb-16">
-        <div className="mx-auto max-w-4xl text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
-            Privacy <span className="text-disc-cyan">Policy</span>
+      <section className="px-6 pt-32 pb-12">
+        {/* Inlined SectionHeader styling: the primitive renders an h2, but a page needs an h1. */}
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+            Legal
+          </p>
+          <h1 className="font-heading text-3xl font-bold leading-[1.1] sm:text-4xl md:text-5xl">
+            Privacy Policy
           </h1>
-          <p className="mt-4 text-lg text-text-secondary sm:text-xl">
+          <p className="mt-4 text-base leading-relaxed text-text-secondary sm:text-lg">
             Last updated: February 19, 2026
           </p>
         </div>
@@ -25,10 +29,10 @@ export default function PrivacyPage() {
       {/* Content */}
       <div className="px-6 pb-32">
         <div className="mx-auto max-w-3xl">
-          <div className="glass-card rounded-2xl p-8 sm:p-12 space-y-8">
+          <div className="[&>section:first-child>h2]:mt-0">
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Introduction</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Introduction</h2>
               <p className="text-text-secondary leading-relaxed">
                 MCAV (Minecraft Audio Visualizer) is an open source project created by Ryan McPherson.
                 This privacy policy explains how we collect, use, and protect your personal information
@@ -37,31 +41,31 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Information We Collect</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Information We Collect</h2>
 
-              <h3 className="text-lg font-semibold mb-3 text-disc-cyan">Account Information</h3>
+              <h3 className="font-heading mt-6 mb-2 text-base font-semibold text-disc-cyan">Account Information</h3>
               <p className="text-text-secondary leading-relaxed mb-4">
                 When you create an account on mcav.live, we collect:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-6">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-6">
                 <li>Discord user ID, username, and avatar (if you sign in with Discord)</li>
                 <li>Google account ID, email, name, and profile picture (if you sign in with Google)</li>
                 <li>Email address (provided by your sign-in method or entered during registration)</li>
                 <li>DJ name and server configuration preferences</li>
               </ul>
 
-              <h3 className="text-lg font-semibold mb-3 text-disc-cyan">Usage Data</h3>
+              <h3 className="font-heading mt-6 mb-2 text-base font-semibold text-disc-cyan">Usage Data</h3>
               <p className="text-text-secondary leading-relaxed mb-4">
                 We automatically collect certain information when you visit our website:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-6">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-6">
                 <li>Browser type and version</li>
                 <li>IP address and general location</li>
                 <li>Pages visited and time spent on the site</li>
                 <li>Referring site or source</li>
               </ul>
 
-              <h3 className="text-lg font-semibold mb-3 text-disc-cyan">Audio Data</h3>
+              <h3 className="font-heading mt-6 mb-2 text-base font-semibold text-disc-cyan">Audio Data</h3>
               <p className="text-text-secondary leading-relaxed">
                 When using the DJ Client app, audio is processed locally on your device.
                 Only frequency band data (FFT analysis results) is transmitted to VJ servers.
@@ -70,11 +74,11 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">How We Use Your Information</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">How We Use Your Information</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 We use the collected information to:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary">
                 <li>Provide and maintain the MCAV service</li>
                 <li>Authenticate users via Discord and Google OAuth</li>
                 <li>Enable DJ-to-server connections using connect codes</li>
@@ -85,11 +89,11 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Cookies and Tracking</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Cookies and Tracking</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 We use cookies and similar technologies to:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-4">
                 <li>Maintain your login session</li>
                 <li>Remember your preferences</li>
                 <li>Analyze site usage and performance</li>
@@ -101,11 +105,11 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Third-Party Services</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Third-Party Services</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 MCAV integrates with the following third-party services:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-4">
                 <li><strong>Discord</strong> - For OAuth authentication and profile data</li>
                 <li><strong>Google</strong> - For OAuth authentication and profile data</li>
                 <li><strong>Cloudflare</strong> - For CDN and DDoS protection</li>
@@ -117,7 +121,7 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Data Retention</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Data Retention</h2>
               <p className="text-text-secondary leading-relaxed">
                 We retain your account information for as long as your account is active.
                 You may request deletion of your account and associated data at any time by
@@ -134,11 +138,11 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Your Rights (GDPR/CCPA)</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Your Rights (GDPR/CCPA)</h2>
               <p className="text-text-secondary leading-relaxed mb-4">
                 Depending on your location, you may have the following rights:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mb-4">
                 <li><strong>Access:</strong> Request a copy of the personal data we hold about you</li>
                 <li><strong>Correction:</strong> Request corrections to inaccurate data</li>
                 <li><strong>Deletion:</strong> Request deletion of your personal data</li>
@@ -159,11 +163,11 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Security</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Security</h2>
               <p className="text-text-secondary leading-relaxed">
                 We implement industry-standard security measures to protect your data, including:
               </p>
-              <ul className="list-disc pl-6 space-y-2 text-text-secondary mt-4 mb-4">
+              <ul className="list-disc pl-5 space-y-2 text-text-secondary mt-4 mb-4">
                 <li>Encrypted WebSocket connections (WSS) for DJ-to-server communication</li>
                 <li>JWT-based authentication with short-lived tokens</li>
                 <li>Bcrypt password hashing for password-based accounts</li>
@@ -176,7 +180,7 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Children&apos;s Privacy</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Children&apos;s Privacy</h2>
               <p className="text-text-secondary leading-relaxed">
                 MCAV is not intended for children under the age of 13. We do not knowingly
                 collect personal information from children. If you believe we have collected
@@ -185,7 +189,7 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Changes to This Policy</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Changes to This Policy</h2>
               <p className="text-text-secondary leading-relaxed">
                 We may update this privacy policy from time to time. Changes will be posted
                 on this page with an updated revision date. Continued use of MCAV after changes
@@ -194,7 +198,7 @@ export default function PrivacyPage() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold mb-4">Contact</h2>
+              <h2 className="font-heading text-xl font-bold mt-10 mb-3">Contact</h2>
               <p className="text-text-secondary leading-relaxed">
                 For questions about this privacy policy or to exercise your rights, please contact us:
               </p>

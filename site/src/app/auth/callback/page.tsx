@@ -10,7 +10,9 @@ import {
   getOAuthProvider,
   clearStoredOAuthState,
 } from "@/lib/auth";
-import Link from "next/link";
+import Alert from "@/components/ui/Alert";
+import Button from "@/components/ui/Button";
+import Spinner from "@/components/ui/Spinner";
 
 const COORDINATOR_URL = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "";
 
@@ -101,17 +103,21 @@ function CallbackHandler() {
   if (error) {
     return (
       <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
-        <div className="mb-4 text-4xl">!</div>
-        <h1 className="mb-2 text-xl font-semibold text-white">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-danger/10">
+          <svg className="h-6 w-6 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </div>
+        <p className="mb-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+          Account
+        </p>
+        <h1 className="mb-3 font-heading text-2xl font-bold leading-tight">
           Sign-in failed
         </h1>
-        <p className="mb-6 text-sm text-text-secondary">{error}</p>
-        <Link
-          href="/login"
-          className="inline-block rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-        >
-          Back to login
-        </Link>
+        <Alert tone="danger" className="mb-6 text-left">
+          {error}
+        </Alert>
+        <Button href="/login">Back to login</Button>
       </div>
     );
   }
@@ -119,7 +125,7 @@ function CallbackHandler() {
   return (
     <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
       <div className="mb-4 flex justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
+        <Spinner label="Completing sign-in" />
       </div>
       <p className="text-sm text-text-secondary">
         Completing sign-in...
@@ -136,7 +142,7 @@ export default function AuthCallbackPage() {
         fallback={
           <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
             <div className="mb-4 flex justify-center">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
+              <Spinner />
             </div>
             <p className="text-sm text-text-secondary">Loading...</p>
           </div>

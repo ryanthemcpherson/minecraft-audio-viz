@@ -2,8 +2,15 @@
 
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { resetPassword } from "@/lib/auth";
+import Alert from "@/components/ui/Alert";
+import Button from "@/components/ui/Button";
+import Spinner from "@/components/ui/Spinner";
+import { Input, Label } from "@/components/ui/Field";
+
+/** Primary submit styling, mirroring Button's primary variant (which has no disabled prop). */
+const submitButtonClassName =
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-lg disabled:hover:brightness-100";
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -58,12 +65,12 @@ function ResetPasswordForm() {
       <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
         <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
         <div className="relative w-full max-w-md glass-card rounded-2xl p-8">
-          <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+          <Alert tone="danger" className="mb-4">
             Invalid reset link. Please request a new password reset.
-          </p>
-          <Link href="/forgot-password" className="text-sm text-disc-cyan hover:underline">
+          </Alert>
+          <Button href="/forgot-password" variant="secondary" className="w-full">
             Request new reset link
-          </Link>
+          </Button>
         </div>
       </div>
     );
@@ -74,36 +81,28 @@ function ResetPasswordForm() {
       <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
 
       <div className="relative w-full max-w-md glass-card rounded-2xl p-8">
-        <h1 className="mb-2 text-xl font-semibold text-white">Set new password</h1>
-        <p className="mb-6 text-sm text-text-secondary">
+        <p className="mb-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+          Account
+        </p>
+        <h1 className="mb-2 font-heading text-2xl font-bold leading-tight">Set new password</h1>
+        <p className="mb-6 text-sm leading-relaxed text-text-secondary">
           Enter your new password below.
         </p>
 
         {success ? (
           <div className="flex flex-col gap-4">
-            <div className="rounded-lg bg-green-500/10 px-4 py-3 text-sm text-green-400">
-              Your password has been reset successfully.
-            </div>
-            <Link
-              href="/login"
-              className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-center text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            >
+            <Alert tone="success">Your password has been reset successfully.</Alert>
+            <Button href="/login" className="w-full">
               Back to login
-            </Link>
+            </Button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {error && (
-              <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                {error}
-              </p>
-            )}
+            {error && <Alert tone="danger">{error}</Alert>}
 
             <div>
-              <label htmlFor="new-password" className="mb-1 block text-sm text-text-secondary">
-                New password
-              </label>
-              <input
+              <Label htmlFor="new-password">New password</Label>
+              <Input
                 id="new-password"
                 name="new-password"
                 type="password"
@@ -112,16 +111,13 @@ function ResetPasswordForm() {
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                 placeholder="Min 8 characters, 1 uppercase, 1 digit"
               />
             </div>
 
             <div>
-              <label htmlFor="confirm-password" className="mb-1 block text-sm text-text-secondary">
-                Confirm password
-              </label>
-              <input
+              <Label htmlFor="confirm-password">Confirm password</Label>
+              <Input
                 id="confirm-password"
                 name="confirm-password"
                 type="password"
@@ -130,7 +126,6 @@ function ResetPasswordForm() {
                 minLength={8}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                 placeholder="Confirm your password"
               />
             </div>
@@ -138,7 +133,7 @@ function ResetPasswordForm() {
             <button
               type="submit"
               disabled={loading || !password || !confirmPassword}
-              className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              className={submitButtonClassName}
             >
               {loading ? "Resetting..." : "Reset password"}
             </button>
@@ -151,11 +146,13 @@ function ResetPasswordForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={
-      <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-disc-cyan" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
+          <Spinner />
+        </div>
+      }
+    >
       <ResetPasswordForm />
     </Suspense>
   );
