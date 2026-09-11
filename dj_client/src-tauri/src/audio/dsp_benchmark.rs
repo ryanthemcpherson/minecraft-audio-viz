@@ -73,6 +73,8 @@ struct ScenarioReport {
     blocks: usize,
     /// BassLane kick decisions (deterministic: sample-domain state only).
     kicks: u32,
+    /// Start sample of each analysis window that reported a BassLane onset.
+    kick_windows: Vec<usize>,
     /// FFT beat flags (wall-clock dependent; informational only).
     beats: u32,
     bass: BlockStats,
@@ -158,6 +160,7 @@ fn run_scenario(name: &'static str, pcm: &[f32]) -> ScenarioReport {
     let mut bass_us = Vec::with_capacity(blocks);
     let mut fft_us = Vec::with_capacity(blocks);
     let mut kicks = 0u32;
+    let mut kick_windows = Vec::with_capacity(blocks);
     let mut beats = 0u32;
     let mut peak_max = 0.0_f32;
     let mut instant_bass_max = 0.0_f32;
@@ -191,6 +194,9 @@ fn run_scenario(name: &'static str, pcm: &[f32]) -> ScenarioReport {
         bass_us.push(bass_elapsed);
         fft_us.push(fft_elapsed);
         kicks += u32::from(i_kick);
+        if i_kick {
+            kick_windows.push(base);
+        }
         beats += u32::from(result.is_beat);
         peak_max = peak_max.max(result.peak);
         instant_bass_max = instant_bass_max.max(i_bass);
@@ -211,6 +217,7 @@ fn run_scenario(name: &'static str, pcm: &[f32]) -> ScenarioReport {
         name,
         blocks,
         kicks,
+        kick_windows,
         beats,
         bass: BlockStats::from_samples(bass_us),
         fft: BlockStats::from_samples(fft_us),
@@ -284,6 +291,22 @@ fn kick_bursts_fire_bass_lane_deterministically() {
         report.kicks
     );
     assert!(report.kicks <= report.blocks as u32);
+    // Counting alone could hide one missed burst plus one false positive.
+    // Match detections to known PCM bursts, without treating window positions
+    // as measured live latency (the production windows overlap).
+    let lead_samples = (lead_in * SAMPLE_RATE as f32) as usize;
+    let period_samples = (period * SAMPLE_RATE as f32) as usize;
+    let burst_samples = (0.010 * SAMPLE_RATE as f32) as usize;
+    assert_eq!(report.kick_windows.len(), expected as usize);
+    // Both streams are chronological, so a linear pairing also rules out
+    // extra detections, missed bursts, and events in the silent gaps.
+    for (index, &window_start) in report.kick_windows.iter().enumerate() {
+        let burst_start = lead_samples + index * period_samples;
+        assert!(
+            window_start < burst_start + burst_samples && window_start + FFT_SIZE > burst_start,
+            "burst at sample {burst_start} mismatched detection window {window_start}"
+        );
+    }
     assert!(report.instant_bass_max > 0.1);
     assert!(report.peak_max > 0.1);
     assert_finite_bounded(&report);
@@ -298,6 +321,7 @@ fn kick_burst_results_are_repeatable() {
 
     assert_eq!(a.blocks, b.blocks);
     assert_eq!(a.kicks, b.kicks);
+    assert_eq!(a.kick_windows, b.kick_windows);
     assert_eq!(a.peak_max, b.peak_max);
     assert_eq!(a.instant_bass_max, b.instant_bass_max);
 }
