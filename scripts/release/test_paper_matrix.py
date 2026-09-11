@@ -89,6 +89,12 @@ def test_fixture_binds_only_loopback_and_disables_managed_runtime(tmp_path):
     properties = (server / "server.properties").read_text()
     config = (server / "plugins/AudioViz/config.yml").read_text()
     assert "server-ip=127.0.0.1" in properties
+    settings = next(
+        line.split("=", 1)[1]
+        for line in properties.splitlines()
+        if line.startswith("generator-settings=")
+    )
+    assert len(json.loads(settings)["layers"]) == 3
     assert "enable-rcon=false" in properties
     assert "address: '127.0.0.1'" in config
     assert "runtime:\n  enabled: false" in config
@@ -103,19 +109,18 @@ def test_paper_pin_matches_product_compatibility():
 
 
 @pytest.mark.asyncio
-async def test_console_query_ignores_old_output_and_uses_unique_markers(monkeypatch, tmp_path):
+async def test_console_query_discards_stale_data_and_awaits_actual_response(tmp_path):
     server = gate.PaperProcess(Path("java"), tmp_path, "fixture", 1)
-    server.send = AsyncMock()
-    monkeypatch.setattr(gate.secrets, "token_hex", lambda _: "fixed")
-    for line in [
-        "stale entity data: [1d, 2d, 3d]",
-        "MCAV_fixed_BEGIN",
-        "entity data: [2d, 82d, 1.5d]",
-        "MCAV_fixed_END",
-    ]:
-        server.lines.put_nowait(line)
-    result = await server.command("data get entity fixture Pos")
+    server.lines.put_nowait("entity data: [1d, 2d, 3d]")
+
+    async def respond(command):
+        server.lines.put_nowait("unrelated delayed chat marker")
+        server.lines.put_nowait("entity data: [2d, 82d, 1.5d]")
+
+    server.send = AsyncMock(side_effect=respond)
+    result = await server.command("data get entity fixture Pos", "entity data:")
     assert gate.parse_vector(result) == [2, 82, 1.5]
+    server.send.assert_awaited_once_with("data get entity fixture Pos")
 
 
 @pytest.mark.asyncio
@@ -173,7 +178,7 @@ async def test_real_subprocess_console_lifecycle_and_log_retention(monkeypatch, 
     server = gate.PaperProcess(Path("java"), tmp_path, "fixture", 5)
     try:
         await server.start()
-        assert await server.command("hello") == ["hello"]
+        assert await server.command("hello", "^hello$") == ["hello"]
     finally:
         await server.stop()
     assert server.process.returncode == 0

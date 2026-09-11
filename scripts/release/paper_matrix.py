@@ -14,7 +14,6 @@ import math
 import os
 import platform
 import re
-import secrets
 import shutil
 import signal
 import socket
@@ -127,6 +126,10 @@ def write_fixture(directory: Path, plugin: Path, paper: Path, ports: list[int]) 
         f"server-ip=127.0.0.1\nserver-port={ports[0]}\n"
         "online-mode=true\nenable-rcon=false\nenable-query=false\n"
         "level-name=world\nlevel-type=minecraft:flat\ngenerate-structures=false\n"
+        'generator-settings={"biome":"minecraft:plains","layers":['
+        '{"block":"minecraft:bedrock","height":1},'
+        '{"block":"minecraft:dirt","height":2},'
+        '{"block":"minecraft:grass_block","height":1}]}\n'
         "spawn-protection=0\nview-distance=2\nsimulation-distance=2\n"
         "max-players=1\nwhite-list=true\nallow-nether=false\n"
         "pause-when-empty-seconds=-1\n",
@@ -202,20 +205,18 @@ class PaperProcess:
         self.process.stdin.write((command + "\n").encode())
         await self.process.stdin.drain()
 
-    async def command(self, command: str) -> list[str]:
-        marker = "MCAV_" + secrets.token_hex(12)
-        await self.send(f"say {marker}_BEGIN\n{command}\nsay {marker}_END")
-        output: list[str] = []
-        started = False
+    async def command(self, command: str, response_pattern: str) -> list[str]:
+        # Paper's asynchronous chat can reorder `say` markers around console data.
+        # Keep exactly one query outstanding and await its actual response instead.
+        while not self.lines.empty():
+            if self.lines.get_nowait() is None:
+                raise GateError(f"{self.label}: server exited before console query")
+        await self.send(command)
         deadline = time.monotonic() + 15
         while True:
             line = await self.line(deadline)
-            if marker + "_END" in line:
-                return output
-            if started:
-                output.append(line)
-            if marker + "_BEGIN" in line:
-                started = True
+            if re.search(response_pattern, line):
+                return [line]
 
     async def stop(self) -> None:
         if self.process is None:
@@ -285,7 +286,8 @@ async def wait_pool(ws: Any) -> int:
 async def check_movement(server: PaperProcess, ws: Any) -> list[dict[str, Any]]:
     # Tag one real entity at the main-stage origin; all pool members get each frame.
     await server.command(
-        "tag @e[type=minecraft:block_display,x=0,y=80,z=0,distance=..0.1,limit=1] add mcav_acceptance"
+        "tag @e[type=minecraft:block_display,x=0,y=80,z=0,distance=..0.1,limit=1] add mcav_acceptance",
+        r"Added tag 'mcav_acceptance' to",
     )
     observations = []
     for coordinate, scale in [(0.25, 0.3), (0.75, 0.8)]:
@@ -313,11 +315,15 @@ async def check_movement(server: PaperProcess, ws: Any) -> list[dict[str, Any]]:
         deadline = time.monotonic() + 10
         while True:
             position = parse_vector(
-                await server.command("data get entity @e[tag=mcav_acceptance,limit=1] Pos")
+                await server.command(
+                    "data get entity @e[tag=mcav_acceptance,limit=1] Pos",
+                    r"has the following entity data: \[",
+                )
             )
             transform = parse_vector(
                 await server.command(
-                    "data get entity @e[tag=mcav_acceptance,limit=1] transformation.scale"
+                    "data get entity @e[tag=mcav_acceptance,limit=1] transformation.scale",
+                    r"has the following entity data: \[",
                 )
             )
             try:
@@ -339,7 +345,10 @@ async def run_gate(
         server = PaperProcess(java, directory, label, timeout)
         try:
             await server.start()
-            await server.command("forceload add -32 -32 32 32")
+            await server.command(
+                "forceload add -32 -32 32 32",
+                r"Marked .*force loaded|No chunks were marked for force loading",
+            )
             async with websockets.connect(f"ws://127.0.0.1:{ws_port}", open_timeout=15) as ws:
                 stages = await request(ws, {"type": "get_stages"}, "stages")
                 if label == "clean-start":
