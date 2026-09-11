@@ -1,9 +1,11 @@
-import Hero from "@/components/Hero";
-import HowItWorks from "@/components/HowItWorks";
-import LazyPatternCarousel from "@/components/LazyPatternCarousel";
-import Features from "@/components/Features";
-import DemoVideo from "@/components/DemoVideo";
-import Community from "@/components/Community";
+import Hero from "@/components/home/Hero";
+import HowItWorks from "@/components/home/HowItWorks";
+import LazyPatternStage from "@/components/patterns/LazyPatternStage";
+import Features from "@/components/home/Features";
+import Audiences from "@/components/home/Audiences";
+import Demo from "@/components/home/Demo";
+import FAQ from "@/components/home/FAQ";
+import CTA from "@/components/home/CTA";
 import Footer from "@/components/Footer";
 
 export default function Home() {
@@ -11,10 +13,12 @@ export default function Home() {
     <>
       <Hero />
       <HowItWorks />
-      <LazyPatternCarousel />
+      <LazyPatternStage />
       <Features />
-      <DemoVideo />
-      <Community />
+      <Audiences />
+      <Demo />
+      <FAQ />
+      <CTA />
       <Footer />
     </>
   );

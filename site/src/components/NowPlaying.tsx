@@ -65,26 +65,36 @@ export default function NowPlaying({ wsUrl }: NowPlayingProps) {
   const primaryColor = activeDj.color_palette?.[0] ?? '#00CCFF';
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-[#08090d]/80 px-4 py-3 backdrop-blur-xl">
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-bg-primary/80 px-4 py-3 backdrop-blur-xl"
+    >
       <div
-        className="h-2 w-2 animate-pulse rounded-full"
-        style={{ background: primaryColor }}
+        className="pulse-ring relative h-2 w-2 rounded-full"
+        style={{ background: primaryColor, color: primaryColor }}
+        aria-hidden="true"
       />
       {activeDj.avatar_url ? (
+        /* Avatar URLs come from Discord/Google OAuth or S3 uploads. Domains are dynamic. */
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={activeDj.avatar_url}
-          alt={activeDj.dj_name}
+          alt=""
           width={32}
           height={32}
           className="h-8 w-8 rounded-full object-cover"
         />
       ) : (
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.08] text-sm font-semibold text-[#a1a1aa]">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.08] text-sm font-semibold text-text-secondary" aria-hidden="true">
           {activeDj.dj_name.charAt(0).toUpperCase()}
         </div>
       )}
       <div>
-        <div className="text-sm font-medium text-[#f5f5f5]">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-text-secondary/70">
+          Now playing
+        </div>
+        <div className="text-sm font-medium text-text-primary">
           {activeDj.slug ? (
             <Link href={`/dj/${activeDj.slug}`} className="hover:underline">
               {activeDj.dj_name}
@@ -94,7 +104,7 @@ export default function NowPlaying({ wsUrl }: NowPlayingProps) {
           )}
         </div>
         {activeDj.genres && (
-          <div className="text-xs text-[#a1a1aa]">{activeDj.genres}</div>
+          <div className="text-xs text-text-secondary">{activeDj.genres}</div>
         )}
       </div>
     </div>
