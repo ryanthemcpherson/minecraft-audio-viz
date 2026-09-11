@@ -1,26 +1,111 @@
-import { Metadata } from "next";
+import type { Metadata } from "next";
+import Link from "next/link";
 import CodeBlock from "@/components/CodeBlock";
 import TableOfContents from "@/components/TableOfContents";
 import Footer from "@/components/Footer";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import ReleaseBanner from "@/components/getting-started/ReleaseBanner";
+import DownloadButton from "@/components/getting-started/DownloadButton";
+import Step, { Note } from "@/components/getting-started/Step";
+import { RELEASE } from "@/lib/releaseStatus";
+import { LINKS } from "@/lib/links";
 
 export const metadata: Metadata = {
-  title: "Getting Started - MCAV",
-  description:
-    "Set up MCAV on your Minecraft server in minutes. Install the Fabric mod or Paper plugin, set up the VJ server, and start visualizing music in real-time.",
+  title: "Getting started",
+  description: `Install MCAV on a Paper ${RELEASE.minecraft} server in five steps: drop one JAR into plugins/, open a port, start Paper, finish setup in the browser. Then connect the DJ client.`,
+  alternates: { canonical: "https://mcav.live/getting-started" },
 };
 
 const tocItems = [
-  { id: "prerequisites", label: "Prerequisites" },
-  { id: "server-setup", label: "Server Owners / VJ Operators" },
-  { id: "install-plugin", label: "Choose Platform", indent: true },
-  { id: "install-processor", label: "Install VJ Server", indent: true },
-  { id: "start-vj-server", label: "Start the VJ Server", indent: true },
-  { id: "in-game-setup", label: "In-Game Setup", indent: true },
-  { id: "dj-setup", label: "For DJs" },
-  { id: "dj-client-availability", label: "DJ Client Availability", indent: true },
-  { id: "connect", label: "Connect", indent: true },
+  { id: "requirements", label: "Requirements" },
+  { id: "server-setup", label: "Server operators" },
+  { id: "download", label: "Download and verify", indent: true },
+  { id: "install", label: "Drop it in plugins/", indent: true },
+  { id: "port", label: "Open one port", indent: true },
+  { id: "first-start", label: "Start Paper", indent: true },
+  { id: "setup", label: "Finish setup", indent: true },
+  { id: "commands", label: "Commands", indent: true },
+  { id: "invite-djs", label: "Invite DJs", indent: true },
+  { id: "upgrades", label: "Upgrades and rollback", indent: true },
+  { id: "migration", label: "Migrating", indent: true },
+  { id: "dj-setup", label: "DJs" },
+  { id: "dj-install", label: "Install the client", indent: true },
+  { id: "dj-invite", label: "Get an invite", indent: true },
+  { id: "dj-connect", label: "Connect", indent: true },
+  { id: "dj-source", label: "Pick a source", indent: true },
   { id: "troubleshooting", label: "Troubleshooting" },
-  { id: "next-steps", label: "Next Steps" },
+  { id: "developers", label: "Developers" },
+  { id: "next-steps", label: "Next steps" },
+];
+
+const requirements = [
+  {
+    title: `Paper ${RELEASE.minecraft}`,
+    body: "The supported server software and Minecraft version. Fabric ships as a separate compatibility JAR without the self-installer.",
+    accent: "text-disc-cyan bg-disc-cyan/10",
+  },
+  {
+    title: `Java ${RELEASE.java}`,
+    body: "The only Java version in the release matrix today. Others are added once they pass the same gates.",
+    accent: "text-disc-blue bg-disc-blue/10",
+  },
+  {
+    title: "Linux or Windows host",
+    body: "Linux x86_64, Linux ARM64, or Windows x86_64. macOS hosting is not supported in this release.",
+    accent: "text-noteblock-amber bg-noteblock-amber/10",
+  },
+  {
+    title: "4 vCPU, 8 GiB memory",
+    body: "The supported baseline for one active stage of 160 display entities. Give Paper about 5 GiB of heap and leave the rest for the VJ runtime.",
+    accent: "text-success bg-success/10",
+  },
+  {
+    title: "2 GiB free disk",
+    body: "The plugin caches verified runtime archives so later restarts work offline and rollback is instant.",
+    accent: "text-disc-cyan bg-disc-cyan/10",
+  },
+  {
+    title: "One extra TCP port",
+    body: `Default ${RELEASE.defaultPort}. It serves the control center, the browser preview, and DJ connections over TLS.`,
+    accent: "text-disc-blue bg-disc-blue/10",
+  },
+];
+
+const commands = [
+  { cmd: "/audioviz status", what: "Plugin and runtime versions, lifecycle state, public address, renderer connection, health summary." },
+  { cmd: "/audioviz setup", what: "Create or rotate a first-run or recovery setup session. Previous setup links stop working." },
+  { cmd: "/audioviz runtime retry", what: "Close a crash circuit and retry the current verified runtime." },
+  { cmd: "/audioviz runtime check", what: "Refresh signed release metadata without activating anything." },
+  { cmd: "/audioviz runtime rollback", what: "Roll back to the last known good runtime. Asks for a time-limited confirmation." },
+  { cmd: "/audioviz diagnostics", what: "Write a redacted support bundle under the plugin data directory." },
+];
+
+const troubleshooting = [
+  {
+    symptom: "Connect code rejected",
+    fix: "Codes are short-lived and single use. Ask the operator for a fresh invite and paste it within a few minutes.",
+  },
+  {
+    symptom: "Certificate fingerprint mismatch",
+    fix: "The server's TLS certificate changed. The client refuses to connect on purpose. Get a new invite with the current fingerprint; there is no accept-anything mode.",
+  },
+  {
+    symptom: "Meters stay flat",
+    fix: "Pick the application that is actually playing, or switch to the system mix. Apps using exclusive-mode WASAPI cannot be captured per-app.",
+  },
+  {
+    symptom: "Setup link expired",
+    fix: `Setup sessions last 30 minutes and allow five failed attempts. Run /audioviz setup from the server console to mint a new one.`,
+  },
+  {
+    symptom: "Runtime will not start",
+    fix: "Run /audioviz status for the reason code, then /audioviz runtime retry. If a fresh install keeps failing, /audioviz diagnostics produces a bundle you can attach to a GitHub issue.",
+  },
+  {
+    symptom: "Show looks choppy in-game",
+    fix: "Lower performance.entity-budget or switch performance.profile in config.yml. Load shedding kicks in automatically when TPS drops.",
+  },
 ];
 
 export default function GettingStartedPage() {
@@ -29,52 +114,33 @@ export default function GettingStartedPage() {
       {/* Hero */}
       <section className="px-6 pt-32 pb-16">
         <div className="mx-auto max-w-4xl text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
-            Getting <span className="text-disc-cyan">Started</span>
+          <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+            Getting started
+          </p>
+          <h1 className="font-heading text-4xl font-bold leading-[1.05] sm:text-5xl md:text-6xl">
+            One JAR. <span className="text-gradient">Five steps.</span>
           </h1>
-          <p className="mt-4 text-lg text-text-secondary sm:text-xl">
-            Get MCAV running on your Minecraft server in minutes.
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-text-secondary sm:text-xl">
+            Drop the plugin into a Paper server, open a port, start it, and finish setup in the
+            browser. The plugin installs and supervises the VJ runtime for you. No Python, no
+            Docker, no shell scripts.
           </p>
 
-          {/* Audience cards */}
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 max-w-2xl mx-auto">
-            <a
-              href="#server-setup"
-              className="glass-card rounded-2xl p-6 text-left group"
-            >
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-disc-cyan to-disc-blue text-white">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                    <line x1="6" y1="6" x2="6.01" y2="6" />
-                    <line x1="6" y1="18" x2="6.01" y2="18" />
-                  </svg>
-                </div>
-                <h3 className="font-bold text-lg">Server Owner</h3>
-              </div>
-              <p className="text-sm text-text-secondary">
-                Set up the Minecraft mod or plugin and VJ server to host audio visualization shows.
-              </p>
-            </a>
+          <ReleaseBanner />
 
-            <a
-              href="#dj-setup"
-              className="glass-card rounded-2xl p-6 text-left group"
-            >
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-disc-blue to-noteblock-amber text-white">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 18V5l12-2v13" />
-                    <circle cx="6" cy="18" r="3" />
-                    <circle cx="18" cy="16" r="3" />
-                  </svg>
-                </div>
-                <h3 className="font-bold text-lg">DJ</h3>
-              </div>
-              <p className="text-sm text-text-secondary">
-                Review the Phase 0 distribution status and source-only development path.
-              </p>
+          {/* Audience cards */}
+          <div className="mx-auto mt-10 grid max-w-3xl gap-4 sm:grid-cols-3">
+            <a href="#server-setup" className="flat-card group rounded-2xl p-5 text-left hover:border-disc-cyan/30">
+              <p className="font-mono text-[11px] uppercase tracking-wider text-disc-cyan">Server operators</p>
+              <p className="mt-2 text-sm text-text-secondary">Install the plugin, finish setup, invite DJs.</p>
+            </a>
+            <a href="#dj-setup" className="flat-card group rounded-2xl p-5 text-left hover:border-disc-blue/30">
+              <p className="font-mono text-[11px] uppercase tracking-wider text-disc-blue">DJs</p>
+              <p className="mt-2 text-sm text-text-secondary">Install the Windows client and connect with an invite.</p>
+            </a>
+            <a href="#developers" className="flat-card group rounded-2xl p-5 text-left hover:border-noteblock-amber/30">
+              <p className="font-mono text-[11px] uppercase tracking-wider text-noteblock-amber">Developers</p>
+              <p className="mt-2 text-sm text-text-secondary">Build from source and write patterns.</p>
             </a>
           </div>
         </div>
@@ -83,645 +149,477 @@ export default function GettingStartedPage() {
       {/* Main content with TOC sidebar */}
       <div className="px-6 pb-32">
         <div className="mx-auto max-w-6xl lg:grid lg:grid-cols-[1fr_220px] lg:gap-12">
-          {/* Content */}
-          <div className="space-y-24">
-
-            {/* Prerequisites */}
-            <section id="prerequisites">
+          <div className="space-y-28">
+            {/* ===== REQUIREMENTS ===== */}
+            <section id="requirements" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-cyan">
-                  Before You Begin
+                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+                  Before you begin
                 </p>
-                <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  Prerequisites
-                </h2>
+                <h2 className="font-heading text-2xl font-bold sm:text-3xl">Requirements</h2>
+                <p className="mt-3 max-w-2xl text-text-secondary">
+                  The installer warns about anything it can observe, such as an unsupported Java
+                  version or too little free disk. It will not refuse to start on a guess about
+                  CPU or memory.
+                </p>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="glass-card rounded-xl p-5">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-disc-cyan/10 text-disc-cyan">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                        <line x1="8" y1="21" x2="16" y2="21" />
-                        <line x1="12" y1="17" x2="12" y2="21" />
-                      </svg>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {requirements.map((req) => (
+                  <div key={req.title} className="flat-card rounded-xl p-5">
+                    <div className={`mb-3 inline-flex rounded-lg px-2.5 py-1 font-mono text-xs font-semibold ${req.accent}`}>
+                      {req.title}
                     </div>
-                    <h3 className="font-semibold">Windows PC</h3>
+                    <p className="text-sm leading-relaxed text-text-secondary">{req.body}</p>
                   </div>
-                  <p className="text-sm text-text-secondary">
-                    Audio capture uses WASAPI, which requires Windows 10 or 11.
-                  </p>
-                </div>
-
-                <div className="glass-card rounded-xl p-5">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-disc-blue/10 text-disc-blue">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                      </svg>
-                    </div>
-                    <h3 className="font-semibold">MC Server 1.21.1+</h3>
-                  </div>
-                  <p className="text-sm text-text-secondary">
-                    Fabric (with Fabric API, SGUI, Polymer) or Paper/Spigot. See{" "}
-                    <a href="#install-plugin" className="text-disc-cyan hover:underline">Step 1</a> for comparison.
-                  </p>
-                </div>
-
-                <div className="glass-card rounded-xl p-5">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-noteblock-amber/10 text-noteblock-amber">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 19l7-7 3 3-7 7-3-3z" />
-                        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-                        <path d="M2 2l7.586 7.586" />
-                        <circle cx="11" cy="11" r="2" />
-                      </svg>
-                    </div>
-                    <h3 className="font-semibold">Python 3.11+</h3>
-                  </div>
-                  <p className="text-sm text-text-secondary">
-                    Required for server owners running the VJ server.
-                  </p>
-                </div>
-
-                <div className="glass-card rounded-xl p-5">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-disc-cyan/10 text-disc-cyan">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      </svg>
-                    </div>
-                    <h3 className="font-semibold">Audio Source</h3>
-                  </div>
-                  <p className="text-sm text-text-secondary">
-                    Spotify, Chrome, Discord, or any application playing audio.
-                  </p>
-                </div>
+                ))}
               </div>
             </section>
 
-            {/* ===== SERVER OWNERS ===== */}
-            <section id="server-setup">
+            {/* ===== SERVER OPERATORS ===== */}
+            <section id="server-setup" className="scroll-mt-28">
               <div className="mb-12">
-                <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-blue">
-                  Server Setup
+                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+                  Server setup
                 </p>
-                <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  For Server Owners / VJ Operators
-                </h2>
-                <p className="mt-3 text-text-secondary max-w-2xl">
-                  Choose between Fabric mod or Paper plugin, install the VJ server, and start hosting visualization shows.
+                <h2 className="font-heading text-2xl font-bold sm:text-3xl">For server operators</h2>
+                <p className="mt-3 max-w-2xl text-text-secondary">
+                  Everything below happens on the machine that runs Paper. Paper stays playable
+                  while the plugin sets itself up in the background.
                 </p>
               </div>
 
-              {/* Step 1: Choose Platform */}
-              <div id="install-plugin" className="mb-16">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-cyan to-disc-blue text-white font-bold text-sm">
-                    01
-                  </div>
-                  <h3 className="text-xl font-bold">Choose Your Server Platform</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    MCAV ships two server-side JARs with full feature parity. Pick whichever fits your server.
-                    Both render the same visualizations — no client mods needed for players.
+              <div className="space-y-16">
+                <Step id="download" number="01" title="Download and verify">
+                  <p>
+                    Grab the plugin JAR and the checksum file from the release. Every artifact is
+                    listed in <code className="font-mono text-noteblock-amber">{RELEASE.artifacts.checksums}</code>,
+                    which is signed with the project GPG key, and the plugin embeds the public keys it
+                    uses to verify the VJ runtime it downloads later.
                   </p>
-
-                  {/* Comparison cards */}
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="glass-card rounded-xl p-6 border border-disc-cyan/20">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-disc-cyan/10 text-disc-cyan font-bold text-lg">F</div>
-                        <div>
-                          <h4 className="font-bold text-lg">Fabric Mod</h4>
-                          <p className="text-xs text-text-secondary">audioviz-mod.jar</p>
-                        </div>
-                      </div>
-                      <ul className="space-y-2 text-sm mb-4">
-                        <li className="flex gap-2">
-                          <span className="text-emerald-400 shrink-0">+</span>
-                          <span className="text-text-secondary">Map-based bitmap rendering — true pixel-level resolution (128x128 per tile)</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-emerald-400 shrink-0">+</span>
-                          <span className="text-text-secondary">Better performance — direct access to Minecraft internals</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-emerald-400 shrink-0">+</span>
-                          <span className="text-text-secondary">No client mods needed — uses Polymer for vanilla compatibility</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-amber-400 shrink-0">&minus;</span>
-                          <span className="text-text-secondary">Requires Fabric API + SGUI + Polymer dependencies</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-amber-400 shrink-0">&minus;</span>
-                          <span className="text-text-secondary">Smaller mod ecosystem than Paper/Spigot</span>
-                        </li>
-                      </ul>
-                      <a
-                        href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg border border-disc-cyan/30 bg-disc-cyan/5 px-4 py-2 text-sm font-semibold text-disc-cyan transition-all hover:bg-disc-cyan/10"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                          <polyline points="7 10 12 15 17 10" />
-                          <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        Download Fabric Mod
-                      </a>
-                    </div>
-
-                    <div className="glass-card rounded-xl p-6 border border-disc-blue/20">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-disc-blue/10 text-disc-blue font-bold text-lg">P</div>
-                        <div>
-                          <h4 className="font-bold text-lg">Paper Plugin</h4>
-                          <p className="text-xs text-text-secondary">audioviz-plugin.jar</p>
-                        </div>
-                      </div>
-                      <ul className="space-y-2 text-sm mb-4">
-                        <li className="flex gap-2">
-                          <span className="text-emerald-400 shrink-0">+</span>
-                          <span className="text-text-secondary">Zero dependencies — single self-contained JAR</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-emerald-400 shrink-0">+</span>
-                          <span className="text-text-secondary">Works with the huge Paper/Spigot plugin ecosystem</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-emerald-400 shrink-0">+</span>
-                          <span className="text-text-secondary">Hot-reload support — <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-xs">/reload</code> without restart</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-amber-400 shrink-0">&minus;</span>
-                          <span className="text-text-secondary">Lower resolution bitmaps — uses Display Entities (1 entity per pixel) instead of maps</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="text-amber-400 shrink-0">&minus;</span>
-                          <span className="text-text-secondary">Slightly higher overhead from Bukkit API abstraction layer</span>
-                        </li>
-                      </ul>
-                      <a
-                        href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg border border-disc-blue/30 bg-disc-blue/5 px-4 py-2 text-sm font-semibold text-disc-blue transition-all hover:bg-disc-blue/10"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                          <polyline points="7 10 12 15 17 10" />
-                          <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        Download Paper Plugin
-                      </a>
-                    </div>
+                  <div className="flex flex-wrap gap-3">
+                    <DownloadButton label={RELEASE.artifacts.plugin} hint="Paper plugin" />
+                    <DownloadButton label={RELEASE.artifacts.checksums} variant="secondary" />
                   </div>
-
-                  {/* Install instructions */}
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <h4 className="font-semibold mb-3 text-disc-cyan text-sm">Fabric Install</h4>
-                      <CodeBlock
-                        title="Terminal"
-                        code={`# Drop into mods/ folder
-cp audioviz-mod-*.jar /path/to/server/mods/
-
-# Also install these Fabric mods:
-# - Fabric API
-# - SGUI
-# - Polymer`}
-                      />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold mb-3 text-disc-blue text-sm">Paper Install</h4>
-                      <CodeBlock
-                        title="Terminal"
-                        code={`# Drop into plugins/ folder
-cp audioviz-plugin-*.jar /path/to/server/plugins/
-
-# No other dependencies needed!
-# Restart the server.`}
-                      />
-                    </div>
-                  </div>
-
-                  <details className="glass-card rounded-xl overflow-hidden">
-                    <summary className="flex items-center justify-between p-5 text-sm font-semibold cursor-pointer">
-                      Build from source instead
-                      <svg className="faq-chevron h-4 w-4 text-text-secondary transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </summary>
-                    <div className="border-t border-white/5 px-5 pb-5 pt-4">
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div>
-                          <p className="text-xs text-text-secondary mb-3">Requires Java 21 + Gradle</p>
-                          <CodeBlock
-                            title="Fabric Mod"
-                            code={`cd minecraft_mod
-./gradlew build
-cp build/libs/audioviz-mod-*.jar \\
-  /path/to/server/mods/`}
-                          />
-                        </div>
-                        <div>
-                          <p className="text-xs text-text-secondary mb-3">Requires Java 21 + Maven</p>
-                          <CodeBlock
-                            title="Paper Plugin"
-                            code={`cd minecraft_plugin
-./mvnw package
-cp target/audioviz-plugin-*.jar \\
-  /path/to/server/plugins/`}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-
-                  <div className="callout-tip text-sm text-text-secondary">
-                    <strong className="text-white">Both platforms have full feature parity</strong> — bitmap rendering, entity pools,
-                    particle effects, recording/playback, stage management, beat sync, Simple Voice Chat integration,
-                    and the admin panel all work identically. Players see the same visualizations regardless of which platform you choose.
-                  </div>
-                </div>
-              </div>
-
-              {/* Step 2: Install VJ Server */}
-              <div id="install-processor" className="mb-16">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-cyan to-disc-blue text-white font-bold text-sm">
-                    02
-                  </div>
-                  <h3 className="text-xl font-bold">Install the VJ Server</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    The VJ server receives audio data from DJ clients, runs Lua visualization patterns, and sends entity updates to the Minecraft plugin over WebSocket.
-                  </p>
-
                   <CodeBlock
-                    title="Terminal"
-                    code={`# Clone the repo and install the VJ server
-git clone https://github.com/ryanthemcpherson/minecraft-audio-viz.git
-cd minecraft-audio-viz/vj_server
-pip install -e .`}
+                    title="verify (Linux / macOS / WSL)"
+                    code={`sha256sum -c ${RELEASE.artifacts.checksums} --ignore-missing
+# ${RELEASE.artifacts.plugin}: OK`}
                   />
+                  <CodeBlock
+                    title="verify (Windows PowerShell)"
+                    language="powershell"
+                    code={`(Get-FileHash .\\${RELEASE.artifacts.plugin} -Algorithm SHA256).Hash
+# compare with the line for ${RELEASE.artifacts.plugin} in ${RELEASE.artifacts.checksums}`}
+                  />
+                </Step>
 
-                  <div className="border-t border-white/5 pt-6">
-                    <p className="text-sm text-text-secondary mb-3">
-                      <strong className="text-white">With auth support</strong> — install the optional bcrypt dependency for DJ authentication:
+                <Step id="install" number="02" title="Drop it in plugins/">
+                  <p>
+                    Copy the JAR into your server&apos;s <code className="font-mono text-noteblock-amber">plugins/</code>{" "}
+                    directory. That is the whole install. There is nothing to unzip and no startup
+                    flags to change.
+                  </p>
+                  <CodeBlock
+                    title="server layout"
+                    language="text"
+                    code={`your-server/
+├── paper-${RELEASE.minecraft}.jar
+├── plugins/
+│   └── ${RELEASE.artifacts.plugin}      <- the only file you add
+└── ...`}
+                  />
+                  <Note title="Hosting panels">
+                    On Pterodactyl or a similar panel, upload the JAR through the file manager
+                    exactly as you would any other plugin. You will also need one extra port
+                    allocation for the next step.
+                  </Note>
+                </Step>
+
+                <Step id="port" number="03" title="Open one port">
+                  <p>
+                    The VJ runtime serves the control center, browser preview, and DJ connections
+                    from a single TCP port, <strong className="text-white">{RELEASE.defaultPort}</strong> by
+                    default. Open it in your firewall or panel. Everything else stays on loopback.
+                  </p>
+                  <p>
+                    To change the port, or to tell MCAV the public hostname to put in DJ invites,
+                    edit <code className="font-mono text-noteblock-amber">plugins/AudioViz/config.yml</code>{" "}
+                    (generated on first start) and restart:
+                  </p>
+                  <CodeBlock
+                    title="plugins/AudioViz/config.yml"
+                    language="yaml"
+                    code={`runtime:
+  enabled: true
+  channel: stable
+  install-on-start: true
+  public-port: ${RELEASE.defaultPort}
+  public-host: "0.0.0.0"
+  public-url: ""          # e.g. https://mc.example.com:${RELEASE.defaultPort}
+  resource-profile: auto
+  retain-versions: 3
+  tls:
+    mode: generated       # or "provided" with certificate + private-key paths
+
+performance:
+  profile: balanced
+  entity-budget: 160
+  target-render-fps: 20
+  tps-load-shedding: true`}
+                  />
+                  <Note tone="warning" title="TLS is on by default">
+                    Admin logins and DJ traffic require TLS. MCAV generates a self-signed
+                    certificate on first start and prints its SHA-256 fingerprint. DJ clients pin
+                    that fingerprint, so you can run without a public certificate. If you have
+                    one, point <code className="font-mono">tls.mode: provided</code> at it or terminate
+                    TLS at a reverse proxy.
+                  </Note>
+                </Step>
+
+                <Step id="first-start" number="04" title="Start Paper">
+                  <p>Start or restart the server. On the first run the plugin will:</p>
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li>generate <code className="font-mono text-noteblock-amber">config.yml</code> with the defaults above,</li>
+                    <li>pick the VJ runtime build for your OS and CPU, download it from the official release origin, and verify its signature,</li>
+                    <li>create the local renderer secret and TLS identity,</li>
+                    <li>start the VJ service and connect it to the renderer over loopback,</li>
+                    <li>print a one-time setup link to the console.</li>
+                  </ul>
+                  <p>
+                    Paper is playable the whole time. Later starts reuse the cached runtime, so the
+                    server comes up without internet access as long as a compatible verified
+                    runtime is on disk.
+                  </p>
+                  <CodeBlock
+                    title="console (example)"
+                    language="text"
+                    code={`[AudioViz] Plugin ${RELEASE.version} loaded on Paper ${RELEASE.minecraft} / Java ${RELEASE.java}
+[AudioViz] Runtime linux-x86_64 ${RELEASE.version} downloaded and verified (Ed25519 manifest)
+[AudioViz] Renderer link established on loopback
+[AudioViz] Control center listening on https://0.0.0.0:${RELEASE.defaultPort}
+[AudioViz] TLS fingerprint SHA256: 3A:9F:...:C1
+[AudioViz] Finish setup within 30 minutes:
+[AudioViz]   https://your-host:${RELEASE.defaultPort}/setup/#<one-time-token>`}
+                  />
+                  <Note title="Nothing runs on the tick thread">
+                    Audio analysis and pattern math stay in the separate VJ process. The plugin
+                    only applies batched entity updates once per tick, so the show cannot stall
+                    your server the way a heavy plugin can.
+                  </Note>
+                </Step>
+
+                <Step id="setup" number="05" title="Finish setup in the browser">
+                  <p>
+                    Open the setup link from the console. It is single use, expires after 30
+                    minutes, and allows five failed attempts. Create the first administrator
+                    account:
+                  </p>
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li>a username of 3 to 32 characters,</li>
+                    <li>a password of 12 to 72 bytes (hashed with bcrypt, never stored in plain text).</li>
+                  </ul>
+                  <p>
+                    That is it. Sign in to the control center at{" "}
+                    <code className="font-mono text-noteblock-amber">https://your-host:{RELEASE.defaultPort}/</code>{" "}
+                    and open the browser preview at{" "}
+                    <code className="font-mono text-noteblock-amber">/preview/</code>. In-game,{" "}
+                    <code className="font-mono text-noteblock-amber">/audioviz status</code> shows the same
+                    health summary.
+                  </p>
+                  <Note tone="warning" title="Lost the link?">
+                    Run <code className="font-mono">/audioviz setup</code> from the server console to mint
+                    a fresh one. The console is the recovery surface on purpose: setup tokens are
+                    never sent through chat.
+                  </Note>
+                </Step>
+
+                {/* Commands */}
+                <div id="commands" className="scroll-mt-28">
+                  <h3 className="font-heading text-xl font-bold sm:text-2xl">Operator commands</h3>
+                  <p className="mt-2 text-text-secondary">
+                    <code className="font-mono text-noteblock-amber">/audioviz status</code> needs the{" "}
+                    <code className="font-mono">audioviz.status</code> permission. The rest need the matching{" "}
+                    <code className="font-mono">audioviz.admin</code> sub-permission; the console always
+                    qualifies.
+                  </p>
+                  <div className="mt-5 overflow-x-auto rounded-xl border border-white/10">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-white/[0.03] font-mono text-[11px] uppercase tracking-wider text-text-secondary">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Command</th>
+                          <th className="px-4 py-3 font-semibold">What it does</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {commands.map((c) => (
+                          <tr key={c.cmd}>
+                            <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-noteblock-amber">{c.cmd}</td>
+                            <td className="px-4 py-3 text-text-secondary">{c.what}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Invite DJs */}
+                <div id="invite-djs" className="scroll-mt-28">
+                  <h3 className="font-heading text-xl font-bold sm:text-2xl">Invite DJs</h3>
+                  <p className="mt-2 text-text-secondary">
+                    From the control center, create a DJ invite. It bundles three things the DJ
+                    client needs:
+                  </p>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-3">
+                    {[
+                      { label: "Server URL", value: `wss://your-host:${RELEASE.defaultPort}/ws/dj` },
+                      { label: "Connect code", value: "BEAT-7K3M" },
+                      { label: "TLS fingerprint", value: "SHA256:3A:9F:...:C1" },
+                    ].map((item) => (
+                      <div key={item.label} className="flat-card rounded-xl p-4">
+                        <p className="font-mono text-[10px] uppercase tracking-wider text-text-secondary/70">
+                          {item.label}
+                        </p>
+                        <p className="mt-1.5 break-all font-mono text-xs text-white">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-sm text-text-secondary">
+                    Connect codes are short-lived and single use. Static DJ credentials remain
+                    available for managed installs, but invites are the default path.
+                  </p>
+                </div>
+
+                {/* Upgrades */}
+                <div id="upgrades" className="scroll-mt-28">
+                  <h3 className="font-heading text-xl font-bold sm:text-2xl">Upgrades and rollback</h3>
+                  <div className="mt-3 space-y-3 text-text-secondary">
+                    <p>
+                      Replacing <code className="font-mono text-noteblock-amber">{RELEASE.artifacts.plugin}</code> in{" "}
+                      <code className="font-mono text-noteblock-amber">plugins/</code> is the upgrade. On the
+                      next start the plugin fetches the matching runtime, verifies it, and switches
+                      over. If the new runtime fails its readiness checks, the plugin rolls back to
+                      the last known good version automatically and says so in the console.
                     </p>
-                    <CodeBlock
-                      title="Terminal"
-                      code={`cd minecraft-audio-viz/vj_server
-pip install -e ".[full]"`}
-                    />
-                  </div>
-
-                  <div className="callout-tip text-sm text-text-secondary">
-                    <strong className="text-white">Tip:</strong> You can use{" "}
-                    <a href="https://docs.astral.sh/uv/" target="_blank" rel="noopener noreferrer" className="text-disc-cyan hover:underline">UV</a>{" "}
-                    instead of pip for significantly faster installs:{" "}
-                    <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">uv pip install -e &quot;.[full]&quot;</code>
+                    <p>
+                      MCAV never installs new executable code during a show. Update discovery can
+                      notify you, but the JAR swap is always your explicit action. To go back by
+                      hand, run <code className="font-mono text-noteblock-amber">/audioviz runtime rollback</code>{" "}
+                      and confirm within the time window it prints.
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              {/* Step 3: Start VJ Server */}
-              <div id="start-vj-server" className="mb-16">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-cyan to-disc-blue text-white font-bold text-sm">
-                    03
-                  </div>
-                  <h3 className="text-xl font-bold">Start the VJ Server</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    The VJ server is the central hub that DJs connect to. It coordinates audio feeds and controls which DJ is live.
-                  </p>
-
-                  <CodeBlock
-                    title="Terminal"
-                    code={`# Same host as Minecraft (recommended)
-audioviz-vj --port 9000
-
-# Separate VJ host: Terminal 1 creates an encrypted tunnel
-ssh -N -L 18765:127.0.0.1:8765 operator@YOUR_MC_SERVER
-
-# Terminal 2 connects only to that local tunnel endpoint
-audioviz-vj --port 9000 --minecraft-host 127.0.0.1 --minecraft-port 18765`}
-                  />
-
-                  <p className="text-sm text-text-secondary">
-                    The Minecraft renderer port is loopback-only. A shared secret authenticates the tunneled connection but never enables plaintext LAN access.
-                  </p>
-
-                  <div className="callout-tip text-sm text-text-secondary">
-                    <strong className="text-white">Dev mode:</strong> For quick testing without authentication, add the{" "}
-                    <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">--no-auth</code> flag:{" "}
-                    <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">audioviz-vj --no-auth</code>
-                  </div>
-                </div>
-              </div>
-
-              {/* Step 4: In-Game Setup */}
-              <div id="in-game-setup">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-cyan to-disc-blue text-white font-bold text-sm">
-                    04
-                  </div>
-                  <h3 className="text-xl font-bold">In-Game Setup</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    Once the mod is installed and the VJ server is running, create a visualization zone in-game.
-                  </p>
-
-                  <CodeBlock
-                    title="Minecraft Console"
-                    language="minecraft"
-                    code={`# Create a visualization zone
-/audioviz zone create main
-
-# Open the interactive control menu
-/audioviz menu
-
-# Check connection status
-/audioviz status`}
-                  />
-
-                  <p className="text-sm text-text-secondary">
-                    Use the in-game menu to manage zones, select patterns, adjust sizes, and configure stages.
-                    Zone entity pools are initialized automatically when you create or place a zone.
-                  </p>
-
-                  <div className="callout-tip text-sm text-text-secondary">
-                    <strong className="text-white">Tip:</strong> Use{" "}
-                    <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz test main wave</code>{" "}
-                    to run a test animation without audio connected. Great for verifying the mod is working.
+                {/* Migration */}
+                <div id="migration" className="scroll-mt-28">
+                  <h3 className="font-heading text-xl font-bold sm:text-2xl">Migrating an existing install</h3>
+                  <div className="mt-3 space-y-3 text-text-secondary">
+                    <p>
+                      Running the older plugin-only setup or the Pterodactyl bundle? Drop the new
+                      JAR in place. Zones, stages, materials, effects, permissions, and
+                      administrator accounts are preserved; the migration backs up your previous
+                      config and only touches the keys it owns.
+                    </p>
+                    <p>
+                      Fabric servers keep working with the separate Fabric compatibility JAR
+                      connected to a VJ server you run yourself. The self-installer is Paper only
+                      in this release.
+                    </p>
                   </div>
                 </div>
               </div>
             </section>
 
-            {/* ===== DJ SETUP ===== */}
-            <section id="dj-setup">
+            {/* ===== DJs ===== */}
+            <section id="dj-setup" className="scroll-mt-28">
               <div className="mb-12">
-                <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-noteblock-amber">
-                  DJ Setup
+                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-blue">
+                  DJ setup
                 </p>
-                <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  For DJs
-                </h2>
-                <p className="mt-3 text-text-secondary max-w-2xl">
-                  Review the current remote-session availability before preparing a DJ setup.
+                <h2 className="font-heading text-2xl font-bold sm:text-3xl">For DJs</h2>
+                <p className="mt-3 max-w-2xl text-text-secondary">
+                  You need a Windows 10 or 11 PC and an invite from the server operator. Audio
+                  is analyzed on your machine; only band and beat data leaves it.
                 </p>
               </div>
 
-              {/* Step 1: DJ Client availability */}
-              <div id="dj-client-availability" className="mb-16">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-blue to-noteblock-amber text-white font-bold text-sm">
-                    01
-                  </div>
-                  <h3 className="text-xl font-bold">DJ Client Distribution Paused</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    Prebuilt DJ Client distribution is paused during Phase 0. Remote DJ sessions are not supported for general use until signed release, rollback, and clean-install gates pass.
+              <div className="space-y-16">
+                <Step id="dj-install" number="01" title="Install the DJ client" accent="blue">
+                  <p>
+                    Download the signed Windows installer. Both the <code className="font-mono">.exe</code>{" "}
+                    and <code className="font-mono">.msi</code> install the same app; pick whichever your
+                    machine or IT policy prefers.
                   </p>
-
-                  <div className="glass-card rounded-xl border border-noteblock-amber/20 p-6">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-noteblock-amber">
-                      Development verification only
-                    </p>
-                    <p className="text-sm text-text-secondary">
-                      Contributors who need to verify remote workflows can build and run the unsigned client from source. These local builds are unsupported and are not published release artifacts.
-                    </p>
-                    <a
-                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/dj_client/README.md"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-5 inline-flex items-center gap-2 rounded-lg border border-noteblock-amber/30 bg-noteblock-amber/5 px-4 py-2 text-sm font-semibold text-noteblock-amber transition-colors hover:bg-noteblock-amber/10"
-                    >
-                      Open the source development guide
-                    </a>
+                  <div className="flex flex-wrap gap-3">
+                    <DownloadButton label="DJ client installer (.exe)" hint="Windows x64" />
+                    <DownloadButton label="DJ client installer (.msi)" variant="secondary" />
                   </div>
-                </div>
-              </div>
+                  <Note tone="warning" title="No auto-updater in this release">
+                    The client does not update itself. When a new version ships, install the new
+                    package over the old one; rollback is the same process with the older
+                    installer.
+                  </Note>
+                </Step>
 
-              {/* Step 2: Connect */}
-              <div id="connect" className="mb-16">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-disc-blue to-noteblock-amber text-white font-bold text-sm">
-                    02
-                  </div>
-                  <h3 className="text-xl font-bold">Connect to a Server</h3>
-                </div>
-
-                <div className="space-y-6 pl-0 sm:pl-16">
-                  <p className="text-text-secondary">
-                    Get a connect code from the VJ operator, then connect in three steps:
+                <Step id="dj-invite" number="02" title="Get an invite" accent="blue">
+                  <p>
+                    Ask the operator for a DJ invite. It contains the server URL, a connect code
+                    in the form <code className="font-mono text-noteblock-amber">BEAT-7K3M</code>, and the
+                    server&apos;s certificate fingerprint. Codes expire quickly, so grab it right before
+                    you plan to connect.
                   </p>
+                </Step>
 
+                <Step id="dj-connect" number="03" title="Add the server and connect" accent="blue">
+                  <p>
+                    In the client, add a server profile and paste the URL, code, and fingerprint.
+                    The client checks the fingerprint before it trusts the connection and stores
+                    the pin in that profile after the first successful login. If the server&apos;s
+                    certificate ever changes, the client refuses until you enter the new
+                    fingerprint from a fresh invite.
+                  </p>
                   <div className="grid gap-4 sm:grid-cols-3">
-                    <div className="glass-card rounded-xl p-5 text-center">
-                      <div className="mb-3 text-3xl font-bold text-disc-cyan">1</div>
-                      <p className="text-sm font-semibold mb-1">Enter Your DJ Name</p>
-                      <p className="text-xs text-text-secondary">How you appear in the DJ queue</p>
-                    </div>
-                    <div className="glass-card rounded-xl p-5 text-center">
-                      <div className="mb-3 text-3xl font-bold text-disc-blue">2</div>
-                      <p className="text-sm font-semibold mb-1">Paste Connect Code</p>
-                      <p className="text-xs text-text-secondary">
-                        Format: <code className="font-mono text-noteblock-amber">BEAT-7K3M</code>
-                      </p>
-                    </div>
-                    <div className="glass-card rounded-xl p-5 text-center">
-                      <div className="mb-3 text-3xl font-bold text-noteblock-amber">3</div>
-                      <p className="text-sm font-semibold mb-1">Select Audio Source</p>
-                      <p className="text-xs text-text-secondary">Spotify, Chrome, or system audio</p>
-                    </div>
+                    {[
+                      { n: "1", title: "Name yourself", body: "How you appear in the DJ queue and on stage billboards." },
+                      { n: "2", title: "Paste the invite", body: "URL, connect code, and fingerprint from the operator." },
+                      { n: "3", title: "Connect", body: "You land in the queue. The operator brings you live." },
+                    ].map((s) => (
+                      <div key={s.n} className="flat-card rounded-xl p-5">
+                        <div className="mb-2 font-mono text-2xl font-bold text-disc-blue">{s.n}</div>
+                        <p className="text-sm font-semibold text-white">{s.title}</p>
+                        <p className="mt-1 text-xs text-text-secondary">{s.body}</p>
+                      </div>
+                    ))}
                   </div>
+                </Step>
 
-                  <p className="text-sm text-text-secondary">
-                    Click <strong className="text-white">Connect</strong> and the app handles everything — audio capture, FFT analysis, and streaming to the VJ server at 60fps.
+                <Step id="dj-source" number="04" title="Pick a source and preset" accent="blue">
+                  <p>
+                    Choose the full system mix or a single application such as Spotify, a browser,
+                    or your DJ software. Per-app capture uses the Windows process loopback API, so
+                    the rest of your desktop audio stays out of the show.
                   </p>
-                </div>
+                  <p>
+                    Then pick a preset. Each one tunes attack, release, and beat thresholds for a
+                    style of music:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {["auto", "edm", "chill", "rock", "hiphop", "classical"].map((p) => (
+                      <Badge key={p} tone="blue">{p}</Badge>
+                    ))}
+                  </div>
+                  <p>
+                    Watch the five band meters lock to the music, then check the browser preview
+                    the operator shares to see the stage react before you go live.
+                  </p>
+                </Step>
               </div>
-
             </section>
 
             {/* ===== TROUBLESHOOTING ===== */}
-            <section id="troubleshooting">
+            <section id="troubleshooting" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-text-secondary">
-                  Help
+                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-noteblock-amber">
+                  When it does not work
                 </p>
-                <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  Troubleshooting
-                </h2>
+                <h2 className="font-heading text-2xl font-bold sm:text-3xl">Troubleshooting</h2>
               </div>
-
-              <div className="space-y-3">
-                <details className="faq-item glass-card rounded-xl overflow-hidden">
-                  <summary className="flex items-center justify-between p-5 font-semibold">
-                    No audio sources detected
-                    <svg className="faq-chevron h-5 w-5 text-text-secondary transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </summary>
-                  <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
-                    <p className="mb-3">Make sure your audio application (Spotify, Chrome, etc.) is playing audio when you start the capture.</p>
-                    <ul className="list-disc pl-5 space-y-2">
-                      <li>The DJ Client auto-detects available audio sources when the app opens</li>
-                      <li>On Windows, per-app capture requires Windows 10 build 20348+ (Process Loopback API)</li>
-                      <li>Try selecting &quot;System Audio&quot; instead of a specific app if per-app capture fails</li>
-                    </ul>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {troubleshooting.map((t) => (
+                  <div key={t.symptom} className="flat-card rounded-xl p-5">
+                    <p className="font-semibold text-white">{t.symptom}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-text-secondary">{t.fix}</p>
                   </div>
-                </details>
+                ))}
+              </div>
+              <p className="mt-6 text-sm text-text-secondary">
+                Still stuck? Attach the output of{" "}
+                <code className="font-mono text-noteblock-amber">/audioviz diagnostics</code> to an{" "}
+                <a href={LINKS.issues} target="_blank" rel="noopener noreferrer" className="text-disc-cyan hover:underline">
+                  issue on GitHub
+                </a>{" "}
+                or ask in the{" "}
+                <a href={LINKS.discord} target="_blank" rel="noopener noreferrer" className="text-disc-cyan hover:underline">
+                  Discord
+                </a>
+                . The bundle is redacted: no secrets, keys, chat, or audio.
+              </p>
+            </section>
 
-                <details className="faq-item glass-card rounded-xl overflow-hidden">
-                  <summary className="flex items-center justify-between p-5 font-semibold">
-                    Can&apos;t connect to server
-                    <svg className="faq-chevron h-5 w-5 text-text-secondary transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </summary>
-                  <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
-                    <ul className="list-disc pl-5 space-y-2">
-                      <li>Verify the VJ server is using the Minecraft host&apos;s loopback listener or a working local encrypted-tunnel endpoint</li>
-                      <li>Never open renderer port <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">8765</code> in a firewall; split-host setups must tunnel it. Restrict VJ port <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">9000</code> to intended DJs</li>
-                      <li>Run <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz status</code> in Minecraft to check the mod status</li>
-                      <li>Make sure the Minecraft mod loaded successfully — check server logs for errors</li>
-                    </ul>
-                  </div>
-                </details>
+            {/* ===== DEVELOPERS ===== */}
+            <section id="developers" className="scroll-mt-28">
+              <div className="mb-8">
+                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-noteblock-amber">
+                  Source builds
+                </p>
+                <h2 className="font-heading text-2xl font-bold sm:text-3xl">For developers</h2>
+                <p className="mt-3 max-w-2xl text-text-secondary">
+                  Source builds are for working on MCAV, not for running shows. They skip the
+                  signed-runtime chain and the supervisor that the release provides.
+                </p>
+              </div>
+              <CodeBlock
+                title="clone and build the pieces"
+                code={`git clone ${LINKS.github}.git
+cd minecraft-audio-viz
 
-                <details className="faq-item glass-card rounded-xl overflow-hidden">
-                  <summary className="flex items-center justify-between p-5 font-semibold">
-                    Entities not appearing in Minecraft
-                    <svg className="faq-chevron h-5 w-5 text-text-secondary transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </summary>
-                  <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
-                    <ul className="list-disc pl-5 space-y-2">
-                      <li>Make sure you&apos;ve created a zone: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz zone create main</code></li>
-                      <li>Stand near the visualization zone — entities spawn at your location</li>
-                      <li>Open the menu to check status: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz menu</code></li>
-                      <li>Try the test animation: <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">/audioviz test main wave</code></li>
-                    </ul>
-                  </div>
-                </details>
+# VJ server (Python 3.11+)
+cd vj_server && pip install -e . && cd ..
+audioviz-vj --no-auth              # dev only
 
-                <details className="faq-item glass-card rounded-xl overflow-hidden">
-                  <summary className="flex items-center justify-between p-5 font-semibold">
-                    High latency or desync
-                    <svg className="faq-chevron h-5 w-5 text-text-secondary transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </summary>
-                  <div className="border-t border-white/5 px-5 pb-5 pt-4 text-sm text-text-secondary">
-                    <ul className="list-disc pl-5 space-y-2">
-                      <li>The DJ Client uses ultra-low-latency mode by default (~21ms window)</li>
-                      <li>Reduce entity count for better server performance</li>
-                      <li>Ensure the VJ server and Minecraft server are on the same network for minimal latency</li>
-                      <li>Close resource-heavy applications on the audio capture machine</li>
-                    </ul>
-                  </div>
-                </details>
+# Paper plugin (Java ${RELEASE.java})
+cd minecraft_plugin && mvn package && cd ..
+
+# DJ client (Rust + Node, Tauri v2)
+cd dj_client && npm install && npm run tauri dev`}
+              />
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button href={LINKS.readme} external variant="secondary">
+                  Read the README
+                </Button>
+                <Button href={LINKS.docs.patternGuide} external variant="secondary">
+                  Pattern guide
+                </Button>
+                <Button href={LINKS.docs.architecture} external variant="ghost">
+                  Architecture notes
+                </Button>
               </div>
             </section>
 
             {/* ===== NEXT STEPS ===== */}
-            <section id="next-steps">
+            <section id="next-steps" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-disc-cyan">
-                  Keep Going
+                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+                  You are set up
                 </p>
-                <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  Next Steps
-                </h2>
+                <h2 className="font-heading text-2xl font-bold sm:text-3xl">Next steps</h2>
               </div>
-
               <div className="grid gap-4 sm:grid-cols-3">
-                <a
-                  href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/README.md#visualization-patterns"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="glass-card rounded-xl p-6 hover:border-disc-cyan/30"
-                >
-                  <div className="mb-3 text-disc-cyan">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                      <line x1="2" y1="12" x2="22" y2="12" />
-                    </svg>
-                  </div>
-                  <h3 className="font-bold mb-2">Pattern Gallery</h3>
-                  <p className="text-sm text-text-secondary">
-                    Explore 40+ visualization patterns — spirals, auroras, galaxies, and more.
-                  </p>
+                <Link href="/patterns" className="flat-card rounded-xl p-5 hover:border-disc-cyan/30">
+                  <p className="font-semibold text-white">Browse the patterns</p>
+                  <p className="mt-2 text-sm text-text-secondary">Every pattern, running live in your browser.</p>
+                </Link>
+                <a href={LINKS.docs.patternGuide} target="_blank" rel="noopener noreferrer" className="flat-card rounded-xl p-5 hover:border-disc-blue/30">
+                  <p className="font-semibold text-white">Write your own</p>
+                  <p className="mt-2 text-sm text-text-secondary">A Lua file with a calculate function is all it takes.</p>
                 </a>
-
-                <a
-                  href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/README.md#admin-panel"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="glass-card rounded-xl p-6 hover:border-disc-blue/30"
-                >
-                  <div className="mb-3 text-disc-blue">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="3" />
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                  </div>
-                  <h3 className="font-bold mb-2">Admin Panel</h3>
-                  <p className="text-sm text-text-secondary">
-                    Control patterns, effects, and presets in real-time through the browser-based VJ interface.
-                  </p>
-                </a>
-
-                <a
-                  href="https://github.com/ryanthemcpherson/minecraft-audio-viz/blob/main/docs/COORDINATOR_ARCHITECTURE.md"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="glass-card rounded-xl p-6 hover:border-noteblock-amber/30"
-                >
-                  <div className="mb-3 text-noteblock-amber">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                      <circle cx="9" cy="7" r="4" />
-                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                    </svg>
-                  </div>
-                  <h3 className="font-bold mb-2">Multi-DJ Events</h3>
-                  <p className="text-sm text-text-secondary">
-                    Host live events with multiple DJs connecting and queuing via connect codes.
-                  </p>
+                <a href={LINKS.discord} target="_blank" rel="noopener noreferrer" className="flat-card rounded-xl p-5 hover:border-noteblock-amber/30">
+                  <p className="font-semibold text-white">Join the Discord</p>
+                  <p className="mt-2 text-sm text-text-secondary">Trade patterns and get help from other operators.</p>
                 </a>
               </div>
             </section>
-
           </div>
 
-          {/* Sidebar TOC */}
-          <TableOfContents items={tocItems} />
+          {/* TOC sidebar */}
+          <aside className="hidden lg:block">
+            <div className="sticky top-28">
+              <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary/60">
+                On this page
+              </p>
+              <TableOfContents items={tocItems} />
+            </div>
+          </aside>
         </div>
       </div>
 
