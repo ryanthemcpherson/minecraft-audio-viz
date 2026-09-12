@@ -30,7 +30,7 @@ const tocItems = [
   { id: "upgrades", label: "Upgrades and rollback", indent: true },
   { id: "migration", label: "Migrating", indent: true },
   { id: "dj-setup", label: "DJs" },
-  { id: "dj-install", label: "Install the client", indent: true },
+  { id: "dj-install", label: "Get the client", indent: true },
   { id: "dj-invite", label: "Get an invite", indent: true },
   { id: "dj-connect", label: "Connect", indent: true },
   { id: "dj-source", label: "Pick a source", indent: true },
@@ -42,7 +42,7 @@ const tocItems = [
 const requirements = [
   {
     title: `Paper ${RELEASE.minecraft}`,
-    body: "The supported server software and Minecraft version. Fabric ships as a separate compatibility JAR without the self-installer.",
+    body: "The supported server software and Minecraft version. Fabric ships as a separate compatibility JAR without the self-installing flow.",
     accent: "text-disc-cyan bg-disc-cyan/10",
   },
   {
@@ -136,7 +136,7 @@ export default function GettingStartedPage() {
             </a>
             <a href="#dj-setup" className="flat-card group rounded-2xl p-5 text-left hover:border-disc-blue/30">
               <p className="font-mono text-[11px] uppercase tracking-wider text-disc-blue">DJs</p>
-              <p className="mt-2 text-sm text-text-secondary">Install the Windows client and connect with an invite.</p>
+              <p className="mt-2 text-sm text-text-secondary">Client availability during Phase 0, then connect with an invite.</p>
             </a>
             <a href="#developers" className="flat-card group rounded-2xl p-5 text-left hover:border-noteblock-amber/30">
               <p className="font-mono text-[11px] uppercase tracking-wider text-noteblock-amber">Developers</p>
@@ -158,7 +158,7 @@ export default function GettingStartedPage() {
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">Requirements</h2>
                 <p className="mt-3 max-w-2xl text-text-secondary">
-                  The installer warns about anything it can observe, such as an unsupported Java
+                  The plugin warns about anything it can observe, such as an unsupported Java
                   version or too little free disk. It will not refuse to start on a guess about
                   CPU or memory.
                 </p>
@@ -187,6 +187,18 @@ export default function GettingStartedPage() {
                   Everything below happens on the machine that runs Paper. Paper stays playable
                   while the plugin sets itself up in the background.
                 </p>
+                <p className="mt-3 max-w-2xl text-sm text-text-secondary">
+                  Running Fabric instead? The Fabric compatibility JAR connects to a VJ server you
+                  run yourself and does not include the self-installing flow.{" "}
+                  <a
+                    href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-disc-cyan hover:underline"
+                  >
+                    Download Fabric Mod
+                  </a>
+                </p>
               </div>
 
               <div className="space-y-16">
@@ -197,9 +209,21 @@ export default function GettingStartedPage() {
                     which is signed with the project GPG key, and the plugin embeds the public keys it
                     uses to verify the VJ runtime it downloads later.
                   </p>
-                  <div className="flex flex-wrap gap-3">
-                    <DownloadButton label={RELEASE.artifacts.plugin} hint="Paper plugin" />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a
+                      href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-disc-cyan/20 transition-all hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110"
+                    >
+                      Download Paper Plugin
+                    </a>
                     <DownloadButton label={RELEASE.artifacts.checksums} variant="secondary" />
+                    {!RELEASE.isReleased && (
+                      <Badge tone="warning" dot>
+                        {RELEASE.version} pending: Releases carries the previous build
+                      </Badge>
+                    )}
                   </div>
                   <CodeBlock
                     title="verify (Linux / macOS / WSL)"
@@ -422,8 +446,8 @@ performance:
                     </p>
                     <p>
                       Fabric servers keep working with the separate Fabric compatibility JAR
-                      connected to a VJ server you run yourself. The self-installer is Paper only
-                      in this release.
+                      connected to a VJ server you run yourself. The self-installing flow is
+                      Paper only in this release.
                     </p>
                   </div>
                 </div>
@@ -444,20 +468,25 @@ performance:
               </div>
 
               <div className="space-y-16">
-                <Step id="dj-install" number="01" title="Install the DJ client" accent="blue">
+                <Step id="dj-install" number="01" title="Get the DJ client" accent="blue">
                   <p>
-                    Download the signed Windows installer. Both the <code className="font-mono">.exe</code>{" "}
-                    and <code className="font-mono">.msi</code> install the same app; pick whichever your
-                    machine or IT policy prefers.
+                    Prebuilt DJ client distribution is paused during Phase 0 containment. Remote
+                    DJ sessions are for development verification only until the signed release,
+                    rollback, and clean-install gates pass. The {RELEASE.version} release lifts
+                    this with a signed Windows build.
                   </p>
-                  <div className="flex flex-wrap gap-3">
-                    <DownloadButton label="DJ client installer (.exe)" hint="Windows x64" />
-                    <DownloadButton label="DJ client installer (.msi)" variant="secondary" />
-                  </div>
-                  <Note tone="warning" title="No auto-updater in this release">
-                    The client does not update itself. When a new version ships, install the new
-                    package over the old one; rollback is the same process with the older
-                    installer.
+                  <Note tone="warning" title="Development verification only">
+                    Contributors who need to verify remote workflows can build the client from
+                    source by following{" "}
+                    <a
+                      href={LINKS.docs.djClient}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-disc-cyan hover:underline"
+                    >
+                      dj_client/README.md
+                    </a>
+                    . Those local builds are unsupported and are not release artifacts.
                   </Note>
                 </Step>
 
@@ -554,7 +583,7 @@ performance:
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">For developers</h2>
                 <p className="mt-3 max-w-2xl text-text-secondary">
-                  Source builds are for working on MCAV, not for running shows. They skip the
+                  Source builds are for development on MCAV, not for running shows. They skip the
                   signed-runtime chain and the supervisor that the release provides.
                 </p>
               </div>

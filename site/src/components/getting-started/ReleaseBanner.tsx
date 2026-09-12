@@ -31,8 +31,8 @@ export default function ReleaseBanner() {
             Release {RELEASE.version} is in progress.
           </p>
           <p className="mt-1">
-            This guide describes the self-installing Paper release. Download buttons switch on
-            the moment the signed artifacts land on{" "}
+            This guide describes the self-installing Paper release. Until its signed artifacts
+            land on{" "}
             <a
               href={RELEASE.releasesUrl}
               target="_blank"
@@ -41,7 +41,8 @@ export default function ReleaseBanner() {
             >
               GitHub Releases
             </a>
-            . Until then, prebuilt installers are not available and source builds are for
+            , the Releases page carries the previous Paper and Fabric builds, prebuilt DJ client
+            distribution stays paused under Phase 0 containment, and source builds are for
             development only.
           </p>
         </div>
