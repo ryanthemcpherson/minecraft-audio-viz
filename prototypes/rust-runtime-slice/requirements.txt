@@ -1,0 +1,11 @@
+# Measured WSL environment; production dependency declarations are unchanged.
+lupa==2.6
+websockets==16.0
+msgspec==0.21.1
+numpy==2.5.3
+python-dotenv==1.2.3
+better-profanity==0.7.0
+bcrypt==5.0.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.16.7
