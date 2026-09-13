@@ -104,7 +104,7 @@ function LiveCanvas({ meta, phaseOffset, quality }: LiveCanvasProps) {
   const handleCreated = useCallback((state: RootState) => {
     glRef.current = state.gl;
     state.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    state.gl.toneMappingExposure = 1.4;
+    state.gl.toneMappingExposure = 1.15;
     // Look slightly down at the stage so the floor reads as a floor.
     state.camera.lookAt(0, -0.35, 0);
   }, []);
