@@ -3,6 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { requestPasswordReset } from "@/lib/auth";
+import Alert from "@/components/ui/Alert";
+import Button from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Field";
+
+/** Primary submit styling, mirroring Button's primary variant (which has no disabled prop). */
+const submitButtonClassName =
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-lg disabled:hover:brightness-100";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -30,36 +37,30 @@ export default function ForgotPasswordPage() {
       <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
 
       <div className="relative w-full max-w-md glass-card rounded-2xl p-8">
-        <h1 className="mb-2 text-xl font-semibold text-white">Reset your password</h1>
-        <p className="mb-6 text-sm text-text-secondary">
+        <p className="mb-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+          Account
+        </p>
+        <h1 className="mb-2 font-heading text-2xl font-bold leading-tight">Reset your password</h1>
+        <p className="mb-6 text-sm leading-relaxed text-text-secondary">
           Enter your email address and we&apos;ll send you a link to reset your password.
         </p>
 
         {success ? (
           <div className="flex flex-col gap-4">
-            <div className="rounded-lg bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <Alert tone="success">
               Check your email for a password reset link. It may take a minute to arrive.
-            </div>
-            <Link
-              href="/login"
-              className="text-center text-sm text-disc-cyan hover:underline"
-            >
+            </Alert>
+            <Button href="/login" variant="secondary" className="w-full">
               Back to login
-            </Link>
+            </Button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {error && (
-              <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                {error}
-              </p>
-            )}
+            {error && <Alert tone="danger">{error}</Alert>}
 
             <div>
-              <label htmlFor="reset-email" className="mb-1 block text-sm text-text-secondary">
-                Email
-              </label>
-              <input
+              <Label htmlFor="reset-email">Email</Label>
+              <Input
                 id="reset-email"
                 name="email"
                 type="email"
@@ -67,7 +68,6 @@ export default function ForgotPasswordPage() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-disc-cyan/50"
                 placeholder="you@example.com"
               />
             </div>
@@ -75,14 +75,14 @@ export default function ForgotPasswordPage() {
             <button
               type="submit"
               disabled={loading || !email}
-              className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              className={submitButtonClassName}
             >
               {loading ? "Sending..." : "Send reset link"}
             </button>
 
             <Link
               href="/login"
-              className="text-center text-sm text-text-secondary hover:text-white transition-colors"
+              className="text-center text-sm text-text-secondary transition-colors hover:text-white"
             >
               Back to login
             </Link>

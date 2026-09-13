@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
+import PageHeader from "@/components/ui/PageHeader";
+import Button from "@/components/ui/Button";
+import Alert from "@/components/ui/Alert";
+import Badge, { type BadgeTone } from "@/components/ui/Badge";
+import { Input } from "@/components/ui/Field";
 import type {
   UserProfile,
   UnifiedDashboard,
@@ -22,6 +27,19 @@ import {
 } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
+// Shared button classes for native <button disabled> elements. Button.tsx does
+// not export its variant classes, so these mirror the primary/secondary
+// variants at size "sm".
+// ---------------------------------------------------------------------------
+
+const buttonBase =
+  "inline-flex items-center justify-center gap-2 rounded-xl font-semibold whitespace-nowrap transition-all duration-200 select-none disabled:cursor-not-allowed disabled:opacity-50";
+const primaryButtonSm = `${buttonBase} px-4 py-2 text-xs bg-gradient-to-r from-disc-cyan to-disc-blue text-white shadow-lg shadow-disc-cyan/20 hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95`;
+const secondaryButtonSm = `${buttonBase} px-4 py-2 text-xs border border-white/10 bg-white/5 text-white backdrop-blur-sm hover:border-white/20 hover:bg-white/10`;
+
+const sectionLabel = "font-mono text-[11px] uppercase tracking-wider text-text-secondary/70";
+
+// ---------------------------------------------------------------------------
 // Checklist component
 // ---------------------------------------------------------------------------
 
@@ -36,10 +54,12 @@ function SetupChecklist({ checklist }: { checklist: { org_created: boolean; serv
   const progress = (completed / items.length) * 100;
 
   return (
-    <div className="glass-card rounded-xl p-6">
+    <div className="glass-card rounded-2xl p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Setup Progress</h2>
-        <span className="text-sm text-text-secondary">{completed}/{items.length}</span>
+        <h2 className="font-heading text-lg font-semibold">Setup progress</h2>
+        <Badge tone={completed === items.length ? "success" : "neutral"}>
+          {completed}/{items.length}
+        </Badge>
       </div>
       <div className="mb-4 h-2 overflow-hidden rounded-full bg-white/5">
         <div
@@ -50,16 +70,16 @@ function SetupChecklist({ checklist }: { checklist: { org_created: boolean; serv
       <div className="flex flex-col gap-2">
         {items.map((item) => (
           <div key={item.key} className="flex items-center gap-3 text-sm">
-            <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${item.done ? "bg-green-500/20" : "bg-white/5"}`}>
+            <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${item.done ? "bg-success/15" : "bg-white/5"}`}>
               {item.done ? (
-                <svg className="h-3 w-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <svg className="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               ) : (
                 <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
               )}
             </div>
-            <span className={item.done ? "text-text-secondary line-through" : "text-white"}>
+            <span className={item.done ? "text-text-secondary line-through" : "text-text-primary"}>
               {item.label}
             </span>
           </div>
@@ -107,15 +127,15 @@ function OrgCard({
   }
 
   return (
-    <div className="glass-card rounded-xl p-5 transition-all duration-200 hover:border-disc-cyan/20">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold">{org.name}</h3>
-          <p className="text-sm text-text-secondary">{org.slug}.mcav.live</p>
+    <div className="flat-card rounded-2xl p-5 hover:border-disc-cyan/30">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-heading font-semibold">{org.name}</h3>
+          <p className="truncate font-mono text-xs text-text-secondary">{org.slug}.mcav.live</p>
         </div>
-        <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-text-secondary">{org.role}</span>
+        <Badge tone={org.role === "owner" ? "cyan" : "neutral"}>{org.role}</Badge>
       </div>
-      <div className="mt-3 flex gap-4 text-xs text-text-secondary">
+      <div className={`mt-3 flex gap-4 ${sectionLabel}`}>
         <Link href={`/org/${org.slug}/servers`} className="transition-colors hover:text-disc-cyan">
           {org.server_count} server{org.server_count !== 1 ? "s" : ""}
         </Link>
@@ -128,7 +148,7 @@ function OrgCard({
             href={`/org/${org.slug}/servers`}
             className="text-xs text-disc-cyan/70 transition-colors hover:text-disc-cyan"
           >
-            Manage Servers
+            Manage servers
           </Link>
         </div>
       )}
@@ -136,19 +156,21 @@ function OrgCard({
         <div className="mt-3 border-t border-white/5 pt-3">
           {inviteCode ? (
             <button
+              type="button"
               onClick={() => handleCopy(inviteCode)}
-              className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-mono transition-colors hover:bg-white/5"
+              className={`${secondaryButtonSm} font-mono`}
             >
-              <span className="tracking-widest">{inviteCode}</span>
-              <span className="text-text-secondary">{copied ? "Copied!" : "Copy"}</span>
+              <span className="tracking-widest text-disc-cyan">{inviteCode}</span>
+              <span className="font-sans font-medium text-text-secondary">{copied ? "Copied!" : "Copy"}</span>
             </button>
           ) : (
             <button
+              type="button"
               onClick={handleCreateInvite}
               disabled={inviteLoading}
-              className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50"
+              className={secondaryButtonSm}
             >
-              {inviteLoading ? "..." : "Create Invite"}
+              {inviteLoading ? "..." : "Create invite"}
             </button>
           )}
         </div>
@@ -166,25 +188,25 @@ function ShowList({ shows, title }: { shows: RecentShowSummary[]; title: string 
 
   return (
     <div>
-      <h2 className="mb-4 text-lg font-semibold">{title}</h2>
+      <h2 className="mb-4 font-heading text-lg font-semibold">{title}</h2>
       <div className="flex flex-col gap-3">
         {shows.map((show) => (
-          <div key={show.id} className="glass-card rounded-xl p-4 transition-all duration-200 hover:border-disc-cyan/20">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium">{show.name}</h3>
+          <div key={show.id} className="flat-card rounded-2xl p-5 hover:border-disc-cyan/30">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-medium">{show.name}</h3>
                 <p className="text-xs text-text-secondary">{show.server_name}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 {show.connect_code && (
-                  <span className="rounded bg-white/5 px-2 py-0.5 font-mono text-xs text-disc-cyan">
+                  <Badge tone="cyan">
                     {show.connect_code}
-                  </span>
+                  </Badge>
                 )}
-                <span className={`rounded-full px-2 py-0.5 text-xs ${show.status === "active" ? "bg-green-500/10 text-green-400" : "bg-white/5 text-text-secondary"}`}>
+                <Badge tone={show.status === "active" ? "success" : "neutral"} dot={show.status === "active"}>
                   {show.status}
-                </span>
-                <span className="text-xs text-text-secondary">{show.current_djs} DJ{show.current_djs !== 1 ? "s" : ""}</span>
+                </Badge>
+                <span className={sectionLabel}>{show.current_djs} DJ{show.current_djs !== 1 ? "s" : ""}</span>
               </div>
             </div>
           </div>
@@ -210,13 +232,13 @@ function SetupPromptCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-6">
+    <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6">
       <div className="flex items-start gap-4">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5">
           {icon}
         </div>
-        <div className="flex-1">
-          <h3 className="font-semibold">{title}</h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-heading font-semibold">{title}</h3>
           <p className="mt-1 text-sm text-text-secondary">{description}</p>
           <div className="mt-4">{children}</div>
         </div>
@@ -229,12 +251,8 @@ function SetupPromptCard({
 // Capability badge
 // ---------------------------------------------------------------------------
 
-function CapabilityBadge({ label, color }: { label: string; color: string }) {
-  return (
-    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
-      {label}
-    </span>
-  );
+function CapabilityBadge({ label, tone }: { label: string; tone: BadgeTone }) {
+  return <Badge tone={tone}>{label}</Badge>;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,34 +301,34 @@ function InlineCreateOrgForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <div className="flex gap-3">
-        <input
+        <Input
           type="text"
           placeholder="Organization name"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
-          className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
+          className="flex-1"
           maxLength={100}
         />
-        <input
+        <Input
           type="text"
           placeholder="slug"
           value={slug}
           onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-          className="w-36 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
+          className="w-36 font-mono"
           maxLength={63}
         />
         <button
           type="submit"
           disabled={submitting || !name.trim() || !slug.trim()}
-          className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          className={primaryButtonSm}
         >
           {submitting ? "..." : "Create"}
         </button>
       </div>
       {slug && (
-        <p className="text-xs text-text-secondary">{slug}.mcav.live</p>
+        <p className="font-mono text-xs text-text-secondary">{slug}.mcav.live</p>
       )}
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <Alert tone="danger">{error}</Alert>}
     </form>
   );
 }
@@ -346,23 +364,25 @@ function InlineJoinOrgForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-3">
-      <input
-        type="text"
-        placeholder="Invite code"
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-        className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-mono text-white placeholder:text-text-secondary/50 focus:border-disc-cyan/30 focus:outline-none"
-        maxLength={8}
-      />
-      <button
-        type="submit"
-        disabled={submitting || !code.trim()}
-        className="rounded-lg border border-white/10 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50"
-      >
-        {submitting ? "..." : "Join"}
-      </button>
-      {error && <p className="ml-2 self-center text-xs text-red-400">{error}</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <div className="flex gap-3">
+        <Input
+          type="text"
+          placeholder="Invite code"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          className="w-32 font-mono tracking-widest"
+          maxLength={8}
+        />
+        <button
+          type="submit"
+          disabled={submitting || !code.trim()}
+          className={secondaryButtonSm}
+        >
+          {submitting ? "..." : "Join"}
+        </button>
+      </div>
+      {error && <Alert tone="danger">{error}</Alert>}
     </form>
   );
 }
@@ -451,7 +471,7 @@ export default function DashboardPage() {
           </div>
           <div className="grid gap-4">
             {[0, 1].map((i) => (
-              <div key={i} className="h-20 animate-pulse rounded-xl bg-white/5" />
+              <div key={i} className="h-20 animate-pulse rounded-2xl bg-white/5" />
             ))}
           </div>
         </div>
@@ -472,80 +492,80 @@ export default function DashboardPage() {
       <div className="relative z-10">
         {/* Email verification banner */}
         {user && !user.email_verified && !verificationDismissed && (
-          <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-3">
-            <p className="text-sm text-amber-400">
-              Please verify your email. Check your inbox or{" "}
+          <Alert tone="warning" className="mb-6">
+            <div className="flex items-center justify-between gap-4">
+              <p>
+                Please verify your email. Check your inbox or{" "}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!accessToken) return;
+                    try {
+                      await resendVerification(accessToken);
+                    } catch (err) { console.error("Failed to resend verification email:", err); }
+                  }}
+                  className="underline transition-opacity hover:opacity-80"
+                >
+                  resend verification
+                </button>
+                .
+              </p>
               <button
                 type="button"
-                onClick={async () => {
-                  if (!accessToken) return;
-                  try {
-                    await resendVerification(accessToken);
-                  } catch (err) { console.error("Failed to resend verification email:", err); }
-                }}
-                className="underline hover:text-amber-300"
+                onClick={() => setVerificationDismissed(true)}
+                aria-label="Dismiss"
+                className="shrink-0 opacity-60 transition-opacity hover:opacity-100"
               >
-                resend verification
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
-              .
-            </p>
-            <button
-              type="button"
-              onClick={() => setVerificationDismissed(true)}
-              className="ml-4 text-amber-400/60 hover:text-amber-400"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
+            </div>
+          </Alert>
         )}
 
         {/* Profile header with capability badges */}
-        <div className="mb-10 flex items-center gap-4">
-          {profile.avatar_url ? (
-            <Image
-              src={profile.avatar_url}
-              alt={profile.display_name}
-              width={56}
-              height={56}
-              className="h-14 w-14 rounded-full"
-              /* Avatar URLs come from Discord/Google OAuth or S3 uploads — domains are dynamic */
-              unoptimized
-            />
-          ) : (
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-xl font-bold">
-              {profile.display_name.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold">
-                <span className="text-disc-cyan">{profile.display_name}</span>
-              </h1>
-              <div className="flex gap-1.5">
-                {dashboard?.has_dj_profile && (
-                  <CapabilityBadge label="DJ" color="bg-disc-cyan/10 text-disc-cyan" />
-                )}
-                {dashboard?.has_orgs && (
-                  <CapabilityBadge label="Server Owner" color="bg-disc-blue/10 text-disc-blue" />
-                )}
-                {dashboard?.organizations.some((o) => o.role === "member") && (
-                  <CapabilityBadge label="Team Member" color="bg-green-500/10 text-green-400" />
-                )}
-              </div>
-            </div>
-            <p className="text-sm text-text-secondary">
-              {profile.email || profile.discord_username || "No email"}
-            </p>
-          </div>
-          <button
-            onClick={logout}
-            className="ml-auto rounded-lg border border-white/10 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
-          >
-            Log out
-          </button>
-        </div>
+        <PageHeader
+          className="mb-10"
+          eyebrow="Dashboard"
+          title={
+            <span className="flex items-center gap-4">
+              {profile.avatar_url ? (
+                <Image
+                  src={profile.avatar_url}
+                  alt={profile.display_name}
+                  width={56}
+                  height={56}
+                  className="h-14 w-14 shrink-0 rounded-full"
+                  /* Avatar URLs come from Discord/Google OAuth or S3 uploads — domains are dynamic */
+                  unoptimized
+                />
+              ) : (
+                <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 text-xl font-bold">
+                  {profile.display_name.charAt(0).toUpperCase()}
+                </span>
+              )}
+              <span className="text-disc-cyan">{profile.display_name}</span>
+            </span>
+          }
+          description={profile.email || profile.discord_username || "No email"}
+          actions={
+            <>
+              {dashboard?.has_dj_profile && (
+                <CapabilityBadge label="DJ" tone="cyan" />
+              )}
+              {dashboard?.has_orgs && (
+                <CapabilityBadge label="Server owner" tone="blue" />
+              )}
+              {dashboard?.organizations.some((o) => o.role === "member") && (
+                <CapabilityBadge label="Team member" tone="success" />
+              )}
+              <Button variant="secondary" size="sm" onClick={logout} className="ml-2">
+                Log out
+              </Button>
+            </>
+          }
+        />
 
         {/* Additive content — all sections render if applicable */}
         <div className="flex flex-col gap-8">
@@ -556,30 +576,30 @@ export default function DashboardPage() {
 
           {/* DJ Profile card */}
           {dashboard?.dj && (
-            <div className="glass-card rounded-xl p-6">
+            <div className="glass-card rounded-2xl p-6">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-disc-cyan/10 text-2xl">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-disc-cyan/10 text-2xl">
                   <svg className="h-7 w-7 text-disc-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
                   </svg>
                 </div>
-                <div className="flex-1">
-                  <h2 className="text-xl font-bold">{dashboard.dj.dj_name}</h2>
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-heading text-xl font-bold">{dashboard.dj.dj_name}</h2>
                   {dashboard.dj.bio && <p className="text-sm text-text-secondary">{dashboard.dj.bio}</p>}
                   {dashboard.dj.genres && (
-                    <div className="mt-2 flex flex-wrap gap-1">
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       {dashboard.dj.genres.split(",").map((g) => (
-                        <span key={g.trim()} className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-text-secondary">
+                        <Badge key={g.trim()} tone="neutral">
                           {g.trim()}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-disc-cyan">{dashboard.dj.session_count}</div>
-                    <div className="text-xs text-text-secondary">session{dashboard.dj.session_count !== 1 ? "s" : ""}</div>
+                    <div className="font-heading text-2xl font-bold text-disc-cyan">{dashboard.dj.session_count}</div>
+                    <div className={sectionLabel}>session{dashboard.dj.session_count !== 1 ? "s" : ""}</div>
                   </div>
                   {/* Social link icons */}
                   {(dashboard.dj.soundcloud_url || dashboard.dj.spotify_url || dashboard.dj.website_url) && (
@@ -607,12 +627,9 @@ export default function DashboardPage() {
                       )}
                     </div>
                   )}
-                  <Link
-                    href="/settings/profile"
-                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-white/5 hover:text-white"
-                  >
-                    Edit Profile
-                  </Link>
+                  <Button href="/settings/profile" variant="secondary" size="sm">
+                    Edit profile
+                  </Button>
                 </div>
               </div>
             </div>
@@ -626,22 +643,19 @@ export default function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
                 </svg>
               }
-              title="Set Up DJ Profile"
+              title="Set up DJ profile"
               description="Create your DJ profile to start performing at shows and build your session history."
             >
-              <Link
-                href="/settings/profile"
-                className="inline-block rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              >
-                Create DJ Profile
-              </Link>
+              <Button href="/settings/profile" size="sm">
+                Create DJ profile
+              </Button>
             </SetupPromptCard>
           )}
 
           {/* Organizations section — always shown */}
           <section>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Organizations</h2>
+              <h2 className="font-heading text-lg font-semibold">Organizations</h2>
             </div>
             {dashboard && dashboard.organizations.length > 0 ? (
               <div className="grid gap-4">
@@ -650,7 +664,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <div className="glass-card rounded-xl p-8 text-center">
+              <div className="flat-card rounded-2xl p-8 text-center">
                 <p className="text-sm text-text-secondary">No organizations yet.</p>
               </div>
             )}
@@ -665,18 +679,18 @@ export default function DashboardPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                   </svg>
                 }
-                title="Create Organization"
+                title="Create organization"
                 description="Set up a new org with your own mcav.live subdomain."
               >
                 <InlineCreateOrgForm accessToken={accessToken!} onCreated={loadDashboard} />
               </SetupPromptCard>
               <SetupPromptCard
                 icon={
-                  <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                   </svg>
                 }
-                title="Join with Invite"
+                title="Join with invite"
                 description="Enter an invite code to join an existing organization."
               >
                 <InlineJoinOrgForm accessToken={accessToken!} onJoined={loadDashboard} />
@@ -686,61 +700,57 @@ export default function DashboardPage() {
 
           {/* Recent Shows (from orgs) */}
           {dashboard && dashboard.recent_shows.length > 0 && (
-            <ShowList shows={dashboard.recent_shows} title="Recent Shows" />
+            <ShowList shows={dashboard.recent_shows} title="Recent shows" />
           )}
 
           {/* Recent DJ Sessions */}
           {dashboard?.dj && dashboard.dj.recent_sessions.length > 0 && (
-            <ShowList shows={dashboard.dj.recent_sessions} title="Recent DJ Sessions" />
+            <ShowList shows={dashboard.dj.recent_sessions} title="Recent DJ sessions" />
           )}
 
           {/* Getting Started */}
-          <div className="glass-card rounded-xl p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">Getting Started Guide</h3>
+          <div className="flat-card rounded-2xl p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h3 className="font-heading font-semibold">Getting started guide</h3>
                 <p className="text-sm text-text-secondary">Step-by-step setup for MCAV</p>
               </div>
-              <Link
-                href="/getting-started"
-                className="rounded-lg bg-gradient-to-r from-disc-cyan to-disc-blue px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              >
-                View Guide
-              </Link>
+              <Button href="/getting-started" size="sm">
+                View guide
+              </Button>
             </div>
           </div>
 
           {/* Developer Tools */}
           {dashboard && (
-            <div className="glass-card rounded-xl p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-text-secondary">Developer Tools</h3>
-                  <p className="text-xs text-text-secondary/60">Reset account to re-test the new user experience</p>
+            <div className="flat-card rounded-2xl p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <h3 className={sectionLabel}>Developer tools</h3>
+                  <p className="mt-1 text-xs text-text-secondary/60">Reset account to re-test the new user experience</p>
                 </div>
                 {confirmFullReset ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-red-400">Delete all orgs, servers, and profile?</span>
+                    <span className="text-xs text-danger">Delete all orgs, servers, and profile?</span>
                     <button
+                      type="button"
                       onClick={handleFullReset}
                       disabled={resettingFull}
-                      className="rounded-lg bg-red-500/10 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                      className={`${buttonBase} px-4 py-2 text-xs border border-danger/25 bg-danger/10 text-danger hover:bg-danger/20`}
                     >
                       {resettingFull ? "Resetting..." : "Yes, reset everything"}
                     </button>
-                    <button
-                      onClick={() => setConfirmFullReset(false)}
-                      className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-white/5"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmFullReset(false)}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => setConfirmFullReset(true)}
-                    className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400/60 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    className={`${buttonBase} px-4 py-2 text-xs border border-danger/20 text-danger/60 hover:bg-danger/10 hover:text-danger`}
                   >
-                    Full Account Reset
+                    Full account reset
                   </button>
                 )}
               </div>

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import PageHeader from "@/components/ui/PageHeader";
 
 const settingsNav = [
-  { label: "DJ Profile", href: "/settings/profile" },
+  { label: "DJ profile", href: "/settings/profile" },
   { label: "Account", href: "/settings/account" },
 ];
 
@@ -24,23 +25,27 @@ export default function SettingsLayout({
       </div>
 
       <div className="relative z-10">
-        <h1 className="mb-6 text-2xl font-bold">
-          <span className="text-disc-cyan">Settings</span>
-        </h1>
+        <PageHeader
+          eyebrow="Settings"
+          title="Settings"
+          description="Manage your DJ profile and account."
+          className="mb-8"
+        />
 
-        <div className="flex gap-8">
+        <div className="flex flex-col md:flex-row md:gap-8">
           {/* Sidebar — hidden on mobile, shown as tab row instead */}
-          <nav className="hidden w-48 shrink-0 flex-col gap-1 md:flex">
+          <nav className="hidden w-48 shrink-0 flex-col gap-1 md:flex" aria-label="Settings sections">
             {settingsNav.map((item) => {
               const active = pathname === item.href;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`rounded-lg px-3 py-2 text-sm transition-colors ${
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-lg border-l-2 px-3 py-2 text-sm transition-colors ${
                     active
-                      ? "bg-white/5 font-medium text-white"
-                      : "text-text-secondary hover:bg-white/[0.03] hover:text-white"
+                      ? "border-disc-cyan bg-white/[0.06] font-medium text-white"
+                      : "border-transparent text-text-secondary hover:bg-white/[0.03] hover:text-white"
                   }`}
                 >
                   {item.label}
@@ -57,9 +62,10 @@ export default function SettingsLayout({
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={active ? "page" : undefined}
                   className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors ${
                     active
-                      ? "bg-white/5 font-medium text-white"
+                      ? "bg-white/[0.06] font-medium text-white"
                       : "text-text-secondary hover:text-white"
                   }`}
                 >
