@@ -1,3 +1,4 @@
+mod matrix;
 mod runtime;
 
 #[allow(dead_code)]
@@ -97,6 +98,53 @@ fn read_features(path: &str) -> Result<Vec<Feature>> {
         .collect()
 }
 
+type Socket = tungstenite::WebSocket<TcpStream>;
+
+fn open_socket(port: Option<u16>) -> Result<Option<Socket>> {
+    if let Some(port) = port {
+        let stream = TcpStream::connect_timeout(
+            &SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into(),
+            Duration::from_secs(5),
+        )?;
+        stream.set_nodelay(true)?;
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        Ok(Some(
+            tungstenite::client(format!("ws://127.0.0.1:{port}"), stream)?.0,
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+fn finish_socket(socket: &mut Option<Socket>) -> Result<()> {
+    if let Some(socket) = socket {
+        // Receipt fence only; a pong does not prove server-tick application.
+        socket.send(tungstenite::Message::Ping(b"slice-fence".to_vec().into()))?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .ok_or("Paper did not acknowledge the receipt fence within five seconds")?;
+            socket.get_mut().set_read_timeout(Some(remaining))?;
+            match socket.read()? {
+                tungstenite::Message::Pong(data) if data.as_ref() == b"slice-fence" => break,
+                tungstenite::Message::Text(data) => {
+                    let message: serde_json::Value = serde_json::from_str(&data)?;
+                    if message["type"] == "error" {
+                        return Err(format!("Paper rejected stream: {message}").into());
+                    }
+                }
+                tungstenite::Message::Close(_) => return Err("Paper closed before fence".into()),
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        socket.close(None)?;
+    }
+    Ok(())
+}
+
 fn render(
     frame_count: usize,
     mut feature_at: impl FnMut(usize) -> Feature,
@@ -108,19 +156,7 @@ fn render(
         return Err("feature count must be 1..7200".into());
     }
     let mut runtime = Runtime::new(count)?;
-    let mut socket = if let Some(port) = port {
-        // Deliberately loopback-only: this prototype has no production transport/auth.
-        let stream = TcpStream::connect_timeout(
-            &SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into(),
-            Duration::from_secs(5),
-        )?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        Some(tungstenite::client(format!("ws://127.0.0.1:{port}"), stream)?.0)
-    } else {
-        None
-    };
+    let mut socket = open_socket(port)?;
     // Retain bounded fixture outputs; disk writes are outside measured/paced work.
     let mut records = Vec::with_capacity(frame_count);
     let epoch = Instant::now();
@@ -158,27 +194,7 @@ fn render(
         records.push(json!({"frame": index, "audio": feature.audio, "instant_bass": feature.instant_bass, "instant_kick": feature.instant_kick, "dsp_us": feature.dsp_us, "entities": entities, "runtime_us": runtime_us, "serialize_us": serialize_us,
             "send_us": send_us, "lateness_us": lateness_us, "bytes": payload.len(), "send_offset_ms": epoch.elapsed().as_secs_f64() * 1000.0}));
     }
-    if let Some(socket) = &mut socket {
-        // A same-connection WebSocket ping/pong fences receipt of the preceding
-        // byte stream. It is NOT proof that each frame was applied by a tick.
-        socket.send(tungstenite::Message::Ping(b"slice-fence".to_vec().into()))?;
-        loop {
-            match socket.read()? {
-                tungstenite::Message::Pong(data) if data.as_ref() == b"slice-fence" => break,
-                tungstenite::Message::Text(data) => {
-                    let message: serde_json::Value = serde_json::from_str(&data)?;
-                    if message["type"] == "error" {
-                        return Err(format!("Paper rejected stream: {message}").into());
-                    }
-                }
-                tungstenite::Message::Close(_) => return Err("Paper closed before fence".into()),
-                _ => {}
-            }
-        }
-        // Keep generation alive through at least two server ticks, then close.
-        std::thread::sleep(Duration::from_millis(150));
-        socket.close(None)?;
-    }
+    finish_socket(&mut socket)?;
     let mut writer = BufWriter::new(File::create(output)?);
     for record in records {
         writeln!(writer, "{}", serde_json::to_string(&record)?)?;
@@ -208,7 +224,22 @@ fn main() -> Result<()> {
                 |index| process_window(&pcm[index * HOP..index * HOP + 1024], index, &mut fft, &mut bass),
                 &args[3], args[4].parse()?, Some(args[5].parse()?))?;
         }
-        _ => return Err("Usage: mcav-runtime-slice analyze PCM FEATURES | render FEATURES OUTPUT COUNT [LOOPBACK_PORT] | stream-pcm PCM OUTPUT COUNT LOOPBACK_PORT".into()),
+        Some("matrix") if args.len() == 5 || args.len() == 6 => {
+            let features = read_features(&args[2])?;
+            let config = matrix::Config::read(&args[3])?;
+            matrix::render(features.len(), |index| features[index].clone(), &config,
+                &args[4], args.get(5).map(|port| port.parse()).transpose()?)?;
+        }
+        Some("matrix-pcm") if args.len() == 6 => {
+            let pcm = load_pcm(&args[2])?;
+            let config = matrix::Config::read(&args[3])?;
+            let mut fft = audio::fft::FftAnalyzer::new(audio::AudioConfig::default());
+            let mut bass = audio::fft::BassLane::new(48_000.0);
+            matrix::render((pcm.len() - 1024) / HOP + 1,
+                |index| process_window(&pcm[index * HOP..index * HOP + 1024], index, &mut fft, &mut bass),
+                &config, &args[4], Some(args[5].parse()?))?;
+        }
+        _ => return Err("Usage: mcav-runtime-slice analyze PCM FEATURES | render FEATURES OUTPUT COUNT [LOOPBACK_PORT] | stream-pcm PCM OUTPUT COUNT LOOPBACK_PORT | matrix FEATURES CONFIG OUTPUT [LOOPBACK_PORT] | matrix-pcm PCM CONFIG OUTPUT LOOPBACK_PORT".into()),
     }
     Ok(())
 }
