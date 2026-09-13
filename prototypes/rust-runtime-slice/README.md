@@ -80,6 +80,8 @@ The PCM stream mode records its live features alongside output entities, allowin
 
 ## Expanded seeded visual and zone matrix
 
+The [September 13 measured report](../../docs/superpowers/reports/2026-09-13-rust-runtime-matrix.md) records the completed matrix, timing comparisons, live observations, and retained diagnostic failures.
+
 `matrix_compare.py` tests Stacked Tower (`spectrum`), Spectrum Bars (`bars`), Aurora, and Shockwave at 64 and 128 entities. It also tests mixed two-zone (Bars/Aurora) and four-zone (all four) workloads. Each zone has its own Lua VM, RNG seed, and smoothing state. Both bindings use Lua 5.4 `math.randomseed(seed, 0)` without changing the Lua files. The Rust wrapper uses the canonical `flat_pack` defaults and production-compatible IDs, including normalized padding and optional glow, brightness, material, and interpolation fields.
 
 The offline matrix checks every emitted field over the full fixture, repeats each case three times in alternating runtime order, and compares each mixed zone against standalone Rust and Python runs using its exact seed. Unit tests additionally reorder independently seeded Aurora instances and insert unrelated neighboring work. Rotation uses shortest angular distance at `1e-9` degrees tolerance: floating-point rounding can represent the same orientation as approximately 0 or 360 degrees. Such cases are counted separately alongside the raw rotation difference. Other numeric fields retain absolute `1e-9` tolerance; optional-field presence and values are checked exactly.
