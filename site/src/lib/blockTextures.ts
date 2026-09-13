@@ -165,3 +165,152 @@ export function getOakPlanksTexture(): THREE.CanvasTexture {
 
   return cache.oak;
 }
+
+// ── Real Minecraft textures ──────────────────────────────────────
+//
+// The files under public/textures/block/ are extracted from the game jar by
+// scripts/extract-mc-textures.mjs. Grass textures ship grayscale in the game
+// and get a biome tint at render time, so we tint them here the same way.
+
+/** Set of textures the previews need, keyed by role. */
+export interface MinecraftBlockTextures {
+  glowstone: THREE.Texture;
+  grassTop: THREE.Texture;
+  grassSide: THREE.Texture;
+  dirt: THREE.Texture;
+  stone: THREE.Texture;
+}
+
+/** Plains biome grass color (the game's default look). */
+export const GRASS_TINT: readonly [number, number, number] = [0x79, 0xc0, 0x5a];
+
+/** Multiply RGB channels by a tint in place; alpha is left alone. */
+export function multiplyTint(
+  data: Uint8ClampedArray,
+  tint: readonly [number, number, number],
+): void {
+  const [tr, tg, tb] = tint;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = Math.round((data[i] * tr) / 255);
+    data[i + 1] = Math.round((data[i + 1] * tg) / 255);
+    data[i + 2] = Math.round((data[i + 2] * tb) / 255);
+  }
+}
+
+/**
+ * Convert RGB to luminance in place (Rec. 601 weights), keeping alpha. Used
+ * on glowstone so per-band tints come out as true colors instead of being
+ * multiplied through the texture's natural yellow.
+ */
+export function desaturate(data: Uint8ClampedArray): void {
+  for (let i = 0; i < data.length; i += 4) {
+    const luma = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    data[i] = luma;
+    data[i + 1] = luma;
+    data[i + 2] = luma;
+  }
+}
+
+/** Alpha-composite `overlay` onto `base` in place (both RGBA, same size). */
+export function compositeOverlay(base: Uint8ClampedArray, overlay: Uint8ClampedArray): void {
+  if (base.length !== overlay.length) {
+    throw new Error(`compositeOverlay: size mismatch (${base.length} vs ${overlay.length})`);
+  }
+  for (let i = 0; i < base.length; i += 4) {
+    const a = overlay[i + 3] / 255;
+    if (a === 0) continue;
+    base[i] = Math.round(overlay[i] * a + base[i] * (1 - a));
+    base[i + 1] = Math.round(overlay[i + 1] * a + base[i + 1] * (1 - a));
+    base[i + 2] = Math.round(overlay[i + 2] * a + base[i + 2] * (1 - a));
+    base[i + 3] = Math.max(base[i + 3], overlay[i + 3]);
+  }
+}
+
+function loadImageData(url: string): Promise<ImageData> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("2D canvas context unavailable"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    };
+    img.onerror = () => reject(new Error(`Failed to load texture ${url}`));
+    img.src = url;
+  });
+}
+
+function textureFromImageData(image: ImageData): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas context unavailable");
+  ctx.putImageData(image, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Procedural stand-ins used until the real textures load (and in tests). */
+export function getProceduralTextures(): MinecraftBlockTextures {
+  return {
+    glowstone: getVizBlockTexture(),
+    grassTop: getGrassTopTexture(),
+    grassSide: getGrassTopTexture(),
+    dirt: getStoneTexture(),
+    stone: getStoneTexture(),
+  };
+}
+
+let loadedTextures: MinecraftBlockTextures | null = null;
+let loadPromise: Promise<MinecraftBlockTextures> | null = null;
+
+/** Real textures if they have finished loading, else null. */
+export function getLoadedMinecraftTextures(): MinecraftBlockTextures | null {
+  return loadedTextures;
+}
+
+/**
+ * Load and tint the extracted game textures. Cached across the page; a
+ * failure rejects so callers keep the procedural fallback and log it.
+ */
+export function loadMinecraftTextures(basePath = "/textures/block"): Promise<MinecraftBlockTextures> {
+  if (loadedTextures) return Promise.resolve(loadedTextures);
+  if (loadPromise) return loadPromise;
+
+  loadPromise = (async () => {
+    const [glowstone, grassTop, grassSide, grassOverlay, dirt, stone] = await Promise.all(
+      ["glowstone", "grass_block_top", "grass_block_side", "grass_block_side_overlay", "dirt", "stone"].map(
+        (name) => loadImageData(`${basePath}/${name}.png`),
+      ),
+    );
+
+    desaturate(glowstone.data);
+    multiplyTint(grassTop.data, GRASS_TINT);
+    multiplyTint(grassOverlay.data, GRASS_TINT);
+    compositeOverlay(grassSide.data, grassOverlay.data);
+
+    loadedTextures = {
+      glowstone: textureFromImageData(glowstone),
+      grassTop: textureFromImageData(grassTop),
+      grassSide: textureFromImageData(grassSide),
+      dirt: textureFromImageData(dirt),
+      stone: textureFromImageData(stone),
+    };
+    return loadedTextures;
+  })().catch((error: unknown) => {
+    loadPromise = null;
+    throw error;
+  });
+
+  return loadPromise;
+}
