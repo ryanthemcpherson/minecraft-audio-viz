@@ -2,4 +2,4 @@ Extracted from the Minecraft 1.21.10 client jar by scripts/extract-mc-textures.m
 These textures are Mojang assets used under the Minecraft usage guidelines for a
 non-commercial fan project. They are not covered by this repository's MIT license.
 
-Files: glowstone.png, grass_block_top.png, grass_block_side.png, grass_block_side_overlay.png, dirt.png, stone.png
+Files: orange_concrete.png, yellow_concrete.png, lime_concrete.png, light_blue_concrete.png, magenta_concrete.png, grass_block_top.png, grass_block_side.png, grass_block_side_overlay.png, dirt.png, stone.png
