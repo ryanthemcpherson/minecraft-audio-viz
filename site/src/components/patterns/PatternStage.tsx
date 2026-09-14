@@ -4,8 +4,6 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { listPatterns, type PatternMeta } from "@/lib/patterns";
 import { useReducedMotion } from "@/lib/useReducedMotion";
-import Badge, { categoryTone } from "@/components/ui/Badge";
-import SectionHeader from "@/components/ui/SectionHeader";
 import PatternPreview from "./PatternPreview";
 import AudioSourcePicker from "./AudioSourcePicker";
 
@@ -18,16 +16,22 @@ const FEATURED_IDS = [
   "ledwall",
   "vortex",
   "mandala",
-  "spectrum",
+  "phoenix",
 ];
 
 const AUTO_ADVANCE_MS = 9_000;
 
+interface PatternStageProps {
+  /** "hero" is the compact homepage layout: stage, pattern chips, source picker. */
+  variant?: "hero" | "section";
+}
+
 /**
- * Homepage pattern showcase: one large live preview plus a selectable list.
- * Only a single WebGL context runs, no matter how many patterns are listed.
+ * Live showcase: one large preview running the real Lua pattern with real
+ * block textures, plus a strip of patterns to switch between. A single WebGL
+ * context no matter how many patterns are listed.
  */
-export default function PatternStage() {
+export default function PatternStage({ variant = "section" }: PatternStageProps) {
   const all = useMemo(() => listPatterns(), []);
   const featured = useMemo<PatternMeta[]>(() => {
     const byId = new Map(all.map((p) => [p.id, p]));
@@ -70,96 +74,74 @@ export default function PatternStage() {
   const active = featured[activeIndex];
   if (!active) return null;
 
+  const isHero = variant === "hero";
+
   return (
-    <section id="patterns" className="relative px-6 py-28 sm:py-32">
-      <div className="mx-auto max-w-7xl">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <SectionHeader
-            eyebrow="Patterns"
-            title="Pick a look. Or write one."
-            lede={`${all.length} Lua patterns ship in the box, each reacting to bands, beats, and tempo. This preview runs the real Lua in your browser against a synthetic 128 BPM track.`}
-          />
-          <Link
-            href="/patterns"
-            className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-disc-cyan hover:underline"
-          >
-            See all {all.length} patterns
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M5 12h14M12 5l7 7-7 7" />
-            </svg>
-          </Link>
-        </div>
-
-        <div className="mt-10">
-          <AudioSourcePicker />
-        </div>
-
-        <div
-          ref={stageRef}
-          className="mt-5 grid gap-4 lg:grid-cols-[1.7fr_1fr]"
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
-        >
-          {/* Stage */}
-          <div className="flat-card relative overflow-hidden rounded-2xl">
-            <PatternPreview
-              key={active.id}
-              meta={active}
-              live={visible && !reducedMotion}
-              quality="high"
-              phaseOffset={activeIndex * 1.3}
-              className="aspect-[16/10] lg:aspect-auto lg:h-full lg:min-h-[420px]"
-            />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 bg-gradient-to-t from-black/80 via-black/30 to-transparent p-5">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-heading text-xl font-bold text-white">{active.name}</h3>
-                  <Badge tone={categoryTone(active.category)}>{active.category}</Badge>
-                </div>
-                <p className="mt-1 max-w-lg text-sm text-white/70">{active.description}</p>
-              </div>
-              <span className="hidden shrink-0 font-mono text-[10px] uppercase tracking-wider text-white/50 sm:block">
-                {active.startBlocks ? `${active.startBlocks} blocks` : ""} &middot; {active.id}.lua
-              </span>
-            </div>
+    <div
+      ref={stageRef}
+      className={isHero ? "" : "mx-auto max-w-7xl"}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      <div className="relative overflow-hidden rounded-md border border-white/10 bg-[#050505]">
+        <PatternPreview
+          key={active.id}
+          meta={active}
+          live={visible && !reducedMotion}
+          quality="high"
+          phaseOffset={activeIndex * 1.3}
+          className={isHero ? "aspect-[16/11]" : "aspect-[16/9]"}
+        />
+        {/* Caption: name, category, and the file the server actually runs */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-3 pt-10">
+          <div className="min-w-0">
+            <p className="font-heading text-lg font-bold leading-tight text-white">{active.name}</p>
+            <p className="mt-0.5 truncate text-sm text-white/70">{active.description}</p>
           </div>
-
-          {/* Selector */}
-          <div className="flat-card rounded-2xl p-2" role="tablist" aria-label="Featured patterns">
-            {featured.map((p, i) => {
-              const isActive = i === activeIndex;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => select(i)}
-                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left transition-colors ${
-                    isActive
-                      ? "bg-white/[0.07] text-white"
-                      : "text-text-secondary hover:bg-white/[0.04] hover:text-white"
-                  }`}
-                >
-                  <span className="flex items-center gap-3">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full transition-colors ${
-                        isActive ? "bg-disc-cyan" : "bg-white/15"
-                      }`}
-                      aria-hidden="true"
-                    />
-                    <span className="text-sm font-medium">{p.name}</span>
-                  </span>
-                  <Badge tone={isActive ? categoryTone(p.category) : "neutral"}>{p.category}</Badge>
-                </button>
-              );
-            })}
-            <p className="px-4 pb-2 pt-3 font-mono text-[10px] uppercase tracking-wider text-text-secondary/50">
-              {paused ? "Paused" : "Auto-cycling"} &middot; hover to pause
-            </p>
-          </div>
+          <p className="shrink-0 font-mono text-[11px] text-white/60">
+            {active.startBlocks ? `${active.startBlocks} blocks` : active.category}
+          </p>
         </div>
       </div>
-    </section>
+
+      {/* Pattern strip */}
+      <div
+        role="tablist"
+        aria-label="Featured patterns"
+        className="mt-3 flex flex-wrap items-center gap-1.5"
+      >
+        {featured.map((p, i) => {
+          const isActive = i === activeIndex;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => select(i)}
+              className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                isActive
+                  ? "border-disc-cyan/60 bg-disc-cyan/10 text-text-primary"
+                  : "border-white/10 text-text-secondary hover:border-white/25 hover:text-text-primary"
+              }`}
+            >
+              {p.name}
+            </button>
+          );
+        })}
+        {isHero && (
+          <Link
+            href="/patterns"
+            className="px-2 text-sm text-disc-cyan hover:underline"
+          >
+            All {all.length} patterns
+          </Link>
+        )}
+      </div>
+
+      <div className="mt-4">
+        <AudioSourcePicker compact={isHero} />
+      </div>
+    </div>
   );
 }

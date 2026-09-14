@@ -24,7 +24,7 @@ type Step = "role" | "server_owner" | "team_member" | "dj" | "server_owner_compl
 // renders a span, so submit buttons that disable while submitting mirror the
 // primary variant here on a native <button>.
 const primaryButton =
-  "inline-flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold whitespace-nowrap transition-all duration-200 select-none bg-gradient-to-r from-disc-cyan to-disc-blue text-white shadow-lg shadow-disc-cyan/20 hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold whitespace-nowrap transition-all duration-200 select-none bg-disc-cyan text-bg-primary active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
 
 const sectionLabel = "mb-3 font-mono text-[11px] uppercase tracking-wider text-text-secondary/70";
 
@@ -234,8 +234,6 @@ export default function OnboardingPage() {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4 pt-20 pb-20">
       {/* Background glows */}
-      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-disc-cyan/5 rounded-full blur-[120px]" />
-      <div className="pointer-events-none absolute top-1/3 right-1/4 w-[300px] h-[300px] bg-disc-blue/5 rounded-full blur-[100px]" />
 
       <div className="relative w-full max-w-lg">
         {/* Step 1: Role Selection */}

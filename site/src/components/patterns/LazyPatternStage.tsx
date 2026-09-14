@@ -9,15 +9,14 @@ import dynamic from "next/dynamic";
 const PatternStage = dynamic(() => import("./PatternStage"), {
   ssr: false,
   loading: () => (
-    <section id="patterns" className="px-6 py-28 sm:py-32">
-      <div className="mx-auto max-w-7xl">
-        <div className="h-8 w-48 animate-pulse rounded bg-white/5" />
-        <div className="mt-12 grid gap-4 lg:grid-cols-[1.7fr_1fr]">
-          <div className="aspect-[16/10] animate-pulse rounded-2xl bg-white/[0.03] lg:min-h-[420px]" />
-          <div className="animate-pulse rounded-2xl bg-white/[0.03]" />
-        </div>
+    <div>
+      <div className="aspect-[16/11] animate-pulse rounded-md border border-white/10 bg-white/[0.03]" />
+      <div className="mt-3 flex gap-1.5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-8 w-20 animate-pulse rounded-md bg-white/[0.04]" />
+        ))}
       </div>
-    </section>
+    </div>
   ),
 });
 

@@ -1,6 +1,5 @@
 import Hero from "@/components/home/Hero";
 import HowItWorks from "@/components/home/HowItWorks";
-import LazyPatternStage from "@/components/patterns/LazyPatternStage";
 import Features from "@/components/home/Features";
 import Audiences from "@/components/home/Audiences";
 import Demo from "@/components/home/Demo";
@@ -13,7 +12,6 @@ export default function Home() {
     <>
       <Hero />
       <HowItWorks />
-      <LazyPatternStage />
       <Features />
       <Audiences />
       <Demo />

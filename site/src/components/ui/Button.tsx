@@ -24,22 +24,24 @@ interface ButtonProps {
 }
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-xl font-semibold whitespace-nowrap transition-all duration-200 select-none";
+  "inline-flex items-center justify-center gap-2 rounded-md font-semibold whitespace-nowrap transition-colors duration-150 select-none";
 
+/**
+ * One solid accent fill for the primary action, a hairline for secondary,
+ * plain text for tertiary. No gradients, no colored shadows: hierarchy comes
+ * from fill versus outline, not from glow.
+ */
 const variants: Record<Variant, string> = {
-  primary:
-    "bg-gradient-to-r from-disc-cyan to-disc-blue text-white shadow-lg shadow-disc-cyan/20 hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95",
-  secondary:
-    "border border-white/10 bg-white/5 text-white backdrop-blur-sm hover:border-white/20 hover:bg-white/10",
-  ghost: "text-text-secondary hover:text-white hover:bg-white/5",
-  disabled:
-    "cursor-not-allowed border border-dashed border-white/15 bg-white/[0.02] text-text-secondary",
+  primary: "bg-disc-cyan text-bg-primary hover:bg-[#33d6ff] active:bg-[#00b8e6]",
+  secondary: "border border-white/15 text-text-primary hover:border-white/30 hover:bg-white/[0.04]",
+  ghost: "text-text-secondary hover:text-text-primary",
+  disabled: "cursor-not-allowed border border-dashed border-white/15 text-text-secondary",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "px-4 py-2 text-xs",
-  md: "px-6 py-3 text-sm",
-  lg: "px-8 py-4 text-sm sm:text-base",
+  sm: "px-3.5 py-2 text-sm",
+  md: "px-5 py-2.5 text-sm",
+  lg: "px-6 py-3 text-base",
 };
 
 /**
@@ -58,7 +60,7 @@ export default function Button({
   disabled = false,
   ariaLabel,
 }: ButtonProps) {
-  const classes = `${base} ${variants[variant]} ${sizes[size]} disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:hover:shadow-lg ${className}`;
+  const classes = `${base} ${variants[variant]} ${sizes[size]} disabled:cursor-not-allowed disabled:opacity-50 ${className}`;
 
   if (variant === "disabled") {
     return (

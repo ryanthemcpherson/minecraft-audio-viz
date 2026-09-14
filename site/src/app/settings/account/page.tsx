@@ -21,7 +21,7 @@ import Spinner from "@/components/ui/Spinner";
 import { Label, Input } from "@/components/ui/Field";
 
 const primaryButtonClassName =
-  "inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-disc-cyan font-semibold whitespace-nowrap text-white transition-all duration-200 select-none active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
 
 const secondaryButtonClassName =
   "inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 font-semibold whitespace-nowrap text-white backdrop-blur-sm transition-all duration-200 select-none hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50";

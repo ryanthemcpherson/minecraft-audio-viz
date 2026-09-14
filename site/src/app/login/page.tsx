@@ -23,7 +23,7 @@ type Tab = "login" | "signup";
 
 /** Primary submit styling, mirroring Button's primary variant (which has no disabled prop). */
 const submitButtonClassName =
-  "mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-lg disabled:hover:brightness-100";
+  "mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-disc-cyan px-6 py-3 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 select-none active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-lg disabled:hover:brightness-100";
 type ConsumedCookie =
   | { found: false }
   | { found: true; value: string | null };
@@ -160,8 +160,7 @@ export default function LoginPage() {
   if (oauthLoading) {
     return (
       <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
-        <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
-        <div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
+<div className="relative w-full max-w-md glass-card rounded-2xl p-8 text-center">
           <div className="mb-4 flex justify-center">
             <Spinner label="Completing sign-in" />
           </div>
@@ -176,9 +175,7 @@ export default function LoginPage() {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4 pt-20">
       {/* Background glow */}
-      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-disc-cyan/5 rounded-full blur-[120px]" />
-
-      <div className="relative w-full max-w-md glass-card rounded-2xl p-8">
+<div className="relative w-full max-w-md glass-card rounded-2xl p-8">
         <p className="mb-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
           Account
         </p>
