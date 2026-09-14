@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useMemo } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
@@ -8,7 +8,7 @@ import type { EntityData } from "@/lib/patterns/base";
 import type { PatternInstance } from "@/lib/patterns";
 import { sampleAudio } from "@/lib/audio/audioSource";
 import { useMinecraftTextures } from "@/lib/useMinecraftTextures";
-import { BAND_BLOCKS } from "@/lib/blockTextures";
+import { BAND_BLOCKS, getMaterialTexture, hasMaterialTexture } from "@/lib/blockTextures";
 import MinecraftStage from "./MinecraftStage";
 
 const BLOCK_SIZE = 0.22;
@@ -25,6 +25,9 @@ const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
 const HIDDEN_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 
+/** Mesh key for the default block of a band. */
+const bandKey = (band: number) => `band:${band}`;
+
 export type PreviewQuality = "low" | "high";
 
 interface PatternSceneProps {
@@ -35,15 +38,19 @@ interface PatternSceneProps {
   quality?: PreviewQuality;
 }
 
+/**
+ * Renders a pattern's entities as instanced block meshes, one mesh per block
+ * material. Every band has a default concrete block; entities that set an
+ * explicit `material` (as the Lua patterns can) get a mesh for that block the
+ * first time it appears, textured with the real game texture.
+ */
 export default function PatternScene({
   pattern,
   phaseOffset,
   staticCamera = false,
   quality = "low",
 }: PatternSceneProps) {
-  // One instanced mesh per band so each band renders its own concrete block,
-  // exactly like the in-game materials.
-  const meshRefs = useRef<(THREE.InstancedMesh | null)[]>([]);
+  const meshRefs = useRef(new Map<string, THREE.InstancedMesh>());
   const groupRef = useRef<THREE.Group>(null);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const skyLightRef = useRef<THREE.HemisphereLight>(null);
@@ -56,22 +63,36 @@ export default function PatternScene({
   const fitScale = useRef(1);
   const radiusHold = useRef(FIT_TARGET_RADIUS);
   const beatGlow = useRef(0);
-  /** Per-band cursor into each mesh's instance list, reused every frame. */
-  const bandCursors = useRef(new Int32Array(BAND_COUNT));
+  /** Per-mesh cursor into its instance list, reused every frame. */
+  const cursors = useRef(new Map<string, number>());
+  /** Explicit materials seen so far that need their own mesh. */
+  const [extraMaterials, setExtraMaterials] = useState<string[]>([]);
+  const requested = useRef(new Set<string>());
 
   const textures = useMinecraftTextures();
 
-  const bandMaterials = useMemo(
-    () =>
-      textures.bands.map(
-        (map) => new THREE.MeshStandardMaterial({ map, toneMapped: false, roughness: 0.95, metalness: 0 }),
-      ),
-    [textures],
-  );
+  const meshSpecs = useMemo(() => {
+    const specs: { key: string; material: THREE.MeshStandardMaterial }[] = [];
+    textures.bands.forEach((map, band) => {
+      specs.push({
+        key: bandKey(band),
+        material: new THREE.MeshStandardMaterial({ map, toneMapped: false, roughness: 0.95, metalness: 0 }),
+      });
+    });
+    for (const name of extraMaterials) {
+      const map = getMaterialTexture(name);
+      if (!map) continue;
+      specs.push({
+        key: name,
+        material: new THREE.MeshStandardMaterial({ map, toneMapped: false, roughness: 0.95, metalness: 0 }),
+      });
+    }
+    return specs;
+  }, [textures, extraMaterials]);
 
   useEffect(() => {
-    return () => bandMaterials.forEach((m) => m.dispose());
-  }, [bandMaterials]);
+    return () => meshSpecs.forEach((s) => s.material.dispose());
+  }, [meshSpecs]);
 
   // Pre-allocate position tracking
   useEffect(() => {
@@ -80,7 +101,7 @@ export default function PatternScene({
 
   useFrame(({ clock }, delta) => {
     const meshes = meshRefs.current;
-    if (meshes.length < BAND_COUNT || meshes.some((m) => !m)) return;
+    if (meshes.size < BAND_COUNT) return;
 
     const time = clock.getElapsedTime();
     // Clamp delta to avoid huge jumps when tab is backgrounded
@@ -163,8 +184,9 @@ export default function PatternScene({
       : beatGlow.current * Math.pow(0.02, dt);
     const glow = beatGlow.current;
 
-    const cursors = bandCursors.current;
-    cursors.fill(0);
+    const slotOf = cursors.current;
+    for (const key of meshes.keys()) slotOf.set(key, 0);
+    let newMaterials: string[] | null = null;
 
     for (let i = 0; i < maxCount; i++) {
       if (i >= entities.length || !entities[i].visible) continue;
@@ -195,31 +217,48 @@ export default function PatternScene({
       const halfBlock = BLOCK_SIZE * s * 0.5;
       const clampedY = Math.max(y, FLOOR_Y + halfBlock);
 
+      // Explicit material wins when we have a texture for it; the mesh for a
+      // newly seen material appears on the next render, so fall back to the
+      // band block until then.
       const band = Math.min(Math.max(0, e.band | 0), BAND_COUNT - 1);
-      const mesh = meshes[band]!;
-      const slot = cursors[band]++;
+      let key = bandKey(band);
+      if (e.material && hasMaterialTexture(e.material)) {
+        if (meshes.has(e.material)) {
+          key = e.material;
+        } else if (!requested.current.has(e.material)) {
+          requested.current.add(e.material);
+          (newMaterials ??= []).push(e.material);
+        }
+      }
+      const mesh = meshes.get(key)!;
+      const slot = slotOf.get(key) ?? 0;
+      slotOf.set(key, slot + 1);
 
       TEMP_OBJECT.position.set(x, clampedY, z);
       TEMP_OBJECT.scale.set(s, s, s);
       TEMP_OBJECT.updateMatrix();
       mesh.setMatrixAt(slot, TEMP_OBJECT.matrix);
 
-      // The block keeps its real concrete color; brightness rises with scale
+      // Blocks keep their real texture colors; brightness rises with scale
       // and on beats so bloom picks the active blocks out.
       const brightness = 0.95 + e.scale * 1.0 + glow * 0.5;
       TEMP_COLOR.setScalar(brightness);
       mesh.setColorAt(slot, TEMP_COLOR);
     }
 
-    // Hide unused instances on every band mesh
-    for (let b = 0; b < BAND_COUNT; b++) {
-      const mesh = meshes[b]!;
-      for (let slot = cursors[b]; slot < maxCount; slot++) {
+    // Hide unused instances on every mesh
+    for (const [key, mesh] of meshes) {
+      for (let slot = slotOf.get(key) ?? 0; slot < maxCount; slot++) {
         mesh.setMatrixAt(slot, HIDDEN_MATRIX);
       }
       mesh.count = maxCount;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+
+    if (newMaterials) {
+      const added = newMaterials;
+      setExtraMaterials((current) => [...current, ...added.filter((m) => !current.includes(m))]);
     }
 
     // Lights and the floor ring flash on the beat
@@ -250,11 +289,12 @@ export default function PatternScene({
       <fog attach="fog" args={["#050505", 8, 25]} />
 
       <group ref={groupRef}>
-        {bandMaterials.map((material, band) => (
+        {meshSpecs.map(({ key, material }) => (
           <instancedMesh
-            key={BAND_BLOCKS[band]}
+            key={key}
             ref={(node) => {
-              meshRefs.current[band] = node;
+              if (node) meshRefs.current.set(key, node);
+              else meshRefs.current.delete(key);
             }}
             args={[undefined, undefined, maxCount]}
             material={material}

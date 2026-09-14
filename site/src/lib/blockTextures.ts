@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import materialTextureMap from "./materialTextures.json";
 
 // ── Seeded PRNG (mulberry32) ─────────────────────────────────────
 function mulberry32(seed: number): () => number {
@@ -308,6 +309,74 @@ export function getProceduralTextures(): MinecraftBlockTextures {
     dirt: getStoneTexture(),
     stone: getStoneTexture(),
   };
+}
+
+// ── Per-entity materials ─────────────────────────────────────────
+
+/** Bukkit material name -> texture file, shared with the extraction script. */
+export const MATERIAL_TEXTURE_FILES: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(materialTextureMap as Record<string, string>).filter(([key]) => !key.startsWith("_")),
+);
+
+/** Texture files that need the grass biome tint applied. */
+const TINTED_FILES: Readonly<Record<string, readonly [number, number, number]>> = {
+  grass_block_top: GRASS_TINT,
+};
+
+const materialTextureCache = new Map<string, THREE.CanvasTexture>();
+
+/** True when the renderer has a texture for this material name. */
+export function hasMaterialTexture(material: string): boolean {
+  return Object.prototype.hasOwnProperty.call(MATERIAL_TEXTURE_FILES, material);
+}
+
+/**
+ * Texture for a Bukkit material, or null when unknown. Returns immediately
+ * with a neutral placeholder canvas that is repainted in place once the PNG
+ * loads, so meshes can be created synchronously. Animated block textures
+ * (tall frame strips) are cropped to their first frame.
+ */
+export function getMaterialTexture(material: string, basePath = "/textures/block"): THREE.CanvasTexture | null {
+  const file = MATERIAL_TEXTURE_FILES[material];
+  if (!file) return null;
+  const cached = materialTextureCache.get(material);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 16;
+  canvas.height = 16;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas context unavailable");
+  ctx.fillStyle = "#7a7a7a";
+  ctx.fillRect(0, 0, 16, 16);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  materialTextureCache.set(material, texture);
+
+  const img = new Image();
+  img.onload = () => {
+    // Animated textures are vertical strips of square frames; keep frame 0.
+    const size = img.naturalWidth;
+    canvas.width = size;
+    canvas.height = size;
+    ctx.drawImage(img, 0, 0, size, size, 0, 0, size, size);
+    const tint = TINTED_FILES[file];
+    if (tint) {
+      const image = ctx.getImageData(0, 0, size, size);
+      multiplyTint(image.data, tint);
+      ctx.putImageData(image, 0, 0);
+    }
+    texture.needsUpdate = true;
+  };
+  img.onerror = () => {
+    console.error(`[MCAV] Failed to load block texture ${file}.png for ${material}`);
+  };
+  img.src = `${basePath}/${file}.png`;
+
+  return texture;
 }
 
 let loadedTextures: MinecraftBlockTextures | null = null;

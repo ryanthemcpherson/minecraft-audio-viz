@@ -27,6 +27,16 @@ let luaL_requiref: any = null;
 let fengariReady = false;
 let loadPromise: Promise<void> | null = null;
 
+/**
+ * Normalize a material string from Lua to a Bukkit-style name:
+ * "minecraft:orange_concrete" and "orange concrete" both become "ORANGE_CONCRETE".
+ * Returns undefined for empty input.
+ */
+export function normalizeMaterialName(raw: string): string | undefined {
+  const trimmed = raw.trim().replace(/^minecraft:/i, "").replace(/[\s-]+/g, "_").toUpperCase();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function bindGlobals(): void {
   const f = (window as any).__fengari;
   if (!f) throw new Error("__fengari global not found after script load");
@@ -127,6 +137,7 @@ function getFieldNames(): Record<string, Uint8Array> {
     scale: to_luastring("scale"),
     band: to_luastring("band"),
     visible: to_luastring("visible"),
+    material: to_luastring("material"),
     calculate: to_luastring("calculate"),
   };
   return fieldNames;
@@ -372,13 +383,30 @@ export class LuaPatternInstance {
           : lua.lua_toboolean(L, -1);
         lua.lua_pop(L, 1);
 
-        entities.push({ id, x, y, z, scale, band, visible });
+        // Optional per-entity material (Bukkit name), normalized to UPPER_SNAKE
+        const material = this._strField(L, f.material);
+
+        const entity: EntityData = { id, x, y, z, scale, band, visible };
+        if (material) entity.material = material;
+        entities.push(entity);
       }
 
       lua.lua_pop(L, 1);
     }
 
     return entities;
+  }
+
+  private _strField(L: any, key: Uint8Array): string | undefined {
+    lua.lua_getfield(L, -1, key);
+    let value: string | undefined;
+    if (lua.lua_type(L, -1) === lua.LUA_TSTRING) {
+      const raw = lua.lua_tostring(L, -1);
+      const text = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw);
+      value = normalizeMaterialName(text);
+    }
+    lua.lua_pop(L, 1);
+    return value;
   }
 
   private _numField(L: any, key: Uint8Array): number | undefined {
