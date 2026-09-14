@@ -112,37 +112,31 @@ export default function GettingStartedPage() {
   return (
     <>
       {/* Hero */}
-      <section className="px-6 pt-32 pb-16">
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
-            Getting started
-          </p>
-          <h1 className="font-heading text-4xl font-bold leading-[1.05] sm:text-5xl md:text-6xl">
-            One JAR. <span className="text-gradient">Five steps.</span>
-          </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg text-text-secondary sm:text-xl">
-            Drop the plugin into a Paper server, open a port, start it, and finish setup in the
-            browser. The plugin installs and supervises the VJ runtime for you. No Python, no
-            Docker, no shell scripts.
-          </p>
-
-          <ReleaseBanner />
-
-          {/* Audience cards */}
-          <div className="mx-auto mt-10 grid max-w-3xl gap-4 sm:grid-cols-3">
-            <a href="#server-setup" className="flat-card group rounded-2xl p-5 text-left hover:border-disc-cyan/30">
-              <p className="font-mono text-[11px] uppercase tracking-wider text-disc-cyan">Server operators</p>
-              <p className="mt-2 text-sm text-text-secondary">Install the plugin, finish setup, invite DJs.</p>
-            </a>
-            <a href="#dj-setup" className="flat-card group rounded-2xl p-5 text-left hover:border-disc-blue/30">
-              <p className="font-mono text-[11px] uppercase tracking-wider text-disc-blue">DJs</p>
-              <p className="mt-2 text-sm text-text-secondary">Client availability during Phase 0, then connect with an invite.</p>
-            </a>
-            <a href="#developers" className="flat-card group rounded-2xl p-5 text-left hover:border-noteblock-amber/30">
-              <p className="font-mono text-[11px] uppercase tracking-wider text-noteblock-amber">Developers</p>
-              <p className="mt-2 text-sm text-text-secondary">Build from source and write patterns.</p>
-            </a>
+      <section className="px-6 pt-28 pb-14 sm:pt-32">
+        <div className="mx-auto max-w-6xl">
+          <div className="max-w-2xl">
+            <h1 className="font-heading text-[clamp(2.25rem,1.5rem+3vw,4rem)] font-bold leading-[1.04] tracking-[-0.03em]">
+              One JAR. Five steps.
+            </h1>
+            <p className="mt-5 text-lg leading-relaxed text-text-secondary">
+              Drop the plugin into a Paper server, open a port, start it, and finish setup in the
+              browser. The plugin installs and supervises the VJ runtime for you. No Python, no
+              Docker, no shell scripts.
+            </p>
+            <ReleaseBanner />
           </div>
+
+          <nav aria-label="Guide sections" className="mt-10 flex flex-wrap gap-x-8 gap-y-2 border-t border-white/[0.08] pt-5 text-sm">
+            <a href="#server-setup" className="text-text-primary hover:text-disc-cyan">
+              Server operators <span className="text-text-secondary">/ install, set up, invite DJs</span>
+            </a>
+            <a href="#dj-setup" className="text-text-primary hover:text-disc-cyan">
+              DJs <span className="text-text-secondary">/ client status, connect with an invite</span>
+            </a>
+            <a href="#developers" className="text-text-primary hover:text-disc-cyan">
+              Developers <span className="text-text-secondary">/ build from source, write patterns</span>
+            </a>
+          </nav>
         </div>
       </section>
 
@@ -153,7 +147,7 @@ export default function GettingStartedPage() {
             {/* ===== REQUIREMENTS ===== */}
             <section id="requirements" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+                <p className="mb-2 text-sm font-medium text-disc-cyan">
                   Before you begin
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">Requirements</h2>
@@ -164,22 +158,20 @@ export default function GettingStartedPage() {
                 </p>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <dl className="grid gap-x-10 gap-y-6 border-t border-white/[0.08] pt-6 sm:grid-cols-2 lg:grid-cols-3">
                 {requirements.map((req) => (
-                  <div key={req.title} className="flat-card rounded-xl p-5">
-                    <div className={`mb-3 inline-flex rounded-lg px-2.5 py-1 font-mono text-xs font-semibold ${req.accent}`}>
-                      {req.title}
-                    </div>
-                    <p className="text-sm leading-relaxed text-text-secondary">{req.body}</p>
+                  <div key={req.title}>
+                    <dt className="font-heading text-base font-bold">{req.title}</dt>
+                    <dd className="mt-1.5 text-sm leading-relaxed text-text-secondary">{req.body}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             </section>
 
             {/* ===== SERVER OPERATORS ===== */}
             <section id="server-setup" className="scroll-mt-28">
               <div className="mb-12">
-                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+                <p className="mb-2 text-sm font-medium text-disc-cyan">
                   Server setup
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">For server operators</h2>
@@ -214,7 +206,7 @@ export default function GettingStartedPage() {
                       href="https://github.com/ryanthemcpherson/minecraft-audio-viz/releases"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-disc-cyan/20 transition-all hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110"
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-disc-cyan px-6 py-3 text-sm font-semibold text-white transition-all"
                     >
                       Download Paper Plugin
                     </a>
@@ -400,10 +392,8 @@ performance:
                       { label: "Connect code", value: "BEAT-7K3M" },
                       { label: "TLS fingerprint", value: "SHA256:3A:9F:...:C1" },
                     ].map((item) => (
-                      <div key={item.label} className="flat-card rounded-xl p-4">
-                        <p className="font-mono text-[10px] uppercase tracking-wider text-text-secondary/70">
-                          {item.label}
-                        </p>
+                      <div key={item.label} className="border-t border-white/[0.08] pt-3">
+                        <p className="text-xs text-text-secondary">{item.label}</p>
                         <p className="mt-1.5 break-all font-mono text-xs text-white">{item.value}</p>
                       </div>
                     ))}
@@ -457,7 +447,7 @@ performance:
             {/* ===== DJs ===== */}
             <section id="dj-setup" className="scroll-mt-28">
               <div className="mb-12">
-                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-blue">
+                <p className="mb-2 text-sm font-medium text-disc-cyan">
                   DJ setup
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">For DJs</h2>
@@ -468,7 +458,7 @@ performance:
               </div>
 
               <div className="space-y-16">
-                <Step id="dj-install" number="01" title="Get the DJ client" accent="blue">
+                <Step id="dj-install" number="01" title="Get the DJ client">
                   <p>
                     Prebuilt DJ client distribution is paused during Phase 0 containment. Remote
                     DJ sessions are for development verification only until the signed release,
@@ -490,7 +480,7 @@ performance:
                   </Note>
                 </Step>
 
-                <Step id="dj-invite" number="02" title="Get an invite" accent="blue">
+                <Step id="dj-invite" number="02" title="Get an invite">
                   <p>
                     Ask the operator for a DJ invite. It contains the server URL, a connect code
                     in the form <code className="font-mono text-noteblock-amber">BEAT-7K3M</code>, and the
@@ -499,7 +489,7 @@ performance:
                   </p>
                 </Step>
 
-                <Step id="dj-connect" number="03" title="Add the server and connect" accent="blue">
+                <Step id="dj-connect" number="03" title="Add the server and connect">
                   <p>
                     In the client, add a server profile and paste the URL, code, and fingerprint.
                     The client checks the fingerprint before it trusts the connection and stores
@@ -513,8 +503,8 @@ performance:
                       { n: "2", title: "Paste the invite", body: "URL, connect code, and fingerprint from the operator." },
                       { n: "3", title: "Connect", body: "You land in the queue. The operator brings you live." },
                     ].map((s) => (
-                      <div key={s.n} className="flat-card rounded-xl p-5">
-                        <div className="mb-2 font-mono text-2xl font-bold text-disc-blue">{s.n}</div>
+                      <div key={s.n} className="border-t border-white/[0.08] pt-3">
+                        <div className="mb-1 font-mono text-sm text-disc-cyan">{s.n}</div>
                         <p className="text-sm font-semibold text-white">{s.title}</p>
                         <p className="mt-1 text-xs text-text-secondary">{s.body}</p>
                       </div>
@@ -522,7 +512,7 @@ performance:
                   </div>
                 </Step>
 
-                <Step id="dj-source" number="04" title="Pick a source and preset" accent="blue">
+                <Step id="dj-source" number="04" title="Pick a source and preset">
                   <p>
                     Choose the full system mix or a single application such as Spotify, a browser,
                     or your DJ software. Per-app capture uses the Windows process loopback API, so
@@ -548,19 +538,19 @@ performance:
             {/* ===== TROUBLESHOOTING ===== */}
             <section id="troubleshooting" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-noteblock-amber">
+                <p className="mb-2 text-sm font-medium text-disc-cyan">
                   When it does not work
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">Troubleshooting</h2>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <dl className="grid gap-x-10 gap-y-6 border-t border-white/[0.08] pt-6 sm:grid-cols-2">
                 {troubleshooting.map((t) => (
-                  <div key={t.symptom} className="flat-card rounded-xl p-5">
-                    <p className="font-semibold text-white">{t.symptom}</p>
-                    <p className="mt-2 text-sm leading-relaxed text-text-secondary">{t.fix}</p>
+                  <div key={t.symptom}>
+                    <dt className="font-heading text-base font-bold">{t.symptom}</dt>
+                    <dd className="mt-1.5 text-sm leading-relaxed text-text-secondary">{t.fix}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
               <p className="mt-6 text-sm text-text-secondary">
                 Still stuck? Attach the output of{" "}
                 <code className="font-mono text-noteblock-amber">/audioviz diagnostics</code> to an{" "}
@@ -578,7 +568,7 @@ performance:
             {/* ===== DEVELOPERS ===== */}
             <section id="developers" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-noteblock-amber">
+                <p className="mb-2 text-sm font-medium text-disc-cyan">
                   Source builds
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">For developers</h2>
@@ -618,25 +608,25 @@ cd dj_client && npm install && npm run tauri dev`}
             {/* ===== NEXT STEPS ===== */}
             <section id="next-steps" className="scroll-mt-28">
               <div className="mb-8">
-                <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
+                <p className="mb-2 text-sm font-medium text-disc-cyan">
                   You are set up
                 </p>
                 <h2 className="font-heading text-2xl font-bold sm:text-3xl">Next steps</h2>
               </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Link href="/patterns" className="flat-card rounded-xl p-5 hover:border-disc-cyan/30">
-                  <p className="font-semibold text-white">Browse the patterns</p>
-                  <p className="mt-2 text-sm text-text-secondary">Every pattern, running live in your browser.</p>
-                </Link>
-                <a href={LINKS.docs.patternGuide} target="_blank" rel="noopener noreferrer" className="flat-card rounded-xl p-5 hover:border-disc-blue/30">
-                  <p className="font-semibold text-white">Write your own</p>
-                  <p className="mt-2 text-sm text-text-secondary">A Lua file with a calculate function is all it takes.</p>
-                </a>
-                <a href={LINKS.discord} target="_blank" rel="noopener noreferrer" className="flat-card rounded-xl p-5 hover:border-noteblock-amber/30">
-                  <p className="font-semibold text-white">Join the Discord</p>
-                  <p className="mt-2 text-sm text-text-secondary">Trade patterns and get help from other operators.</p>
-                </a>
-              </div>
+              <ul className="space-y-3 border-t border-white/[0.08] pt-6 text-[15px]">
+                <li>
+                  <Link href="/patterns" className="font-semibold text-disc-cyan hover:underline">Browse the patterns</Link>
+                  <span className="text-text-secondary">: every pattern, running live in your browser.</span>
+                </li>
+                <li>
+                  <a href={LINKS.docs.patternGuide} target="_blank" rel="noopener noreferrer" className="font-semibold text-disc-cyan hover:underline">Write your own</a>
+                  <span className="text-text-secondary">: a Lua file with a calculate function is all it takes.</span>
+                </li>
+                <li>
+                  <a href={LINKS.discord} target="_blank" rel="noopener noreferrer" className="font-semibold text-disc-cyan hover:underline">Join the Discord</a>
+                  <span className="text-text-secondary">: trade patterns and get help from other operators.</span>
+                </li>
+              </ul>
             </section>
           </div>
 

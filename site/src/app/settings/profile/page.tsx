@@ -646,7 +646,7 @@ export default function ProfileEditPage() {
           <button
             type="submit"
             disabled={saving || !djName}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-disc-cyan to-disc-blue px-6 py-3 text-sm font-semibold whitespace-nowrap text-white shadow-lg shadow-disc-cyan/20 transition-all duration-200 select-none hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-disc-cyan px-6 py-3 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 select-none active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Saving..." : hasProfile ? "Save changes" : "Create profile"}
           </button>

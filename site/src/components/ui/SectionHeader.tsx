@@ -1,50 +1,33 @@
 import type { ReactNode } from "react";
 
 interface SectionHeaderProps {
-  /** Small mono label above the title, e.g. "01 / Capture". */
+  /** Short plain-language label above the title, e.g. "How it works". Optional; most sections do not need one. */
   eyebrow?: string;
   title: ReactNode;
   lede?: ReactNode;
   align?: "left" | "center";
-  accent?: "cyan" | "blue" | "amber";
   className?: string;
 }
 
-const accents = {
-  cyan: "text-disc-cyan",
-  blue: "text-disc-blue",
-  amber: "text-noteblock-amber",
-};
-
 /**
- * Consistent section heading: mono eyebrow, display title, optional lede.
+ * Section heading: display title with an optional lede. Left-aligned by
+ * default; the eyebrow is ordinary small text, not a machine label.
  */
 export default function SectionHeader({
   eyebrow,
   title,
   lede,
   align = "left",
-  accent = "cyan",
   className = "",
 }: SectionHeaderProps) {
   const alignment = align === "center" ? "text-center mx-auto" : "text-left";
   return (
-    <div className={`max-w-3xl ${alignment} ${className}`}>
-      {eyebrow && (
-        <p
-          className={`mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] ${accents[accent]}`}
-        >
-          {eyebrow}
-        </p>
-      )}
-      <h2 className="font-heading text-3xl font-bold leading-[1.1] sm:text-4xl md:text-5xl">
+    <div className={`max-w-2xl ${alignment} ${className}`}>
+      {eyebrow && <p className="mb-2 text-sm font-medium text-disc-cyan">{eyebrow}</p>}
+      <h2 className="font-heading text-[clamp(1.75rem,1.2rem+2vw,2.75rem)] font-bold leading-[1.08] tracking-[-0.02em]">
         {title}
       </h2>
-      {lede && (
-        <p className="mt-4 text-base leading-relaxed text-text-secondary sm:text-lg">
-          {lede}
-        </p>
-      )}
+      {lede && <p className="mt-4 text-[17px] leading-relaxed text-text-secondary">{lede}</p>}
     </div>
   );
 }

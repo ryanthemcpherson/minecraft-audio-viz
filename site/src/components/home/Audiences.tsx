@@ -6,25 +6,21 @@ const audiences = [
   {
     title: "DJs",
     surface: "DJ client on Windows",
-    accent: "text-disc-cyan",
-    border: "hover:border-disc-cyan/30",
     points: [
-      "Pick the system mix or a single app as your source",
-      "Choose a genre preset, watch the meters lock to the beat",
-      "Paste a connect code from the operator and go live",
+      "Pick the system mix or a single app as your source.",
+      "Choose a genre preset and watch the meters lock to the beat.",
+      "Paste a connect code from the operator and go live.",
     ],
     href: "/getting-started#dj-setup",
     linkLabel: "DJ setup",
   },
   {
     title: "Server operators",
-    surface: "Paper plugin + browser control center",
-    accent: "text-disc-blue",
-    border: "hover:border-disc-blue/30",
+    surface: "Paper plugin and a browser control center",
     points: [
-      `Drop one JAR into plugins/ on Paper ${RELEASE.minecraft}`,
-      "Lay out zones and stages, switch patterns and effects live",
-      "Invite DJs with short-lived connect codes",
+      `Drop one JAR into plugins/ on Paper ${RELEASE.minecraft}.`,
+      "Lay out zones and stages, switch patterns and effects live.",
+      "Invite DJs with short-lived connect codes.",
     ],
     href: "/getting-started#server-setup",
     linkLabel: "Server setup",
@@ -32,51 +28,32 @@ const audiences = [
   {
     title: "Players",
     surface: "Any vanilla Java client",
-    accent: "text-noteblock-amber",
-    border: "hover:border-noteblock-amber/30",
     points: [
-      "Join the server like any other",
-      "No mods, no resource packs, no launcher profiles",
-      "Watch the stage react to the DJ in real time",
+      "Join the server like any other.",
+      "No mods, no resource packs, no launcher profiles.",
+      "Watch the stage react to the DJ in real time.",
     ],
   },
 ];
 
 export default function Audiences() {
   return (
-    <section className="relative px-6 py-28 sm:py-32">
+    <section className="border-t border-white/[0.07] px-6 py-24 sm:py-28">
       <div className="mx-auto max-w-7xl">
         <SectionHeader
-          eyebrow="Who it is for"
           title="Three roles, one show."
           lede="Each role gets its own surface. None of them has to touch the others' setup."
         />
 
-        <div className="mt-14 grid gap-5 md:grid-cols-3">
-          {audiences.map((aud) => (
-            <article
-              key={aud.title}
-              className={`flat-card flex flex-col rounded-2xl p-7 ${aud.border}`}
-            >
-              <h3 className={`font-heading text-2xl font-bold ${aud.accent}`}>{aud.title}</h3>
-              <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-text-secondary/70">
-                {aud.surface}
-              </p>
-              <ul className="mt-6 flex flex-1 flex-col gap-3">
+        <div className="mt-14 grid gap-10 md:grid-cols-3 md:gap-0 md:divide-x md:divide-white/[0.08]">
+          {audiences.map((aud, i) => (
+            <div key={aud.title} className={i === 0 ? "md:pr-10" : i === 1 ? "md:px-10" : "md:pl-10"}>
+              <h3 className="font-heading text-2xl font-bold">{aud.title}</h3>
+              <p className="mt-1 text-sm text-text-secondary">{aud.surface}</p>
+              <ul className="mt-6 space-y-3 text-[15px] leading-relaxed text-text-secondary">
                 {aud.points.map((point) => (
-                  <li key={point} className="flex items-start gap-3 text-sm leading-relaxed text-text-secondary">
-                    <svg
-                      className={`mt-1 h-3.5 w-3.5 shrink-0 ${aud.accent}`}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
+                  <li key={point} className="flex gap-3">
+                    <span className="mt-[11px] h-px w-4 shrink-0 bg-disc-cyan" aria-hidden="true" />
                     <span>{point}</span>
                   </li>
                 ))}
@@ -84,15 +61,12 @@ export default function Audiences() {
               {aud.href && (
                 <Link
                   href={aud.href}
-                  className={`mt-7 inline-flex items-center gap-1 text-sm font-semibold ${aud.accent} hover:underline`}
+                  className="mt-6 inline-block text-sm font-semibold text-disc-cyan hover:underline"
                 >
                   {aud.linkLabel}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M5 12h14M12 5l7 7-7 7" />
-                  </svg>
                 </Link>
               )}
-            </article>
+            </div>
           ))}
         </div>
       </div>

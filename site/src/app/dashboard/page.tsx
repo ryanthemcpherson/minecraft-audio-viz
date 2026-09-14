@@ -34,7 +34,7 @@ import {
 
 const buttonBase =
   "inline-flex items-center justify-center gap-2 rounded-xl font-semibold whitespace-nowrap transition-all duration-200 select-none disabled:cursor-not-allowed disabled:opacity-50";
-const primaryButtonSm = `${buttonBase} px-4 py-2 text-xs bg-gradient-to-r from-disc-cyan to-disc-blue text-white shadow-lg shadow-disc-cyan/20 hover:shadow-xl hover:shadow-disc-cyan/30 hover:brightness-110 active:brightness-95`;
+const primaryButtonSm = `${buttonBase} px-4 py-2 text-xs bg-disc-cyan text-bg-primary active:brightness-95`;
 const secondaryButtonSm = `${buttonBase} px-4 py-2 text-xs border border-white/10 bg-white/5 text-white backdrop-blur-sm hover:border-white/20 hover:bg-white/10`;
 
 const sectionLabel = "font-mono text-[11px] uppercase tracking-wider text-text-secondary/70";
@@ -63,7 +63,7 @@ function SetupChecklist({ checklist }: { checklist: { org_created: boolean; serv
       </div>
       <div className="mb-4 h-2 overflow-hidden rounded-full bg-white/5">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-disc-cyan to-disc-blue transition-all duration-500"
+          className="h-full rounded-full bg-disc-cyan transition-all duration-500"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -485,8 +485,6 @@ export default function DashboardPage() {
     <div className="relative mx-auto max-w-4xl px-6 pt-28 pb-20">
       {/* Background glows */}
       <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="absolute top-0 left-1/2 h-[400px] w-[500px] -translate-x-1/2 rounded-full bg-disc-cyan/5 blur-[120px]" />
-        <div className="absolute top-1/4 right-1/4 h-[300px] w-[300px] rounded-full bg-disc-blue/5 blur-[100px]" />
       </div>
 
       <div className="relative z-10">

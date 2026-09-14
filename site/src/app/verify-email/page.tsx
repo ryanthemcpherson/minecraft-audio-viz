@@ -40,8 +40,7 @@ function VerifyEmailContent() {
     <div className="relative flex min-h-screen items-center justify-center px-6 pt-20 pb-20">
       {/* Background glow */}
       <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="absolute top-1/3 left-1/2 h-[400px] w-[500px] -translate-x-1/2 rounded-full bg-disc-cyan/5 blur-[120px]" />
-      </div>
+</div>
 
       <div className="relative z-10 glass-card w-full max-w-md rounded-2xl p-8 text-center">
         <p className="mb-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-disc-cyan">
