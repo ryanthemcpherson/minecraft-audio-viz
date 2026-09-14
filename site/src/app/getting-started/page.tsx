@@ -632,12 +632,7 @@ cd dj_client && npm install && npm run tauri dev`}
 
           {/* TOC sidebar */}
           <aside className="hidden lg:block">
-            <div className="sticky top-28">
-              <p className="mb-3 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-text-secondary/60">
-                On this page
-              </p>
-              <TableOfContents items={tocItems} />
-            </div>
+            <TableOfContents items={tocItems} />
           </aside>
         </div>
       </div>
