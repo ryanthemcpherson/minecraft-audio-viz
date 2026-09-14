@@ -34,6 +34,23 @@ describe("bundled Lua patterns", () => {
     expect(PATTERNS.length).toBeGreaterThan(0);
   });
 
+  it("exposes per-entity materials from patterns that set them", () => {
+    const def = PATTERNS.find((p) => p.id === "phoenix");
+    expect(def, "phoenix pattern missing from bundle").toBeDefined();
+    const pattern = new LuaPatternInstance(LIB_LUA, def!.source, {
+      entityCount: def!.startBlocks ?? undefined,
+    });
+    const seen = new Set<string>();
+    for (let frame = 0; frame < 120; frame++) {
+      for (const e of pattern.calculateEntities(generateAudioState(frame / 60, 0), 1 / 60)) {
+        if (e.material) seen.add(e.material);
+      }
+    }
+    pattern.dispose();
+    expect(seen.has("ORANGE_CONCRETE")).toBe(true);
+    for (const m of seen) expect(m).toMatch(/^[A-Z][A-Z0-9_]*$/);
+  });
+
   for (const def of PATTERNS) {
     it(`${def.id} loads and returns entities`, () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

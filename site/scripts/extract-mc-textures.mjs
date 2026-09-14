@@ -21,22 +21,23 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(__dirname, "..", "public", "textures", "block");
+const MATERIAL_MAP = join(__dirname, "..", "src", "lib", "materialTextures.json");
 
-/** Block textures the previews need. Keys are output file names. */
+/** Stage textures that are not entity materials. */
+const STAGE_TEXTURES = ["grass_block_top", "grass_block_side", "grass_block_side_overlay", "dirt", "stone"];
+
+/**
+ * Block textures the previews need: every entity material the renderer knows
+ * (src/lib/materialTextures.json) plus the stage blocks.
+ */
 const WANTED = [
-  // Entity blocks, one per frequency band (bass .. high)
-  "orange_concrete",
-  "yellow_concrete",
-  "lime_concrete",
-  "light_blue_concrete",
-  "magenta_concrete",
-  // Stage
-  "grass_block_top",
-  "grass_block_side",
-  "grass_block_side_overlay",
-  "dirt",
-  "stone",
-];
+  ...new Set([
+    ...STAGE_TEXTURES,
+    ...Object.entries(JSON.parse(readFileSync(MATERIAL_MAP, "utf8")))
+      .filter(([key]) => !key.startsWith("_"))
+      .map(([, file]) => file),
+  ]),
+].sort();
 
 function defaultVersionsDir() {
   if (process.platform === "win32") {

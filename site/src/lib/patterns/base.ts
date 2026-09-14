@@ -11,6 +11,8 @@ export interface EntityData {
   scale: number;
   band: number;
   visible: boolean;
+  /** Optional Bukkit material name (e.g. "ORANGE_CONCRETE") set by the pattern. */
+  material?: string;
 }
 
 export interface AudioState {
