@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef, useEffect, useMemo } from "react";
+import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 import type { EntityData } from "@/lib/patterns/base";
 import type { PatternInstance } from "@/lib/patterns";
 import { sampleAudio } from "@/lib/audio/audioSource";
-import { getVizBlockTexture } from "@/lib/blockTextures";
+import { useMinecraftTextures } from "@/lib/useMinecraftTextures";
 import MinecraftStage from "./MinecraftStage";
 
 const BLOCK_SIZE = 0.22;
@@ -50,7 +50,7 @@ export default function PatternScene({
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const groupRef = useRef<THREE.Group>(null);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
-  const cyanLightRef = useRef<THREE.PointLight>(null);
+  const skyLightRef = useRef<THREE.HemisphereLight>(null);
   const beatRingRef = useRef<THREE.Mesh>(null);
   const beatRingMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
   const maxCount = pattern.config.entityCount;
@@ -61,7 +61,7 @@ export default function PatternScene({
   const radiusHold = useRef(FIT_TARGET_RADIUS);
   const beatGlow = useRef(0);
 
-  const blockTexture = useMemo(() => getVizBlockTexture(), []);
+  const textures = useMinecraftTextures();
 
   // Pre-allocate position tracking
   useEffect(() => {
@@ -187,9 +187,10 @@ export default function PatternScene({
         TEMP_OBJECT.updateMatrix();
         mesh.setMatrixAt(i, TEMP_OBJECT.matrix);
 
-        // Color by band. Values above 1 read as emissive under bloom.
+        // Tint the glowstone texture by band, the way the in-game preview
+        // applies an emissive band color. Values above 1 read as glow under bloom.
         const bandColor = BAND_COLORS[Math.min(e.band, 4)];
-        const brightness = 0.75 + e.scale * 1.8 + glow * 0.5;
+        const brightness = 1.0 + e.scale * 1.2 + glow * 0.45;
         TEMP_COLOR.copy(bandColor).multiplyScalar(brightness);
         mesh.setColorAt(i, TEMP_COLOR);
       } else {
@@ -208,8 +209,8 @@ export default function PatternScene({
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
     // Lights and the floor ring flash on the beat
-    if (keyLightRef.current) keyLightRef.current.intensity = 1.5 + glow * 0.9;
-    if (cyanLightRef.current) cyanLightRef.current.intensity = 0.8 + glow * 1.6;
+    if (keyLightRef.current) keyLightRef.current.intensity = 1.1 + glow * 0.6;
+    if (skyLightRef.current) skyLightRef.current.intensity = 0.95 + glow * 0.35;
     if (beatRingRef.current && beatRingMaterialRef.current) {
       const ringScale = 1 + (1 - glow) * 0.35;
       beatRingRef.current.scale.set(ringScale, ringScale, 1);
@@ -224,17 +225,20 @@ export default function PatternScene({
 
   return (
     <>
-      <ambientLight intensity={0.3} />
-      <directionalLight ref={keyLightRef} position={[4, 6, 3]} intensity={1.5} color="#ffffff" />
-      <pointLight ref={cyanLightRef} position={[3, 4, 3]} intensity={0.8} distance={14} color="#00CCFF" />
-      <pointLight position={[-3, 3, -2]} intensity={0.6} distance={14} color="#5B6AFF" />
-      <pointLight position={[0, -2, 3]} intensity={0.4} distance={12} color="#FFAA00" />
+      {/*
+        Minecraft-style lighting: a sky/ground hemisphere gives the vertical
+        face shading the game has (tops bright, sides mid, bottoms dark) and a
+        soft white key adds a little directionality. No colored lights, so the
+        block textures keep their real colors.
+      */}
+      <hemisphereLight ref={skyLightRef} args={["#dbe9ff", "#4a3f2a", 0.95]} />
+      <directionalLight ref={keyLightRef} position={[3, 6, 2]} intensity={1.1} color="#fff6e6" />
       <fog attach="fog" args={["#050505", 8, 25]} />
 
       <group ref={groupRef}>
         <instancedMesh ref={meshRef} args={[undefined, undefined, maxCount]}>
           <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
-          <meshStandardMaterial map={blockTexture} toneMapped={false} roughness={0.55} metalness={0.05} />
+          <meshStandardMaterial map={textures.glowstone} toneMapped={false} roughness={0.9} metalness={0} />
         </instancedMesh>
 
         {/* Beat ring on the stage floor */}
@@ -255,7 +259,7 @@ export default function PatternScene({
 
       {quality === "high" && (
         <EffectComposer>
-          <Bloom intensity={0.7} luminanceThreshold={0.7} luminanceSmoothing={0.25} mipmapBlur />
+          <Bloom intensity={0.6} luminanceThreshold={0.85} luminanceSmoothing={0.2} mipmapBlur />
         </EffectComposer>
       )}
     </>

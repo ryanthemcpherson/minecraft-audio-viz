@@ -1,0 +1,5 @@
+Extracted from the Minecraft 1.21.10 client jar by scripts/extract-mc-textures.mjs.
+These textures are Mojang assets used under the Minecraft usage guidelines for a
+non-commercial fan project. They are not covered by this repository's MIT license.
+
+Files: glowstone.png, grass_block_top.png, grass_block_side.png, grass_block_side_overlay.png, dirt.png, stone.png

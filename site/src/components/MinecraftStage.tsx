@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { getGrassTopTexture, getStoneTexture } from "@/lib/blockTextures";
+import { useMinecraftTextures } from "@/lib/useMinecraftTextures";
 
 const BLOCK_SIZE = 0.38;
 const GRID_SPACING = 0.4;
@@ -17,6 +17,11 @@ interface MinecraftStageProps {
   yOffset?: number;
 }
 
+/**
+ * A small floating island of grass over stone, textured with the real game
+ * block textures (grass top and sides tinted like the plains biome, dirt
+ * underneath, stone below).
+ */
 export default function MinecraftStage({
   size = 7,
   layers = 3,
@@ -24,9 +29,34 @@ export default function MinecraftStage({
 }: MinecraftStageProps) {
   const grassRef = useRef<THREE.InstancedMesh>(null);
   const stoneRef = useRef<THREE.InstancedMesh>(null);
+  const textures = useMinecraftTextures();
 
-  const grassTex = useMemo(() => getGrassTopTexture(), []);
-  const stoneTex = useMemo(() => getStoneTexture(), []);
+  // BoxGeometry face order: +x, -x, +y (top), -y (bottom), +z, -z
+  const grassMaterials = useMemo(() => {
+    const side = () =>
+      new THREE.MeshStandardMaterial({ map: textures.grassSide, roughness: 1, metalness: 0 });
+    return [
+      side(),
+      side(),
+      new THREE.MeshStandardMaterial({ map: textures.grassTop, roughness: 1, metalness: 0 }),
+      new THREE.MeshStandardMaterial({ map: textures.dirt, roughness: 1, metalness: 0 }),
+      side(),
+      side(),
+    ];
+  }, [textures]);
+
+  const stoneMaterial = useMemo(
+    () => new THREE.MeshStandardMaterial({ map: textures.stone, roughness: 1, metalness: 0 }),
+    [textures],
+  );
+
+  // Dispose materials when the texture set is swapped or on unmount
+  useEffect(() => {
+    return () => {
+      grassMaterials.forEach((m) => m.dispose());
+      stoneMaterial.dispose();
+    };
+  }, [grassMaterials, stoneMaterial]);
 
   const { grassPositions, stonePositions } = useMemo(() => {
     const gPos: [number, number, number][] = [];
@@ -36,11 +66,7 @@ export default function MinecraftStage({
     const half = (size - 1) / 2;
     for (let x = 0; x < size; x++) {
       for (let z = 0; z < size; z++) {
-        gPos.push([
-          (x - half) * GRID_SPACING,
-          yOffset,
-          (z - half) * GRID_SPACING,
-        ]);
+        gPos.push([(x - half) * GRID_SPACING, yOffset, (z - half) * GRID_SPACING]);
       }
     }
 
@@ -93,18 +119,18 @@ export default function MinecraftStage({
       <instancedMesh
         ref={grassRef}
         args={[undefined, undefined, grassPositions.length]}
+        material={grassMaterials}
       >
         <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
-        <meshStandardMaterial map={grassTex} roughness={0.8} metalness={0} />
       </instancedMesh>
 
       {stonePositions.length > 0 && (
         <instancedMesh
           ref={stoneRef}
           args={[undefined, undefined, stonePositions.length]}
+          material={stoneMaterial}
         >
           <boxGeometry args={[BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE]} />
-          <meshStandardMaterial map={stoneTex} roughness={0.9} metalness={0} />
         </instancedMesh>
       )}
     </>
