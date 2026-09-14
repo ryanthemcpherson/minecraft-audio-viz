@@ -172,13 +172,52 @@ export function getOakPlanksTexture(): THREE.CanvasTexture {
 // scripts/extract-mc-textures.mjs. Grass textures ship grayscale in the game
 // and get a biome tint at render time, so we tint them here the same way.
 
+/**
+ * Concrete block per frequency band (bass, low-mid, mid, high-mid, high),
+ * matching the materials the Lua patterns and the in-game renderer use.
+ */
+export const BAND_BLOCKS = [
+  "orange_concrete",
+  "yellow_concrete",
+  "lime_concrete",
+  "light_blue_concrete",
+  "magenta_concrete",
+] as const;
+
+/** Approximate concrete colors, used for the procedural fallback. */
+const BAND_BLOCK_COLORS: ReadonlyArray<readonly [number, number, number]> = [
+  [224, 97, 1],
+  [241, 175, 21],
+  [94, 169, 25],
+  [35, 137, 198],
+  [169, 48, 159],
+];
+
 /** Set of textures the previews need, keyed by role. */
 export interface MinecraftBlockTextures {
-  glowstone: THREE.Texture;
+  /** One texture per band, in BAND_BLOCKS order. */
+  bands: THREE.Texture[];
   grassTop: THREE.Texture;
   grassSide: THREE.Texture;
   dirt: THREE.Texture;
   stone: THREE.Texture;
+}
+
+/** Flat concrete-like stand-in for one band. */
+function getProceduralBandTexture(band: number): THREE.CanvasTexture {
+  const key = `band${band}`;
+  if (cache[key]) return cache[key];
+  const [r, g, b] = BAND_BLOCK_COLORS[band] ?? BAND_BLOCK_COLORS[0];
+  cache[key] = makeTexture((data) => {
+    const rand = mulberry32(1000 + band);
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        const v = Math.floor((rand() - 0.5) * 12);
+        setPixel(data, x, y, clamp(r + v, 0, 255), clamp(g + v, 0, 255), clamp(b + v, 0, 255));
+      }
+    }
+  });
+  return cache[key];
 }
 
 /** Plains biome grass color (the game's default look). */
@@ -263,7 +302,7 @@ function textureFromImageData(image: ImageData): THREE.CanvasTexture {
 /** Procedural stand-ins used until the real textures load (and in tests). */
 export function getProceduralTextures(): MinecraftBlockTextures {
   return {
-    glowstone: getVizBlockTexture(),
+    bands: BAND_BLOCKS.map((_, i) => getProceduralBandTexture(i)),
     grassTop: getGrassTopTexture(),
     grassSide: getGrassTopTexture(),
     dirt: getStoneTexture(),
@@ -288,19 +327,23 @@ export function loadMinecraftTextures(basePath = "/textures/block"): Promise<Min
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
-    const [glowstone, grassTop, grassSide, grassOverlay, dirt, stone] = await Promise.all(
-      ["glowstone", "grass_block_top", "grass_block_side", "grass_block_side_overlay", "dirt", "stone"].map(
-        (name) => loadImageData(`${basePath}/${name}.png`),
-      ),
+    const [grassTop, grassSide, grassOverlay, dirt, stone, ...bandImages] = await Promise.all(
+      [
+        "grass_block_top",
+        "grass_block_side",
+        "grass_block_side_overlay",
+        "dirt",
+        "stone",
+        ...BAND_BLOCKS,
+      ].map((name) => loadImageData(`${basePath}/${name}.png`)),
     );
 
-    desaturate(glowstone.data);
     multiplyTint(grassTop.data, GRASS_TINT);
     multiplyTint(grassOverlay.data, GRASS_TINT);
     compositeOverlay(grassSide.data, grassOverlay.data);
 
     loadedTextures = {
-      glowstone: textureFromImageData(glowstone),
+      bands: bandImages.map(textureFromImageData),
       grassTop: textureFromImageData(grassTop),
       grassSide: textureFromImageData(grassSide),
       dirt: textureFromImageData(dirt),

@@ -24,7 +24,13 @@ const OUT_DIR = join(__dirname, "..", "public", "textures", "block");
 
 /** Block textures the previews need. Keys are output file names. */
 const WANTED = [
-  "glowstone",
+  // Entity blocks, one per frequency band (bass .. high)
+  "orange_concrete",
+  "yellow_concrete",
+  "lime_concrete",
+  "light_blue_concrete",
+  "magenta_concrete",
+  // Stage
   "grass_block_top",
   "grass_block_side",
   "grass_block_side_overlay",
