@@ -35,7 +35,7 @@ jobs:
       attestations: read
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -91,7 +91,7 @@ jobs:
           ' <<< "$candidate_run"
 
       - name: Download retained candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: paper-plugin-candidate-1.1.0
           path: candidate
@@ -158,14 +158,14 @@ jobs:
       attestations: read
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.commit_sha }}
 
       - name: Download approved candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: paper-plugin-candidate-1.1.0
           path: candidate
@@ -228,7 +228,7 @@ jobs:
           fi
 
       - name: Publish byte-identical candidate files
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: plugin-v1.1.0
           name: MCAV Paper Plugin 1.1.0
